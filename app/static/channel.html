@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Midas · Channel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 980px; margin: 2rem auto; padding: 0 1.25rem; line-height: 1.5; }
+  h1 { margin-bottom: .25rem; }
+  .sub { opacity: .7; margin-top: 0; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.25rem; margin: 1rem 0; }
+  button, .btn { font: inherit; padding: .55rem 1rem; border-radius: 8px;
+                 border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
+  button:hover, .btn:hover { background: #8882; }
+  button:disabled { opacity: .5; cursor: progress; }
+  textarea { width: 100%; box-sizing: border-box; font: inherit; padding: .75rem; border-radius: 8px;
+             border: 1px solid #8886; background: transparent; color: inherit; }
+  table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+  th, td { text-align: left; padding: .5rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
+  th { font-weight: 600; }
+  code, pre { background: #8882; padding: 0 .3rem; border-radius: 4px; }
+  pre { padding: .75rem; overflow:auto; white-space: pre-wrap; }
+  .row { display:flex; gap:.5rem; flex-wrap: wrap; }
+  .pill { display:inline-block; padding: .15rem .5rem; border-radius: 999px; background:#8882; font-size:.78rem; }
+  .sev-high { background: #c33; color: white; }
+  .sev-medium { background: #d80; color: white; }
+  .sev-low { background: #888; color: white; }
+  .audit { margin-top: .75rem; border-left: 3px solid #6af; padding-left: .9rem; }
+  .muted { opacity: .65; }
+  details > summary { cursor: pointer; }
+</style>
+</head>
+<body>
+  <p><a href="/">← All channels</a></p>
+  <h1 id="title">Channel</h1>
+  <p class="sub" id="subtitle"></p>
+
+  <div class="card">
+    <h3 style="margin-top:0">Sync</h3>
+    <p class="muted">Pull all videos and metadata from YouTube into the database. Cheap (~1 quota unit per 50 videos).</p>
+    <button id="sync-btn">Sync now</button>
+    <span id="sync-status"></span>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Audit prompt</h3>
+    <p class="muted">Write what you care about in plain English (hooks, brand voice, target keywords, what to avoid). Click <em>Generate prompt</em> and an LLM will turn it into a full audit prompt. You can edit the result directly. This prompt is what every audit run uses.</p>
+
+    <label><b>Your insights</b></label>
+    <textarea id="insights" rows="4" placeholder="e.g. I run a finance explainer channel. Titles should not sound like clickbait but must hook in 3 seconds. Descriptions must link my newsletter in line 2. Avoid generic SEO tags."></textarea>
+
+    <div class="row" style="margin:.5rem 0;">
+      <button id="generate-btn">Generate prompt from insights</button>
+      <button id="save-btn">Save</button>
+      <span id="cfg-status" class="muted"></span>
+    </div>
+
+    <label><b>Generated audit prompt (editable)</b></label>
+    <textarea id="prompt" rows="14"></textarea>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Videos</h3>
+    <div id="videos">No videos yet — run a sync.</div>
+  </div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const channelId = params.get('id');
+if (!channelId) { document.body.innerHTML = '<p>Missing channel id.</p>'; throw new Error('no id'); }
+
+const $ = (id) => document.getElementById(id);
+
+async function loadChannel() {
+  const all = await (await fetch('/auth/channels')).json();
+  const c = all.find(x => x.id === channelId);
+  if (c) {
+    $('title').textContent = c.name || channelId;
+    $('subtitle').textContent = `${c.handle || ''} · ${c.id} · last synced ${c.last_synced_at || '—'}`;
+  }
+}
+
+async function loadConfig() {
+  const cfg = await (await fetch(`/channels/${channelId}/audit-config`)).json();
+  $('insights').value = cfg.raw_insights || '';
+  $('prompt').value = cfg.generated_prompt || '';
+}
+
+const currentVideos = {};
+async function loadVideos() {
+  const vids = await (await fetch(`/channels/${channelId}/videos`)).json();
+  vids.forEach(v => currentVideos[v.id] = v);
+  if (!vids.length) { $('videos').innerHTML = '<em class="muted">No videos yet — run a sync.</em>'; return; }
+  $('videos').innerHTML = '<table><thead><tr><th></th><th>Title</th><th>Views</th><th>Published</th><th></th></tr></thead><tbody>' +
+    vids.map(v => `<tr id="row-${v.id}">
+      <td>${v.thumbnail_url ? `<img src="${v.thumbnail_url}" width="96" style="border-radius:6px"/>` : ''}</td>
+      <td>${escapeHtml(v.title || '')}<div class="muted" style="font-size:.78rem"><code>${v.id}</code></div></td>
+      <td>${(v.view_count || 0).toLocaleString()}</td>
+      <td>${(v.published_at || '').slice(0,10)}</td>
+      <td><button onclick="audit('${v.id}')">Audit</button></td>
+    </tr>
+    <tr id="audit-${v.id}"><td colspan="5" style="border:none; padding:0"></td></tr>`).join('') +
+    '</tbody></table>';
+}
+
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function applyAudit(auditId, videoId) {
+  if (!confirm('Push these changes to the live YouTube video?')) return;
+  const cell = $('audit-' + videoId).firstChild;
+  const prev = cell.innerHTML;
+  cell.innerHTML = '<div class="audit muted">Applying…</div>';
+  try {
+    const r = await fetch(`/audits/${auditId}/apply`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    if (j.status === 'dry_run') {
+      cell.innerHTML = prev + `<div class="audit" style="border-color:#d80;color:#d80"><b>DRY_RUN is on</b> — payload was logged but not pushed. Set <code>DRY_RUN=false</code> in .env and restart to apply for real.</div>`;
+    } else {
+      cell.innerHTML = '<div class="audit" style="border-color:#2a7;color:#2a7">Applied to YouTube ✓ — refreshing…</div>';
+      await loadVideos();
+    }
+  } catch (e) {
+    cell.innerHTML = prev + `<div class="audit" style="border-color:#c33;color:#c33">Apply failed: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function audit(videoId) {
+  const cell = $('audit-' + videoId).firstChild;
+  cell.innerHTML = '<div class="audit muted">Running audit…</div>';
+  try {
+    const r = await fetch(`/videos/${videoId}/audit`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const a = await r.json();
+    cell.innerHTML = renderAudit(a);
+  } catch (e) {
+    cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Audit failed: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function compareRow(label, current, suggested, problems, why, rawCurrent = false) {
+  const fmt = (v, raw=false) => raw ? (v || '')
+    : Array.isArray(v) ? v.map(t => `<span class="pill">${escapeHtml(t)}</span>`).join(' ')
+    : escapeHtml(v || '');
+  return `
+    <div style="margin: .75rem 0; padding: .6rem .8rem; border:1px solid #8884; border-radius:8px;">
+      <div style="font-weight:600; margin-bottom:.4rem;">${label}</div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:.75rem;">
+        <div><div class="muted" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.04em;">Current</div><div>${fmt(current, rawCurrent)}</div></div>
+        <div><div class="muted" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.04em;">Suggested</div><div>${fmt(suggested)}</div></div>
+      </div>
+      ${problems ? `<div style="margin-top:.5rem;"><span class="muted">What's lacking:</span> ${escapeHtml(problems)}</div>` : ''}
+      ${why ? `<div><span class="muted">Why better:</span> ${escapeHtml(why)}</div>` : ''}
+    </div>`;
+}
+
+function renderAudit(a) {
+  const v = currentVideos[a.video_id] || {};
+  const ifd = a.issues_found || {};
+  const cmp = ifd.comparisons || {};
+  const issues = (ifd.issues || []).map(i =>
+    `<li><span class="pill sev-${i.severity}">${i.severity}</span> <b>${escapeHtml(i.field || '')}</b> — ${escapeHtml(i.problem || '')}<br><span class="muted">Fix: ${escapeHtml(i.fix || '')}</span></li>`
+  ).join('');
+  const applied = a.status === 'applied';
+  return `<div class="audit">
+    <p><b>Reasoning:</b> ${escapeHtml(a.ai_reasoning || '')}</p>
+    ${compareRow('Title', v.title, (cmp.title||{}).suggested, (cmp.title||{}).current_problems, (cmp.title||{}).why_better)}
+    ${compareRow('Description', truncate(v.description, 400), truncate((cmp.description||{}).suggested, 400), (cmp.description||{}).current_problems, (cmp.description||{}).why_better)}
+    ${compareRow('Tags', v.tags || [], (cmp.tags||{}).suggested || [], (cmp.tags||{}).current_problems, (cmp.tags||{}).why_better)}
+    ${compareRow('Thumbnail', v.thumbnail_url ? `<img src="${v.thumbnail_url}" style="max-width:240px;border-radius:6px"/>` : '<span class="muted">none</span>', (cmp.thumbnail||{}).suggested, (cmp.thumbnail||{}).current_problems, (cmp.thumbnail||{}).why_better, true)}
+    ${issues ? `<p><b>Issues:</b></p><ul>${issues}</ul>` : ''}
+    <div style="margin-top:.75rem;">
+      ${applied
+        ? `<span class="pill" style="background:#2a7;color:white">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>`
+        : `<button onclick="applyAudit(${a.id}, '${a.video_id}')">Apply to YouTube →</button>
+           <span class="muted" style="margin-left:.5rem">Pushes suggested title / description / tags to the live video.</span>`}
+    </div>
+  </div>`;
+}
+
+function truncate(s, n) {
+  if (!s) return '';
+  s = String(s);
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+$('sync-btn').onclick = async () => {
+  $('sync-btn').disabled = true; $('sync-status').textContent = ' Syncing…';
+  try {
+    const r = await fetch(`/channels/${channelId}/sync`, { method: 'POST' });
+    const j = await r.json();
+    $('sync-status').textContent = ` Synced ${j.synced} videos`;
+    await loadVideos(); await loadChannel();
+  } catch (e) {
+    $('sync-status').textContent = ' Sync failed: ' + e;
+  } finally { $('sync-btn').disabled = false; }
+};
+
+$('generate-btn').onclick = async () => {
+  $('generate-btn').disabled = true; $('cfg-status').textContent = 'Generating…';
+  try {
+    const r = await fetch(`/channels/${channelId}/audit-config/elaborate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ raw_insights: $('insights').value }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    $('prompt').value = j.generated_prompt;
+    $('cfg-status').textContent = 'Generated.';
+  } catch (e) {
+    $('cfg-status').textContent = 'Failed: ' + e;
+  } finally { $('generate-btn').disabled = false; }
+};
+
+$('save-btn').onclick = async () => {
+  $('cfg-status').textContent = 'Saving…';
+  try {
+    await fetch(`/channels/${channelId}/audit-config`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ raw_insights: $('insights').value, generated_prompt: $('prompt').value }),
+    });
+    $('cfg-status').textContent = 'Saved.';
+  } catch (e) { $('cfg-status').textContent = 'Save failed: ' + e; }
+};
+
+loadChannel(); loadConfig(); loadVideos();
+</script>
+</body>
+</html>

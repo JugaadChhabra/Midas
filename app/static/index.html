@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Midas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 760px; margin: 4rem auto; padding: 0 1.25rem; line-height: 1.5; }
+  h1 { margin-bottom: .25rem; }
+  .sub { opacity: .7; margin-top: 0; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.25rem; margin: 1rem 0; }
+  button, .btn { font: inherit; padding: .6rem 1rem; border-radius: 8px;
+                 border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; display: inline-block; }
+  button:hover, .btn:hover { background: #8882; }
+  table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+  th, td { text-align: left; padding: .5rem .25rem; border-bottom: 1px solid #8883; font-size: .95rem; }
+  code { background: #8882; padding: 0 .3rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>Midas</h1>
+  <p class="sub">YouTube metadata audit + write-back, with human review.</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">1 · Connect a channel</h3>
+    <p>Sign in with the Google account that owns the YouTube channel. Repeat once per channel.</p>
+    <a class="btn" href="/auth/login">Connect channel →</a>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">2 · Connected channels</h3>
+    <div id="channels">Loading…</div>
+  </div>
+
+<script>
+async function loadChannels() {
+  const el = document.getElementById('channels');
+  try {
+    const r = await fetch('/auth/channels');
+    const data = await r.json();
+    if (!data.length) { el.innerHTML = '<em>No channels yet.</em>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Name</th><th>Handle</th><th>Last synced</th><th></th></tr></thead><tbody>' +
+      data.map(c => `<tr>
+        <td>${c.name ?? ''}</td>
+        <td>${c.handle ?? ''}</td>
+        <td>${c.last_synced_at ?? '—'}</td>
+        <td><a class="btn" href="/channel?id=${encodeURIComponent(c.id)}">Open →</a></td>
+      </tr>`).join('') + '</tbody></table>';
+  } catch (e) {
+    el.innerHTML = '<em style="color:#c33">Failed to load. Is Supabase configured in .env?</em>';
+  }
+}
+loadChannels();
+</script>
+</body>
+</html>
