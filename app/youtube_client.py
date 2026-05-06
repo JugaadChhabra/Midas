@@ -85,10 +85,10 @@ def yt_playlist_items_page(yt, channel_id: str, playlist_id: str, page_token: st
 
 
 def yt_videos_list_full(yt, channel_id: str | None, ids: list[str]) -> list[dict]:
-    """Full snippet+statistics+contentDetails for up to 50 videos. Cost: 1."""
+    """Full snippet+statistics+contentDetails+status for up to 50 videos. Cost: 1."""
     success = False
     try:
-        resp = yt.videos().list(part="snippet,statistics,contentDetails", id=",".join(ids)).execute()
+        resp = yt.videos().list(part="snippet,statistics,contentDetails,status", id=",".join(ids)).execute()
         success = True
         return resp.get("items", [])
     finally:

@@ -23,7 +23,7 @@ APPLY_COST = COST_STATS_FETCH + COST_VIDEO_UPDATE  # 51
 
 
 UNSAFE_MODELS = {
-    "google/gemini-2.0-flash-001",
+    # "google/gemini-2.0-flash-001",
     # Any model id ending with ":free" is also rejected (checked separately)
 }
 

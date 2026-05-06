@@ -15,6 +15,9 @@ from app.autopilot import router as autopilot_router, tick as autopilot_tick
 from app.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+# Quiet noisy library loggers — they emit one INFO line per HTTP call.
+for noisy in ("httpx", "httpcore", "google_auth_httplib2", "googleapiclient.discovery_cache", "hpack"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("midas")
 
 scheduler = BackgroundScheduler(daemon=True)

@@ -119,8 +119,11 @@ def audit_video(video_id: str) -> dict:
     cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
     audit_prompt = (cfg[0]["generated_prompt"] if cfg else None) or DEFAULT_PROMPT
 
-    thumb_url = v.get("thumbnail_url")
-    user_block = f"""\
+    # Use stable URL pattern (no expiring sqp token) for vision input.
+    stable_thumb_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+    def _build_user_block(thumb_attached: bool) -> str:
+        return f"""\
 VIDEO METADATA:
 Title: {v.get('title')}
 Description: {(v.get('description') or '')[:1500]}
@@ -128,15 +131,27 @@ Tags: {', '.join(v.get('tags') or [])}
 Views: {v.get('view_count')}
 Likes: {v.get('like_count')}
 Published: {v.get('published_at')}
-Thumbnail: {'attached as image' if thumb_url else 'not available'}
+Thumbnail: {'attached as image' if thumb_attached else 'not available'}
 
 Run the audit now and return only the JSON object.
 """
-    result = chat_json(
-        user_block,
-        system=audit_prompt,
-        image_urls=[thumb_url] if thumb_url else None,
-    )
+    try:
+        result = chat_json(
+            _build_user_block(True),
+            system=audit_prompt,
+            image_urls=[stable_thumb_url],
+        )
+    except RuntimeError as e:
+        msg = str(e)
+        if "fetching image" in msg or "image" in msg.lower() and "url" in msg.lower():
+            # Vision provider couldn't fetch the thumbnail — retry text-only.
+            import logging
+            logging.getLogger("midas.audits").warning(
+                "Thumbnail fetch failed for %s, falling back to text-only audit", video_id
+            )
+            result = chat_json(_build_user_block(False), system=audit_prompt)
+        else:
+            raise
 
     comparisons = result.get("comparisons") or {}
     row = {

@@ -197,16 +197,43 @@ async function loadVideos() {
   const vids = await (await fetch(`/channels/${channelId}/videos`)).json();
   vids.forEach(v => currentVideos[v.id] = v);
   if (!vids.length) { $('videos').innerHTML = '<em class="muted">No videos yet — run a sync.</em>'; return; }
-  $('videos').innerHTML = '<table><thead><tr><th></th><th>Title</th><th>Views</th><th>Published</th><th></th></tr></thead><tbody>' +
+  $('videos').innerHTML = '<table><thead><tr><th></th><th>Title</th><th>State</th><th>Views</th><th>Published</th><th></th></tr></thead><tbody>' +
     vids.map(v => `<tr id="row-${v.id}">
       <td>${v.thumbnail_url ? `<img src="${v.thumbnail_url}" width="96" style="border-radius:6px"/>` : ''}</td>
       <td>${escapeHtml(v.title || '')}<div class="muted" style="font-size:.78rem"><code>${v.id}</code></div></td>
+      <td>${stateBadge(v)}</td>
       <td>${(v.view_count || 0).toLocaleString()}</td>
       <td>${(v.published_at || '').slice(0,10)}</td>
-      <td><button onclick="audit('${v.id}')">Audit</button></td>
+      <td>${auditButton(v)}</td>
     </tr>
-    <tr id="audit-${v.id}"><td colspan="5" style="border:none; padding:0"></td></tr>`).join('') +
+    <tr id="audit-${v.id}"><td colspan="6" style="border:none; padding:0"></td></tr>`).join('') +
     '</tbody></table>';
+}
+
+function stateBadge(v) {
+  const s = v.audit_status;
+  if (!s) return '<span class="pill" style="background:#8884">Not audited</span>';
+  const colors = {
+    applied:     {bg:'#2a7', label:'Applied'},
+    pending:     {bg:'#28a', label:'Audited · pending'},
+    quarantined: {bg:'#d80', label:'Quarantined'},
+    failed:      {bg:'#c33', label:'Failed'},
+    rejected:    {bg:'#888', label:'Rejected'},
+    approved:    {bg:'#28a', label:'Approved'},
+  };
+  const c = colors[s] || {bg:'#888', label: s};
+  const when = v.audit_applied_at ? ` · ${(v.audit_applied_at||'').slice(0,10)}` : '';
+  return `<span class="pill" style="background:${c.bg};color:white">${c.label}${when}</span>`;
+}
+
+function auditButton(v) {
+  if (v.audit_status === 'applied') {
+    return `<button onclick="audit('${v.id}')" title="Already applied — re-auditing creates a new pending audit">Re-audit</button>`;
+  }
+  if (v.audit_status === 'pending' || v.audit_status === 'quarantined') {
+    return `<button onclick="audit('${v.id}')">Re-audit</button>`;
+  }
+  return `<button onclick="audit('${v.id}')">Audit</button>`;
 }
 
 function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
