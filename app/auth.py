@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
+from pydantic import BaseModel
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from datetime import datetime, timezone
@@ -79,5 +80,29 @@ def callback(request: Request, code: str | None = None, error: str | None = None
 
 @router.get("/channels")
 def list_channels():
-    res = supabase().table("channels").select("id,name,handle,last_synced_at").execute()
+    res = supabase().table("channels").select(
+        "id,name,handle,last_synced_at,default_language,"
+        "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at"
+    ).execute()
     return res.data
+
+
+class ChannelSettings(BaseModel):
+    default_language: str | None = None
+    autopilot_enabled: bool | None = None
+    autopilot_daily_cap: int | None = None
+
+
+@router.patch("/channels/{channel_id}")
+def update_channel(channel_id: str, body: ChannelSettings):
+    patch: dict = {}
+    if body.default_language is not None:
+        patch["default_language"] = body.default_language or None
+    if body.autopilot_enabled is not None:
+        patch["autopilot_enabled"] = body.autopilot_enabled
+    if body.autopilot_daily_cap is not None:
+        patch["autopilot_daily_cap"] = max(1, min(int(body.autopilot_daily_cap), 200))
+    if not patch:
+        return {"ok": True, "noop": True}
+    supabase().table("channels").update(patch).eq("id", channel_id).execute()
+    return {"ok": True}

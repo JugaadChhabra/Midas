@@ -6,7 +6,11 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import supabase
 from app.openrouter import chat_json
-from app.youtube_client import youtube_for_channel
+from app.youtube_client import (
+    youtube_for_channel,
+    yt_videos_list_stats,
+    yt_videos_update,
+)
 
 log = logging.getLogger("midas.audits")
 
@@ -106,8 +110,8 @@ knows what they care about. Be specific. Do not lose the creator's voice.
     return {"generated_prompt": generated}
 
 
-@router.post("/videos/{video_id}/audit")
-def run_audit(video_id: str):
+def audit_video(video_id: str) -> dict:
+    """Run an audit and insert a pending audit row. Used by /videos/{id}/audit and autopilot."""
     v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
     if not v:
         raise HTTPException(404, "Video not found")
@@ -149,6 +153,29 @@ Run the audit now and return only the JSON object.
     return inserted.data[0] if inserted.data else row
 
 
+def validate_audit(audit: dict) -> tuple[bool, str | None]:
+    """Return (ok, reason). Used before autopilot apply to refuse junk output."""
+    title = (audit.get("suggested_title") or "").strip()
+    if not title or len(title) > 100:
+        return False, "title empty or >100 chars"
+    desc = audit.get("suggested_description") or ""
+    if not desc or len(desc) > 5000:
+        return False, "description empty or >5000 chars"
+    tags = audit.get("suggested_tags") or []
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        return False, "tags not a list of strings"
+    if len(tags) > 30:
+        return False, ">30 tags"
+    if sum(len(t) for t in tags) > 500:
+        return False, "tags total chars >500"
+    return True, None
+
+
+@router.post("/videos/{video_id}/audit")
+def run_audit(video_id: str):
+    return audit_video(video_id)
+
+
 @router.get("/videos/{video_id}/audits")
 def list_audits(video_id: str):
     res = (
@@ -168,9 +195,8 @@ class ApplyIn(BaseModel):
     tags: list[str] | None = None
 
 
-@router.post("/audits/{audit_id}/apply")
-def apply_audit(audit_id: int, body: ApplyIn | None = None):
-    """Push the audit's suggested metadata to YouTube. Respects DRY_RUN."""
+def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
+    """Core apply logic, callable from HTTP handler and from autopilot."""
     audit = supabase().table("audits").select("*").eq("id", audit_id).single().execute().data
     if not audit:
         raise HTTPException(404, "Audit not found")
@@ -181,35 +207,72 @@ def apply_audit(audit_id: int, body: ApplyIn | None = None):
     if not video:
         raise HTTPException(404, "Video not found")
 
+    channel = supabase().table("channels").select("*").eq("id", video["channel_id"]).single().execute().data
+    lang = (channel or {}).get("default_language") or None
+
+    # Capture before-state from the local row before we overwrite it.
+    before_patch = {
+        "title_before": video.get("title"),
+        "description_before": video.get("description"),
+        "tags_before": video.get("tags") or [],
+    }
+
     new_title = (body and body.title) or audit.get("suggested_title") or video.get("title")
     new_description = (body and body.description) or audit.get("suggested_description") or video.get("description")
     new_tags = (body.tags if body and body.tags is not None else audit.get("suggested_tags")) or []
 
+    snippet: dict = {
+        "title": new_title,
+        "description": new_description,
+        "tags": new_tags,
+        "categoryId": "27",  # Education
+    }
+    if lang:
+        snippet["defaultLanguage"] = lang
+        snippet["defaultAudioLanguage"] = lang
+
     payload = {
         "id": video["id"],
-        "snippet": {
-            "title": new_title,
-            "description": new_description,
-            "tags": new_tags,
-            "categoryId": video.get("category_id") or "22",
+        "snippet": snippet,
+        "status": {
+            "selfDeclaredMadeForKids": True,
         },
     }
 
     if settings.DRY_RUN:
         log.warning("[DRY_RUN] would update video %s with %s", video["id"], payload)
+        # Persist before-state even on dry-run so the UI can show what would have changed.
+        supabase().table("audits").update(before_patch).eq("id", audit_id).execute()
         return {"status": "dry_run", "payload": payload}
 
     yt = youtube_for_channel(video["channel_id"])
+
+    # Fresh stats for an accurate apply-time baseline (1 quota unit).
+    baseline_patch: dict = {}
     try:
-        yt.videos().update(part="snippet", body=payload).execute()
+        stats_items = yt_videos_list_stats(yt, video["channel_id"], [video["id"]])
+        if stats_items:
+            stats = stats_items[0].get("statistics", {})
+            baseline_patch = {
+                "view_count_at_apply": int(stats.get("viewCount") or 0),
+                "like_count_at_apply": int(stats.get("likeCount") or 0),
+                "comment_count_at_apply": int(stats.get("commentCount") or 0),
+            }
     except Exception as e:
-        supabase().table("audits").update({"status": "failed"}).eq("id", audit_id).execute()
+        log.warning("Failed to fetch baseline stats for %s: %s", video["id"], e)
+
+    try:
+        yt_videos_update(yt, video["channel_id"], payload, parts="snippet,status")
+    except Exception as e:
+        supabase().table("audits").update({"status": "failed", **before_patch, **baseline_patch}).eq("id", audit_id).execute()
         raise HTTPException(500, f"YouTube update failed: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
     supabase().table("audits").update({
         "status": "applied",
         "applied_at": now,
+        **before_patch,
+        **baseline_patch,
     }).eq("id", audit_id).execute()
     supabase().table("videos").update({
         "title": new_title,
@@ -219,3 +282,9 @@ def apply_audit(audit_id: int, body: ApplyIn | None = None):
     }).eq("id", video["id"]).execute()
 
     return {"status": "applied", "payload": payload}
+
+
+@router.post("/audits/{audit_id}/apply")
+def apply_audit(audit_id: int, body: ApplyIn | None = None):
+    """Push the audit's suggested metadata to YouTube. Respects DRY_RUN."""
+    return apply_audit_internal(audit_id, body)

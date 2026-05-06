@@ -19,6 +19,10 @@ class Settings:
     SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret-change-me")
     DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 
+    YT_DAILY_QUOTA = int(os.getenv("YT_DAILY_QUOTA") or "10000")
+    YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
+    AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
+
 
 settings = Settings()
 
