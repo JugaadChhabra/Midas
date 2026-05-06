@@ -122,11 +122,11 @@ function toggle(i) {
 $('min-days').oninput = render;
 
 $('sync-btn').onclick = async () => {
-  $('sync-btn').disabled = true; $('sync-status').textContent = 'Syncing…';
+  $('sync-btn').disabled = true; $('sync-status').textContent = 'Refreshing…';
   try {
-    const r = await fetch(`/channels/${channelId}/sync`, { method: 'POST' });
+    const r = await fetch(`/channels/${channelId}/refresh-applied-stats`, { method: 'POST' });
     const j = await r.json();
-    $('sync-status').textContent = `Synced ${j.synced} videos`;
+    $('sync-status').textContent = `Refreshed ${j.refreshed} videos`;
     await load();
   } catch (e) { $('sync-status').textContent = 'Failed: ' + e; }
   finally { $('sync-btn').disabled = false; }

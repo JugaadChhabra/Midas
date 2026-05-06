@@ -21,4 +21,4 @@ create table if not exists quota_log (
     units        int not null,
     success      boolean default true
 );
-create index if not exists quota_log_day_idx on quota_log ((occurred_at::date));
+create index if not exists quota_log_occurred_at_idx on quota_log (occurred_at desc);
