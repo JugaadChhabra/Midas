@@ -52,8 +52,8 @@ def sync_channel(channel_id: str):
             if _iso8601_to_seconds(duration) <= SHORTS_MAX_SECONDS:
                 continue  # skip shorts
             privacy = (item.get("status") or {}).get("privacyStatus")
-            if privacy != "public":
-                continue  # skip unlisted / private
+            if privacy == "private":
+                continue  # skip private (unlisted is fine)
             sn = item["snippet"]
             stats = item.get("statistics", {})
             # Use the stable URL pattern (no expiring signed token).
@@ -65,6 +65,7 @@ def sync_channel(channel_id: str):
                 "title": sn.get("title"),
                 "description": sn.get("description"),
                 "tags": sn.get("tags") or [],
+                "privacy_status": privacy,
                 "thumbnail_url": stable_thumb,
                 "category_id": sn.get("categoryId"),
                 "view_count": int(stats.get("viewCount", 0)),
