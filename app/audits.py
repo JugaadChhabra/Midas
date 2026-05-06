@@ -115,6 +115,8 @@ def audit_video(video_id: str) -> dict:
     v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
     if not v:
         raise HTTPException(404, "Video not found")
+    if (v.get("privacy_status") or "public") != "public":
+        raise HTTPException(400, f"Skipping audit: video is {v.get('privacy_status')} (only public videos are audited)")
 
     cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
     audit_prompt = (cfg[0]["generated_prompt"] if cfg else None) or DEFAULT_PROMPT

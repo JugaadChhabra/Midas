@@ -83,8 +83,14 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     ).data or []
 
     for v in candidates:
-        if v["id"] not in blocked_ids:
-            return v
+        if v["id"] in blocked_ids:
+            continue
+        # Only public videos qualify for audit. Older rows synced before
+        # privacy_status existed are treated as public to avoid stalling.
+        privacy = v.get("privacy_status")
+        if privacy is not None and privacy != "public":
+            continue
+        return v
     return None
 
 
