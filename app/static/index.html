@@ -20,8 +20,13 @@
 </style>
 </head>
 <body>
-  <h1>Midas</h1>
-  <p class="sub">YouTube metadata audit + write-back, with human review.</p>
+  <div style="display:flex; align-items:flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+    <div>
+      <h1 style="margin-bottom:.25rem">Midas</h1>
+      <p class="sub">YouTube metadata audit + write-back. Autopilot ready.</p>
+    </div>
+    <div id="quota-badge" class="muted" style="font-size:.85rem"></div>
+  </div>
 
   <div class="card">
     <h3 style="margin-top:0">1 · Connect a channel</h3>
@@ -52,7 +57,19 @@ async function loadChannels() {
     el.innerHTML = '<em style="color:#c33">Failed to load. Is Supabase configured in .env?</em>';
   }
 }
-loadChannels();
+async function loadQuota() {
+  try {
+    const q = await (await fetch('/quota')).json();
+    const remPct = q.remaining / (q.limit - q.safety_buffer);
+    const color = remPct > 0.3 ? '#2a7' : remPct > 0.1 ? '#d80' : '#c33';
+    document.getElementById('quota-badge').innerHTML =
+      `<span style="display:inline-block;width:.6rem;height:.6rem;border-radius:50%;background:${color};margin-right:.4rem"></span>` +
+      `Quota today: <b>${q.used_today.toLocaleString()}</b> / ${q.limit.toLocaleString()} ` +
+      `<span class="muted">(${q.remaining.toLocaleString()} usable)</span>`;
+  } catch (e) {}
+}
+loadChannels(); loadQuota();
+setInterval(loadQuota, 30000);
 </script>
 </body>
 </html>

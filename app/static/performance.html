@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Midas · Performance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 1100px; margin: 2rem auto; padding: 0 1.25rem; line-height: 1.5; }
+  h1 { margin-bottom: .25rem; }
+  .sub { opacity: .7; margin-top: 0; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.25rem; margin: 1rem 0; }
+  button, .btn { font: inherit; padding: .55rem 1rem; border-radius: 8px;
+                 border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
+  button:hover, .btn:hover { background: #8882; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: .55rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
+  th { font-weight: 600; }
+  .muted { opacity: .65; }
+  .pos { color: #2a7; font-weight: 600; }
+  .neg { color: #c33; font-weight: 600; }
+  .neutral { color: #888; }
+  .small { font-size: .8rem; }
+  .diff-row { background: #8881; }
+  pre { white-space: pre-wrap; background: #8881; padding: .6rem; border-radius: 6px; margin: .25rem 0; }
+  .pill { display:inline-block; padding: .15rem .5rem; border-radius: 999px; background:#8882; font-size:.78rem; margin: 1px; }
+  details > summary { cursor: pointer; }
+</style>
+</head>
+<body>
+  <p><a href="/">← All channels</a> · <a id="channel-link" href="#">← Back to channel</a></p>
+  <h1>Performance</h1>
+  <p class="sub" id="subtitle">Tracking starts from the moment you Apply. Sync to refresh current view counts.</p>
+
+  <div class="card">
+    <div style="display:flex; gap:.5rem; align-items:center; flex-wrap: wrap;">
+      <button id="sync-btn">Sync stats now</button>
+      <span id="sync-status" class="muted"></span>
+      <span style="margin-left:auto"></span>
+      <label class="muted">Min days since apply:</label>
+      <input id="min-days" type="number" value="0" min="0" style="width: 5rem; padding: .35rem; border-radius: 6px; background: transparent; color: inherit; border: 1px solid #8886;" />
+    </div>
+  </div>
+
+  <div id="rows" class="card">Loading…</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const channelId = params.get('channel_id');
+if (!channelId) { document.body.innerHTML = '<p>Missing channel_id.</p>'; throw new Error('no id'); }
+document.getElementById('channel-link').href = `/channel?id=${encodeURIComponent(channelId)}`;
+
+const $ = (id) => document.getElementById(id);
+const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtNum = (n) => (n ?? 0).toLocaleString();
+const signed = (n) => (n > 0 ? '+' : '') + (n ?? 0).toLocaleString();
+const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : 'neutral';
+
+let rowsData = [];
+
+async function load() {
+  $('rows').innerHTML = 'Loading…';
+  const r = await fetch(`/channels/${channelId}/performance`);
+  rowsData = await r.json();
+  render();
+}
+
+function render() {
+  const minDays = parseFloat($('min-days').value || '0');
+  const filtered = rowsData.filter(r => (r.days_since_apply ?? 0) >= minDays);
+  if (!filtered.length) {
+    $('rows').innerHTML = '<em class="muted">No applied audits matching filter yet.</em>';
+    return;
+  }
+  $('rows').innerHTML = `<table>
+    <thead><tr>
+      <th></th><th>Video</th><th>Days since</th>
+      <th>Views</th><th>Likes</th><th>Comments</th><th></th>
+    </tr></thead>
+    <tbody>
+    ${filtered.map((r, i) => {
+      const titleChanged = r.title_before !== r.title_after;
+      return `<tr>
+        <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" width="96" style="border-radius:6px"/>` : ''}</td>
+        <td>
+          <div style="font-weight:600">${escapeHtml(r.title_now)}</div>
+          ${titleChanged ? `<div class="small muted">was: ${escapeHtml(r.title_before)}</div>` : '<div class="small muted">title unchanged</div>'}
+          <div class="small muted"><code>${r.video_id}</code> · applied ${(r.applied_at||'').slice(0,16).replace('T',' ')}</div>
+        </td>
+        <td>${r.days_since_apply ?? '—'}</td>
+        <td>${fmtNum(r.view_count_now)}<div class="small ${cls(r.delta_views)}">${signed(r.delta_views)}</div></td>
+        <td>${fmtNum(r.like_count_now)}<div class="small ${cls(r.delta_likes)}">${signed(r.delta_likes)}</div></td>
+        <td>${fmtNum(r.comment_count_now)}<div class="small ${cls(r.delta_comments)}">${signed(r.delta_comments)}</div></td>
+        <td><button onclick="toggle(${i})">Diff</button></td>
+      </tr>
+      <tr id="diff-${i}" style="display:none"><td colspan="7" class="diff-row">${diffBlock(r)}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+function diffBlock(r) {
+  return `
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:.75rem;">
+      <div><div class="muted small">DESCRIPTION — BEFORE</div><pre>${escapeHtml(r.description_before || '')}</pre></div>
+      <div><div class="muted small">DESCRIPTION — AFTER</div><pre>${escapeHtml(r.description_after || '')}</pre></div>
+      <div><div class="muted small">TAGS — BEFORE</div><div>${(r.tags_before||[]).map(t=>`<span class="pill">${escapeHtml(t)}</span>`).join(' ') || '<em class="muted">none</em>'}</div></div>
+      <div><div class="muted small">TAGS — AFTER</div><div>${(r.tags_after||[]).map(t=>`<span class="pill">${escapeHtml(t)}</span>`).join(' ') || '<em class="muted">none</em>'}</div></div>
+    </div>
+    <div class="small muted" style="margin-top:.5rem">
+      At apply: ${fmtNum(r.view_count_at_apply)} views · ${fmtNum(r.like_count_at_apply)} likes · ${fmtNum(r.comment_count_at_apply)} comments
+      &nbsp;|&nbsp; Now: ${fmtNum(r.view_count_now)} / ${fmtNum(r.like_count_now)} / ${fmtNum(r.comment_count_now)}
+      ${r.stats_last_fetched ? ` · stats refreshed ${(r.stats_last_fetched||'').slice(0,16).replace('T',' ')}` : ''}
+    </div>`;
+}
+
+function toggle(i) {
+  const el = document.getElementById('diff-' + i);
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+$('min-days').oninput = render;
+
+$('sync-btn').onclick = async () => {
+  $('sync-btn').disabled = true; $('sync-status').textContent = 'Syncing…';
+  try {
+    const r = await fetch(`/channels/${channelId}/sync`, { method: 'POST' });
+    const j = await r.json();
+    $('sync-status').textContent = `Synced ${j.synced} videos`;
+    await load();
+  } catch (e) { $('sync-status').textContent = 'Failed: ' + e; }
+  finally { $('sync-btn').disabled = false; }
+};
+
+load();
+</script>
+</body>
+</html>

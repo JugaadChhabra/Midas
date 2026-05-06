@@ -3,7 +3,12 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone
 
 from app.db import supabase
-from app.youtube_client import youtube_for_channel
+from app.youtube_client import (
+    youtube_for_channel,
+    yt_channels_list_uploads,
+    yt_playlist_items_page,
+    yt_videos_list_full,
+)
 
 SHORTS_MAX_SECONDS = 180  # YouTube Shorts are <= 3 minutes
 
@@ -24,20 +29,14 @@ router = APIRouter(tags=["sync"])
 def sync_channel(channel_id: str):
     yt = youtube_for_channel(channel_id)
 
-    ch = yt.channels().list(part="contentDetails", id=channel_id).execute()
-    if not ch.get("items"):
+    uploads_playlist = yt_channels_list_uploads(yt, channel_id)
+    if not uploads_playlist:
         raise HTTPException(404, "Channel not found on YouTube")
-    uploads_playlist = ch["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
     video_ids: list[str] = []
     page_token: str | None = None
     while True:
-        resp = yt.playlistItems().list(
-            part="contentDetails",
-            playlistId=uploads_playlist,
-            maxResults=50,
-            pageToken=page_token,
-        ).execute()
+        resp = yt_playlist_items_page(yt, channel_id, uploads_playlist, page_token)
         video_ids.extend(item["contentDetails"]["videoId"] for item in resp.get("items", []))
         page_token = resp.get("nextPageToken")
         if not page_token:
@@ -46,8 +45,8 @@ def sync_channel(channel_id: str):
     rows: list[dict] = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
-        v = yt.videos().list(part="snippet,statistics,contentDetails", id=",".join(batch)).execute()
-        for item in v.get("items", []):
+        items = yt_videos_list_full(yt, channel_id, batch)
+        for item in items:
             duration = (item.get("contentDetails") or {}).get("duration", "")
             if _iso8601_to_seconds(duration) <= SHORTS_MAX_SECONDS:
                 continue  # skip shorts
