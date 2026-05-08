@@ -84,6 +84,14 @@
   </div>
 
   <div class="card">
+    <h3 style="margin-top:0">Pending audits</h3>
+    <p class="muted">Apply every audit currently in <code>pending</code> for this channel. Each apply costs ~51 YouTube quota units (1 stats fetch + 50 update). Stops automatically when quota would dip too low. Respects <code>DRY_RUN</code>.</p>
+    <button id="apply-pending-btn">Apply all pending</button>
+    <span id="apply-pending-status"></span>
+    <div id="apply-pending-results" style="margin-top:.75rem"></div>
+  </div>
+
+  <div class="card">
     <h3 style="margin-top:0">Audit prompt</h3>
     <p class="muted">Write what you care about in plain English (hooks, brand voice, target keywords, what to avoid). Click <em>Generate prompt</em> and an LLM will turn it into a full audit prompt. You can edit the result directly. This prompt is what every audit run uses.</p>
 
@@ -327,6 +335,40 @@ $('sync-btn').onclick = async () => {
   } catch (e) {
     $('sync-status').textContent = ' Sync failed: ' + e;
   } finally { $('sync-btn').disabled = false; }
+};
+
+$('apply-pending-btn').onclick = async () => {
+  if (!confirm('Apply every pending audit on this channel to YouTube? Each apply uses ~51 quota units.')) return;
+  $('apply-pending-btn').disabled = true;
+  $('apply-pending-status').textContent = ' Applying…';
+  $('apply-pending-results').innerHTML = '';
+  try {
+    const r = await fetch(`/channels/${channelId}/audits/apply-pending`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    $('apply-pending-status').textContent =
+      ` ${j.applied} applied, ${j.skipped} skipped, ${j.failed} failed (of ${j.total_pending} pending)`;
+    if (j.results && j.results.length) {
+      const colorFor = o =>
+        o === 'applied' ? '#2a7'
+        : o === 'dry_run' ? '#d80'
+        : o === 'failed' ? '#c33'
+        : o === 'quarantined' ? '#d80'
+        : '#888';
+      $('apply-pending-results').innerHTML =
+        '<details><summary class="muted">Per-audit detail</summary>' +
+        '<ul style="font-size:.85rem">' +
+        j.results.map(r =>
+          `<li><code>${r.video_id}</code> · <span style="color:${colorFor(r.outcome)}">${escapeHtml(r.outcome)}</span>${r.reason ? ` — ${escapeHtml(r.reason)}` : ''}</li>`
+        ).join('') +
+        '</ul></details>';
+    }
+    await loadVideos(); await loadChannel();
+  } catch (e) {
+    $('apply-pending-status').textContent = ' Failed: ' + e;
+  } finally {
+    $('apply-pending-btn').disabled = false;
+  }
 };
 
 $('generate-btn').onclick = async () => {

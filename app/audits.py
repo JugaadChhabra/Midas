@@ -397,3 +397,99 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
 def apply_audit(audit_id: int, body: ApplyIn | None = None):
     """Push the audit's suggested metadata to YouTube. Respects DRY_RUN."""
     return apply_audit_internal(audit_id, body)
+
+
+@router.post("/channels/{channel_id}/audits/apply-pending")
+def apply_pending_audits(channel_id: str):
+    """Bulk-apply every pending audit for this channel.
+
+    For each video in the channel, finds the latest audit. If status='pending'
+    AND validate_audit passes, applies it. Stops early if quota runs out.
+    Returns per-audit outcomes for the UI.
+
+    Each apply costs ~51 YouTube quota units (1 stats fetch + 50 update).
+    DRY_RUN is honored by apply_audit_internal.
+    """
+    from app import quota
+
+    APPLY_COST = 51
+
+    video_ids = [
+        v["id"] for v in (
+            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
+        )
+    ]
+    if not video_ids:
+        return {"applied": 0, "skipped": 0, "failed": 0, "results": []}
+
+    # Latest audit per video — only consider 'pending' ones.
+    audits = (
+        supabase().table("audits")
+        .select("id,video_id,status,created_at,suggested_title,suggested_description,suggested_tags")
+        .in_("video_id", video_ids)
+        .order("created_at", desc=True)
+        .execute()
+    ).data or []
+    seen: set[str] = set()
+    pending: list[dict] = []
+    for a in audits:
+        if a["video_id"] in seen:
+            continue
+        seen.add(a["video_id"])
+        if a["status"] == "pending":
+            pending.append(a)
+
+    results: list[dict] = []
+    applied = skipped = failed = 0
+
+    for a in pending:
+        if not quota.can_afford(APPLY_COST):
+            results.append({
+                "audit_id": a["id"], "video_id": a["video_id"],
+                "outcome": "skipped", "reason": "quota_exhausted",
+            })
+            skipped += 1
+            continue
+
+        ok, reason = validate_audit(a)
+        if not ok:
+            supabase().table("audits").update({
+                "status": "quarantined",
+                "ai_reasoning": (a.get("ai_reasoning") or "") + f"\n[bulk-apply] quarantined: {reason}",
+            }).eq("id", a["id"]).execute()
+            results.append({
+                "audit_id": a["id"], "video_id": a["video_id"],
+                "outcome": "quarantined", "reason": reason,
+            })
+            skipped += 1
+            continue
+
+        try:
+            res = apply_audit_internal(a["id"])
+            results.append({
+                "audit_id": a["id"], "video_id": a["video_id"],
+                "outcome": res.get("status", "applied"),
+            })
+            applied += 1
+        except HTTPException as e:
+            results.append({
+                "audit_id": a["id"], "video_id": a["video_id"],
+                "outcome": "failed", "reason": str(e.detail),
+            })
+            failed += 1
+        except Exception as e:
+            log.exception("bulk-apply failed for audit %s", a["id"])
+            results.append({
+                "audit_id": a["id"], "video_id": a["video_id"],
+                "outcome": "failed", "reason": str(e),
+            })
+            failed += 1
+
+    return {
+        "channel_id": channel_id,
+        "total_pending": len(pending),
+        "applied": applied,
+        "skipped": skipped,
+        "failed": failed,
+        "results": results,
+    }
