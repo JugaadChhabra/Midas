@@ -57,7 +57,10 @@ def _applies_today(channel_id: str) -> int:
 
 
 def _next_video_for_channel(channel_id: str) -> dict | None:
-    """Lowest-view-count video that has no audit yet (or whose latest audit was a transient failure)."""
+    """Most-recently-published public video that has no audit yet (or whose latest audit was a transient failure).
+
+    Walks newest → oldest so freshly uploaded videos are optimized first.
+    """
     audits = (
         supabase().table("audits")
         .select("video_id,status,created_at")
@@ -78,7 +81,7 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
         supabase().table("videos")
         .select("*")
         .eq("channel_id", channel_id)
-        .order("view_count", desc=False)
+        .order("published_at", desc=True)
         .execute()
     ).data or []
 

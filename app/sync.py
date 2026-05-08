@@ -30,9 +30,10 @@ router = APIRouter(tags=["sync"])
 def sync_channel(channel_id: str):
     yt = youtube_for_channel(channel_id)
 
-    uploads_playlist = yt_channels_list_uploads(yt, channel_id)
-    if not uploads_playlist:
+    channel_meta = yt_channels_list_uploads(yt, channel_id)
+    if not channel_meta:
         raise HTTPException(404, "Channel not found on YouTube")
+    uploads_playlist = channel_meta["uploads_playlist_id"]
 
     video_ids: list[str] = []
     page_token: str | None = None
@@ -44,6 +45,7 @@ def sync_channel(channel_id: str):
             break
 
     rows: list[dict] = []
+    privacy_changed_to_private: list[str] = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         items = yt_videos_list_full(yt, channel_id, batch)
@@ -53,7 +55,12 @@ def sync_channel(channel_id: str):
                 continue  # skip shorts
             privacy = (item.get("status") or {}).get("privacyStatus")
             if privacy == "private":
-                continue  # skip private (unlisted is fine)
+                # Don't ingest the snippet, but flip any existing row to private
+                # so the autopilot stops picking it. Without this the stored
+                # privacy_status stays stale at 'public' and audits fail when
+                # the transcript / YouTube API rejects the now-private video.
+                privacy_changed_to_private.append(item["id"])
+                continue
             sn = item["snippet"]
             stats = item.get("statistics", {})
             # Use the stable URL pattern (no expiring signed token).
@@ -79,9 +86,21 @@ def sync_channel(channel_id: str):
         deduped = list({r["id"]: r for r in rows}.values())
         supabase().table("videos").upsert(deduped).execute()
 
-    supabase().table("channels").update({
-        "last_synced_at": datetime.now(timezone.utc).isoformat()
-    }).eq("id", channel_id).execute()
+    if privacy_changed_to_private:
+        supabase().table("videos").update(
+            {"privacy_status": "private"}
+        ).in_("id", privacy_changed_to_private).execute()
+
+    # Refresh default_language from YouTube unless the channel has a manual
+    # override saved (we don't want sync to clobber a user-picked language).
+    channel_row = (
+        supabase().table("channels").select("default_language").eq("id", channel_id)
+        .single().execute().data or {}
+    )
+    channel_patch: dict = {"last_synced_at": datetime.now(timezone.utc).isoformat()}
+    if not channel_row.get("default_language") and channel_meta.get("default_language"):
+        channel_patch["default_language"] = channel_meta["default_language"]
+    supabase().table("channels").update(channel_patch).eq("id", channel_id).execute()
 
     return {"synced": len(rows)}
 

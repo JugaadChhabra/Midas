@@ -1,13 +1,19 @@
+import threading
+
 from supabase import create_client, Client
 from app.config import settings
 
 
-_client: Client | None = None
+# Per-thread client. The underlying httpx HTTP/2 hpack encoder is not
+# thread-safe; FastAPI's sync threadpool was sharing one client across
+# threads and corrupting the dynamic header table (RuntimeError: deque
+# mutated during iteration → server GOAWAY COMPRESSION_ERROR).
+_local = threading.local()
 
 
 def supabase() -> Client:
-    global _client
-    if _client is None:
+    client = getattr(_local, "client", None)
+    if client is None:
         url = (settings.SUPABASE_URL or "").strip().strip('"').strip("'")
         key = (settings.SUPABASE_SERVICE_KEY or "").strip().strip('"').strip("'")
         if not url or not key:
@@ -17,5 +23,6 @@ def supabase() -> Client:
                 "SUPABASE_SERVICE_KEY does not look like a JWT (should start with 'eyJ'). "
                 "Use the legacy service_role key from Project Settings → API."
             )
-        _client = create_client(url, key)
-    return _client
+        client = create_client(url, key)
+        _local.client = client
+    return client

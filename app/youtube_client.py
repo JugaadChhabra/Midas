@@ -54,16 +54,25 @@ def _log_quota(channel_id: str | None, operation: str, units: int, success: bool
         pass
 
 
-def yt_channels_list_uploads(yt, channel_id: str) -> str | None:
-    """Return the uploads playlist id for a channel. Cost: 1."""
+def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
+    """Return uploads playlist id and snippet metadata. Cost: 1.
+
+    Shape: {"uploads_playlist_id": str, "default_language": str | None}.
+    Snippet is folded in here so sync can refresh `channels.default_language`
+    without spending a second quota unit.
+    """
     success = False
     try:
-        resp = yt.channels().list(part="contentDetails", id=channel_id).execute()
+        resp = yt.channels().list(part="contentDetails,snippet", id=channel_id).execute()
         success = True
         items = resp.get("items", [])
         if not items:
             return None
-        return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        item = items[0]
+        return {
+            "uploads_playlist_id": item["contentDetails"]["relatedPlaylists"]["uploads"],
+            "default_language": (item.get("snippet") or {}).get("defaultLanguage"),
+        }
     finally:
         _log_quota(channel_id, "channels.list", 1, success)
 

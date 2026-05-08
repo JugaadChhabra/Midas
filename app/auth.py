@@ -61,14 +61,25 @@ def callback(request: Request, code: str | None = None, error: str | None = None
 
     expiry = creds.expiry.replace(tzinfo=timezone.utc).isoformat() if creds.expiry else None
 
-    supabase().table("channels").upsert({
+    payload = {
         "id": channel_id,
         "name": snippet.get("title"),
         "handle": snippet.get("customUrl"),
         "refresh_token": creds.refresh_token,
         "access_token": creds.token,
         "token_expiry": expiry,
-    }).execute()
+    }
+    # Seed default_language from YouTube on first connect. Subsequent reconnects
+    # don't overwrite it — the user may have manually overridden it via PATCH.
+    existing = (
+        supabase().table("channels").select("default_language").eq("id", channel_id)
+        .execute().data or []
+    )
+    has_lang = bool(existing and existing[0].get("default_language"))
+    if not has_lang and snippet.get("defaultLanguage"):
+        payload["default_language"] = snippet.get("defaultLanguage")
+
+    supabase().table("channels").upsert(payload).execute()
 
     return HTMLResponse(
         f"<h2>Connected ✓</h2>"
