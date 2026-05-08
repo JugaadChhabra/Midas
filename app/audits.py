@@ -6,6 +6,10 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import supabase
 from app.openrouter import chat_json
+# Keyframe extraction lives in app.keyframes but is not used by audits — it is
+# reserved for thumbnail generation (Block D). Do not re-import without
+# revisiting CONTENT_INTELLIGENCE_ROADMAP.md.
+from app.transcripts import fetch_transcript, lang_display_name
 from app.youtube_client import (
     youtube_for_channel,
     yt_videos_list_stats,
@@ -20,10 +24,23 @@ router = APIRouter(tags=["audits"])
 DEFAULT_PROMPT = """\
 You are a YouTube SEO and content optimization expert. Audit this video's metadata.
 
-The user will provide the title, description, tags, view stats, and (when available) the
-actual thumbnail image attached to the message. ANALYZE THE THUMBNAIL IMAGE DIRECTLY when present:
-describe what you actually see (composition, faces, text legibility, colors, focal point) — do
-NOT say "no information provided" if an image is attached.
+CONTENT SOURCES
+You will receive: the current title/description/tags (which may be placeholder or
+inadequate), the video transcript when available (in any language — content signal
+only), and the current thumbnail image. Treat the transcript as the primary source
+of truth for what the video is actually about, with the thumbnail as supporting
+visual context. The current metadata is a starting point, not a constraint —
+rewrite freely to reflect the real content.
+
+ANALYZE THE THUMBNAIL DIRECTLY when present: describe what you actually see
+(composition, faces, on-screen text, colors, focal point). Do NOT say "no
+information provided" if an image is attached.
+
+LANGUAGE
+The user message will state the channel's configured language. ALL output (title,
+description, tags) must target that language and audience regardless of what
+language the transcript is in. Use whatever mix of the channel language and English
+performs best on YouTube — your editorial call.
 
 Return strictly a JSON object with this exact shape:
 {
@@ -110,52 +127,125 @@ knows what they care about. Be specific. Do not lose the creator's voice.
     return {"generated_prompt": generated}
 
 
+def _build_user_block(
+    video: dict,
+    transcript: str | None,
+    transcript_lang: str | None,
+    channel_language: str,
+    thumb_attached: bool,
+) -> str:
+    """Audit user message: language rule first, then metadata, transcript, thumbnail note."""
+    channel_lang_name = lang_display_name(channel_language)
+    transcript_lang_name = lang_display_name(transcript_lang)
+
+    lines = [
+        "LANGUAGE RULE (non-negotiable):",
+        f"  Channel configured language: {channel_language} ({channel_lang_name}).",
+        "  The transcript is a CONTENT SIGNAL ONLY — use it to understand what the",
+        "  video is about. Do NOT use its language for output.",
+        f"  ALL output (title, description, tags) must target a {channel_lang_name}-speaking",
+        f"  audience. Use whatever mix of {channel_lang_name} and English performs best on",
+        "  YouTube for this content type and audience — your editorial call.",
+        "  NEVER let the transcript language override the channel's configured language.",
+        "",
+        "VIDEO METADATA (CURRENT — may be placeholder or inadequate):",
+        f"Title: {video.get('title') or ''}",
+        f"Description: {(video.get('description') or '')[:1500]}",
+        f"Tags: {', '.join(video.get('tags') or [])}",
+        f"Views: {video.get('view_count', 0)}",
+        f"Likes: {video.get('like_count', 0)}",
+        f"Published: {video.get('published_at') or ''}",
+    ]
+
+    if transcript:
+        lines += [
+            "",
+            f"VIDEO TRANSCRIPT (detected language: {transcript_lang_name} — content signal only):",
+            transcript,
+        ]
+    else:
+        lines += [
+            "",
+            "VIDEO TRANSCRIPT: not available — base content judgment on metadata + thumbnail only.",
+        ]
+
+    lines += [
+        "",
+        f"THUMBNAIL: {'attached as image — analyze it directly' if thumb_attached else 'not available'}.",
+        "",
+        "The current title and description may be placeholder or poorly written.",
+        "Use the transcript as the primary signal for what the video is about, with the",
+        "thumbnail as supporting visual context. Generate metadata that reflects the actual",
+        "content — do not just polish what's already there.",
+        "",
+        "Run the audit now and return only the JSON object.",
+    ]
+    return "\n".join(lines)
+
+
+def _is_image_fetch_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "fetching image" in msg or ("image" in msg and "url" in msg)
+
+
 def audit_video(video_id: str) -> dict:
-    """Run an audit and insert a pending audit row. Used by /videos/{id}/audit and autopilot."""
+    """Run a content-aware audit and insert a pending audit row.
+
+    Pulls the transcript alongside the existing thumbnail input, applies the
+    channel's language rule, and persists the transcript-signal columns.
+    Keyframe extraction is deliberately not used here — those are reserved for
+    thumbnail generation (see CONTENT_INTELLIGENCE_ROADMAP.md, Block D).
+    """
     v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
     if not v:
         raise HTTPException(404, "Video not found")
     if (v.get("privacy_status") or "public") != "public":
-        raise HTTPException(400, f"Skipping audit: video is {v.get('privacy_status')} (only public videos are audited)")
+        raise HTTPException(
+            400,
+            f"Skipping audit: video is {v.get('privacy_status')} (only public videos are audited)",
+        )
 
     cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
     audit_prompt = (cfg[0]["generated_prompt"] if cfg else None) or DEFAULT_PROMPT
 
-    # Use stable URL pattern (no expiring sqp token) for vision input.
+    channel = supabase().table("channels").select("default_language").eq(
+        "id", v["channel_id"]
+    ).single().execute().data or {}
+    channel_language = channel.get("default_language") or "en"
+
+    transcript, transcript_lang = fetch_transcript(video_id)
+
     stable_thumb_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
-    def _build_user_block(thumb_attached: bool) -> str:
-        return f"""\
-VIDEO METADATA:
-Title: {v.get('title')}
-Description: {(v.get('description') or '')[:1500]}
-Tags: {', '.join(v.get('tags') or [])}
-Views: {v.get('view_count')}
-Likes: {v.get('like_count')}
-Published: {v.get('published_at')}
-Thumbnail: {'attached as image' if thumb_attached else 'not available'}
-
-Run the audit now and return only the JSON object.
-"""
-    try:
-        result = chat_json(
-            _build_user_block(True),
-            system=audit_prompt,
-            image_urls=[stable_thumb_url],
+    def _call(thumb_attached: bool) -> dict:
+        user = _build_user_block(
+            video=v,
+            transcript=transcript,
+            transcript_lang=transcript_lang,
+            channel_language=channel_language,
+            thumb_attached=thumb_attached,
         )
+        images = [stable_thumb_url] if thumb_attached else None
+        return chat_json(user, system=audit_prompt, image_urls=images)
+
+    try:
+        result = _call(thumb_attached=True)
     except RuntimeError as e:
-        msg = str(e)
-        if "fetching image" in msg or "image" in msg.lower() and "url" in msg.lower():
-            # Vision provider couldn't fetch the thumbnail — retry text-only.
-            import logging
-            logging.getLogger("midas.audits").warning(
-                "Thumbnail fetch failed for %s, falling back to text-only audit", video_id
-            )
-            result = chat_json(_build_user_block(False), system=audit_prompt)
+        if _is_image_fetch_error(e):
+            log.warning("Thumbnail fetch failed for %s — text-only audit", video_id)
+            result = _call(thumb_attached=False)
         else:
             raise
 
+    if isinstance(result, list):
+        # Some models occasionally return a bare JSON array (usually the issues list)
+        # instead of the documented object shape. Recover gracefully.
+        log.warning("Audit for %s returned a list; coercing to object shape", video_id)
+        result = {"issues": result, "comparisons": {}}
     comparisons = result.get("comparisons") or {}
+    if isinstance(comparisons, list):
+        # Models sometimes emit comparisons as [{field, ...}, ...] instead of a keyed object.
+        comparisons = {(c.get("field") or "").lower(): c for c in comparisons if isinstance(c, dict)}
     row = {
         "video_id": video_id,
         "status": "pending",
@@ -165,6 +255,8 @@ Run the audit now and return only the JSON object.
         "thumbnail_feedback": (comparisons.get("thumbnail") or {}).get("suggested"),
         "issues_found": {"comparisons": comparisons, "issues": result.get("issues") or []},
         "ai_reasoning": result.get("reasoning"),
+        "transcript_available": transcript is not None,
+        "transcript_lang": transcript_lang,
     }
     inserted = supabase().table("audits").insert(row).execute()
     return inserted.data[0] if inserted.data else row
