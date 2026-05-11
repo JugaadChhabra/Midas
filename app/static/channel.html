@@ -210,7 +210,11 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dat
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
-  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === name ? 'true' : 'false'));
+  document.querySelectorAll('.tab').forEach(t => {
+    const isActive = t.dataset.tab === name;
+    t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    t.setAttribute('tabindex', isActive ? '0' : '-1');
+  });
   history.replaceState(null, '', `?id=${encodeURIComponent(channelId)}#${name}`);
 }
 const initialTab = location.hash.slice(1);
