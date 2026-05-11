@@ -7,16 +7,18 @@
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         max-width: 1100px; margin: 2rem auto; padding: 0 1.25rem; line-height: 1.5; }
+         max-width: 1280px; margin: 1.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
   h1 { margin-bottom: .25rem; }
   .sub { opacity: .7; margin-top: 0; }
-  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.25rem; margin: 1rem 0; }
-  button, .btn { font: inherit; padding: .55rem 1rem; border-radius: 8px;
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
+  button, .btn { font: inherit; padding: .5rem .9rem; border-radius: 8px;
                  border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
   button:hover, .btn:hover { background: #8882; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: .55rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
+  th, td { text-align: left; padding: .5rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
   th { font-weight: 600; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #6af; }
   .muted { opacity: .65; }
   .pos { color: #2a7; font-weight: 600; }
   .neg { color: #c33; font-weight: 600; }
@@ -24,26 +26,127 @@
   .small { font-size: .8rem; }
   .diff-row { background: #8881; }
   pre { white-space: pre-wrap; background: #8881; padding: .6rem; border-radius: 6px; margin: .25rem 0; }
-  .pill { display:inline-block; padding: .15rem .5rem; border-radius: 999px; background:#8882; font-size:.78rem; margin: 1px; }
+  .pill { display:inline-block; padding: .15rem .55rem; border-radius: 999px; background:#8882; font-size:.78rem; margin: 1px; }
   details > summary { cursor: pointer; }
+  input, select { font: inherit; padding: .4rem .55rem; border-radius: 6px; border: 1px solid #8886; background: transparent; color: inherit; box-sizing: border-box; }
+  .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
+  .kpi { border:1px solid #8884; border-radius:10px; padding:.65rem .8rem; }
+  .kpi .v { font-size:1.3rem; font-weight:700; line-height:1.1; }
+  .kpi .l { font-size:.74rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
+  .filter-bar { display:flex; gap:.5rem; flex-wrap: wrap; align-items: center; margin: .25rem 0; }
+  .regression-row td { background: #c331; }
+  /* Insights */
+  .insight-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap:.65rem; }
+  .insight-stat { border:1px solid #8884; border-radius:9px; padding:.7rem .85rem; }
+  .insight-stat .iv { font-size:1.5rem; font-weight:800; line-height:1.1; }
+  .insight-stat .il { font-size:.76rem; opacity:.6; margin-top:.25rem; line-height:1.3; }
+  .insight-stat .im { font-size:.67rem; opacity:.4; margin-top:.35rem; font-style:italic; }
+
+  /* Velocity chart */
+  .vel-chart { display:flex; flex-direction:column; gap:.5rem; }
+  .vel-row { display:grid; grid-template-columns: 160px 1fr 1fr 58px; gap:.45rem; align-items:center; font-size:.84rem; }
+  .vel-header { font-size:.68rem; opacity:.4; text-transform:uppercase; letter-spacing:.05em; }
+  .bar-wrap { height:18px; background:#8882; border-radius:3px; overflow:hidden; position:relative; }
+  .bar-before { position:absolute; height:100%; background:#8886; border-radius:3px; }
+  .bar-after  { position:absolute; height:100%; background:#2a7; border-radius:3px; opacity:.85; }
+  .vel-delta { font-weight:700; text-align:right; }
+
+  /* Outcome bar */
+  .outcome-bar { display:flex; height:14px; border-radius:6px; overflow:hidden; gap:2px; }
+  .outcome-seg { height:100%; }
+  .outcome-legend { display:flex; gap:1rem; flex-wrap:wrap; margin-top:.5rem; font-size:.8rem; }
+  .outcome-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:.3rem; vertical-align:middle; }
+
+  /* Lever bar */
+  .lever-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:.6rem; }
+  .lever-card { border:1px solid #8884; border-radius:8px; padding:.65rem .8rem; }
+  .lever-card .lh { font-weight:600; font-size:.9rem; margin-bottom:.4rem; }
+  .lever-bar-row { display:flex; align-items:center; gap:.4rem; font-size:.8rem; margin-top:.3rem; }
+  .lever-track { flex:1; height:6px; background:#8882; border-radius:3px; overflow:hidden; }
+  .lever-fill { height:100%; border-radius:3px; }
+  #toasts { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; display:flex; flex-direction: column; gap: .5rem; max-width: 360px; }
+  .toast { padding:.65rem .9rem; border-radius: 8px; border:1px solid #8886; background:#fffe; color:#000;
+           box-shadow: 0 4px 14px #0002; animation: tin .25s ease-out; }
+  @media (prefers-color-scheme: dark) { .toast { background:#222; color:#fff; } }
+  .toast.ok { border-color: #2a7; }
+  .toast.err { border-color: #c33; }
+  .toast.warn { border-color: #d80; }
+  @keyframes tin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
   <p><a href="/">← All channels</a> · <a id="channel-link" href="#">← Back to channel</a></p>
   <h1>Performance</h1>
-  <p class="sub" id="subtitle">Tracking starts from the moment you Apply. Sync to refresh current view counts.</p>
+  <p class="sub">Tracking starts at Apply. Use Sync to refresh stats.</p>
+
+  <!-- Optimization impact — velocity-based insights -->
+  <div class="card" id="insights-card">
+    <h3 style="margin-top:0; font-size:.95rem;">Optimization impact</h3>
+    <div class="insight-grid" id="insight-stats" aria-live="polite">Loading…</div>
+    <details style="margin-top:1rem;">
+      <summary style="cursor:pointer; font-size:.82rem; opacity:.6;">How these are measured</summary>
+      <p style="font-size:.8rem; opacity:.65; margin:.5rem 0 0; line-height:1.55;">
+        <b>Before velocity</b> = total views at apply ÷ days from publish → apply.<br>
+        <b>After velocity</b> = views gained since apply ÷ days since apply.<br>
+        <b>Velocity lift</b> = (after − before) ÷ before × 100. Only computed for videos with ≥7 days post-apply data.<br>
+        This controls for organic growth — a video already trending will show a "before" rate; the question is whether the rate <em>changed</em>.
+      </p>
+    </details>
+  </div>
+
+  <!-- Velocity before/after chart -->
+  <div class="card" id="velocity-card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:.5rem; margin-bottom:.75rem;">
+      <h3 style="margin:0; font-size:.95rem;">Views/day — before vs after apply</h3>
+      <span class="muted small">top videos by velocity lift · ≥7d post-apply</span>
+    </div>
+    <div id="velocity-chart" aria-live="polite" aria-label="Velocity before/after chart"><span class="muted small">Loading…</span></div>
+  </div>
+
+  <!-- Outcome distribution -->
+  <div class="card" id="outcome-card">
+    <h3 style="margin-top:0; font-size:.95rem;">Outcome distribution</h3>
+    <div id="outcome-dist" aria-live="polite"><span class="muted small">Loading…</span></div>
+  </div>
 
   <div class="card">
-    <div style="display:flex; gap:.5rem; align-items:center; flex-wrap: wrap;">
+    <div class="kpi-grid" id="kpis" aria-live="polite">Loading…</div>
+  </div>
+
+  <div class="card">
+    <div class="filter-bar">
+      <label>Status:
+        <select id="f-status">
+          <option value="applied">Applied (default)</option>
+          <option value="all">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="quarantined">Quarantined</option>
+          <option value="failed">Failed</option>
+          <option value="rejected">Rejected</option>
+          <option value="reverted">Reverted</option>
+          <option value="applied,quarantined,failed">Applied + problems</option>
+        </select>
+      </label>
+      <label>Min days since apply:
+        <input id="min-days" type="number" value="0" min="0" style="width:5rem"/>
+      </label>
+      <input id="search" type="search" placeholder="Search title…" style="min-width:200px"/>
+      <label><input type="checkbox" id="only-regressions"/> Regressions only</label>
+      <span style="flex:1"></span>
       <button id="sync-btn">Sync stats now</button>
+      <a class="btn" id="csv-btn" href="#" download>Export CSV</a>
       <span id="sync-status" class="muted"></span>
-      <span style="margin-left:auto"></span>
-      <label class="muted">Min days since apply:</label>
-      <input id="min-days" type="number" value="0" min="0" style="width: 5rem; padding: .35rem; border-radius: 6px; background: transparent; color: inherit; border: 1px solid #8886;" />
     </div>
   </div>
 
-  <div id="rows" class="card">Loading…</div>
+  <!-- Lever breakdown -->
+  <div class="card">
+    <h3 style="margin-top:0; font-size:.95rem;">Which change moves the needle?</h3>
+    <p class="muted small">Avg velocity lift by what changed. Correlation only — videos with more room to improve may be over-represented.</p>
+    <div class="lever-grid" id="lever-grid" aria-live="polite">—</div>
+  </div>
+
+  <div id="rows" class="card" aria-live="polite">Loading…</div>
 
 <script>
 const params = new URLSearchParams(location.search);
@@ -52,51 +155,272 @@ if (!channelId) { document.body.innerHTML = '<p>Missing channel_id.</p>'; throw 
 document.getElementById('channel-link').href = `/channel?id=${encodeURIComponent(channelId)}`;
 
 const $ = (id) => document.getElementById(id);
+function toast(msg, kind='ok', timeout=3500) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.innerHTML = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = 0; el.style.transition = '.3s'; setTimeout(() => el.remove(), 300); }, timeout);
+}
 const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmtNum = (n) => (n ?? 0).toLocaleString();
-const signed = (n) => (n > 0 ? '+' : '') + (n ?? 0).toLocaleString();
+const fmt = (n) => (n ?? 0).toLocaleString();
+const signed = (n) => (n > 0 ? '+' : '') + fmt(n ?? 0);
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : 'neutral';
+const pctTxt = (p) => p == null ? '—' : (p > 0 ? '+' : '') + p.toFixed(1) + '%';
+
+const STATE_META = {
+  applied: { bg:'#2a7', label:'Applied' },
+  pending: { bg:'#28a', label:'Pending' },
+  quarantined: { bg:'#d80', label:'Quarantined' },
+  failed: { bg:'#c33', label:'Failed' },
+  rejected: { bg:'#888', label:'Rejected' },
+  reverted: { bg:'#888', label:'Reverted' },
+  approved: { bg:'#28a', label:'Approved' },
+};
+function statusPill(s) {
+  const m = STATE_META[s] || { bg:'#888', label: s };
+  return `<span class="pill" style="background:${m.bg};color:white">${m.label}</span>`;
+}
 
 let rowsData = [];
+let summary = null;
+let sortKey = 'days_since_apply';
+let sortDir = 'desc';
+
+function statusParam() { return $('f-status').value || 'applied'; }
+function csvHref() { return `/channels/${channelId}/performance.csv?status=${encodeURIComponent(statusParam())}`; }
 
 async function load() {
   $('rows').innerHTML = 'Loading…';
-  const r = await fetch(`/channels/${channelId}/performance`);
-  rowsData = await r.json();
+  $('csv-btn').href = csvHref();
+  const [rs, sm] = await Promise.all([
+    fetch(`/channels/${channelId}/performance?status=${encodeURIComponent(statusParam())}`).then(r => r.json()),
+    fetch(`/channels/${channelId}/performance/summary?status=${encodeURIComponent(statusParam())}`).then(r => r.json()),
+  ]);
+  rowsData = rs;
+  summary = sm;
+  renderInsights();
+  renderVelocityChart();
+  renderOutcomeDistribution();
+  renderKpis();
+  renderLeverGrid();
   render();
 }
 
-function render() {
-  const minDays = parseFloat($('min-days').value || '0');
-  const filtered = rowsData.filter(r => (r.days_since_apply ?? 0) >= minDays);
-  if (!filtered.length) {
-    $('rows').innerHTML = '<em class="muted">No applied audits matching filter yet.</em>';
+function renderInsights() {
+  const s = summary || {};
+  const od = s.outcome_distribution || {};
+  const lever = s.best_lever ? s.best_lever.charAt(0).toUpperCase() + s.best_lever.slice(1) : '—';
+  const leverLift = s.best_lever_lift != null ? `+${s.best_lever_lift.toFixed(0)}% velocity lift` : '';
+  $('insight-stats').innerHTML = `
+    <div class="insight-stat">
+      <div class="iv pos">${s.median_velocity_lift != null ? (s.median_velocity_lift > 0 ? '+' : '') + s.median_velocity_lift + '%' : '—'}</div>
+      <div class="il">Median velocity lift after apply</div>
+      <div class="im">views/day after ÷ views/day before − 1</div>
+    </div>
+    <div class="insight-stat">
+      <div class="iv" style="color:#6af">${s.win_rate != null ? s.win_rate + '%' : '—'}</div>
+      <div class="il">Win rate — videos that accelerated (&gt;+10%)</div>
+      <div class="im">${od.total ? `of ${od.total} videos with ≥7d data` : 'no data yet'}</div>
+    </div>
+    <div class="insight-stat">
+      <div class="iv pos">${escapeHtml(lever)}</div>
+      <div class="il">Highest-impact lever</div>
+      <div class="im">${escapeHtml(leverLift)}</div>
+    </div>
+    <div class="insight-stat">
+      <div class="iv ${(s.regression_count||0) > 0 ? 'neg' : ''}">${fmt(s.regression_count)}</div>
+      <div class="il">Regressions (velocity &lt;50% of baseline)</div>
+      <div class="im">investigate on Performance table below</div>
+    </div>`;
+}
+
+function renderVelocityChart() {
+  const qualifying = rowsData
+    .filter(r => r.velocity_lift_pct != null && r.before_velocity > 0)
+    .sort((a, b) => b.velocity_lift_pct - a.velocity_lift_pct)
+    .slice(0, 8);
+  if (!qualifying.length) {
+    $('velocity-chart').innerHTML = '<em class="muted small">No videos with ≥7 days post-apply data yet.</em>';
     return;
   }
+  const maxVel = Math.max(1, ...qualifying.map(r => Math.max(r.before_velocity || 0, r.after_velocity || 0)));
+  $('velocity-chart').innerHTML = `
+    <div class="vel-chart">
+      <div class="vel-row vel-header">
+        <span>Video</span><span>Before (views/day)</span><span>After (views/day)</span><span>Lift</span>
+      </div>
+      ${qualifying.map(r => {
+        const bw = Math.max(2, Math.round((r.before_velocity / maxVel) * 100));
+        const aw = Math.max(2, Math.round(((r.after_velocity || 0) / maxVel) * 100));
+        const lift = r.velocity_lift_pct;
+        const liftColor = lift > 10 ? '#2a7' : lift < -10 ? '#c33' : '#888';
+        const title = (r.title_now || r.video_id || '').substring(0, 40) + ((r.title_now || '').length > 40 ? '…' : '');
+        return `<div class="vel-row">
+          <div class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem" title="${escapeHtml(r.title_now || r.video_id)}">${escapeHtml(title)}</div>
+          <div class="bar-wrap"><div class="bar-before" style="width:${bw}%"></div></div>
+          <div class="bar-wrap"><div class="bar-after" style="width:${aw}%"></div></div>
+          <div class="vel-delta" style="color:${liftColor}">${lift > 0 ? '+' : ''}${lift}%</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="muted" style="font-size:.74rem; display:flex; gap:1rem; margin-top:.6rem; flex-wrap:wrap;">
+      <span><span style="display:inline-block;width:10px;height:10px;background:#8886;border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>Before apply</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#2a7;border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>After apply</span>
+      <span style="margin-left:auto">bars scaled to channel max · showing top 8 by lift</span>
+    </div>`;
+}
+
+function renderOutcomeDistribution() {
+  const od = (summary || {}).outcome_distribution || {};
+  const total = od.total || 0;
+  if (!total) {
+    $('outcome-dist').innerHTML = '<em class="muted small">No data yet — need applied audits with ≥7 days post-apply.</em>';
+    return;
+  }
+  const accPct = Math.round((od.accelerated || 0) / total * 100);
+  const flatPct = Math.round((od.flat || 0) / total * 100);
+  const regPct = 100 - accPct - flatPct;
+  $('outcome-dist').innerHTML = `
+    <div class="outcome-bar">
+      <div class="outcome-seg" style="width:${accPct}%;background:#2a7;border-radius:6px 0 0 6px;"></div>
+      <div class="outcome-seg" style="width:${flatPct}%;background:#8884;"></div>
+      <div class="outcome-seg" style="width:${Math.max(0,regPct)}%;background:#c33;border-radius:0 6px 6px 0;"></div>
+    </div>
+    <div class="outcome-legend">
+      <span><span class="outcome-dot" style="background:#2a7"></span><b>${od.accelerated}</b> accelerated (${accPct}%) — velocity up &gt;10%</span>
+      <span><span class="outcome-dot" style="background:#8884"></span>${od.flat} flat (${flatPct}%) — within ±10%</span>
+      <span><span class="outcome-dot" style="background:#c33"></span>${od.regression} regressed (${regPct}%) — velocity down &gt;10%</span>
+    </div>
+    <p class="muted small" style="margin:.5rem 0 0">Regressions don't prove the audit caused the drop — algorithm changes, seasonality, or video age can lower velocity independently.</p>`;
+}
+
+function renderLeverGrid() {
+  const c = (summary && summary.cohorts) || {};
+  const levers = [
+    { key: 'title_changed',       unchKey: 'title_unchanged',       label: 'Title rewritten',       emoji: '📝' },
+    { key: 'description_changed', unchKey: 'description_unchanged', label: 'Description rewritten', emoji: '📄' },
+    { key: 'tags_changed',        unchKey: 'tags_unchanged',        label: 'Tags rewritten',        emoji: '🏷️' },
+    { key: 'all_changed',         unchKey: null,                    label: 'All 3 changed',         emoji: '🎯' },
+  ];
+  const maxLift = Math.max(1, ...levers.map(l => Math.abs((c[l.key] || {}).avg_velocity_lift || 0)));
+  $('lever-grid').innerHTML = levers.map(l => {
+    const ch = c[l.key] || { n: 0, avg_velocity_lift: null };
+    const un = l.unchKey ? (c[l.unchKey] || { n: 0, avg_velocity_lift: null }) : null;
+    const lift = ch.avg_velocity_lift;
+    const liftColor = lift == null ? '#888' : lift > 0 ? '#2a7' : '#c33';
+    const barW = lift != null ? Math.max(2, Math.round(Math.abs(lift) / maxLift * 100)) : 0;
+    const unLift = un ? un.avg_velocity_lift : null;
+    const unBarW = unLift != null ? Math.max(2, Math.round(Math.abs(unLift) / maxLift * 100)) : 0;
+    return `<div class="lever-card">
+      <div class="lh">${l.emoji} ${l.label}</div>
+      <div class="lever-bar-row">
+        <span style="color:${liftColor};font-weight:700;min-width:3.5rem">${lift != null ? (lift>0?'+':'')+lift+'%' : '—'}</span>
+        <div class="lever-track"><div class="lever-fill" style="width:${barW}%;background:${liftColor}"></div></div>
+      </div>
+      ${un ? `<div class="lever-bar-row" style="opacity:.55">
+        <span style="min-width:3.5rem;font-size:.78rem">${unLift != null ? (unLift>0?'+':'')+unLift+'%' : '—'} unchanged</span>
+        <div class="lever-track"><div class="lever-fill" style="width:${unBarW}%;background:#8886"></div></div>
+      </div>` : ''}
+      <div class="muted" style="font-size:.72rem; margin-top:.3rem">n=${ch.n}${un ? ` changed · ${un.n} unchanged` : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderKpis() {
+  const s = summary || {};
+  $('kpis').innerHTML = `
+    <div class="kpi"><div class="v">${fmt(s.count)}</div><div class="l">Audits in view</div></div>
+    <div class="kpi"><div class="v">${fmt(s.applied_count)}</div><div class="l">Applied</div></div>
+    <div class="kpi"><div class="v ${(s.total_delta_views||0)>=0?'pos':'neg'}">${signed(s.total_delta_views)}</div><div class="l">Σ Δ views</div></div>
+    <div class="kpi"><div class="v ${(s.total_delta_likes||0)>=0?'pos':'neg'}">${signed(s.total_delta_likes)}</div><div class="l">Σ Δ likes</div></div>
+    <div class="kpi"><div class="v ${(s.total_delta_comments||0)>=0?'pos':'neg'}">${signed(s.total_delta_comments)}</div><div class="l">Σ Δ comments</div></div>
+    <div class="kpi"><div class="v">${pctTxt(s.avg_pct_views)}</div><div class="l">Avg % Δ views</div></div>
+    <div class="kpi"><div class="v">${s.positive_pct_share == null ? '—' : s.positive_pct_share + '%'}</div><div class="l">Share with + Δ</div></div>
+    <div class="kpi"><div class="v ${s.regression_count > 0 ? 'neg':''}">${fmt(s.regression_count)}</div><div class="l">Regressions</div></div>
+  `;
+}
+
+
+function passesFilters(r) {
+  const minDays = parseFloat($('min-days').value || '0');
+  if ((r.days_since_apply ?? 0) < minDays) return false;
+  const q = ($('search').value || '').toLowerCase().trim();
+  if (q) {
+    const hay = ((r.title_now || '') + ' ' + (r.title_before || '') + ' ' + r.video_id).toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  if ($('only-regressions').checked && !r.regression) return false;
+  return true;
+}
+
+function sortRows(list) {
+  const k = sortKey, dir = sortDir === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => {
+    let av = a[k], bv = b[k];
+    if (av == null) av = 0; if (bv == null) bv = 0;
+    if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * dir;
+    return (av - bv) * dir;
+  });
+}
+
+function render() {
+  const filtered = rowsData.filter(passesFilters);
+  const sorted = sortRows(filtered);
+  if (!sorted.length) {
+    $('rows').innerHTML = '<em class="muted">No audits matching filter.</em>';
+    return;
+  }
+  const arrow = (k) => sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+  const ariaSort = (k) => sortKey === k ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   $('rows').innerHTML = `<table>
     <thead><tr>
-      <th></th><th>Video</th><th>Days since</th>
-      <th>Views</th><th>Likes</th><th>Comments</th><th></th>
+      <th></th>
+      <th>Video</th>
+      <th>Status</th>
+      <th class="sortable" data-sort="days_since_apply" aria-sort="${ariaSort('days_since_apply')}">Days${arrow('days_since_apply')}</th>
+      <th class="sortable" data-sort="view_count_now" aria-sort="${ariaSort('view_count_now')}">Views${arrow('view_count_now')}</th>
+      <th class="sortable" data-sort="pct_views" aria-sort="${ariaSort('pct_views')}">Δ views${arrow('pct_views')}</th>
+      <th class="sortable" data-sort="views_per_day_since_apply" aria-sort="${ariaSort('views_per_day_since_apply')}">v/day${arrow('views_per_day_since_apply')}</th>
+      <th class="sortable" data-sort="pct_likes" aria-sort="${ariaSort('pct_likes')}">Δ likes${arrow('pct_likes')}</th>
+      <th class="sortable" data-sort="pct_comments" aria-sort="${ariaSort('pct_comments')}">Δ comments${arrow('pct_comments')}</th>
+      <th class="sortable" data-sort="engagement_now_pct" aria-sort="${ariaSort('engagement_now_pct')}">Eng %${arrow('engagement_now_pct')}</th>
+      <th></th>
     </tr></thead>
     <tbody>
-    ${filtered.map((r, i) => {
-      const titleChanged = r.title_before !== r.title_after;
-      return `<tr>
-        <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" width="96" style="border-radius:6px"/>` : ''}</td>
+    ${sorted.map((r, i) => {
+      const titleChanged = r.title_changed;
+      return `<tr class="${r.regression ? 'regression-row' : ''}">
+        <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" width="88" style="border-radius:6px"/>` : ''}</td>
         <td>
           <div style="font-weight:600">${escapeHtml(r.title_now)}</div>
           ${titleChanged ? `<div class="small muted">was: ${escapeHtml(r.title_before)}</div>` : '<div class="small muted">title unchanged</div>'}
-          <div class="small muted"><code>${r.video_id}</code> · applied ${(r.applied_at||'').slice(0,16).replace('T',' ')}</div>
+          <div class="small muted"><code>${r.video_id}</code> · ${r.applied_at ? 'applied ' + r.applied_at.slice(0,16).replace('T',' ') : 'created ' + (r.created_at||'').slice(0,16).replace('T',' ')}</div>
+          ${r.regression ? '<div class="small neg">⚠ Regression detected (post-apply velocity &lt;50% of baseline)</div>' : ''}
         </td>
+        <td>${statusPill(r.status)}</td>
         <td>${r.days_since_apply ?? '—'}</td>
-        <td>${fmtNum(r.view_count_now)}<div class="small ${cls(r.delta_views)}">${signed(r.delta_views)}</div></td>
-        <td>${fmtNum(r.like_count_now)}<div class="small ${cls(r.delta_likes)}">${signed(r.delta_likes)}</div></td>
-        <td>${fmtNum(r.comment_count_now)}<div class="small ${cls(r.delta_comments)}">${signed(r.delta_comments)}</div></td>
-        <td><button onclick="toggle(${i})">Diff</button></td>
+        <td>${fmt(r.view_count_now)}<div class="small ${cls(r.delta_views)}">${signed(r.delta_views)}</div></td>
+        <td class="${cls(r.delta_views)}">${pctTxt(r.pct_views)}</td>
+        <td>${r.views_per_day_since_apply == null ? '—' : fmt(r.views_per_day_since_apply)}</td>
+        <td class="${cls(r.delta_likes)}">${pctTxt(r.pct_likes)}<div class="small muted">${signed(r.delta_likes)}</div></td>
+        <td class="${cls(r.delta_comments)}">${pctTxt(r.pct_comments)}<div class="small muted">${signed(r.delta_comments)}</div></td>
+        <td>${r.engagement_now_pct == null ? '—' : r.engagement_now_pct.toFixed(2) + '%'}<div class="small muted">was ${r.engagement_at_apply_pct == null ? '—' : r.engagement_at_apply_pct.toFixed(2)+'%'}</div></td>
+        <td>
+          <button onclick="toggle(${i})">Diff</button>
+          ${r.status === 'applied' ? `<button onclick="revert(${r.audit_id})" style="margin-left:.25rem">Revert</button>` : ''}
+        </td>
       </tr>
-      <tr id="diff-${i}" style="display:none"><td colspan="7" class="diff-row">${diffBlock(r)}</td></tr>`;
+      <tr id="diff-${i}" style="display:none"><td colspan="11" class="diff-row">${diffBlock(r)}</td></tr>`;
     }).join('')}
     </tbody></table>`;
+
+  document.querySelectorAll('th.sortable').forEach(th => th.onclick = () => {
+    const k = th.dataset.sort;
+    if (sortKey === k) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    else { sortKey = k; sortDir = 'desc'; }
+    render();
+  });
 }
 
 function diffBlock(r) {
@@ -107,9 +431,10 @@ function diffBlock(r) {
       <div><div class="muted small">TAGS — BEFORE</div><div>${(r.tags_before||[]).map(t=>`<span class="pill">${escapeHtml(t)}</span>`).join(' ') || '<em class="muted">none</em>'}</div></div>
       <div><div class="muted small">TAGS — AFTER</div><div>${(r.tags_after||[]).map(t=>`<span class="pill">${escapeHtml(t)}</span>`).join(' ') || '<em class="muted">none</em>'}</div></div>
     </div>
+    ${r.ai_reasoning ? `<div class="small muted" style="margin-top:.5rem"><b>Reasoning:</b> ${escapeHtml(r.ai_reasoning)}</div>` : ''}
     <div class="small muted" style="margin-top:.5rem">
-      At apply: ${fmtNum(r.view_count_at_apply)} views · ${fmtNum(r.like_count_at_apply)} likes · ${fmtNum(r.comment_count_at_apply)} comments
-      &nbsp;|&nbsp; Now: ${fmtNum(r.view_count_now)} / ${fmtNum(r.like_count_now)} / ${fmtNum(r.comment_count_now)}
+      At apply: ${fmt(r.view_count_at_apply)} views · ${fmt(r.like_count_at_apply)} likes · ${fmt(r.comment_count_at_apply)} comments
+      &nbsp;|&nbsp; Now: ${fmt(r.view_count_now)} / ${fmt(r.like_count_now)} / ${fmt(r.comment_count_now)}
       ${r.stats_last_fetched ? ` · stats refreshed ${(r.stats_last_fetched||'').slice(0,16).replace('T',' ')}` : ''}
     </div>`;
 }
@@ -119,7 +444,21 @@ function toggle(i) {
   el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
-$('min-days').oninput = render;
+async function revert(auditId) {
+  if (!confirm('Restore the previous title / description / tags from before this audit?')) return;
+  try {
+    const r = await fetch(`/audits/${auditId}/revert`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    toast(j.status === 'dry_run' ? 'DRY_RUN — payload logged but not pushed.' : 'Reverted to previous metadata.', j.status === 'dry_run' ? 'warn' : 'ok');
+    await load();
+  } catch (e) { toast('Revert failed: ' + escapeHtml(String(e)), 'err'); }
+}
+
+['min-days','search','only-regressions','f-status'].forEach(id => {
+  $(id).oninput = id === 'f-status' ? load : render;
+  $(id).onchange = id === 'f-status' ? load : render;
+});
 
 $('sync-btn').onclick = async () => {
   $('sync-btn').disabled = true; $('sync-status').textContent = 'Refreshing…';
@@ -134,5 +473,6 @@ $('sync-btn').onclick = async () => {
 
 load();
 </script>
+  <div id="toasts" aria-live="assertive" role="alert"></div>
 </body>
 </html>

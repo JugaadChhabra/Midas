@@ -7,29 +7,61 @@
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         max-width: 980px; margin: 2rem auto; padding: 0 1.25rem; line-height: 1.5; }
+         max-width: 1180px; margin: 1.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
   h1 { margin-bottom: .25rem; }
   .sub { opacity: .7; margin-top: 0; }
-  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.25rem; margin: 1rem 0; }
-  button, .btn { font: inherit; padding: .55rem 1rem; border-radius: 8px;
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
+  button, .btn { font: inherit; padding: .5rem .9rem; border-radius: 8px;
                  border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
   button:hover, .btn:hover { background: #8882; }
   button:disabled { opacity: .5; cursor: progress; }
-  textarea { width: 100%; box-sizing: border-box; font: inherit; padding: .75rem; border-radius: 8px;
-             border: 1px solid #8886; background: transparent; color: inherit; }
+  textarea, input[type=text], input[type=search], input[type=number], select {
+    font: inherit; padding: .45rem .55rem; border-radius: 8px;
+    border: 1px solid #8886; background: transparent; color: inherit; box-sizing: border-box;
+  }
+  textarea { width: 100%; padding: .75rem; }
   table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
   th, td { text-align: left; padding: .5rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
-  th { font-weight: 600; }
+  th { font-weight: 600; cursor: default; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #6af; }
   code, pre { background: #8882; padding: 0 .3rem; border-radius: 4px; }
   pre { padding: .75rem; overflow:auto; white-space: pre-wrap; }
-  .row { display:flex; gap:.5rem; flex-wrap: wrap; }
-  .pill { display:inline-block; padding: .15rem .5rem; border-radius: 999px; background:#8882; font-size:.78rem; }
+  .row { display:flex; gap:.5rem; flex-wrap: wrap; align-items:center; }
+  .pill { display:inline-block; padding: .15rem .55rem; border-radius: 999px; background:#8882; font-size:.78rem; }
   .sev-high { background: #c33; color: white; }
   .sev-medium { background: #d80; color: white; }
   .sev-low { background: #888; color: white; }
   .audit { margin-top: .75rem; border-left: 3px solid #6af; padding-left: .9rem; }
   .muted { opacity: .65; }
   details > summary { cursor: pointer; }
+  /* Tabs */
+  .tabs { display:flex; gap:.25rem; flex-wrap:wrap; border-bottom: 1px solid #8884; margin: 1rem 0 .5rem; }
+  .tab { padding:.55rem .9rem; border-bottom: 2px solid transparent; cursor:pointer; }
+  .tab.active { border-bottom-color: #6af; font-weight: 600; }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+  /* KPI grid */
+  .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
+  .kpi { border:1px solid #8884; border-radius:10px; padding:.65rem .8rem; }
+  .kpi .v { font-size:1.25rem; font-weight:700; line-height:1.1; }
+  .kpi .l { font-size:.74rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
+  /* Diff highlighting */
+  .diff-add { background: #2a73; padding: 0 .15em; border-radius: 3px; }
+  .diff-del { background: #c333; padding: 0 .15em; border-radius: 3px; text-decoration: line-through; opacity: .8; }
+  /* Toast */
+  #toasts { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; display:flex; flex-direction: column; gap: .5rem; max-width: 360px; }
+  .toast { padding:.65rem .9rem; border-radius: 8px; border:1px solid #8886; background:#fffe; color:#000;
+           box-shadow: 0 4px 14px #0002; animation: tin .25s ease-out; }
+  @media (prefers-color-scheme: dark) { .toast { background:#222; color:#fff; } }
+  .toast.ok { border-color: #2a7; }
+  .toast.err { border-color: #c33; }
+  .toast.warn { border-color: #d80; }
+  @keyframes tin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .pace-bar { display:inline-block; width:120px; height:8px; background:#8882; border-radius:4px; vertical-align:middle; overflow:hidden; }
+  .pace-bar > i { display:block; height:100%; background:#2a7; }
+  .vid-row.selected { background: #6af1; }
+  .filter-bar { display:flex; gap:.5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
 </style>
 </head>
 <body>
@@ -37,81 +69,122 @@
   <h1 id="title">Channel</h1>
   <p class="sub" id="subtitle"></p>
 
-  <div class="card">
-    <h3 style="margin-top:0">Channel settings</h3>
-    <p class="muted">When you Apply an audit, Midas always sets <b>Category = Education</b> and <b>Made for kids = Yes</b>. The default language below is what Midas will tag every applied video with — set it to the language your channel actually publishes in.</p>
-    <label><b>Default language</b></label>
-    <select id="lang-select" style="font:inherit; padding:.45rem; border-radius:6px; background:transparent; color:inherit; border:1px solid #8886; min-width: 220px;">
-      <option value="">— not set (skip language tagging) —</option>
-      <option value="en">English</option>
-      <option value="hi">Hindi</option>
-      <option value="mr">Marathi</option>
-      <option value="bn">Bengali</option>
-      <option value="pa">Punjabi</option>
-      <option value="gu">Gujarati</option>
-      <option value="ta">Tamil</option>
-      <option value="te">Telugu</option>
-      <option value="kn">Kannada</option>
-      <option value="ml">Malayalam</option>
-      <option value="or">Odia</option>
-      <option value="ur">Urdu</option>
-    </select>
-    <button id="lang-save" style="margin-left:.5rem">Save</button>
-    <span id="lang-status" class="muted"></span>
+  <div class="tabs" role="tablist">
+    <div class="tab active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</div>
+    <div class="tab" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">Videos</div>
+    <div class="tab" data-tab="autopilot" role="tab" tabindex="-1" aria-selected="false">Autopilot</div>
+    <div class="tab" data-tab="settings" role="tab" tabindex="-1" aria-selected="false">Settings</div>
   </div>
 
-  <div class="card">
-    <h3 style="margin-top:0">Autopilot</h3>
-    <p class="muted">When enabled, Midas will autonomously audit and apply changes to every video on this channel, starting with the lowest view count. It tracks what's done, never repeats, picks up new uploads, and stops cleanly before YouTube quota runs out.</p>
-    <div class="row" style="align-items:center">
-      <label><input type="checkbox" id="ap-enabled" /> Enable autopilot</label>
-      <label class="muted">Daily cap:
-        <input id="ap-cap" type="number" min="1" max="200" value="10" style="width: 5rem; padding: .35rem; border-radius: 6px; background: transparent; color: inherit; border: 1px solid #8886; margin-left: .25rem;" />
-      </label>
-      <button id="ap-save">Save</button>
-      <span id="ap-status" class="muted"></span>
+  <!-- ─── OVERVIEW ─── -->
+  <div class="tab-panel active" data-panel="overview">
+    <div class="card">
+      <div class="kpi-grid" id="overview-kpis">Loading…</div>
     </div>
-    <div id="ap-summary" style="margin-top:.75rem"></div>
-    <div id="ap-activity" style="margin-top:.5rem"></div>
-    <div style="margin-top:.75rem"><a class="btn" id="perf-link" href="#">View performance →</a></div>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-top:0">Sync</h3>
-    <p class="muted">Pull all videos and metadata from YouTube into the database. Cheap (~1 quota unit per 50 videos).</p>
-    <button id="sync-btn">Sync now</button>
-    <span id="sync-status"></span>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-top:0">Pending audits</h3>
-    <p class="muted">Apply every audit currently in <code>pending</code> for this channel. Each apply costs ~51 YouTube quota units (1 stats fetch + 50 update). Stops automatically when quota would dip too low. Respects <code>DRY_RUN</code>.</p>
-    <button id="apply-pending-btn">Apply all pending</button>
-    <span id="apply-pending-status"></span>
-    <div id="apply-pending-results" style="margin-top:.75rem"></div>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-top:0">Audit prompt</h3>
-    <p class="muted">Write what you care about in plain English (hooks, brand voice, target keywords, what to avoid). Click <em>Generate prompt</em> and an LLM will turn it into a full audit prompt. You can edit the result directly. This prompt is what every audit run uses.</p>
-
-    <label><b>Your insights</b></label>
-    <textarea id="insights" rows="4" placeholder="e.g. I run a finance explainer channel. Titles should not sound like clickbait but must hook in 3 seconds. Descriptions must link my newsletter in line 2. Avoid generic SEO tags."></textarea>
-
-    <div class="row" style="margin:.5rem 0;">
-      <button id="generate-btn">Generate prompt from insights</button>
-      <button id="save-btn">Save</button>
-      <span id="cfg-status" class="muted"></span>
+    <div class="card">
+      <h3 style="margin-top:0">Quick actions</h3>
+      <div class="row">
+        <button id="sync-btn">Sync videos</button>
+        <span id="sync-status" class="muted"></span>
+        <span style="flex:1"></span>
+        <button id="apply-pending-btn">Apply all pending</button>
+        <a class="btn" id="perf-link" href="#" aria-label="View performance for this channel">View performance →</a>
+      </div>
+      <div id="apply-pending-status" class="muted" style="margin-top:.5rem"></div>
+      <div id="apply-pending-results" style="margin-top:.5rem"></div>
     </div>
-
-    <label><b>Generated audit prompt (editable)</b></label>
-    <textarea id="prompt" rows="14"></textarea>
   </div>
 
-  <div class="card">
-    <h3 style="margin-top:0">Videos</h3>
-    <div id="videos">No videos yet — run a sync.</div>
+  <!-- ─── VIDEOS ─── -->
+  <div class="tab-panel" data-panel="videos">
+    <div class="card">
+      <div class="filter-bar">
+        <input type="search" id="v-search" placeholder="Search title or id…" style="min-width: 220px"/>
+        <select id="v-state">
+          <option value="">All states</option>
+          <option value="none">Not audited</option>
+          <option value="pending">Pending</option>
+          <option value="applied">Applied</option>
+          <option value="quarantined">Quarantined</option>
+          <option value="failed">Failed</option>
+          <option value="rejected">Rejected</option>
+          <option value="reverted">Reverted</option>
+        </select>
+        <select id="v-privacy">
+          <option value="">Any privacy</option>
+          <option value="public">Public</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="private">Private</option>
+        </select>
+        <span class="muted" style="margin-left:auto"><span id="v-count">0</span> shown</span>
+      </div>
+      <div class="filter-bar">
+        <button id="bulk-audit-btn" disabled>Audit selected</button>
+        <button id="bulk-apply-btn" disabled>Apply selected pending</button>
+        <button id="select-clear-btn" disabled>Clear selection</button>
+        <span id="selection-count" class="muted"></span>
+      </div>
+      <div id="videos">No videos yet — run a sync.</div>
+    </div>
   </div>
+
+  <!-- ─── AUTOPILOT ─── -->
+  <div class="tab-panel" data-panel="autopilot">
+    <div class="card">
+      <h3 style="margin-top:0">Autopilot</h3>
+      <p class="muted">Audits and applies changes automatically, starting with the lowest-view-count public video. Stops cleanly before quota runs out.</p>
+      <div class="row">
+        <label><input type="checkbox" id="ap-enabled" /> Enable autopilot</label>
+        <label class="muted">Daily cap:
+          <input id="ap-cap" type="number" min="1" max="200" value="10" style="width: 5rem; margin-left: .25rem;" />
+        </label>
+        <button id="ap-save">Save</button>
+      </div>
+      <div id="ap-summary" style="margin-top:.75rem"></div>
+      <div id="ap-eta" class="muted" style="margin-top:.25rem; font-size:.85rem"></div>
+      <h4 style="margin-bottom:.25rem">Recent activity</h4>
+      <div id="ap-activity"></div>
+    </div>
+  </div>
+
+  <!-- ─── SETTINGS ─── -->
+  <div class="tab-panel" data-panel="settings">
+    <div class="card">
+      <h3 style="margin-top:0">Channel settings</h3>
+      <p class="muted">Apply always sets <b>Category = Education</b>, <b>Made for kids = Yes</b>. Default language tags every applied video.</p>
+      <label><b>Default language</b></label>
+      <select id="lang-select" style="min-width: 220px;">
+        <option value="">— not set —</option>
+        <option value="en">English</option>
+        <option value="hi">Hindi</option>
+        <option value="mr">Marathi</option>
+        <option value="bn">Bengali</option>
+        <option value="pa">Punjabi</option>
+        <option value="gu">Gujarati</option>
+        <option value="ta">Tamil</option>
+        <option value="te">Telugu</option>
+        <option value="kn">Kannada</option>
+        <option value="ml">Malayalam</option>
+        <option value="or">Odia</option>
+        <option value="ur">Urdu</option>
+      </select>
+      <button id="lang-save" style="margin-left:.5rem">Save</button>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Audit prompt</h3>
+      <p class="muted">Write what you care about in plain English. Click <em>Generate</em> to turn it into a structured audit prompt.</p>
+      <label><b>Your insights</b></label>
+      <textarea id="insights" rows="4" placeholder="e.g. Finance explainer channel. Titles must hook in 3 seconds without sounding clickbait. Description line 2 must link the newsletter."></textarea>
+      <div class="row" style="margin:.5rem 0;">
+        <button id="generate-btn">Generate prompt</button>
+        <button id="save-btn">Save prompt</button>
+      </div>
+      <label><b>Generated audit prompt (editable)</b></label>
+      <textarea id="prompt" rows="14"></textarea>
+    </div>
+  </div>
+
+  <div id="toasts" aria-live="assertive" role="alert"></div>
 
 <script>
 const params = new URLSearchParams(location.search);
@@ -119,150 +192,385 @@ const channelId = params.get('id');
 if (!channelId) { document.body.innerHTML = '<p>Missing channel id.</p>'; throw new Error('no id'); }
 
 const $ = (id) => document.getElementById(id);
+const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (n) => (n ?? 0).toLocaleString();
+const truncate = (s, n) => !s ? '' : (String(s).length > n ? String(s).slice(0, n) + '…' : String(s));
 
+// ── Toasts ─────────────────────────────────────────────────────────────
+function toast(msg, kind='ok', timeout=3500) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.innerHTML = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = 0; el.style.transition = '.3s'; setTimeout(() => el.remove(), 300); }, timeout);
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === name ? 'true' : 'false'));
+  history.replaceState(null, '', `?id=${encodeURIComponent(channelId)}#${name}`);
+}
+const initialTab = location.hash.slice(1);
+if (initialTab) switchTab(initialTab);
+
+// ── Status taxonomy (single source of truth) ───────────────────────────
+const STATE_META = {
+  applied:     { bg:'#2a7', label:'Applied' },
+  pending:     { bg:'#28a', label:'Pending' },
+  quarantined: { bg:'#d80', label:'Quarantined' },
+  failed:      { bg:'#c33', label:'Failed' },
+  rejected:    { bg:'#888', label:'Rejected' },
+  reverted:    { bg:'#888', label:'Reverted' },
+  approved:    { bg:'#28a', label:'Approved' },
+  none:        { bg:'#8884', label:'Not audited' },
+};
+function statusPill(s) {
+  const m = STATE_META[s || 'none'] || { bg:'#888', label: s };
+  return `<span class="pill" style="background:${m.bg};${s ? 'color:white' : ''}">${m.label}</span>`;
+}
+
+// ── Channel meta ──────────────────────────────────────────────────────
+let channelMeta = {};
 async function loadChannel() {
   const all = await (await fetch('/auth/channels')).json();
-  const c = all.find(x => x.id === channelId);
-  if (c) {
-    $('title').textContent = c.name || channelId;
-    $('subtitle').textContent = `${c.handle || ''} · ${c.id} · last synced ${c.last_synced_at || '—'}`;
-    $('lang-select').value = c.default_language || '';
-    $('ap-enabled').checked = !!c.autopilot_enabled;
-    $('ap-cap').value = c.autopilot_daily_cap ?? 10;
-    $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
+  const c = all.find(x => x.id === channelId) || {};
+  channelMeta = c;
+  $('title').textContent = c.name || channelId;
+  $('subtitle').innerHTML = `${escapeHtml(c.handle || '')} · <code>${escapeHtml(c.id || channelId)}</code> · last synced ${c.last_synced_at ? c.last_synced_at.slice(0,16).replace('T',' ') : '—'}`;
+  $('lang-select').value = c.default_language || '';
+  $('ap-enabled').checked = !!c.autopilot_enabled;
+  $('ap-cap').value = c.autopilot_daily_cap ?? 10;
+  $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
+}
+
+// ── Overview KPIs ──────────────────────────────────────────────────────
+async function loadOverview() {
+  try {
+    const j = await (await fetch('/dashboard')).json();
+    const c = (j.channels || []).find(x => x.id === channelId) || {};
+    $('overview-kpis').innerHTML = `
+      <div class="kpi"><div class="v">${fmt(c.video_count)}</div><div class="l">Videos</div></div>
+      <div class="kpi"><div class="v">${c.pending_count || 0}</div><div class="l">Pending audits</div></div>
+      <div class="kpi"><div class="v">${c.applied_today || 0}</div><div class="l">Applied today</div></div>
+      <div class="kpi"><div class="v">${c.applied_7d || 0}</div><div class="l">Applied · 7d</div></div>
+      <div class="kpi"><div class="v">${c.applied_total || 0}</div><div class="l">Applied · total</div></div>
+      <div class="kpi"><div class="v ${(c.delta_views_7d||0)>=0?'':'neg'}" style="color:${(c.delta_views_7d||0)>=0?'#2a7':'#c33'}">${(c.delta_views_7d>0?'+':'') + fmt(c.delta_views_7d || 0)}</div><div class="l">Δ views · 7d</div></div>
+    `;
+  } catch (e) {
+    $('overview-kpis').innerHTML = '<em class="muted">Could not load.</em>';
   }
 }
 
+// ── Autopilot ──────────────────────────────────────────────────────────
 async function loadAutopilotLog() {
   try {
     const j = await (await fetch(`/channels/${channelId}/autopilot/log`)).json();
-    let pill = '';
+    let pill;
     if (j.paused_reason) pill = `<span class="pill" style="background:#c33;color:white">Paused · ${escapeHtml(j.paused_reason)}</span>`;
     else if (j.enabled) pill = `<span class="pill" style="background:#2a7;color:white">Running</span>`;
     else pill = `<span class="pill">Disabled</span>`;
-    const resumeBtn = j.paused_reason ? `<button onclick="resumeAutopilot()">Resume</button>` : '';
+    const cap = j.daily_cap || 0;
+    const pct = cap > 0 ? Math.max(0, Math.min(100, (j.applies_today / cap) * 100)) : 0;
+    const resumeBtn = j.paused_reason ? `<button onclick="resumeAutopilot()" style="margin-left:.5rem">Resume</button>` : '';
     $('ap-summary').innerHTML = `${pill}
-      <span class="muted" style="margin-left:.5rem">Today: ${j.applies_today}/${j.daily_cap} applied</span>
-      ${resumeBtn ? '&nbsp;' + resumeBtn : ''}`;
+      <span class="muted" style="margin-left:.5rem">Today: ${j.applies_today}/${cap}</span>
+      <span class="pace-bar" style="margin-left:.5rem"><i style="width:${pct}%"></i></span>
+      ${resumeBtn}`;
+
+    // ETA: last_tick + AUTOPILOT_TICK_SECONDS estimate (we don't expose that, so show last tick + activity)
+    const lastTick = channelMeta.autopilot_last_tick_at;
+    if (lastTick) {
+      const ago = Math.round((Date.now() - new Date(lastTick).getTime()) / 1000);
+      $('ap-eta').textContent = j.enabled ? `Last tick ${ago}s ago — next tick within ~60s.` : `Last tick ${ago}s ago. Autopilot is off.`;
+    } else {
+      $('ap-eta').textContent = j.enabled ? 'Has not ticked yet — first run is imminent.' : 'Autopilot is off.';
+    }
+
     if (!j.items.length) {
-      $('ap-activity').innerHTML = '<em class="muted small">No activity yet.</em>';
+      $('ap-activity').innerHTML = '<em class="muted">No activity yet.</em>';
     } else {
       $('ap-activity').innerHTML = `<table><thead><tr>
-        <th>When</th><th>Status</th><th>Video</th></tr></thead><tbody>` +
-        j.items.slice(0, 10).map(it => `<tr>
-          <td class="small">${(it.applied_at || it.created_at || '').slice(0,16).replace('T',' ')}</td>
-          <td><span class="pill" style="background:${statusColor(it.status)};color:white">${escapeHtml(it.status)}</span></td>
+        <th>When</th><th>Status</th><th>Video</th><th>Notes</th></tr></thead><tbody>` +
+        j.items.slice(0, 15).map(it => `<tr>
+          <td class="muted" style="font-size:.85rem">${(it.applied_at || it.created_at || '').slice(0,16).replace('T',' ')}</td>
+          <td>${statusPill(it.status)}</td>
           <td>${escapeHtml(it.video_title || it.video_id)}</td>
+          <td class="muted" style="font-size:.82rem">${escapeHtml(truncate(it.note, 100))}</td>
         </tr>`).join('') + `</tbody></table>`;
     }
   } catch (e) { $('ap-summary').innerHTML = '<em class="muted">Could not load autopilot status.</em>'; }
 }
 
-function statusColor(s) {
-  return ({applied:'#2a7', pending:'#888', quarantined:'#d80', failed:'#c33', rejected:'#888', approved:'#28a'})[s] || '#888';
-}
-
 async function resumeAutopilot() {
   await fetch(`/channels/${channelId}/autopilot/resume`, { method: 'POST' });
+  toast('Autopilot resumed.', 'ok');
   await loadAutopilotLog();
 }
 
 $('ap-save').onclick = async () => {
-  $('ap-status').textContent = 'Saving…';
   try {
-    await fetch(`/auth/channels/${channelId}`, {
+    const r = await fetch(`/auth/channels/${channelId}`, {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         autopilot_enabled: $('ap-enabled').checked,
         autopilot_daily_cap: parseInt($('ap-cap').value || '10', 10),
       }),
     });
-    $('ap-status').textContent = 'Saved.';
+    if (!r.ok) throw new Error(await r.text());
+    toast('Autopilot settings saved.', 'ok');
     await loadAutopilotLog();
-  } catch (e) { $('ap-status').textContent = 'Failed: ' + e; }
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 
 $('lang-save').onclick = async () => {
-  $('lang-status').textContent = 'Saving…';
   try {
     const r = await fetch(`/auth/channels/${channelId}`, {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ default_language: $('lang-select').value || null }),
     });
     if (!r.ok) throw new Error(await r.text());
-    $('lang-status').textContent = 'Saved.';
-  } catch (e) { $('lang-status').textContent = 'Failed: ' + e; }
+    toast('Language saved.', 'ok');
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 
+// ── Audit prompt ──────────────────────────────────────────────────────
 async function loadConfig() {
   const cfg = await (await fetch(`/channels/${channelId}/audit-config`)).json();
   $('insights').value = cfg.raw_insights || '';
   $('prompt').value = cfg.generated_prompt || '';
 }
+$('generate-btn').onclick = async () => {
+  $('generate-btn').disabled = true;
+  try {
+    const r = await fetch(`/channels/${channelId}/audit-config/elaborate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ raw_insights: $('insights').value }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    $('prompt').value = j.generated_prompt;
+    toast('Prompt generated.', 'ok');
+  } catch (e) { toast('Generate failed: ' + escapeHtml(String(e)), 'err'); }
+  finally { $('generate-btn').disabled = false; }
+};
+$('save-btn').onclick = async () => {
+  try {
+    await fetch(`/channels/${channelId}/audit-config`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ raw_insights: $('insights').value, generated_prompt: $('prompt').value }),
+    });
+    toast('Prompt saved.', 'ok');
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
+};
 
+// ── Videos table ──────────────────────────────────────────────────────
+let allVideos = [];
 const currentVideos = {};
+const selected = new Set();
+let sortKey = 'published_at';
+let sortDir = 'desc';
+
 async function loadVideos() {
   const vids = await (await fetch(`/channels/${channelId}/videos`)).json();
-  vids.forEach(v => currentVideos[v.id] = v);
-  if (!vids.length) { $('videos').innerHTML = '<em class="muted">No videos yet — run a sync.</em>'; return; }
-  $('videos').innerHTML = '<table><thead><tr><th></th><th>Title</th><th>State</th><th>Views</th><th>Published</th><th></th></tr></thead><tbody>' +
-    vids.map(v => `<tr id="row-${v.id}">
-      <td>${v.thumbnail_url ? `<img src="${v.thumbnail_url}" width="96" style="border-radius:6px"/>` : ''}</td>
-      <td>${escapeHtml(v.title || '')}<div class="muted" style="font-size:.78rem"><code>${v.id}</code></div></td>
-      <td>${stateBadge(v)}</td>
-      <td>${(v.view_count || 0).toLocaleString()}</td>
-      <td>${(v.published_at || '').slice(0,10)}</td>
+  allVideos = vids || [];
+  allVideos.forEach(v => currentVideos[v.id] = v);
+  renderVideos();
+}
+
+function videoMatches(v, q, state, privacy) {
+  if (q) {
+    const hay = (v.title || '').toLowerCase() + ' ' + v.id.toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  if (state) {
+    if (state === 'none') { if (v.audit_status) return false; }
+    else { if (v.audit_status !== state) return false; }
+  }
+  if (privacy && (v.privacy_status || 'public') !== privacy) return false;
+  return true;
+}
+
+function sortVideos(list) {
+  const key = sortKey;
+  const dir = sortDir === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => {
+    let av = a[key], bv = b[key];
+    if (av == null) av = '';
+    if (bv == null) bv = '';
+    if (typeof av === 'number' || typeof bv === 'number') return (Number(av) - Number(bv)) * dir;
+    return String(av).localeCompare(String(bv)) * dir;
+  });
+}
+
+function renderVideos() {
+  const q = ($('v-search').value || '').toLowerCase().trim();
+  const state = $('v-state').value;
+  const privacy = $('v-privacy').value;
+  const filtered = allVideos.filter(v => videoMatches(v, q, state, privacy));
+  const sorted = sortVideos(filtered);
+  $('v-count').textContent = sorted.length;
+  if (!allVideos.length) {
+    $('videos').innerHTML = '<em class="muted">No videos yet — run a sync from the Overview tab.</em>';
+    return;
+  }
+  if (!sorted.length) {
+    $('videos').innerHTML = '<em class="muted">No videos match the current filters.</em>';
+    return;
+  }
+
+  const arrow = (k) => sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+  $('videos').innerHTML = `<table>
+    <thead><tr>
+      <th style="width:1.4rem" aria-label="Select"><input type="checkbox" id="select-all" /></th>
+      <th aria-label="Thumbnail"></th>
+      <th class="sortable" data-sort="title">Title${arrow('title')}</th>
+      <th class="sortable" data-sort="audit_status">State${arrow('audit_status')}</th>
+      <th class="sortable" data-sort="issues_count">Issues${arrow('issues_count')}</th>
+      <th class="sortable" data-sort="audit_count">#${arrow('audit_count')}</th>
+      <th class="sortable" data-sort="view_count">Views${arrow('view_count')}</th>
+      <th class="sortable" data-sort="views_per_day">v/day${arrow('views_per_day')}</th>
+      <th class="sortable" data-sort="published_at">Published${arrow('published_at')}</th>
+      <th class="sortable" data-sort="audit_last_at">Last audit${arrow('audit_last_at')}</th>
+      <th aria-label="Actions"></th>
+    </tr></thead><tbody>` +
+    sorted.map(v => `<tr id="row-${v.id}" class="vid-row${selected.has(v.id) ? ' selected':''}">
+      <td><input type="checkbox" class="vsel" data-id="${v.id}" ${selected.has(v.id) ? 'checked':''} /></td>
+      <td>${v.thumbnail_url ? `<img src="${v.thumbnail_url}" width="88" style="border-radius:6px"/>` : ''}</td>
+      <td>
+        <div style="font-weight:600">${escapeHtml(v.title || '')}</div>
+        <div class="muted" style="font-size:.78rem"><code>${v.id}</code>${(v.privacy_status && v.privacy_status !== 'public') ? ` · <span class="pill">${escapeHtml(v.privacy_status)}</span>` : ''}</div>
+        ${v.ai_reasoning_short ? `<div class="muted" style="font-size:.78rem; margin-top:.2rem">${escapeHtml(v.ai_reasoning_short)}</div>` : ''}
+      </td>
+      <td>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="View latest audit">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</td>
+      <td>${v.issues_count > 0
+            ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill" style="background:#d80;color:white">${v.issues_count}</span></a>`
+            : '<span class="muted">—</span>'}</td>
+      <td>${v.audit_count || 0}</td>
+      <td>${fmt(v.view_count)}</td>
+      <td class="muted">${v.views_per_day != null ? fmt(v.views_per_day) : '—'}</td>
+      <td class="muted">${(v.published_at || '').slice(0,10)}</td>
+      <td class="muted">${v.audit_last_at ? v.audit_last_at.slice(0,10) : '—'}</td>
       <td>${auditButton(v)}</td>
     </tr>
-    <tr id="audit-${v.id}"><td colspan="6" style="border:none; padding:0"></td></tr>`).join('') +
+    <tr id="audit-${v.id}"><td colspan="11" style="border:none; padding:0"></td></tr>`).join('') +
     '</tbody></table>';
-}
 
-function stateBadge(v) {
-  const s = v.audit_status;
-  if (!s) return '<span class="pill" style="background:#8884">Not audited</span>';
-  const colors = {
-    applied:     {bg:'#2a7', label:'Applied'},
-    pending:     {bg:'#28a', label:'Audited · pending'},
-    quarantined: {bg:'#d80', label:'Quarantined'},
-    failed:      {bg:'#c33', label:'Failed'},
-    rejected:    {bg:'#888', label:'Rejected'},
-    approved:    {bg:'#28a', label:'Approved'},
+  // Wire up sort headers
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.sort;
+      if (sortKey === k) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      else { sortKey = k; sortDir = (k === 'title') ? 'asc' : 'desc'; }
+      renderVideos();
+    };
+  });
+  // Selection wiring
+  document.querySelectorAll('.vsel').forEach(cb => cb.onchange = (e) => toggleSelect(cb.dataset.id, cb.checked));
+  $('select-all').onchange = (e) => {
+    if (e.target.checked) sorted.forEach(v => toggleSelect(v.id, true));
+    else { selected.clear(); renderVideos(); updateSelectionUi(); }
   };
-  const c = colors[s] || {bg:'#888', label: s};
-  const when = v.audit_applied_at ? ` · ${(v.audit_applied_at||'').slice(0,10)}` : '';
-  return `<span class="pill" style="background:${c.bg};color:white">${c.label}${when}</span>`;
+  updateSelectionUi();
 }
 
-function auditButton(v) {
-  if (v.audit_status === 'applied') {
-    return `<button onclick="audit('${v.id}')" title="Already applied — re-auditing creates a new pending audit">Re-audit</button>`;
-  }
-  if (v.audit_status === 'pending' || v.audit_status === 'quarantined') {
-    return `<button onclick="audit('${v.id}')">Re-audit</button>`;
-  }
-  return `<button onclick="audit('${v.id}')">Audit</button>`;
+function toggleSelect(id, on) {
+  if (on) selected.add(id); else selected.delete(id);
+  const row = document.getElementById('row-' + id);
+  if (row) row.classList.toggle('selected', on);
+  updateSelectionUi();
+}
+function updateSelectionUi() {
+  const n = selected.size;
+  $('selection-count').textContent = n ? `${n} selected` : '';
+  $('bulk-audit-btn').disabled = n === 0;
+  $('select-clear-btn').disabled = n === 0;
+  // Apply selected pending: count how many of selected are pending
+  const pendingSel = [...selected].filter(id => currentVideos[id]?.audit_status === 'pending');
+  $('bulk-apply-btn').disabled = pendingSel.length === 0;
+  $('bulk-apply-btn').textContent = pendingSel.length > 0
+    ? `Apply ${pendingSel.length} pending` : 'Apply selected pending';
 }
 
-function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+['v-search','v-state','v-privacy'].forEach(id => $(id).oninput = renderVideos);
 
-async function applyAudit(auditId, videoId) {
-  if (!confirm('Push these changes to the live YouTube video?')) return;
-  const cell = $('audit-' + videoId).firstChild;
-  const prev = cell.innerHTML;
-  cell.innerHTML = '<div class="audit muted">Applying…</div>';
+$('select-clear-btn').onclick = () => { selected.clear(); renderVideos(); };
+
+$('bulk-audit-btn').onclick = async () => {
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (!confirm(`Audit ${ids.length} selected video(s)? Each audit calls the LLM (no YouTube quota).`)) return;
+  $('bulk-audit-btn').disabled = true;
+  toast(`Auditing ${ids.length} videos…`, 'warn', 5000);
   try {
-    const r = await fetch(`/audits/${auditId}/apply`, { method: 'POST' });
+    const r = await fetch(`/channels/${channelId}/audits/run-bulk`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ video_ids: ids }),
+    });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-    if (j.status === 'dry_run') {
-      cell.innerHTML = prev + `<div class="audit" style="border-color:#d80;color:#d80"><b>DRY_RUN is on</b> — payload was logged but not pushed. Set <code>DRY_RUN=false</code> in .env and restart to apply for real.</div>`;
-    } else {
-      cell.innerHTML = '<div class="audit" style="border-color:#2a7;color:#2a7">Applied to YouTube ✓ — refreshing…</div>';
-      await loadVideos();
+    toast(`Audited ${j.audited}, failed ${j.failed} (of ${j.total}).`, j.failed ? 'warn' : 'ok');
+    await loadVideos();
+  } catch (e) { toast('Bulk audit failed: ' + escapeHtml(String(e)), 'err'); }
+  finally { $('bulk-audit-btn').disabled = false; updateSelectionUi(); }
+};
+
+$('bulk-apply-btn').onclick = async () => {
+  const ids = [...selected].filter(id => currentVideos[id]?.audit_status === 'pending');
+  if (!ids.length) return;
+  // Quota cost preview
+  const pv = await (await fetch(`/quota-cost-preview?action=apply&n=${ids.length}`)).json();
+  if (!pv.can_afford) {
+    toast(`Cannot afford: needs ${pv.cost} units, ${pv.remaining} remaining today.`, 'err', 6000);
+    return;
+  }
+  if (!confirm(`Apply ${ids.length} pending audits? Estimated quota: ${pv.cost} units (${pv.pct_of_remaining}% of today's remaining).`)) return;
+  $('bulk-apply-btn').disabled = true;
+  toast(`Applying ${ids.length}…`, 'warn', 5000);
+  try {
+    const audits = (await Promise.all(ids.map(id =>
+      fetch(`/videos/${id}/audits`).then(r => r.json()).then(arr => arr[0]?.id).catch(() => null)
+    ))).filter(Boolean);
+    let ok = 0, fail = 0;
+    for (const aid of audits) {
+      try {
+        const rr = await fetch(`/audits/${aid}/apply`, { method:'POST' });
+        if (rr.ok) ok++; else fail++;
+      } catch { fail++; }
     }
+    toast(`Applied ${ok}, failed ${fail}.`, fail ? 'warn' : 'ok');
+    await loadVideos();
+  } catch (e) { toast('Bulk apply failed: ' + escapeHtml(String(e)), 'err'); }
+  finally { $('bulk-apply-btn').disabled = false; updateSelectionUi(); }
+};
+
+function auditButton(v) {
+  const label = v.audit_status === 'applied' ? 'Re-audit'
+    : (v.audit_status === 'pending' || v.audit_status === 'quarantined') ? 'Re-audit'
+    : 'Audit';
+  return `<button onclick="audit('${v.id}')">${label}</button>`;
+}
+
+async function viewAudit(videoId) {
+  const cell = $('audit-' + videoId).firstChild;
+  // Toggle: if already showing, collapse it.
+  if (cell.innerHTML && cell.dataset && cell.dataset.shown === videoId) {
+    cell.innerHTML = ''; cell.dataset.shown = '';
+    return;
+  }
+  cell.innerHTML = '<div class="audit muted">Loading latest audit…</div>';
+  try {
+    const arr = await (await fetch(`/videos/${videoId}/audits`)).json();
+    if (!arr || !arr.length) {
+      cell.innerHTML = '<div class="audit muted">No audit yet — click Audit to run one.</div>';
+      return;
+    }
+    cell.innerHTML = renderAudit(arr[0]);
+    cell.dataset.shown = videoId;
   } catch (e) {
-    cell.innerHTML = prev + `<div class="audit" style="border-color:#c33;color:#c33">Apply failed: ${escapeHtml(String(e))}</div>`;
+    cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Could not load audit: ${escapeHtml(String(e))}</div>`;
   }
 }
 
@@ -276,23 +584,42 @@ async function audit(videoId) {
     cell.innerHTML = renderAudit(a);
   } catch (e) {
     cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Audit failed: ${escapeHtml(String(e))}</div>`;
+    toast('Audit failed: ' + escapeHtml(String(e)), 'err');
   }
 }
 
-function compareRow(label, current, suggested, problems, why, rawCurrent = false) {
-  const fmt = (v, raw=false) => raw ? (v || '')
-    : Array.isArray(v) ? v.map(t => `<span class="pill">${escapeHtml(t)}</span>`).join(' ')
-    : escapeHtml(v || '');
-  return `
-    <div style="margin: .75rem 0; padding: .6rem .8rem; border:1px solid #8884; border-radius:8px;">
-      <div style="font-weight:600; margin-bottom:.4rem;">${label}</div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:.75rem;">
-        <div><div class="muted" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.04em;">Current</div><div>${fmt(current, rawCurrent)}</div></div>
-        <div><div class="muted" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.04em;">Suggested</div><div>${fmt(suggested)}</div></div>
-      </div>
-      ${problems ? `<div style="margin-top:.5rem;"><span class="muted">What's lacking:</span> ${escapeHtml(problems)}</div>` : ''}
-      ${why ? `<div><span class="muted">Why better:</span> ${escapeHtml(why)}</div>` : ''}
-    </div>`;
+// ── Diff highlighting (word-level for short strings, line-level for long) ─
+function diffWords(a, b) {
+  a = a || ''; b = b || '';
+  if (!a && !b) return '<span class="muted">—</span>';
+  if (!a) return `<span class="diff-add">${escapeHtml(b)}</span>`;
+  if (!b) return `<span class="diff-del">${escapeHtml(a)}</span>`;
+  if (a === b) return escapeHtml(a);
+  const aw = a.split(/(\s+)/), bw = b.split(/(\s+)/);
+  // Greedy LCS via simple DP
+  const n = aw.length, m = bw.length;
+  const dp = Array.from({length: n+1}, () => new Array(m+1).fill(0));
+  for (let i=1;i<=n;i++) for (let j=1;j<=m;j++)
+    dp[i][j] = aw[i-1] === bw[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  let i=n, j=m, out=[];
+  while (i>0 && j>0) {
+    if (aw[i-1] === bw[j-1]) { out.push(escapeHtml(aw[i-1])); i--; j--; }
+    else if (dp[i-1][j] >= dp[i][j-1]) { out.push(`<span class="diff-del">${escapeHtml(aw[i-1])}</span>`); i--; }
+    else { out.push(`<span class="diff-add">${escapeHtml(bw[j-1])}</span>`); j--; }
+  }
+  while (i>0) { out.push(`<span class="diff-del">${escapeHtml(aw[i-1])}</span>`); i--; }
+  while (j>0) { out.push(`<span class="diff-add">${escapeHtml(bw[j-1])}</span>`); j--; }
+  return out.reverse().join('');
+}
+
+function diffTags(before, after) {
+  const setB = new Set(before || []), setA = new Set(after || []);
+  const out = [];
+  (after || []).forEach(t => out.push(setB.has(t)
+    ? `<span class="pill">${escapeHtml(t)}</span>`
+    : `<span class="pill diff-add">+${escapeHtml(t)}</span>`));
+  (before || []).forEach(t => { if (!setA.has(t)) out.push(`<span class="pill diff-del">-${escapeHtml(t)}</span>`); });
+  return out.join(' ') || '<span class="muted">none</span>';
 }
 
 function renderAudit(a) {
@@ -303,42 +630,116 @@ function renderAudit(a) {
     `<li><span class="pill sev-${i.severity}">${i.severity}</span> <b>${escapeHtml(i.field || '')}</b> — ${escapeHtml(i.problem || '')}<br><span class="muted">Fix: ${escapeHtml(i.fix || '')}</span></li>`
   ).join('');
   const applied = a.status === 'applied';
+
+  // Only render rows for fields where suggestion exists; show diff only if changed.
+  const sections = [];
+  const tSug = (cmp.title || {}).suggested;
+  if (tSug !== undefined) {
+    const changed = (v.title || '') !== (tSug || '');
+    sections.push(diffSection('Title', changed ? diffWords(v.title, tSug) : escapeHtml(v.title || ''), changed, (cmp.title||{}).why_better));
+  }
+  const dSug = (cmp.description || {}).suggested;
+  if (dSug !== undefined) {
+    const changed = (v.description || '') !== (dSug || '');
+    sections.push(diffSection('Description', changed ? diffWords(truncate(v.description, 600), truncate(dSug, 600)) : `<span class="muted">${escapeHtml(truncate(v.description,400))}</span>`, changed, (cmp.description||{}).why_better));
+  }
+  const tagSug = (cmp.tags || {}).suggested;
+  if (Array.isArray(tagSug)) {
+    const before = v.tags || [];
+    const changed = JSON.stringify(before) !== JSON.stringify(tagSug);
+    sections.push(diffSection('Tags', diffTags(before, tagSug), changed, (cmp.tags||{}).why_better));
+  }
+  const tSugThumb = (cmp.thumbnail || {}).suggested;
+  if (tSugThumb) {
+    sections.push(`<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid #8884; border-radius:8px;">
+      <div style="font-weight:600; margin-bottom:.3rem;">Thumbnail · feedback</div>
+      <div class="muted" style="font-size:.85rem">${escapeHtml(tSugThumb)}</div>
+      ${(cmp.thumbnail||{}).why_better ? `<div style="margin-top:.3rem"><span class="muted">Why better:</span> ${escapeHtml((cmp.thumbnail||{}).why_better)}</div>` : ''}
+    </div>`);
+  }
+
   return `<div class="audit">
-    <p><b>Reasoning:</b> ${escapeHtml(a.ai_reasoning || '')}</p>
-    ${compareRow('Title', v.title, (cmp.title||{}).suggested, (cmp.title||{}).current_problems, (cmp.title||{}).why_better)}
-    ${compareRow('Description', truncate(v.description, 400), truncate((cmp.description||{}).suggested, 400), (cmp.description||{}).current_problems, (cmp.description||{}).why_better)}
-    ${compareRow('Tags', v.tags || [], (cmp.tags||{}).suggested || [], (cmp.tags||{}).current_problems, (cmp.tags||{}).why_better)}
-    ${compareRow('Thumbnail', v.thumbnail_url ? `<img src="${v.thumbnail_url}" style="max-width:240px;border-radius:6px"/>` : '<span class="muted">none</span>', (cmp.thumbnail||{}).suggested, (cmp.thumbnail||{}).current_problems, (cmp.thumbnail||{}).why_better, true)}
-    ${issues ? `<p><b>Issues:</b></p><ul>${issues}</ul>` : ''}
+    ${a.ai_reasoning ? `<p><b>Reasoning:</b> ${escapeHtml(a.ai_reasoning)}</p>` : ''}
+    ${sections.join('')}
+    ${issues ? `<details open><summary><b>Issues (${(ifd.issues||[]).length})</b></summary><ul>${issues}</ul></details>` : ''}
     <div style="margin-top:.75rem;">
       ${applied
-        ? `<span class="pill" style="background:#2a7;color:white">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>`
+        ? `<span class="pill" style="background:#2a7;color:white">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>
+           <button onclick="revertAudit(${a.id}, '${a.video_id}')" style="margin-left:.5rem" aria-label="Revert audit changes">Revert →</button>`
         : `<button onclick="applyAudit(${a.id}, '${a.video_id}')">Apply to YouTube →</button>
            <span class="muted" style="margin-left:.5rem">Pushes suggested title / description / tags to the live video.</span>`}
     </div>
   </div>`;
 }
 
-function truncate(s, n) {
-  if (!s) return '';
-  s = String(s);
-  return s.length > n ? s.slice(0, n) + '…' : s;
+function diffSection(label, body, changed, why) {
+  const tag = changed ? '<span class="pill" style="background:#28a;color:white;margin-left:.4rem">changed</span>'
+                      : '<span class="pill muted" style="margin-left:.4rem">unchanged</span>';
+  return `<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid #8884; border-radius:8px;">
+    <div style="font-weight:600; margin-bottom:.3rem;">${label} ${tag}</div>
+    <div>${body}</div>
+    ${why ? `<div class="muted" style="margin-top:.4rem; font-size:.85rem">Why better: ${escapeHtml(why)}</div>` : ''}
+  </div>`;
 }
 
+async function applyAudit(auditId, videoId) {
+  const pv = await (await fetch(`/quota-cost-preview?action=apply&n=1`)).json();
+  if (!pv.can_afford) { toast(`Cannot afford: needs ${pv.cost}, ${pv.remaining} left.`, 'err'); return; }
+  if (!confirm(`Push these changes to the live YouTube video? (~${pv.cost} quota units)`)) return;
+  const cell = $('audit-' + videoId).firstChild;
+  const prev = cell.innerHTML;
+  cell.innerHTML = '<div class="audit muted">Applying…</div>';
+  try {
+    const r = await fetch(`/audits/${auditId}/apply`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    if (j.status === 'dry_run') {
+      cell.innerHTML = prev + `<div class="audit" style="border-color:#d80;color:#d80"><b>DRY_RUN is on</b> — payload logged but not pushed.</div>`;
+      toast('DRY_RUN — not pushed.', 'warn');
+    } else {
+      toast('Applied ✓', 'ok');
+      await loadVideos();
+    }
+  } catch (e) {
+    cell.innerHTML = prev + `<div class="audit" style="border-color:#c33;color:#c33">Apply failed: ${escapeHtml(String(e))}</div>`;
+    toast('Apply failed: ' + escapeHtml(String(e)), 'err');
+  }
+}
+
+async function revertAudit(auditId, videoId) {
+  if (!confirm('Restore the previous title / description / tags from before this audit?')) return;
+  try {
+    const r = await fetch(`/audits/${auditId}/revert`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    if (j.status === 'dry_run') toast('DRY_RUN — revert not pushed.', 'warn');
+    else toast('Reverted to previous metadata.', 'ok');
+    await loadVideos();
+  } catch (e) { toast('Revert failed: ' + escapeHtml(String(e)), 'err'); }
+}
+
+// ── Sync + Apply All Pending (Overview tab) ───────────────────────────
 $('sync-btn').onclick = async () => {
   $('sync-btn').disabled = true; $('sync-status').textContent = ' Syncing…';
   try {
     const r = await fetch(`/channels/${channelId}/sync`, { method: 'POST' });
     const j = await r.json();
-    $('sync-status').textContent = ` Synced ${j.synced} videos`;
-    await loadVideos(); await loadChannel();
+    if (!r.ok) throw new Error(JSON.stringify(j));
+    $('sync-status').textContent = ` ${j.synced} videos`;
+    toast(`Synced ${j.synced} videos.`, 'ok');
+    await loadVideos(); await loadChannel(); await loadOverview();
   } catch (e) {
-    $('sync-status').textContent = ' Sync failed: ' + e;
+    $('sync-status').textContent = ' Sync failed';
+    toast('Sync failed: ' + escapeHtml(String(e)), 'err');
   } finally { $('sync-btn').disabled = false; }
 };
 
 $('apply-pending-btn').onclick = async () => {
-  if (!confirm('Apply every pending audit on this channel to YouTube? Each apply uses ~51 quota units.')) return;
+  // Estimate cost: count pending in current data
+  const pendingCount = allVideos.filter(v => v.audit_status === 'pending').length;
+  if (!pendingCount) { toast('No pending audits.', 'warn'); return; }
+  const pv = await (await fetch(`/quota-cost-preview?action=apply&n=${pendingCount}`)).json();
+  if (!confirm(`Apply ${pendingCount} pending audits? Estimated quota: ${pv.cost} units${pv.pct_of_remaining ? ` (${pv.pct_of_remaining}% of remaining)`:''}.`)) return;
   $('apply-pending-btn').disabled = true;
   $('apply-pending-status').textContent = ' Applying…';
   $('apply-pending-results').innerHTML = '';
@@ -347,59 +748,29 @@ $('apply-pending-btn').onclick = async () => {
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     $('apply-pending-status').textContent =
-      ` ${j.applied} applied, ${j.skipped} skipped, ${j.failed} failed (of ${j.total_pending} pending)`;
+      ` ${j.applied} applied · ${j.skipped} skipped · ${j.failed} failed (of ${j.total_pending}).`;
+    toast(`Applied ${j.applied}, skipped ${j.skipped}, failed ${j.failed}.`, j.failed ? 'warn' : 'ok');
     if (j.results && j.results.length) {
       const colorFor = o =>
-        o === 'applied' ? '#2a7'
-        : o === 'dry_run' ? '#d80'
-        : o === 'failed' ? '#c33'
-        : o === 'quarantined' ? '#d80'
-        : '#888';
+        o === 'applied' ? '#2a7' : o === 'dry_run' ? '#d80' : o === 'failed' ? '#c33' : o === 'quarantined' ? '#d80' : '#888';
       $('apply-pending-results').innerHTML =
-        '<details><summary class="muted">Per-audit detail</summary>' +
-        '<ul style="font-size:.85rem">' +
+        '<details><summary class="muted">Per-audit detail</summary><ul style="font-size:.85rem">' +
         j.results.map(r =>
           `<li><code>${r.video_id}</code> · <span style="color:${colorFor(r.outcome)}">${escapeHtml(r.outcome)}</span>${r.reason ? ` — ${escapeHtml(r.reason)}` : ''}</li>`
-        ).join('') +
-        '</ul></details>';
+        ).join('') + '</ul></details>';
     }
-    await loadVideos(); await loadChannel();
+    await loadVideos(); await loadChannel(); await loadOverview();
   } catch (e) {
-    $('apply-pending-status').textContent = ' Failed: ' + e;
-  } finally {
-    $('apply-pending-btn').disabled = false;
-  }
+    $('apply-pending-status').textContent = ' Failed';
+    toast('Apply failed: ' + escapeHtml(String(e)), 'err');
+  } finally { $('apply-pending-btn').disabled = false; }
 };
 
-$('generate-btn').onclick = async () => {
-  $('generate-btn').disabled = true; $('cfg-status').textContent = 'Generating…';
-  try {
-    const r = await fetch(`/channels/${channelId}/audit-config/elaborate`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ raw_insights: $('insights').value }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const j = await r.json();
-    $('prompt').value = j.generated_prompt;
-    $('cfg-status').textContent = 'Generated.';
-  } catch (e) {
-    $('cfg-status').textContent = 'Failed: ' + e;
-  } finally { $('generate-btn').disabled = false; }
-};
-
-$('save-btn').onclick = async () => {
-  $('cfg-status').textContent = 'Saving…';
-  try {
-    await fetch(`/channels/${channelId}/audit-config`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ raw_insights: $('insights').value, generated_prompt: $('prompt').value }),
-    });
-    $('cfg-status').textContent = 'Saved.';
-  } catch (e) { $('cfg-status').textContent = 'Save failed: ' + e; }
-};
-
-loadChannel(); loadConfig(); loadVideos(); loadAutopilotLog();
-setInterval(loadAutopilotLog, 30000);
+(async () => {
+  await loadChannel();
+  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview()]);
+  setInterval(loadAutopilotLog, 30000);
+})();
 </script>
 </body>
 </html>
