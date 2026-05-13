@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Midas — Insights Mockup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem; line-height: 1.5; background: #111; color: #eee; }
+  .card { border: 1px solid #2a2a2a; border-radius: 12px; padding: 1.1rem 1.25rem; margin: .85rem 0; background: #181818; }
+  .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; opacity: .5; }
+  .muted { opacity: .5; }
+
+  /* ── Headline metrics ──────────────────────────────── */
+  .insight-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; }
+  .hero-stat { border: 1px solid #2a2a2a; border-radius: 10px; padding: .85rem 1rem; background: #1c1c1c; }
+  .hero-stat .big { font-size: 2rem; font-weight: 800; line-height: 1; }
+  .hero-stat .desc { font-size: .78rem; opacity: .55; margin-top: .35rem; line-height: 1.35; }
+  .hero-stat .method { font-size: .68rem; opacity: .38; margin-top: .5rem; font-style: italic; }
+  .pos { color: #2a7; }
+  .amb { color: #6af; }
+  .neu { color: #d80; }
+
+  /* ── Velocity comparison ───────────────────────────── */
+  .vel-chart { display: flex; flex-direction: column; gap: .6rem; }
+  .vel-row { display: grid; grid-template-columns: 130px 1fr 1fr 60px; gap: .5rem; align-items: center; font-size: .85rem; }
+  .vel-label { opacity: .7; font-size: .82rem; }
+  .bar-wrap { height: 20px; background: #1e1e1e; border-radius: 4px; overflow: hidden; position: relative; }
+  .bar-before { position: absolute; height: 100%; background: #334; border-radius: 4px; }
+  .bar-after  { position: absolute; height: 100%; background: #2a7; border-radius: 4px; opacity: .85; }
+  .vel-delta { font-weight: 700; text-align: right; }
+  .vel-header { display: grid; grid-template-columns: 130px 1fr 1fr 60px; gap: .5rem; font-size: .68rem; opacity: .4; text-transform: uppercase; letter-spacing: .05em; margin-bottom: -.2rem; }
+
+  /* ── Lever breakdown ───────────────────────────────── */
+  .lever-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .65rem; }
+  .lever-card { border: 1px solid #2a2a2a; border-radius: 9px; padding: .75rem .9rem; background: #1c1c1c; }
+  .lever-card .field { font-weight: 700; font-size: .9rem; margin-bottom: .45rem; }
+  .lever-bar-row { display: flex; align-items: center; gap: .5rem; font-size: .8rem; margin-top: .3rem; }
+  .lever-track { flex: 1; height: 7px; background: #222; border-radius: 4px; overflow: hidden; }
+  .lever-fill { height: 100%; border-radius: 4px; }
+  .lever-n { opacity: .4; font-size: .72rem; margin-top: .25rem; }
+
+  /* ── Win / loss ────────────────────────────────────── */
+  .wl-row { display: flex; gap: 1.25rem; align-items: flex-start; flex-wrap: wrap; }
+  .donut-wrap { display: flex; flex-direction: column; align-items: center; gap: .3rem; flex-shrink: 0; }
+  svg.donut { transform: rotate(-90deg); }
+  .wl-legend { display: flex; flex-direction: column; gap: .4rem; font-size: .85rem; }
+  .wl-item { display: flex; align-items: center; gap: .5rem; }
+  .wl-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .wl-note { font-size: .78rem; opacity: .5; line-height: 1.4; margin-top: .5rem; }
+
+  /* ── Methodology callout ───────────────────────────── */
+  .method-box { background: #1a2030; border: 1px solid #2a3a5a; border-radius: 9px; padding: .75rem 1rem; font-size: .8rem; opacity: .8; line-height: 1.55; }
+  .method-box b { color: #6af; }
+
+  /* ── Section header ────────────────────────────────── */
+  .section-head { display: flex; align-items: baseline; gap: .5rem; margin: 0 0 .85rem; flex-wrap: wrap; }
+  .section-head h3 { margin: 0; font-size: 1rem; }
+  .badge-new { display: inline-block; font-size: .65rem; font-weight: 700; background: #6af; color: #000; padding: .1rem .35rem; border-radius: 4px; }
+
+  .divider { border: none; border-top: 1px solid #222; margin: 1rem 0; }
+</style>
+</head>
+<body>
+
+<div style="margin-bottom: 1rem;">
+  <h2 style="margin-bottom:.15rem">Optimization Impact</h2>
+  <p style="opacity:.5;margin:0;font-size:.88rem">Does rewriting titles/descriptions/tags actually move the needle?</p>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- HERO STATS                                            -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="insight-hero">
+
+    <div class="hero-stat">
+      <div class="big pos">+38%</div>
+      <div class="desc">Median velocity lift<br>after audit applied</div>
+      <div class="method">views/day after ÷ views/day before − 1</div>
+    </div>
+
+    <div class="hero-stat">
+      <div class="big amb">71%</div>
+      <div class="desc">Win rate — videos<br>that accelerated post-apply</div>
+      <div class="method">of 187 videos with ≥7 days post-apply data</div>
+    </div>
+
+    <div class="hero-stat">
+      <div class="big pos">Title</div>
+      <div class="desc">Highest-impact lever<br>avg +51% velocity when changed</div>
+      <div class="method">vs +12% when only tags/desc changed</div>
+    </div>
+
+    <div class="hero-stat">
+      <div class="big neu">14d</div>
+      <div class="desc">Median days to see<br>measurable velocity shift</div>
+      <div class="method">based on 7-day rolling avg comparison</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- VELOCITY COMPARISON (before vs after per video cohort) -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="section-head">
+    <h3>Views/day — before vs after apply</h3>
+    <span style="opacity:.4;font-size:.8rem;margin-left:auto">top 6 videos by post-apply gain</span>
+  </div>
+
+  <div class="method-box" style="margin-bottom: 1rem;">
+    <b>How this is measured:</b> "Before" = avg views/day from publish → apply date. "After" = avg views/day from apply date → today. Only videos with ≥7 days in each window are shown. This controls for organic growth — a video that was already trending will show a before rate; the question is whether the rate <em>changed</em>.
+  </div>
+
+  <div class="vel-chart">
+    <div class="vel-header">
+      <span>Video</span>
+      <span>Before apply</span>
+      <span>After apply</span>
+      <span>Δ</span>
+    </div>
+
+    <!-- Row 1 -->
+    <div class="vel-row">
+      <div class="vel-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="How Compound Interest Really Works">How Compound Interest…</div>
+      <div class="bar-wrap">
+        <div class="bar-before" style="width:30%"></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-after" style="width:85%"></div>
+      </div>
+      <div class="vel-delta pos">+183%</div>
+    </div>
+
+    <!-- Row 2 -->
+    <div class="vel-row">
+      <div class="vel-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">React Hooks Explained…</div>
+      <div class="bar-wrap">
+        <div class="bar-before" style="width:45%"></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-after" style="width:100%"></div>
+      </div>
+      <div class="vel-delta pos">+122%</div>
+    </div>
+
+    <!-- Row 3 -->
+    <div class="vel-row">
+      <div class="vel-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Python vs JavaScript…</div>
+      <div class="bar-wrap">
+        <div class="bar-before" style="width:60%"></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-after" style="width:88%"></div>
+      </div>
+      <div class="vel-delta pos">+47%</div>
+    </div>
+
+    <!-- Row 4 -->
+    <div class="vel-row">
+      <div class="vel-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SIP Investing Basics</div>
+      <div class="bar-wrap">
+        <div class="bar-before" style="width:55%"></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-after" style="width:72%"></div>
+      </div>
+      <div class="vel-delta pos">+31%</div>
+    </div>
+
+    <!-- Row 5 — flat -->
+    <div class="vel-row">
+      <div class="vel-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">What is an Index Fund</div>
+      <div class="bar-wrap">
+        <div class="bar-before" style="width:40%"></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-after" style="width:42%"></div>
+      </div>
+      <div class="vel-delta" style="color:#888">+5%</div>
+    </div>
+
+    <!-- Row 6 — regression -->
+    <div class="vel-row">
+      <div class="vel-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Budget Tracker Tutorial</div>
+      <div class="bar-wrap">
+        <div class="bar-before" style="width:70%"></div>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-after" style="width:50%"></div>
+      </div>
+      <div class="vel-delta" style="color:#c33">−29%</div>
+    </div>
+  </div>
+
+  <div style="margin-top:.75rem;font-size:.75rem;opacity:.38;display:flex;gap:1rem;flex-wrap:wrap;">
+    <span><span style="display:inline-block;width:10px;height:10px;background:#334;border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>Before (views/day)</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#2a7;border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>After (views/day)</span>
+    <span style="margin-left:auto">bars scaled relative to channel max</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- LEVER BREAKDOWN                                       -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="section-head">
+    <h3>Which change type moves the needle?</h3>
+    <span style="opacity:.4;font-size:.8rem;margin-left:auto">avg velocity lift by what was changed</span>
+  </div>
+  <div class="lever-grid">
+
+    <div class="lever-card">
+      <div class="field">📝 Title rewritten</div>
+      <div class="lever-bar-row">
+        <span style="color:#2a7;font-weight:700">+51%</span>
+        <div class="lever-track"><div class="lever-fill" style="width:100%;background:#2a7"></div></div>
+      </div>
+      <div class="lever-bar-row" style="margin-top:0">
+        <span style="color:#888;font-size:.8rem">unchanged</span>
+        <div class="lever-track"><div class="lever-fill" style="width:24%;background:#555"></div></div>
+        <span style="color:#888;font-size:.78rem">+12%</span>
+      </div>
+      <div class="lever-n">n=94 changed · n=93 unchanged</div>
+    </div>
+
+    <div class="lever-card">
+      <div class="field">📄 Description rewritten</div>
+      <div class="lever-bar-row">
+        <span style="color:#6af;font-weight:700">+22%</span>
+        <div class="lever-track"><div class="lever-fill" style="width:43%;background:#6af"></div></div>
+      </div>
+      <div class="lever-bar-row" style="margin-top:0">
+        <span style="color:#888;font-size:.8rem">unchanged</span>
+        <div class="lever-track"><div class="lever-fill" style="width:22%;background:#555"></div></div>
+        <span style="color:#888;font-size:.78rem">+11%</span>
+      </div>
+      <div class="lever-n">n=141 changed · n=46 unchanged</div>
+    </div>
+
+    <div class="lever-card">
+      <div class="field">🏷️ Tags rewritten</div>
+      <div class="lever-bar-row">
+        <span style="color:#d80;font-weight:700">+14%</span>
+        <div class="lever-track"><div class="lever-fill" style="width:27%;background:#d80"></div></div>
+      </div>
+      <div class="lever-bar-row" style="margin-top:0">
+        <span style="color:#888;font-size:.8rem">unchanged</span>
+        <div class="lever-track"><div class="lever-fill" style="width:20%;background:#555"></div></div>
+        <span style="color:#888;font-size:.78rem">+10%</span>
+      </div>
+      <div class="lever-n">n=160 changed · n=27 unchanged</div>
+    </div>
+
+    <div class="lever-card">
+      <div class="field">🎯 All 3 changed</div>
+      <div class="lever-bar-row">
+        <span style="color:#2a7;font-weight:700">+63%</span>
+        <div class="lever-track"><div class="lever-fill" style="width:100%;background:linear-gradient(90deg,#2a7,#6af)"></div></div>
+      </div>
+      <div class="lever-bar-row" style="margin-top:0">
+        <span style="color:#888;font-size:.8rem">none changed</span>
+        <div class="lever-track"><div class="lever-fill" style="width:5%;background:#555"></div></div>
+        <span style="color:#888;font-size:.78rem">+3%</span>
+      </div>
+      <div class="lever-n">n=58 all changed · n=6 none</div>
+    </div>
+
+  </div>
+  <p style="font-size:.75rem;opacity:.38;margin:.75rem 0 0">
+    Correlation only — videos chosen by autopilot are not a random sample. Title rewrites may correlate with videos that had more room to improve.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- WIN RATE DONUT                                        -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="section-head">
+    <h3>Outcome distribution</h3>
+    <span style="opacity:.4;font-size:.8rem;margin-left:auto">187 videos with ≥7 days post-apply data</span>
+  </div>
+  <div class="wl-row">
+    <!-- donut: 71% win, 16% flat, 13% regression -->
+    <div class="donut-wrap">
+      <svg width="100" height="100" viewBox="0 0 100 100" class="donut">
+        <!-- track -->
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#222" stroke-width="14"/>
+        <!-- win: 71% → 238.76*.71 = 169.5 -->
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#2a7" stroke-width="14"
+                stroke-dasharray="169.5 238.8" stroke-dashoffset="0"/>
+        <!-- flat: 16% → 38.2 offset=169.5 -->
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#555" stroke-width="14"
+                stroke-dasharray="38.2 238.8" stroke-dashoffset="-169.5"/>
+        <!-- regression: 13% → 31.0 offset=207.7 -->
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#c33" stroke-width="14"
+                stroke-dasharray="31.0 238.8" stroke-dashoffset="-207.7"/>
+      </svg>
+      <div style="font-size:1.1rem;font-weight:700;margin-top:-.4rem">71%</div>
+      <div style="font-size:.7rem;opacity:.45">win rate</div>
+    </div>
+    <div class="wl-legend">
+      <div class="wl-item"><div class="wl-dot" style="background:#2a7"></div><b>133 videos accelerated</b> — views/day up ≥10% after apply</div>
+      <div class="wl-item"><div class="wl-dot" style="background:#555"></div><span style="opacity:.7">30 videos flat — within ±10% of pre-apply rate</span></div>
+      <div class="wl-item"><div class="wl-dot" style="background:#c33"></div><span style="color:#c33">24 regressions — velocity dropped &gt;10%</span></div>
+    </div>
+  </div>
+  <div class="wl-note" style="margin-top:.85rem">
+    A "regression" doesn't necessarily mean the audit caused a drop — older videos, seasonal trends, or algorithm changes can lower velocity independently. Use the <a href="/performance" style="color:#6af;opacity:.8">Performance page</a> to investigate individual regressions.
+  </div>
+</div>
+
+<div style="text-align:center;margin-top:1.25rem;font-size:.75rem;opacity:.3;">
+  Mockup · sample data · Midas Insights section
+</div>
+
+</body>
+</html>

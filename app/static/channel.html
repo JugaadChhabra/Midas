@@ -105,7 +105,7 @@
           <option value="none">Not audited</option>
           <option value="pending">Pending</option>
           <option value="applied">Applied</option>
-          <option value="quarantined">Quarantined</option>
+          <option value="quarantined">Bad output</option>
           <option value="failed">Failed</option>
           <option value="rejected">Rejected</option>
           <option value="reverted">Reverted</option>
@@ -121,6 +121,7 @@
       <div class="filter-bar">
         <button id="bulk-audit-btn" disabled>Audit selected</button>
         <button id="bulk-apply-btn" disabled>Apply selected pending</button>
+        <button id="reaudit-quarantined-btn" disabled style="display:none">Re-audit bad output</button>
         <button id="select-clear-btn" disabled>Clear selection</button>
         <span id="selection-count" class="muted"></span>
       </div>
@@ -224,7 +225,7 @@ if (initialTab) switchTab(initialTab);
 const STATE_META = {
   applied:     { bg:'#2a7', label:'Applied' },
   pending:     { bg:'#28a', label:'Pending' },
-  quarantined: { bg:'#d80', label:'Quarantined' },
+  quarantined: { bg:'#d80', label:'Bad output' },
   failed:      { bg:'#c33', label:'Failed' },
   rejected:    { bg:'#888', label:'Rejected' },
   reverted:    { bg:'#888', label:'Reverted' },
@@ -273,12 +274,20 @@ async function loadAutopilotLog() {
   try {
     const j = await (await fetch(`/channels/${channelId}/autopilot/log`)).json();
     let pill;
-    if (j.paused_reason) pill = `<span class="pill" style="background:#c33;color:white">Paused · ${escapeHtml(j.paused_reason)}</span>`;
-    else if (j.enabled) pill = `<span class="pill" style="background:#2a7;color:white">Running</span>`;
-    else pill = `<span class="pill">Disabled</span>`;
+    let resumeBtn = '';
+    if (j.paused_reason === 'token_expired') {
+      pill = `<span class="pill" style="background:#c33;color:white">Paused · OAuth token expired</span>`;
+      resumeBtn = `<a href="/auth/login" style="margin-left:.5rem"><button>Reconnect Google account</button></a>`;
+    } else if (j.paused_reason) {
+      pill = `<span class="pill" style="background:#c33;color:white">Paused · ${escapeHtml(j.paused_reason)}</span>`;
+      resumeBtn = `<button onclick="resumeAutopilot()" style="margin-left:.5rem">Resume</button>`;
+    } else if (j.enabled) {
+      pill = `<span class="pill" style="background:#2a7;color:white">Running</span>`;
+    } else {
+      pill = `<span class="pill">Disabled</span>`;
+    }
     const cap = j.daily_cap || 0;
     const pct = cap > 0 ? Math.max(0, Math.min(100, (j.applies_today / cap) * 100)) : 0;
-    const resumeBtn = j.paused_reason ? `<button onclick="resumeAutopilot()" style="margin-left:.5rem">Resume</button>` : '';
     $('ap-summary').innerHTML = `${pill}
       <span class="muted" style="margin-left:.5rem">Today: ${j.applies_today}/${cap}</span>
       <span class="pace-bar" style="margin-left:.5rem"><i style="width:${pct}%"></i></span>
@@ -416,6 +425,11 @@ function renderVideos() {
   const filtered = allVideos.filter(v => videoMatches(v, q, state, privacy));
   const sorted = sortVideos(filtered);
   $('v-count').textContent = sorted.length;
+  const quarantinedCount = allVideos.filter(v => v.audit_status === 'quarantined').length;
+  const rqBtn = $('reaudit-quarantined-btn');
+  rqBtn.style.display = quarantinedCount > 0 ? '' : 'none';
+  rqBtn.disabled = quarantinedCount === 0;
+  rqBtn.textContent = `Re-audit bad output (${quarantinedCount})`;
   if (!allVideos.length) {
     $('videos').innerHTML = '<em class="muted">No videos yet — run a sync from the Overview tab.</em>';
     return;
@@ -502,6 +516,26 @@ function updateSelectionUi() {
 
 $('select-clear-btn').onclick = () => { selected.clear(); renderVideos(); };
 
+$('reaudit-quarantined-btn').onclick = async () => {
+  const count = allVideos.filter(v => v.audit_status === 'quarantined').length;
+  if (!count) return;
+  if (!confirm(`Re-audit ${count} video(s) with bad output? Each calls the LLM (no YouTube quota).`)) return;
+  $('reaudit-quarantined-btn').disabled = true;
+  toast(`Re-auditing ${count} videos with bad output…`, 'warn', 6000);
+  try {
+    const r = await fetch(`/channels/${channelId}/audits/reaudit-quarantined`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    toast(`Re-audited ${j.reaudited}, skipped ${j.skipped}, failed ${j.failed} (of ${j.total_quarantined}).`,
+      j.failed ? 'warn' : 'ok');
+    await loadVideos();
+  } catch (e) {
+    toast('Re-audit failed: ' + escapeHtml(String(e)), 'err');
+  } finally {
+    $('reaudit-quarantined-btn').disabled = false;
+  }
+};
+
 $('bulk-audit-btn').onclick = async () => {
   const ids = [...selected];
   if (!ids.length) return;
@@ -537,14 +571,19 @@ $('bulk-apply-btn').onclick = async () => {
     const audits = (await Promise.all(ids.map(id =>
       fetch(`/videos/${id}/audits`).then(r => r.json()).then(arr => arr[0]?.id).catch(() => null)
     ))).filter(Boolean);
-    let ok = 0, fail = 0;
+    let ok = 0, fail = 0, quotaHit = false;
     for (const aid of audits) {
       try {
         const rr = await fetch(`/audits/${aid}/apply`, { method:'POST' });
+        if (rr.status === 429) { quotaHit = true; break; }
         if (rr.ok) ok++; else fail++;
       } catch { fail++; }
     }
-    toast(`Applied ${ok}, failed ${fail}.`, fail ? 'warn' : 'ok');
+    if (quotaHit) {
+      toast(`Applied ${ok} before hitting YouTube quota limit. Remaining videos skipped — retry after midnight Pacific.`, 'warn', 8000);
+    } else {
+      toast(`Applied ${ok}, failed ${fail}.`, fail ? 'warn' : 'ok');
+    }
     await loadVideos();
   } catch (e) { toast('Bulk apply failed: ' + escapeHtml(String(e)), 'err'); }
   finally { $('bulk-apply-btn').disabled = false; updateSelectionUi(); }

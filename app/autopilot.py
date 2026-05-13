@@ -1,6 +1,7 @@
 import logging
 import math
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 from fastapi import APIRouter, HTTPException
 
@@ -9,12 +10,28 @@ from app.db import supabase
 from app import quota
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.sync import sync_channel
+from app.youtube_client import TokenExpiredError
 
 log = logging.getLogger("midas.autopilot")
 router = APIRouter(tags=["autopilot"])
 
 # In-memory consecutive-failure counter per channel. Reset on successful apply.
 _failure_counts: dict[str, int] = defaultdict(int)
+
+# Set when YouTube returns quotaExceeded; cleared after quota resets.
+_yt_quota_exhausted_until: datetime | None = None
+
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
+def _next_yt_quota_reset() -> datetime:
+    """Next midnight Pacific Time (when YouTube daily quota resets)."""
+    now_pacific = datetime.now(_PACIFIC)
+    next_midnight = (now_pacific + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return next_midnight.astimezone(timezone.utc)
+
 
 # Per-tick cost gates
 COST_STATS_FETCH = 1
@@ -73,8 +90,8 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
         if a["video_id"] not in latest:
             latest[a["video_id"]] = a["status"]
 
-    # Skip if last audit was applied / pending / quarantined. Retry only if 'failed' or never audited.
-    skip_statuses = {"applied", "pending", "quarantined"}
+    # Retry only if last audit was 'failed' or video was never audited.
+    skip_statuses = {"applied", "pending", "quarantined", "blocked_test_and_compare"}
     blocked_ids = {vid for vid, st in latest.items() if st in skip_statuses}
 
     candidates = (
@@ -110,11 +127,24 @@ def _touch_tick(channel_id: str):
 
 def tick():
     """One pass of the autopilot loop. Processes at most one video and returns."""
+    global _yt_quota_exhausted_until
     try:
-        # 1. Quota gate
+        # 1. Quota gate — internal estimate
         if not quota.can_afford(APPLY_COST):
             log.info("Autopilot deferred: quota remaining %d < %d", quota.units_remaining(), APPLY_COST)
             return
+
+        # 1b. YouTube-confirmed quota exhaustion gate
+        if _yt_quota_exhausted_until is not None:
+            now = datetime.now(timezone.utc)
+            if now < _yt_quota_exhausted_until:
+                log.info(
+                    "Autopilot dormant: YouTube quota exhausted until %s",
+                    _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
+                )
+                return
+            _yt_quota_exhausted_until = None
+            log.info("YouTube quota window reset; resuming autopilot")
 
         # 2. Pick next channel (round-robin by last_tick_at; null treated as oldest)
         channels = (
@@ -153,6 +183,10 @@ def tick():
                 return
             try:
                 sync_channel(channel_id)
+            except TokenExpiredError:
+                log.warning("OAuth token expired or revoked for %s during sync; pausing", channel_id)
+                _pause(channel_id, "token_expired")
+                return
             except Exception as e:
                 log.exception("Sync failed for %s: %s", channel_id, e)
                 _failure_counts[channel_id] += 1
@@ -184,6 +218,10 @@ def tick():
         # 7. Run audit
         try:
             audit_row = audit_video(video["id"])
+        except TokenExpiredError:
+            log.warning("OAuth token expired or revoked for %s during audit; pausing", channel_id)
+            _pause(channel_id, "token_expired")
+            return
         except Exception as e:
             log.exception("Audit failed for %s: %s", video["id"], e)
             _failure_counts[channel_id] += 1
@@ -216,9 +254,21 @@ def tick():
             log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
         except HTTPException as e:
             log.warning("Apply HTTPException for %s: %s", audit_row["id"], e.detail)
-            _failure_counts[channel_id] += 1
-            if _failure_counts[channel_id] >= 3:
-                _pause(channel_id, "repeated_failures")
+            if e.detail == "blocked_test_and_compare":
+                log.info("Skipping video %s: active Test & Compare experiment on YouTube", video["id"])
+            elif e.detail == "youtube_quota_exceeded":
+                _yt_quota_exhausted_until = _next_yt_quota_reset()
+                log.warning(
+                    "YouTube quota exhausted; autopilot dormant until %s",
+                    _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
+                )
+            elif e.detail == "token_expired":
+                log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
+                _pause(channel_id, "token_expired")
+            else:
+                _failure_counts[channel_id] += 1
+                if _failure_counts[channel_id] >= 3:
+                    _pause(channel_id, "repeated_failures")
         except Exception as e:
             log.exception("Apply failed for %s: %s", audit_row["id"], e)
             _failure_counts[channel_id] += 1

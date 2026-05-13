@@ -1,11 +1,16 @@
 from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 import json
 
 from app.config import settings
 from app.db import supabase
+
+
+class TokenExpiredError(Exception):
+    """Raised when the OAuth refresh token is revoked or expired."""
 
 
 def _client_secrets() -> dict:
@@ -29,7 +34,12 @@ def youtube_for_channel(channel_id: str):
     )
 
     if not creds.valid:
-        creds.refresh(GoogleRequest())
+        try:
+            creds.refresh(GoogleRequest())
+        except RefreshError as e:
+            if "invalid_grant" in str(e):
+                raise TokenExpiredError(channel_id) from e
+            raise
         supabase().table("channels").update({
             "access_token": creds.token,
             "token_expiry": creds.expiry.replace(tzinfo=timezone.utc).isoformat() if creds.expiry else None,
@@ -50,17 +60,17 @@ def _log_quota(channel_id: str | None, operation: str, units: int, success: bool
             "success": success,
         }).execute()
     except Exception:
-        # never let logging break a real call
         pass
 
 
-def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
-    """Return uploads playlist id and snippet metadata. Cost: 1.
+def _guard_token(e: Exception, channel_id: str | None) -> None:
+    """Re-raise as TokenExpiredError if the exception is an invalid_grant."""
+    if "invalid_grant" in str(e):
+        raise TokenExpiredError(channel_id) from e
 
-    Shape: {"uploads_playlist_id": str, "default_language": str | None}.
-    Snippet is folded in here so sync can refresh `channels.default_language`
-    without spending a second quota unit.
-    """
+
+def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
+    """Return uploads playlist id and snippet metadata. Cost: 1."""
     success = False
     try:
         resp = yt.channels().list(part="contentDetails,snippet", id=channel_id).execute()
@@ -73,6 +83,9 @@ def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
             "uploads_playlist_id": item["contentDetails"]["relatedPlaylists"]["uploads"],
             "default_language": (item.get("snippet") or {}).get("defaultLanguage"),
         }
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
     finally:
         _log_quota(channel_id, "channels.list", 1, success)
 
@@ -89,6 +102,9 @@ def yt_playlist_items_page(yt, channel_id: str, playlist_id: str, page_token: st
         ).execute()
         success = True
         return resp
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
     finally:
         _log_quota(channel_id, "playlistItems.list", 1, success)
 
@@ -100,6 +116,9 @@ def yt_videos_list_full(yt, channel_id: str | None, ids: list[str]) -> list[dict
         resp = yt.videos().list(part="snippet,statistics,contentDetails,status", id=",".join(ids)).execute()
         success = True
         return resp.get("items", [])
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
     finally:
         _log_quota(channel_id, "videos.list", 1, success)
 
@@ -111,6 +130,9 @@ def yt_videos_list_stats(yt, channel_id: str | None, ids: list[str]) -> list[dic
         resp = yt.videos().list(part="statistics", id=",".join(ids)).execute()
         success = True
         return resp.get("items", [])
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
     finally:
         _log_quota(channel_id, "videos.list", 1, success)
 
@@ -122,5 +144,8 @@ def yt_videos_update(yt, channel_id: str | None, payload: dict, parts: str = "sn
         resp = yt.videos().update(part=parts, body=payload).execute()
         success = True
         return resp
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
     finally:
         _log_quota(channel_id, "videos.update", 50, success)

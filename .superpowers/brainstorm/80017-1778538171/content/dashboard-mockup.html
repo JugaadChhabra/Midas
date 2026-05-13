@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Midas — Dashboard Mockup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  :root { color-scheme: light dark; --accent: #6af; --green: #2a7; --amber: #d80; --red: #c33; --border: #8884; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem; line-height: 1.5; background: #111; color: #eee; }
+  h1 { margin-bottom: .15rem; font-size: 1.6rem; }
+  .sub { opacity: .55; margin: 0 0 1.25rem; font-size: .9rem; }
+  .card { border: 1px solid #2a2a2a; border-radius: 12px; padding: 1.1rem 1.25rem; margin: .85rem 0; background: #181818; }
+  .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; opacity: .55; }
+
+  /* ── Section A: System health bar ────────────────────────────── */
+  .health-bar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: stretch; }
+  .health-pill {
+    display: flex; align-items: center; gap: .55rem;
+    border: 1px solid #2a2a2a; border-radius: 10px; padding: .55rem .85rem;
+    font-size: .88rem; flex: 1; min-width: 160px; background: #1c1c1c;
+  }
+  .health-pill .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .health-pill .val { font-weight: 700; font-size: 1.05rem; line-height: 1; }
+  .health-pill.ok { border-color: #2a73; }
+  .health-pill.warn { border-color: #d803; }
+  .health-pill.err { border-color: #c333; }
+  .dot.ok { background: #2a7; box-shadow: 0 0 5px #2a74; }
+  .dot.warn { background: #d80; box-shadow: 0 0 5px #d804; }
+  .dot.err { background: #c33; box-shadow: 0 0 5px #c334; }
+
+  /* ── Section B: Audit pipeline ───────────────────────────────── */
+  .funnel { display: flex; gap: 0; align-items: stretch; border-radius: 10px; overflow: hidden; border: 1px solid #2a2a2a; }
+  .funnel-step {
+    flex: 1; padding: .8rem .75rem; display: flex; flex-direction: column;
+    align-items: center; text-align: center; border-right: 1px solid #2a2a2a; background: #1a1a1a;
+    position: relative;
+  }
+  .funnel-step:last-child { border-right: none; }
+  .funnel-step .n { font-size: 1.6rem; font-weight: 800; line-height: 1.1; }
+  .funnel-step .l { font-size: .7rem; opacity: .55; text-transform: uppercase; letter-spacing: .05em; margin-top: .2rem; }
+  .funnel-step .bar { width: 100%; height: 3px; border-radius: 2px; margin-top: .6rem; }
+  .funnel-arrow { width: 0; height: 0; border-top: 24px solid transparent; border-bottom: 24px solid transparent; border-left: 12px solid #2a2a2a; align-self: center; flex-shrink: 0; }
+  .progress-track { background: #222; border-radius: 6px; height: 6px; margin-top: .5rem; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 6px; transition: width .4s; }
+
+  /* ── Section C: Quota ring ───────────────────────────────────── */
+  .quota-row { display: flex; gap: 1.25rem; align-items: flex-start; flex-wrap: wrap; }
+  .quota-ring-wrap { display: flex; flex-direction: column; align-items: center; gap: .35rem; flex-shrink: 0; }
+  svg.ring { transform: rotate(-90deg); }
+  .ring-label { font-size: .72rem; opacity: .55; text-transform: uppercase; letter-spacing: .04em; }
+  .quota-details { flex: 1; display: flex; flex-direction: column; gap: .4rem; min-width: 200px; }
+  .quota-row-item { display: flex; justify-content: space-between; font-size: .88rem; }
+  .quota-row-item .k { opacity: .6; }
+  .quota-row-item .v { font-weight: 600; }
+  .spark { display: flex; align-items: flex-end; gap: 3px; height: 38px; }
+  .spark .b { width: 18px; border-radius: 2px 2px 0 0; min-height: 2px; background: #334; }
+  .spark .b.today { background: #2a7; }
+
+  /* ── Section D: Activity feed ────────────────────────────────── */
+  .feed { display: flex; flex-direction: column; gap: .4rem; }
+  .feed-item { display: flex; gap: .75rem; align-items: flex-start; font-size: .88rem; padding: .5rem .75rem; border-radius: 8px; background: #1a1a1a; border: 1px solid #222; }
+  .feed-item .icon { font-size: .95rem; flex-shrink: 0; margin-top: .05rem; }
+  .feed-item .body { flex: 1; }
+  .feed-item .time { font-size: .75rem; opacity: .45; flex-shrink: 0; }
+  .pill { display: inline-block; padding: .12rem .45rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+  .pill-applied { background: #2a73; color: #2a7; border: 1px solid #2a74; }
+  .pill-pending { background: #28a3; color: #6af; border: 1px solid #28a4; }
+  .pill-paused  { background: #c333; color: #f99; border: 1px solid #c334; }
+  .pill-quota   { background: #d803; color: #fa5; border: 1px solid #d804; }
+
+  /* ── Section E: Channel table improvements ──────────────────── */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: .5rem .4rem; border-bottom: 1px solid #222; font-size: .88rem; }
+  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; opacity: .5; font-weight: 600; }
+  .ap-running { display: inline-flex; align-items: center; gap: .3rem; color: #2a7; font-size: .8rem; font-weight: 600; }
+  .ap-paused  { display: inline-flex; align-items: center; gap: .3rem; color: #c33; font-size: .8rem; font-weight: 600; }
+  .ap-off     { display: inline-flex; align-items: center; gap: .3rem; opacity: .4; font-size: .8rem; }
+  .mini-bar { display: inline-flex; align-items: center; gap: .35rem; }
+  .mini-track { width: 50px; height: 5px; background: #222; border-radius: 3px; overflow: hidden; }
+  .mini-fill  { height: 100%; border-radius: 3px; background: #2a7; }
+
+  /* annotation badges */
+  .badge-new { display: inline-block; font-size: .65rem; font-weight: 700; background: #6af; color: #000; padding: .1rem .35rem; border-radius: 4px; margin-left: .4rem; vertical-align: middle; }
+  .section-head { display: flex; align-items: baseline; gap: .5rem; margin: 0 0 .75rem; }
+  .section-head h3 { margin: 0; font-size: 1rem; }
+</style>
+</head>
+<body>
+
+<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1rem;">
+  <div>
+    <h1>Midas</h1>
+    <p class="sub">YouTube metadata audit + write-back. Autopilot ready.</p>
+  </div>
+  <!-- quota badge stays here, same as today -->
+  <div style="font-size:.82rem;opacity:.6;">Quota today: <b>9,421</b> / 10,000 <span style="opacity:.7">(279 usable)</span></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- A: SYSTEM HEALTH BAR  (NEW)                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card" style="padding: .75rem 1rem;">
+  <div style="margin-bottom:.5rem;" class="label">System health <span class="badge-new">NEW</span></div>
+  <div class="health-bar">
+    <div class="health-pill ok">
+      <div class="dot ok"></div>
+      <div>
+        <div class="val">2 / 2</div>
+        <div class="label">Autopilots running</div>
+      </div>
+    </div>
+    <div class="health-pill warn">
+      <div class="dot warn"></div>
+      <div>
+        <div class="val">279 units</div>
+        <div class="label">Quota remaining · resets in 3h 2m</div>
+      </div>
+    </div>
+    <div class="health-pill ok">
+      <div class="dot ok"></div>
+      <div>
+        <div class="val">14 applied</div>
+        <div class="label">Today across all channels</div>
+      </div>
+    </div>
+    <div class="health-pill ok">
+      <div class="dot ok"></div>
+      <div>
+        <div class="val">Synced &lt;2h ago</div>
+        <div class="label">All channels fresh</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- B: AUDIT PIPELINE FUNNEL  (NEW)                           -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="section-head">
+    <h3>Audit pipeline</h3><span class="badge-new">NEW</span>
+    <span style="opacity:.45;font-size:.8rem;margin-left:auto;">across all channels</span>
+  </div>
+  <div class="funnel">
+    <div class="funnel-step">
+      <div class="n" style="color:#aaa">847</div>
+      <div class="l">Total videos</div>
+      <div class="bar" style="background:#333"></div>
+    </div>
+    <div class="funnel-step">
+      <div class="n" style="color:#6af">312</div>
+      <div class="l">Audited</div>
+      <div class="bar" style="background:#6af"></div>
+    </div>
+    <div class="funnel-step">
+      <div class="n" style="color:#6af">47</div>
+      <div class="l">Pending apply</div>
+      <div class="bar" style="background:#28a"></div>
+    </div>
+    <div class="funnel-step">
+      <div class="n" style="color:#2a7">265</div>
+      <div class="l">Applied ✓</div>
+      <div class="bar" style="background:#2a7"></div>
+    </div>
+    <div class="funnel-step">
+      <div class="n" style="color:#888">535</div>
+      <div class="l">Not yet audited</div>
+      <div class="bar" style="background:#333"></div>
+    </div>
+  </div>
+  <!-- Overall progress bar -->
+  <div style="margin-top:.85rem;">
+    <div style="display:flex;justify-content:space-between;font-size:.78rem;opacity:.55;margin-bottom:.3rem;">
+      <span>Overall progress</span>
+      <span>31% audited · 85% of those applied</span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" style="width:31%;background:#6af;"></div>
+    </div>
+  </div>
+  <!-- ETA -->
+  <div style="margin-top:.6rem;font-size:.82rem;opacity:.5;">
+    At current pace (14/day avg) — backlog clears in ~<b style="opacity:1;color:#eee">38 days</b>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- C: KPIs (same as today, slightly reorganised)             -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.65rem;">
+    <div><div class="label">Channels</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem">2</div></div>
+    <div><div class="label">Videos tracked</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem">847</div></div>
+    <div><div class="label">Pending audits</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem;color:#6af">47</div></div>
+    <div><div class="label">Applied today</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem">14</div></div>
+    <div><div class="label">Applied · 7d</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem">98</div></div>
+    <div><div class="label">Δ views · 7d</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem;color:#2a7">+12,441</div></div>
+    <div><div class="label">Quota today</div><div style="font-size:1.35rem;font-weight:700;margin-top:.2rem;color:#d80">9,421</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- D: CHANNELS TABLE (improved autopilot + ETA column)       -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;flex-wrap:wrap;gap:.5rem;">
+    <h3 style="margin:0;font-size:1rem">Connected channels</h3>
+    <a style="font-size:.85rem;opacity:.6;text-decoration:none;border:1px solid #333;padding:.3rem .7rem;border-radius:7px;color:inherit">+ Connect channel</a>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Name</th>
+      <th>Videos</th>
+      <th>Pipeline <span class="badge-new">NEW</span></th>
+      <th>Applied 7d</th>
+      <th>Δ views 7d</th>
+      <th>Autopilot</th>
+      <th>Synced</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Tech Explainers</b><br><span style="opacity:.45;font-size:.78rem">@techexplainers</span></td>
+        <td>512</td>
+        <td>
+          <!-- Mini pipeline: audited / total + pending badge -->
+          <div style="font-size:.82rem;">194/512 audited</div>
+          <div class="mini-bar" style="margin-top:.3rem">
+            <div class="mini-track"><div class="mini-fill" style="width:38%"></div></div>
+            <span style="font-size:.75rem;opacity:.5">38%</span>
+          </div>
+          <span style="font-size:.75rem;color:#6af">29 pending</span>
+        </td>
+        <td>61</td>
+        <td style="color:#2a7;font-weight:600">+8,212</td>
+        <td>
+          <div class="ap-running">● Running</div>
+          <div class="mini-bar" style="margin-top:.25rem">
+            <span style="font-size:.75rem;opacity:.5">7/10 today</span>
+            <div class="mini-track" style="margin-left:.25rem"><div class="mini-fill" style="width:70%"></div></div>
+          </div>
+        </td>
+        <td style="color:#2a7;font-size:.82rem">47m ago</td>
+        <td><a style="font-size:.82rem;color:#6af;text-decoration:none">Open →</a></td>
+      </tr>
+      <tr>
+        <td><b>Finance Weekly</b><br><span style="opacity:.45;font-size:.78rem">@financeweekly</span></td>
+        <td>335</td>
+        <td>
+          <div style="font-size:.82rem;">118/335 audited</div>
+          <div class="mini-bar" style="margin-top:.3rem">
+            <div class="mini-track"><div class="mini-fill" style="width:35%"></div></div>
+            <span style="font-size:.75rem;opacity:.5">35%</span>
+          </div>
+          <span style="font-size:.75rem;color:#6af">18 pending</span>
+        </td>
+        <td>37</td>
+        <td style="color:#2a7;font-weight:600">+4,229</td>
+        <td>
+          <div class="ap-running">● Running</div>
+          <div class="mini-bar" style="margin-top:.25rem">
+            <span style="font-size:.75rem;opacity:.5">7/10 today</span>
+            <div class="mini-track" style="margin-left:.25rem"><div class="mini-fill" style="width:70%"></div></div>
+          </div>
+        </td>
+        <td style="color:#2a7;font-size:.82rem">1.2h ago</td>
+        <td><a style="font-size:.82rem;color:#6af;text-decoration:none">Open →</a></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- E: RECENT ACTIVITY FEED  (NEW)                            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="section-head">
+    <h3>Recent activity</h3><span class="badge-new">NEW</span>
+  </div>
+  <div class="feed">
+    <div class="feed-item">
+      <div class="icon">✅</div>
+      <div class="body">
+        <span class="pill pill-applied">Applied</span>
+        <b>"How Compound Interest Really Works"</b> — Finance Weekly
+        <div style="opacity:.5;font-size:.78rem;margin-top:.1rem">Title + tags updated · +82 views since apply</div>
+      </div>
+      <div class="time">4m ago</div>
+    </div>
+    <div class="feed-item">
+      <div class="icon">✅</div>
+      <div class="body">
+        <span class="pill pill-applied">Applied</span>
+        <b>"React Hooks Explained Simply"</b> — Tech Explainers
+        <div style="opacity:.5;font-size:.78rem;margin-top:.1rem">Title + description + tags updated</div>
+      </div>
+      <div class="time">11m ago</div>
+    </div>
+    <div class="feed-item">
+      <div class="icon">⏳</div>
+      <div class="body">
+        <span class="pill pill-pending">Pending</span>
+        <b>"Python vs JavaScript in 2025"</b> — Tech Explainers
+        <div style="opacity:.5;font-size:.78rem;margin-top:.1rem">Audit complete, waiting to apply</div>
+      </div>
+      <div class="time">18m ago</div>
+    </div>
+    <div class="feed-item">
+      <div class="icon">⚠️</div>
+      <div class="body">
+        <span class="pill pill-quota">Quota low</span>
+        <b>Autopilot deferred</b> — all channels
+        <div style="opacity:.5;font-size:.78rem;margin-top:.1rem">279 units remaining · below apply threshold (51)</div>
+      </div>
+      <div class="time">2m ago</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- F: QUOTA (improved — ring + sparkline + reset countdown)  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card">
+  <div class="section-head">
+    <h3>Quota — last 8 days</h3><span class="badge-new">IMPROVED</span>
+  </div>
+  <div class="quota-row">
+    <!-- donut ring -->
+    <div class="quota-ring-wrap">
+      <svg width="90" height="90" viewBox="0 0 90 90" class="ring">
+        <circle cx="45" cy="45" r="36" fill="none" stroke="#222" stroke-width="10"/>
+        <!-- 94.21% used: circumference = 2π*36 ≈ 226.2. used arc = 226.2 * 0.9421 ≈ 213.1 -->
+        <circle cx="45" cy="45" r="36" fill="none" stroke="#c33" stroke-width="10"
+                stroke-dasharray="213.1 226.2" stroke-linecap="round"/>
+      </svg>
+      <div style="font-size:1.1rem;font-weight:700;margin-top:-.5rem">94%</div>
+      <div class="ring-label">used</div>
+    </div>
+    <!-- details -->
+    <div class="quota-details">
+      <div class="quota-row-item"><span class="k">Used today</span><span class="v" style="color:#c33">9,421</span></div>
+      <div class="quota-row-item"><span class="k">Remaining (after buffer)</span><span class="v" style="color:#d80">279</span></div>
+      <div class="quota-row-item"><span class="k">Safety buffer</span><span class="v" style="opacity:.6">300</span></div>
+      <div class="quota-row-item"><span class="k">Daily limit</span><span class="v" style="opacity:.6">10,000</span></div>
+      <div class="quota-row-item" style="margin-top:.35rem;padding-top:.35rem;border-top:1px solid #222">
+        <span class="k">Resets in</span>
+        <span class="v" style="color:#6af">3h 02m</span>
+      </div>
+    </div>
+    <!-- sparkline -->
+    <div style="flex:1;min-width:140px;">
+      <div class="label" style="margin-bottom:.4rem">Daily usage</div>
+      <div class="spark">
+        <div class="b" style="height:12px" title="May 4"></div>
+        <div class="b" style="height:20px" title="May 5"></div>
+        <div class="b" style="height:30px" title="May 6"></div>
+        <div class="b" style="height:25px" title="May 7"></div>
+        <div class="b" style="height:28px" title="May 8"></div>
+        <div class="b" style="height:22px" title="May 9"></div>
+        <div class="b" style="height:35px" title="May 10"></div>
+        <div class="b today" style="height:38px" title="May 11 (today)"></div>
+      </div>
+      <div style="font-size:.72rem;opacity:.4;display:flex;justify-content:space-between;margin-top:.2rem;max-width:164px">
+        <span>May 4</span><span>today</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;margin-top:1.5rem;font-size:.78rem;opacity:.35;">
+  Mockup — not live data · Midas dashboard redesign
+</div>
+
+</body>
+</html>

@@ -120,7 +120,7 @@
           <option value="applied">Applied (default)</option>
           <option value="all">All statuses</option>
           <option value="pending">Pending</option>
-          <option value="quarantined">Quarantined</option>
+          <option value="quarantined">Bad output</option>
           <option value="failed">Failed</option>
           <option value="rejected">Rejected</option>
           <option value="reverted">Reverted</option>
@@ -171,7 +171,7 @@ const pctTxt = (p) => p == null ? '—' : (p > 0 ? '+' : '') + p.toFixed(1) + '%
 const STATE_META = {
   applied: { bg:'#2a7', label:'Applied' },
   pending: { bg:'#28a', label:'Pending' },
-  quarantined: { bg:'#d80', label:'Quarantined' },
+  quarantined: { bg:'#d80', label:'Bad output' },
   failed: { bg:'#c33', label:'Failed' },
   rejected: { bg:'#888', label:'Rejected' },
   reverted: { bg:'#888', label:'Reverted' },
@@ -465,9 +465,21 @@ $('sync-btn').onclick = async () => {
   try {
     const r = await fetch(`/channels/${channelId}/refresh-applied-stats`, { method: 'POST' });
     const j = await r.json();
-    $('sync-status').textContent = `Refreshed ${j.refreshed} videos`;
-    await load();
-  } catch (e) { $('sync-status').textContent = 'Failed: ' + e; }
+    if (r.status === 429 || j.detail === 'youtube_quota_exceeded') {
+      toast('YouTube quota exhausted — stats refresh skipped. Will retry after midnight Pacific.', 'warn', 6000);
+      $('sync-status').textContent = 'Quota exhausted';
+    } else if (!r.ok) {
+      toast('Stats refresh failed: ' + escapeHtml(j.detail || JSON.stringify(j)), 'err');
+      $('sync-status').textContent = 'Failed';
+    } else {
+      toast(`Refreshed stats for ${j.refreshed} video${j.refreshed === 1 ? '' : 's'}.`, 'ok');
+      $('sync-status').textContent = '';
+      await load();
+    }
+  } catch (e) {
+    toast('Stats refresh failed: ' + escapeHtml(String(e)), 'err');
+    $('sync-status').textContent = 'Failed';
+  }
   finally { $('sync-btn').disabled = false; }
 };
 

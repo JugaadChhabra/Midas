@@ -81,12 +81,20 @@ def callback(request: Request, code: str | None = None, error: str | None = None
 
     supabase().table("channels").upsert(payload).execute()
 
-    return HTMLResponse(
-        f"<h2>Connected ✓</h2>"
-        f"<p>Channel: <b>{snippet.get('title')}</b> ({channel_id})</p>"
-        f"<p>Refresh token stored in Supabase. You can close this tab.</p>"
-        f"<p><a href='/'>Back to dashboard</a></p>"
-    )
+    # If autopilot was paused because the token expired, clear the pause now
+    # that we have fresh credentials.
+    existing_pause = (
+        supabase().table("channels")
+        .select("autopilot_paused_reason")
+        .eq("id", channel_id)
+        .single()
+        .execute()
+        .data or {}
+    ).get("autopilot_paused_reason")
+    if existing_pause == "token_expired":
+        supabase().table("channels").update({"autopilot_paused_reason": None}).eq("id", channel_id).execute()
+
+    return RedirectResponse(f"/channel?id={channel_id}")
 
 
 @router.get("/channels")
