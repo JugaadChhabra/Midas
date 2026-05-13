@@ -1,6 +1,7 @@
 import re
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone
+from googleapiclient.errors import HttpError
 
 from app.db import supabase
 from app.youtube_client import (
@@ -128,7 +129,12 @@ def refresh_applied_stats(channel_id: str):
     now = datetime.now(timezone.utc).isoformat()
     for i in range(0, len(target_ids), 50):
         batch = target_ids[i:i+50]
-        items = yt_videos_list_stats(yt, channel_id, batch)
+        try:
+            items = yt_videos_list_stats(yt, channel_id, batch)
+        except HttpError as e:
+            if e.status_code == 403 and "quotaExceeded" in str(e):
+                raise HTTPException(429, "youtube_quota_exceeded")
+            raise HTTPException(502, f"YouTube API error: {e}")
         for item in items:
             stats = item.get("statistics", {})
             supabase().table("videos").update({
@@ -145,7 +151,8 @@ def refresh_applied_stats(channel_id: str):
 def list_videos(channel_id: str):
     videos = (
         supabase().table("videos")
-        .select("id,title,description,tags,view_count,like_count,published_at,thumbnail_url")
+        .select("id,title,description,tags,view_count,like_count,comment_count,"
+                "published_at,thumbnail_url,privacy_status,last_fetched_at")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
         .execute()
@@ -154,23 +161,55 @@ def list_videos(channel_id: str):
     if not videos:
         return []
 
-    # Latest audit per video (status + applied_at) so the UI can show a state pill.
+    # Pull all audits for these videos so we can enrich each row with:
+    # - latest audit status, applied_at
+    # - audit_count (how many times re-audited)
+    # - issues_count (from latest audit's issues_found.issues)
+    # - ai_reasoning_short (latest)
     video_ids = [v["id"] for v in videos]
     audits = (
         supabase().table("audits")
-        .select("video_id,status,applied_at,created_at")
+        .select("id,video_id,status,applied_at,created_at,issues_found,ai_reasoning")
         .in_("video_id", video_ids)
         .order("created_at", desc=True)
         .execute()
     ).data or []
     latest: dict[str, dict] = {}
+    counts: dict[str, int] = {}
     for a in audits:
-        if a["video_id"] not in latest:
-            latest[a["video_id"]] = a
+        vid = a["video_id"]
+        counts[vid] = counts.get(vid, 0) + 1
+        if vid not in latest:
+            latest[vid] = a
 
+    now = datetime.now(timezone.utc)
     for v in videos:
         a = latest.get(v["id"])
         v["audit_status"] = a["status"] if a else None
         v["audit_applied_at"] = a.get("applied_at") if a else None
+        v["audit_id"] = a.get("id") if a else None
+        v["audit_count"] = counts.get(v["id"], 0)
+        v["audit_last_at"] = (a.get("applied_at") or a.get("created_at")) if a else None
+        if a:
+            ifd = a.get("issues_found") or {}
+            issues = ifd.get("issues") if isinstance(ifd, dict) else None
+            v["issues_count"] = len(issues) if isinstance(issues, list) else 0
+            reasoning = a.get("ai_reasoning") or ""
+            v["ai_reasoning_short"] = (reasoning[:140] + "…") if len(reasoning) > 140 else reasoning
+        else:
+            v["issues_count"] = 0
+            v["ai_reasoning_short"] = ""
+        # Approximate view velocity: avg views/day since publish.
+        pub = None
+        if v.get("published_at"):
+            try:
+                pub = datetime.fromisoformat(v["published_at"].replace("Z", "+00:00"))
+            except ValueError:
+                pub = None
+        if pub:
+            age_days = max(1.0, (now - pub).total_seconds() / 86400.0)
+            v["views_per_day"] = round((v.get("view_count") or 0) / age_days, 1)
+        else:
+            v["views_per_day"] = None
 
     return videos

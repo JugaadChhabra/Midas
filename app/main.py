@@ -12,6 +12,7 @@ from app.audits import router as audits_router
 from app.quota import router as quota_router
 from app.performance import router as performance_router
 from app.autopilot import router as autopilot_router, tick as autopilot_tick
+from app.dashboard import router as dashboard_router
 from app.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -49,6 +50,7 @@ app.include_router(audits_router)
 app.include_router(quota_router)
 app.include_router(performance_router)
 app.include_router(autopilot_router)
+app.include_router(dashboard_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
