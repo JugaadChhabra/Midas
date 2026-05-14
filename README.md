@@ -31,13 +31,6 @@ uvicorn app.main:app --reload --port 8000
 
 Open http://localhost:3000 — wait, the redirect URI in your OAuth client is `http://localhost:8000/auth/callback`, so use **http://localhost:8000**. Click *Connect channel*, sign in with the Google account that owns the YouTube channel, and you'll be redirected back with the channel saved to Supabase.
 
-## Status
-- [x] Phase 1 — OAuth flow + channel storage
-- [ ] Phase 2 — Video sync
-- [ ] Phase 3 — Editable audit prompt + audit engine
-- [ ] Phase 4 — Review UI
-- [ ] Phase 5 — Write-back (`DRY_RUN=true` until proven)
-
 ## Notes
 - `prompt="consent"` is on so Google always returns a refresh token. Remove for prod.
 - `DRY_RUN=true` — write-back will log payloads instead of pushing to YouTube. Flip when ready.

@@ -214,7 +214,7 @@ def audit_video(video_id: str) -> dict:
     ).single().execute().data or {}
     channel_language = channel.get("default_language") or "en"
 
-    transcript, transcript_lang = fetch_transcript(video_id)
+    transcript, transcript_lang = fetch_transcript(video_id, channel_id=v["channel_id"])
 
     stable_thumb_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
