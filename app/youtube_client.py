@@ -137,6 +137,34 @@ def yt_videos_list_stats(yt, channel_id: str | None, ids: list[str]) -> list[dic
         _log_quota(channel_id, "videos.list", 1, success)
 
 
+def yt_captions_list(yt, channel_id: str | None, video_id: str) -> list[dict]:
+    """List caption tracks for a video. Cost: 50."""
+    success = False
+    try:
+        resp = yt.captions().list(part="snippet", videoId=video_id).execute()
+        success = True
+        return resp.get("items", [])
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(channel_id, "captions.list", 50, success)
+
+
+def yt_captions_download(yt, channel_id: str | None, caption_id: str) -> bytes:
+    """Download a caption track in VTT format. Cost: 200."""
+    success = False
+    try:
+        data = yt.captions().download(id=caption_id, tfmt="vtt").execute()
+        success = True
+        return data if isinstance(data, bytes) else data.encode()
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(channel_id, "captions.download", 200, success)
+
+
 def yt_videos_update(yt, channel_id: str | None, payload: dict, parts: str = "snippet,status") -> dict:
     """Update a video. Cost: 50."""
     success = False

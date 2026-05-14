@@ -23,6 +23,13 @@ class Settings:
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
 
+    # YouTube transcript proxy (to work around IP bans)
+    # Option A: any HTTP/HTTPS/SOCKS proxy  e.g. "http://user:pass@host:port"
+    YOUTUBE_PROXY_URL = os.getenv("YOUTUBE_PROXY_URL", "")
+    # Option B: Webshare rotating residential proxy (recommended for cloud deployments)
+    WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME", "")
+    WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
+
     # Content-aware audit (Block B)
     TRANSCRIPT_MAX_CHARS = int(os.getenv("TRANSCRIPT_MAX_CHARS") or "8000")
     KEYFRAME_MAX_FRAMES = int(os.getenv("KEYFRAME_MAX_FRAMES") or "4")
