@@ -31,6 +31,14 @@ router = APIRouter(tags=["sync"])
 def sync_channel(channel_id: str):
     yt = youtube_for_channel(channel_id)
 
+    # Read channel settings first so we know whether to include Shorts.
+    # sync_shorts defaults to True (None = not set yet = include Shorts).
+    channel_settings = (
+        supabase().table("channels").select("default_language,sync_shorts").eq("id", channel_id)
+        .single().execute().data or {}
+    )
+    sync_shorts: bool = channel_settings.get("sync_shorts") is not False
+
     channel_meta = yt_channels_list_uploads(yt, channel_id)
     if not channel_meta:
         raise HTTPException(404, "Channel not found on YouTube")
@@ -52,8 +60,9 @@ def sync_channel(channel_id: str):
         items = yt_videos_list_full(yt, channel_id, batch)
         for item in items:
             duration = (item.get("contentDetails") or {}).get("duration", "")
-            if _iso8601_to_seconds(duration) <= SHORTS_MAX_SECONDS:
-                continue  # skip shorts
+            is_short = _iso8601_to_seconds(duration) <= SHORTS_MAX_SECONDS
+            if not sync_shorts and is_short:
+                continue  # skip shorts when channel has sync_shorts = false
             privacy = (item.get("status") or {}).get("privacyStatus")
             if privacy == "private":
                 # Don't ingest the snippet, but flip any existing row to private
@@ -74,6 +83,7 @@ def sync_channel(channel_id: str):
                 "description": sn.get("description"),
                 "tags": sn.get("tags") or [],
                 "privacy_status": privacy,
+                "is_short": is_short,
                 "thumbnail_url": stable_thumb,
                 "category_id": sn.get("categoryId"),
                 "view_count": int(stats.get("viewCount", 0)),
@@ -92,14 +102,9 @@ def sync_channel(channel_id: str):
             {"privacy_status": "private"}
         ).in_("id", privacy_changed_to_private).execute()
 
-    # Refresh default_language from YouTube unless the channel has a manual
-    # override saved (we don't want sync to clobber a user-picked language).
-    channel_row = (
-        supabase().table("channels").select("default_language").eq("id", channel_id)
-        .single().execute().data or {}
-    )
+    # Refresh default_language from YouTube unless the channel has a manual override.
     channel_patch: dict = {"last_synced_at": datetime.now(timezone.utc).isoformat()}
-    if not channel_row.get("default_language") and channel_meta.get("default_language"):
+    if not channel_settings.get("default_language") and channel_meta.get("default_language"):
         channel_patch["default_language"] = channel_meta["default_language"]
     supabase().table("channels").update(channel_patch).eq("id", channel_id).execute()
 

@@ -101,7 +101,8 @@ def callback(request: Request, code: str | None = None, error: str | None = None
 def list_channels():
     res = supabase().table("channels").select(
         "id,name,handle,last_synced_at,default_language,"
-        "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at"
+        "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
+        "sync_shorts"
     ).execute()
     return res.data
 
@@ -110,6 +111,7 @@ class ChannelSettings(BaseModel):
     default_language: str | None = None
     autopilot_enabled: bool | None = None
     autopilot_daily_cap: int | None = None
+    sync_shorts: bool | None = None
 
 
 @router.patch("/channels/{channel_id}")
@@ -121,6 +123,8 @@ def update_channel(channel_id: str, body: ChannelSettings):
         patch["autopilot_enabled"] = body.autopilot_enabled
     if body.autopilot_daily_cap is not None:
         patch["autopilot_daily_cap"] = max(1, min(int(body.autopilot_daily_cap), 200))
+    if body.sync_shorts is not None:
+        patch["sync_shorts"] = body.sync_shorts
     if not patch:
         return {"ok": True, "noop": True}
     supabase().table("channels").update(patch).eq("id", channel_id).execute()

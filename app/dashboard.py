@@ -50,22 +50,66 @@ def dashboard():
         ).execute()
     ).data or []
 
-    # Pull all videos and audits once, then aggregate in Python — cheaper than N round-trips.
-    videos = (
-        supabase().table("videos").select("id,channel_id,view_count").execute()
-    ).data or []
+    # Pull all videos — paginated because the table can exceed Supabase's 1000-row default cap.
+    videos: list[dict] = []
+    vid_offset = 0
+    while True:
+        page = (
+            supabase().table("videos")
+            .select("id,channel_id,view_count,privacy_status,is_short")
+            .range(vid_offset, vid_offset + 999)
+            .execute()
+        ).data or []
+        videos.extend(page)
+        if len(page) < 1000:
+            break
+        vid_offset += 1000
     video_to_channel: dict[str, str] = {v["id"]: v["channel_id"] for v in videos}
+    # Only public (or legacy null privacy_status) videos are auditable
+    public_video_ids: set[str] = {
+        v["id"] for v in videos
+        if v.get("privacy_status") is None or v.get("privacy_status") == "public"
+    }
     channel_video_counts: dict[str, int] = {}
+    channel_shorts_counts: dict[str, int] = {}
+    channel_regular_counts: dict[str, int] = {}
+    shorts_video_ids: set[str] = set()
     for v in videos:
-        channel_video_counts[v["channel_id"]] = channel_video_counts.get(v["channel_id"], 0) + 1
+        if v["id"] not in public_video_ids:
+            continue
+        ch = v["channel_id"]
+        channel_video_counts[ch] = channel_video_counts.get(ch, 0) + 1
+        if v.get("is_short"):
+            channel_shorts_counts[ch] = channel_shorts_counts.get(ch, 0) + 1
+            shorts_video_ids.add(v["id"])
+        else:
+            channel_regular_counts[ch] = channel_regular_counts.get(ch, 0) + 1
 
-    # Latest audit per video → state per video.
-    audits_state = (
-        supabase().table("audits")
-        .select("id,video_id,status,applied_at,created_at,view_count_at_apply")
-        .order("created_at", desc=True)
-        .execute()
-    ).data or []
+    # Fetch all audit records for known videos.
+    # Two levels of pagination:
+    #   outer — 200 video IDs per batch (keeps record counts manageable)
+    #   inner — range() pages within each batch for channels with heavy re-audits
+    # Both levels are needed because Supabase caps every .execute() at 1000 rows.
+    all_video_ids = list(video_to_channel.keys())
+    audits_state: list[dict] = []
+    VID_BATCH = 200
+    ROW_PAGE = 1000
+    for i in range(0, len(all_video_ids), VID_BATCH):
+        batch_ids = all_video_ids[i:i + VID_BATCH]
+        inner_offset = 0
+        while True:
+            page = (
+                supabase().table("audits")
+                .select("id,video_id,status,applied_at,created_at,view_count_at_apply")
+                .in_("video_id", batch_ids)
+                .order("created_at", desc=True)
+                .range(inner_offset, inner_offset + ROW_PAGE - 1)
+                .execute()
+            ).data or []
+            audits_state.extend(page)
+            if len(page) < ROW_PAGE:
+                break
+            inner_offset += ROW_PAGE
     latest_per_video: dict[str, dict] = {}
     for a in audits_state:
         latest_per_video.setdefault(a["video_id"], a)
@@ -76,19 +120,32 @@ def dashboard():
     applied_7d_by_channel: dict[str, int] = {}
     delta_views_7d_by_channel: dict[str, int] = {}
     total_applied_by_channel: dict[str, int] = {}
+    channel_audited_shorts: dict[str, int] = {}
+    channel_audited_regular: dict[str, int] = {}
+
+    for vid in latest_per_video:
+        if vid not in public_video_ids:
+            continue
+        ch = video_to_channel.get(vid)
+        if not ch:
+            continue
+        if vid in shorts_video_ids:
+            channel_audited_shorts[ch] = channel_audited_shorts.get(ch, 0) + 1
+        else:
+            channel_audited_regular[ch] = channel_audited_regular.get(ch, 0) + 1
 
     # current view counts for delta calc
     cur_views_by_video: dict[str, int] = {v["id"]: (v.get("view_count") or 0) for v in videos}
 
-    # For pending: count latest audit == 'pending' per video
+    # pending: unique public videos whose current audit state is pending
     for vid, a in latest_per_video.items():
-        ch = video_to_channel.get(vid)
-        if not ch:
+        if vid not in public_video_ids:
             continue
-        if a["status"] == "pending":
+        ch = video_to_channel.get(vid)
+        if ch and a["status"] == "pending":
             pending_by_channel[ch] = pending_by_channel.get(ch, 0) + 1
 
-    # For applied counts and Δviews 7d: scan ALL applied audits (not just latest)
+    # applied counts: scan ALL applied records so total matches the raw DB count
     for a in audits_state:
         if a["status"] != "applied":
             continue
@@ -116,6 +173,10 @@ def dashboard():
         enriched.append({
             **c,
             "video_count": channel_video_counts.get(cid, 0),
+            "regular_count": channel_regular_counts.get(cid, 0),
+            "shorts_count": channel_shorts_counts.get(cid, 0),
+            "audited_regular": channel_audited_regular.get(cid, 0),
+            "audited_shorts": channel_audited_shorts.get(cid, 0),
             "pending_count": pending_by_channel.get(cid, 0),
             "applied_today": applied_today_by_channel.get(cid, 0),
             "applied_7d": applied_7d_by_channel.get(cid, 0),
@@ -133,13 +194,13 @@ def dashboard():
 
     # ── Pipeline funnel ───────────────────────────────────────────────────
     total_videos_global = sum(channel_video_counts.values())
-    # A video is "audited" if it has any audit record belonging to a known channel
-    audited_video_ids = {vid for vid in latest_per_video if vid in video_to_channel}
+    # Only count public videos as audited/applied — keeps numerator and denominator consistent
+    audited_video_ids = {vid for vid in latest_per_video if vid in public_video_ids}
     total_audited_global = len(audited_video_ids)
     total_not_audited_global = max(0, total_videos_global - total_audited_global)
     total_applied_global = sum(
         1 for vid, a in latest_per_video.items()
-        if vid in video_to_channel and a["status"] == "applied"
+        if vid in public_video_ids and a["status"] == "applied"
     )
     applied_7d_total = sum(applied_7d_by_channel.values())
     daily_rate = applied_7d_total / 7.0

@@ -78,9 +78,25 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
 
     Walks newest → oldest so freshly uploaded videos are optimized first.
     """
+    candidates = (
+        supabase().table("videos")
+        .select("*")
+        .eq("channel_id", channel_id)
+        .order("published_at", desc=True)
+        .execute()
+    ).data or []
+
+    if not candidates:
+        return None
+
+    # Only fetch audits for this channel's videos — avoids cross-channel noise
+    # and prevents Supabase's 1000-row default cap from silently truncating results
+    # when the audits table is large.
+    candidate_ids = [v["id"] for v in candidates]
     audits = (
         supabase().table("audits")
         .select("video_id,status,created_at")
+        .in_("video_id", candidate_ids)
         .order("created_at", desc=True)
         .execute()
     ).data or []
@@ -93,14 +109,6 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     # Retry only if last audit was 'failed' or video was never audited.
     skip_statuses = {"applied", "pending", "quarantined", "blocked_test_and_compare"}
     blocked_ids = {vid for vid, st in latest.items() if st in skip_statuses}
-
-    candidates = (
-        supabase().table("videos")
-        .select("*")
-        .eq("channel_id", channel_id)
-        .order("published_at", desc=True)
-        .execute()
-    ).data or []
 
     for v in candidates:
         if v["id"] in blocked_ids:

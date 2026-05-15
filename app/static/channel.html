@@ -172,16 +172,22 @@
       <button id="lang-save" style="margin-left:.5rem">Save</button>
     </div>
     <div class="card">
+      <h3 style="margin-top:0">Sync settings</h3>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+        <input type="checkbox" id="sync-shorts" />
+        <b>Sync Shorts</b>
+      </label>
+      <p class="muted" style="margin:.35rem 0 .75rem">When enabled, YouTube Shorts (&le;3 min) are included in the sync and eligible for auditing alongside regular videos.</p>
+      <button id="sync-settings-save">Save</button>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0">Audit prompt</h3>
-      <p class="muted">Write what you care about in plain English. Click <em>Generate</em> to turn it into a structured audit prompt.</p>
-      <label><b>Your insights</b></label>
-      <textarea id="insights" rows="4" placeholder="e.g. Finance explainer channel. Titles must hook in 3 seconds without sounding clickbait. Description line 2 must link the newsletter."></textarea>
-      <div class="row" style="margin:.5rem 0;">
-        <button id="generate-btn">Generate prompt</button>
-        <button id="save-btn">Save prompt</button>
-      </div>
-      <label><b>Generated audit prompt (editable)</b></label>
-      <textarea id="prompt" rows="14"></textarea>
+      <label><b>Regular videos</b></label>
+      <textarea id="prompt" rows="12" placeholder="Paste your audit prompt here…"></textarea>
+      <label style="display:block;margin-top:.75rem"><b>Shorts</b></label>
+      <p class="muted" style="margin:.15rem 0 .35rem">Used instead of the regular prompt when auditing Shorts (&le;3 min). Leave blank to use the regular prompt for Shorts too.</p>
+      <textarea id="shorts-prompt" rows="10" placeholder="Paste your Shorts-specific audit prompt here…"></textarea>
+      <button id="save-btn" style="margin-top:.5rem">Save prompts</button>
     </div>
   </div>
 
@@ -248,6 +254,7 @@ async function loadChannel() {
   $('lang-select').value = c.default_language || '';
   $('ap-enabled').checked = !!c.autopilot_enabled;
   $('ap-cap').value = c.autopilot_daily_cap ?? 10;
+  $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
   $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
 }
 
@@ -257,8 +264,11 @@ async function loadOverview() {
     const j = await (await fetch('/dashboard')).json();
     const c = (j.channels || []).find(x => x.id === channelId) || {};
     $('overview-kpis').innerHTML = `
-      <div class="kpi"><div class="v">${fmt(c.video_count)}</div><div class="l">Videos</div></div>
-      <div class="kpi"><div class="v">${c.pending_count || 0}</div><div class="l">Pending audits</div></div>
+      <div class="kpi"><div class="v">${fmt(c.regular_count || 0)}</div><div class="l">Videos</div></div>
+      <div class="kpi"><div class="v">${fmt(c.shorts_count || 0)}</div><div class="l">Shorts</div></div>
+      <div class="kpi"><div class="v">${fmt(c.audited_regular || 0)}</div><div class="l">Videos audited</div></div>
+      <div class="kpi"><div class="v">${fmt(c.audited_shorts || 0)}</div><div class="l">Shorts audited</div></div>
+      <div class="kpi"><div class="v">${c.pending_count || 0}</div><div class="l">Pending</div></div>
       <div class="kpi"><div class="v">${c.applied_today || 0}</div><div class="l">Applied today</div></div>
       <div class="kpi"><div class="v">${c.applied_7d || 0}</div><div class="l">Applied · 7d</div></div>
       <div class="kpi"><div class="v">${c.applied_total || 0}</div><div class="l">Applied · total</div></div>
@@ -349,33 +359,33 @@ $('lang-save').onclick = async () => {
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 
+$('sync-settings-save').onclick = async () => {
+  try {
+    const r = await fetch(`/auth/channels/${channelId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ sync_shorts: $('sync-shorts').checked }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Sync settings saved.', 'ok');
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
+};
+
 // ── Audit prompt ──────────────────────────────────────────────────────
 async function loadConfig() {
   const cfg = await (await fetch(`/channels/${channelId}/audit-config`)).json();
-  $('insights').value = cfg.raw_insights || '';
   $('prompt').value = cfg.generated_prompt || '';
+  $('shorts-prompt').value = cfg.shorts_prompt || '';
 }
-$('generate-btn').onclick = async () => {
-  $('generate-btn').disabled = true;
-  try {
-    const r = await fetch(`/channels/${channelId}/audit-config/elaborate`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ raw_insights: $('insights').value }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const j = await r.json();
-    $('prompt').value = j.generated_prompt;
-    toast('Prompt generated.', 'ok');
-  } catch (e) { toast('Generate failed: ' + escapeHtml(String(e)), 'err'); }
-  finally { $('generate-btn').disabled = false; }
-};
 $('save-btn').onclick = async () => {
   try {
     await fetch(`/channels/${channelId}/audit-config`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ raw_insights: $('insights').value, generated_prompt: $('prompt').value }),
+      body: JSON.stringify({
+        generated_prompt: $('prompt').value,
+        shorts_prompt: $('shorts-prompt').value || null,
+      }),
     });
-    toast('Prompt saved.', 'ok');
+    toast('Prompts saved.', 'ok');
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 
