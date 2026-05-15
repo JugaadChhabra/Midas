@@ -66,6 +66,7 @@ Rules:
 class AuditConfigIn(BaseModel):
     raw_insights: str | None = None
     generated_prompt: str | None = None
+    shorts_prompt: str | None = None
 
 
 @router.get("/channels/{channel_id}/audit-config")
@@ -73,7 +74,7 @@ def get_config(channel_id: str):
     res = supabase().table("audit_configs").select("*").eq("channel_id", channel_id).execute()
     if res.data:
         return res.data[0]
-    return {"channel_id": channel_id, "raw_insights": "", "generated_prompt": DEFAULT_PROMPT}
+    return {"channel_id": channel_id, "raw_insights": "", "generated_prompt": DEFAULT_PROMPT, "shorts_prompt": ""}
 
 
 @router.post("/channels/{channel_id}/audit-config")
@@ -83,6 +84,8 @@ def save_config(channel_id: str, body: AuditConfigIn):
         "raw_insights": body.raw_insights or "",
         "generated_prompt": body.generated_prompt or DEFAULT_PROMPT,
     }
+    if body.shorts_prompt is not None:
+        payload["shorts_prompt"] = body.shorts_prompt
     supabase().table("audit_configs").upsert(payload).execute()
     return {"ok": True}
 
@@ -207,7 +210,11 @@ def audit_video(video_id: str) -> dict:
         )
 
     cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
-    audit_prompt = (cfg[0]["generated_prompt"] if cfg else None) or DEFAULT_PROMPT
+    cfg_row = cfg[0] if cfg else {}
+    if v.get("is_short") and cfg_row.get("shorts_prompt"):
+        audit_prompt = cfg_row["shorts_prompt"]
+    else:
+        audit_prompt = cfg_row.get("generated_prompt") or DEFAULT_PROMPT
 
     channel = supabase().table("channels").select("default_language").eq(
         "id", v["channel_id"]
