@@ -177,3 +177,90 @@ def yt_videos_update(yt, channel_id: str | None, payload: dict, parts: str = "sn
         raise
     finally:
         _log_quota(channel_id, "videos.update", 50, success)
+
+
+def yt_playlists_list(yt, channel_id: str) -> list[dict]:
+    """All playlists for a channel (paginates internally). Cost: 1 per page.
+    Returns list of {id, title, description}."""
+    items: list[dict] = []
+    page_token = None
+    while True:
+        success = False
+        try:
+            resp = yt.playlists().list(
+                part="snippet",
+                channelId=channel_id,
+                maxResults=50,
+                pageToken=page_token,
+            ).execute()
+            success = True
+        except Exception as e:
+            _guard_token(e, channel_id)
+            raise
+        finally:
+            _log_quota(channel_id, "playlists.list", 1, success)
+        for item in resp.get("items", []):
+            items.append({
+                "id": item["id"],
+                "title": item["snippet"]["title"],
+                "description": item["snippet"].get("description", ""),
+            })
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return items
+
+
+def yt_playlists_insert(yt, channel_id: str, title: str, description: str) -> str:
+    """Create a public playlist. Cost: 50. Returns the new playlist id."""
+    success = False
+    try:
+        resp = yt.playlists().insert(
+            part="snippet,status",
+            body={
+                "snippet": {"title": title, "description": description},
+                "status": {"privacyStatus": "public"},
+            },
+        ).execute()
+        success = True
+        return resp["id"]
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(channel_id, "playlists.insert", 50, success)
+
+
+def yt_playlist_items_insert(yt, channel_id: str, playlist_id: str, video_id: str) -> str:
+    """Add a video to a playlist. Cost: 50. Returns the playlistItem id."""
+    success = False
+    try:
+        resp = yt.playlistItems().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                }
+            },
+        ).execute()
+        success = True
+        return resp["id"]
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(channel_id, "playlistItems.insert", 50, success)
+
+
+def yt_playlist_items_delete(yt, channel_id: str, playlist_item_id: str) -> None:
+    """Remove a video from a playlist by its playlistItem id. Cost: 50."""
+    success = False
+    try:
+        yt.playlistItems().delete(id=playlist_item_id).execute()
+        success = True
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(channel_id, "playlistItems.delete", 50, success)
