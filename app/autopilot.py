@@ -11,6 +11,8 @@ from app import quota
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.sync import sync_channel
 from app.youtube_client import TokenExpiredError
+from app.embeddings import embed_video
+from app.playlists import join_pass
 
 log = logging.getLogger("midas.autopilot")
 router = APIRouter(tags=["autopilot"])
@@ -260,6 +262,12 @@ def tick():
             apply_audit_internal(audit_row["id"])
             _failure_counts[channel_id] = 0
             log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
+            if not video.get("is_short"):
+                try:
+                    if embed_video(video["id"]):
+                        join_pass(channel_id, video["id"])
+                except Exception as e:
+                    log.warning("Embed/playlist pass failed for %s: %s", video["id"], e)
         except HTTPException as e:
             log.warning("Apply HTTPException for %s: %s", audit_row["id"], e.detail)
             if e.detail == "blocked_test_and_compare":

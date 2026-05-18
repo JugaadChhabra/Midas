@@ -3,9 +3,33 @@ import json
 from json_repair import repair_json
 from app.config import settings
 
+EMBED_MODEL = "google/gemini-embedding-2-preview"
+
+
+def embed(texts: list[str]) -> list[list[float]]:
+    """Embed a batch of texts via OpenRouter. Returns one vector per input."""
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+    r = httpx.post(
+        "https://openrouter.ai/api/v1/embeddings",
+        headers={
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Midas",
+        },
+        json={"model": EMBED_MODEL, "input": texts},
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"OpenRouter embeddings {r.status_code}: {r.text}")
+    data = r.json()
+    items = sorted(data["data"], key=lambda x: x["index"])
+    return [item["embedding"] for item in items]
+
 
 def chat_json(prompt: str, model: str | None = None, system: str | None = None,
-              image_urls: list[str] | None = None) -> dict:
+            image_urls: list[str] | None = None) -> dict:
     model = model or settings.AUDIT_MODEL
     """Call OpenRouter with response_format=json_object and parse the result.
     If image_urls is provided, the user message becomes multi-part (vision)."""

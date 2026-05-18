@@ -73,6 +73,7 @@
     <div class="tab active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</div>
     <div class="tab" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">Videos</div>
     <div class="tab" data-tab="autopilot" role="tab" tabindex="-1" aria-selected="false">Autopilot</div>
+    <div class="tab" data-tab="playlists" role="tab" tabindex="-1" aria-selected="false">Playlists</div>
     <div class="tab" data-tab="settings" role="tab" tabindex="-1" aria-selected="false">Settings</div>
   </div>
 
@@ -145,6 +146,33 @@
       <div id="ap-eta" class="muted" style="margin-top:.25rem; font-size:.85rem"></div>
       <h4 style="margin-bottom:.25rem">Recent activity</h4>
       <div id="ap-activity"></div>
+    </div>
+  </div>
+
+  <!-- ─── PLAYLISTS ─── -->
+  <div class="tab-panel" data-panel="playlists">
+    <div class="card">
+      <h3 style="margin-top:0">Playlist allocation</h3>
+      <p class="muted">Bootstrap embeds all videos so the system can score them against playlists. Run once, then auto-allocation happens after every audit.</p>
+      <div class="row">
+        <button id="pl-bootstrap-btn">Bootstrap (sync + embed all)</button>
+        <button id="pl-reconcile-btn">Reconcile now</button>
+        <span id="pl-action-status" class="muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Status</h3>
+      <div id="pl-status">Loading…</div>
+    </div>
+    <div class="card" id="pl-proposals-card">
+      <div class="row" style="margin-bottom:.75rem">
+        <h3 style="margin:0">Pending proposals</h3>
+        <span style="flex:1"></span>
+        <button id="pl-approve-all-btn" disabled>Approve selected</button>
+        <button id="pl-reject-all-btn" disabled>Reject selected</button>
+        <button id="pl-refresh-btn">Refresh</button>
+      </div>
+      <div id="pl-proposals">Loading…</div>
     </div>
   </div>
 
@@ -819,9 +847,135 @@ $('apply-pending-btn').onclick = async () => {
   } finally { $('apply-pending-btn').disabled = false; }
 };
 
+// ── Playlists ──────────────────────────────────────────────────────────
+let plProposals = [];
+const plSelected = new Set();
+
+function renderProposals() {
+  if (!plProposals.length) {
+    $('pl-proposals').innerHTML = '<em class="muted">No pending proposals.</em>';
+    $('pl-approve-all-btn').disabled = true;
+    $('pl-reject-all-btn').disabled = true;
+    return;
+  }
+  const rows = plProposals.map(p => {
+    const badge = p.action === 'add'
+      ? `<span class="pill" style="background:#2a7;color:white">add</span>`
+      : `<span class="pill" style="background:#c33;color:white">remove</span>`;
+    const sim = p.similarity != null ? (p.similarity * 100).toFixed(1) + '%' : '—';
+    return `<tr>
+      <td><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''}></td>
+      <td>${badge}</td>
+      <td>${escapeHtml(p.video_title || p.video_id)}</td>
+      <td class="muted">${escapeHtml(p.playlist_title || p.playlist_id)}</td>
+      <td class="muted">${sim}</td>
+      <td class="muted" style="font-size:.8rem">${escapeHtml(p.decision_source)}</td>
+    </tr>`;
+  }).join('');
+  $('pl-proposals').innerHTML =
+    `<table style="width:100%;border-collapse:collapse">
+      <thead><tr style="text-align:left;border-bottom:1px solid #8882">
+        <th><input type="checkbox" id="pl-select-all"></th>
+        <th>Action</th><th>Video</th><th>Playlist</th><th>Similarity</th><th>Source</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  $('pl-select-all').onchange = e => {
+    plProposals.forEach(p => e.target.checked ? plSelected.add(p.id) : plSelected.delete(p.id));
+    renderProposals();
+  };
+  $('pl-proposals').querySelectorAll('input[data-id]').forEach(cb => {
+    cb.onchange = () => { cb.checked ? plSelected.add(+cb.dataset.id) : plSelected.delete(+cb.dataset.id); updatePlBtns(); };
+  });
+  updatePlBtns();
+}
+
+function updatePlBtns() {
+  $('pl-approve-all-btn').disabled = plSelected.size === 0;
+  $('pl-reject-all-btn').disabled = plSelected.size === 0;
+}
+
+async function loadProposals() {
+  try {
+    plProposals = await (await fetch(`/channels/${channelId}/playlists/proposals`)).json();
+    plSelected.clear();
+    renderProposals();
+  } catch (e) { $('pl-proposals').innerHTML = '<em class="muted">Could not load proposals.</em>'; }
+}
+
+async function decideProposals(decision) {
+  const ids = [...plSelected];
+  if (!ids.length) return;
+  try {
+    const r = await fetch(`/channels/${channelId}/playlists/proposals/decide`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ ids, decision }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    toast(decision === 'approved'
+      ? `Executed ${j.executed} change(s) on YouTube.`
+      : `Rejected ${ids.length} proposal(s).`, 'ok');
+    await loadProposals();
+    await loadPlaylistStatus();
+  } catch (e) { toast('Failed: ' + escapeHtml(String(e)), 'err'); }
+}
+
+$('pl-approve-all-btn').onclick = () => decideProposals('approved');
+$('pl-reject-all-btn').onclick = () => decideProposals('rejected');
+$('pl-refresh-btn').onclick = loadProposals;
+
+
+async function loadPlaylistStatus() {
+  try {
+    const s = await (await fetch(`/channels/${channelId}/playlists/status`)).json();
+    const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
+    $('pl-status').innerHTML =
+      `<div class="kpi-grid">
+        <div><div class="kpi-val">${s.embedded}/${s.total_videos}</div><div class="kpi-label">Videos embedded (${pct}%)</div></div>
+        <div><div class="kpi-val">${s.playlists}</div><div class="kpi-label">Playlists tracked</div></div>
+        <div><div class="kpi-val">${s.videos_in_playlists}</div><div class="kpi-label">Videos in playlists</div></div>
+        <div><div class="kpi-val">${s.orphans}</div><div class="kpi-label">Orphans (no playlist)</div></div>
+      </div>`;
+  } catch (e) { $('pl-status').innerHTML = '<em class="muted">Could not load playlist status.</em>'; }
+}
+
+$('pl-bootstrap-btn').onclick = async () => {
+  $('pl-bootstrap-btn').disabled = true;
+  $('pl-action-status').textContent = 'Bootstrapping… (this may take a few minutes)';
+  try {
+    const r = await fetch(`/channels/${channelId}/playlists/bootstrap`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    toast(`Bootstrap done: ${j.playlists} playlists, ${j.memberships_seeded} memberships seeded, ${j.videos_embedded} videos embedded.`, 'ok', 8000);
+    $('pl-action-status').textContent = '';
+    await loadPlaylistStatus();
+  } catch (e) {
+    toast('Bootstrap failed: ' + escapeHtml(String(e)), 'err');
+    $('pl-action-status').textContent = '';
+  } finally { $('pl-bootstrap-btn').disabled = false; }
+};
+
+$('pl-reconcile-btn').onclick = async () => {
+  $('pl-reconcile-btn').disabled = true;
+  $('pl-action-status').textContent = 'Reconciling…';
+  try {
+    const r = await fetch(`/channels/${channelId}/playlists/reconcile`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    const cap = j.skipped_cap ? ' (mutation cap hit)' : '';
+    toast(`Reconcile done: ${j.added} added, ${j.removed} removed${cap}.`, 'ok');
+    $('pl-action-status').textContent = '';
+    await loadPlaylistStatus();
+  } catch (e) {
+    toast('Reconcile failed: ' + escapeHtml(String(e)), 'err');
+    $('pl-action-status').textContent = '';
+  } finally { $('pl-reconcile-btn').disabled = false; }
+};
+
 (async () => {
   await loadChannel();
-  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview()]);
+  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview(), loadPlaylistStatus(), loadProposals()]);
   setInterval(loadAutopilotLog, 30000);
 })();
 </script>

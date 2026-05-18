@@ -14,14 +14,42 @@ from app.performance import router as performance_router
 from app.autopilot import router as autopilot_router, tick as autopilot_tick
 from app.dashboard import router as dashboard_router
 from app.config import settings
+from app.db import supabase
+from app.playlists import reconcile_channel
+from app.playlist_discovery import discover_playlists
+from app.playlists_router import router as playlists_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+_main_log = logging.getLogger("midas.main")
 # Quiet noisy library loggers — they emit one INFO line per HTTP call.
 for noisy in ("httpx", "httpcore", "google_auth_httplib2", "googleapiclient.discovery_cache", "hpack"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("midas")
 
 scheduler = BackgroundScheduler(daemon=True)
+
+
+def _all_channel_ids() -> list[str]:
+    rows = supabase().table("channels").select("id").execute().data or []
+    return [r["id"] for r in rows]
+
+
+def _daily_reconcile():
+    for channel_id in _all_channel_ids():
+        try:
+            result = reconcile_channel(channel_id)
+            _main_log.info("Daily reconcile %s: %s", channel_id, result)
+        except Exception as e:
+            _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
+
+
+def _weekly_discovery():
+    for channel_id in _all_channel_ids():
+        try:
+            result = discover_playlists(channel_id)
+            _main_log.info("Weekly discovery %s: %s", channel_id, result)
+        except Exception as e:
+            _main_log.exception("Weekly discovery failed for %s: %s", channel_id, e)
 
 
 @asynccontextmanager
@@ -31,6 +59,25 @@ async def lifespan(app: FastAPI):
         "interval",
         seconds=settings.AUTOPILOT_TICK_SECONDS,
         id="autopilot",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        _daily_reconcile,
+        "cron",
+        hour=2,
+        minute=0,
+        id="playlist_reconcile",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        _weekly_discovery,
+        "cron",
+        day_of_week="sun",
+        hour=3,
+        minute=0,
+        id="playlist_discovery",
         max_instances=1,
         coalesce=True,
     )
@@ -51,6 +98,7 @@ app.include_router(quota_router)
 app.include_router(performance_router)
 app.include_router(autopilot_router)
 app.include_router(dashboard_router)
+app.include_router(playlists_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
