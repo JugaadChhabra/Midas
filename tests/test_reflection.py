@@ -205,3 +205,26 @@ def test_get_or_derive_uses_cache():
 
     mock_chat.assert_not_called()
     assert result == cached
+
+
+def test_sample_competitors_formats_output():
+    mock_results = [
+        {"video_id": "v1", "title": "Marathi Rhymes for Kids", "description": "Best rhymes", "tags": ["marathi"]},
+        {"video_id": "v2", "title": "बालगीत मराठी", "description": "Songs", "tags": ["marathi", "bal geet"]},
+    ]
+    with patch("app.reflection.youtube_for_channel") as mock_yt_fn, \
+         patch("app.reflection.yt_search_videos", return_value=mock_results):
+        mock_yt_fn.return_value = MagicMock()
+        from app.reflection import _sample_competitors
+        output = _sample_competitors("ch1", ["marathi nursery rhymes"])
+
+    assert "Marathi Rhymes for Kids" in output
+    assert "बालगीत मराठी" in output
+
+
+def test_get_platform_guidance_returns_text():
+    with patch("app.reflection.chat_text", return_value="Use short titles. Front-load keywords.") as mock_ct:
+        from app.reflection import _get_platform_guidance
+        result = _get_platform_guidance("marathi children's music")
+    assert "titles" in result.lower() or len(result) > 0
+    mock_ct.assert_called_once()
