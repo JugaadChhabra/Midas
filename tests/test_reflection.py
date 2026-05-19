@@ -93,3 +93,72 @@ def test_audit_video_uses_prompt_override():
         call_kwargs = mock_chat.call_args
         used_system = call_kwargs.kwargs.get("system") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
         assert used_system == "MY CUSTOM PROMPT"
+
+
+def _make_perf_report(win_rate=70.0, regression_count=0, count=15):
+    return {
+        "count": count,
+        "win_rate": win_rate,
+        "regression_count": regression_count,
+        "median_velocity_lift": 12.0,
+        "levers": {"title": 15.0, "description": 8.0, "tags": 20.0},
+        "worst_audits": [],
+        "best_audits": [],
+    }
+
+
+def test_should_reflect_skips_insufficient_data():
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection._build_perf_report", return_value=None):
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
+            .order.return_value.limit.return_value.execute.return_value.data = []
+        from app.reflection import _should_reflect
+        should, reason = _should_reflect("ch1")
+    assert should is False
+    assert reason == "insufficient_data"
+
+
+def test_should_reflect_skips_high_win_rate():
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=70.0, regression_count=1)):
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
+            .order.return_value.limit.return_value.execute.return_value.data = []
+        from app.reflection import _should_reflect
+        should, reason = _should_reflect("ch1")
+    assert should is False
+    assert reason == "performing_well"
+
+
+def test_should_reflect_fires_low_win_rate():
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=40.0)):
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
+            .order.return_value.limit.return_value.execute.return_value.data = []
+        from app.reflection import _should_reflect
+        should, reason = _should_reflect("ch1")
+    assert should is True
+    assert reason == "low_win_rate"
+
+
+def test_should_reflect_fires_high_regressions():
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=60.0, regression_count=4)):
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
+            .order.return_value.limit.return_value.execute.return_value.data = []
+        from app.reflection import _should_reflect
+        should, reason = _should_reflect("ch1")
+    assert should is True
+    assert reason == "high_regressions"
+
+
+def test_should_reflect_skips_recent_reflection():
+    from datetime import datetime, timezone, timedelta
+    recent = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=40.0)):
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
+            .order.return_value.limit.return_value.execute.return_value.data = [{"created_at": recent}]
+        from app.reflection import _should_reflect
+        should, reason = _should_reflect("ch1")
+    assert should is False
+    assert reason == "reflected_recently"
