@@ -192,7 +192,7 @@ def _is_image_fetch_error(err: Exception) -> bool:
     return "fetching image" in msg or ("image" in msg and "url" in msg)
 
 
-def audit_video(video_id: str) -> dict:
+def audit_video(video_id: str, prompt_override: str | None = None, status_override: str | None = None) -> dict:
     """Run a content-aware audit and insert a pending audit row.
 
     Pulls the transcript alongside the existing thumbnail input, applies the
@@ -211,7 +211,9 @@ def audit_video(video_id: str) -> dict:
 
     cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
     cfg_row = cfg[0] if cfg else {}
-    if v.get("is_short") and cfg_row.get("shorts_prompt"):
+    if prompt_override:
+        audit_prompt = prompt_override
+    elif v.get("is_short") and cfg_row.get("shorts_prompt"):
         audit_prompt = cfg_row["shorts_prompt"]
     else:
         audit_prompt = cfg_row.get("generated_prompt") or DEFAULT_PROMPT
@@ -256,7 +258,7 @@ def audit_video(video_id: str) -> dict:
         comparisons = {(c.get("field") or "").lower(): c for c in comparisons if isinstance(c, dict)}
     row = {
         "video_id": video_id,
-        "status": "pending",
+        "status": status_override or "pending",
         "suggested_title": (comparisons.get("title") or {}).get("suggested"),
         "suggested_description": (comparisons.get("description") or {}).get("suggested"),
         "suggested_tags": (comparisons.get("tags") or {}).get("suggested") or [],
