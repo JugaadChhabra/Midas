@@ -109,7 +109,7 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
             latest[a["video_id"]] = a["status"]
 
     # Retry only if last audit was 'failed' or video was never audited.
-    skip_statuses = {"applied", "pending", "quarantined", "blocked_test_and_compare"}
+    skip_statuses = {"applied", "pending", "quarantined", "blocked_test_and_compare", "shadow_pending"}
     blocked_ids = {vid for vid, st in latest.items() if st in skip_statuses}
 
     for v in candidates:
@@ -239,6 +239,24 @@ def tick():
                 _pause(channel_id, "repeated_failures")
             _touch_tick(channel_id)
             return
+
+        # Stamp which prompt version generated this audit
+        try:
+            live_ver = (
+                supabase().table("prompt_versions")
+                .select("id")
+                .eq("channel_id", channel_id)
+                .eq("status", "live")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            ).data
+            if live_ver and audit_row.get("id"):
+                supabase().table("audits").update(
+                    {"prompt_version_id": live_ver[0]["id"]}
+                ).eq("id", audit_row["id"]).execute()
+        except Exception as e:
+            log.warning("Failed to stamp prompt_version_id for audit %s: %s", audit_row.get("id"), e)
 
         # 8. Validate
         ok, reason = validate_audit(audit_row)
