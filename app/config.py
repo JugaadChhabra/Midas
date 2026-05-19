@@ -15,6 +15,7 @@ class Settings:
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
     AUDIT_MODEL = os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"
     PROMPT_GEN_MODEL = os.getenv("PROMPT_GEN_MODEL") or "google/gemini-2.0-flash-001"
+    REFLECTION_MODEL = os.getenv("REFLECTION_MODEL") or "anthropic/claude-sonnet-4-6"
 
     SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret-change-me")
     DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"

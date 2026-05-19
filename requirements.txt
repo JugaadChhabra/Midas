@@ -11,4 +11,4 @@ json-repair==0.30.2
 apscheduler==3.10.4
 youtube-transcript-api>=0.6.2
 yt-dlp>=2024.1.0
-
+pytest==8.3.4
