@@ -162,3 +162,46 @@ def test_should_reflect_skips_recent_reflection():
         should, reason = _should_reflect("ch1")
     assert should is False
     assert reason == "reflected_recently"
+
+
+def test_derive_niche_queries_calls_haiku():
+    mock_videos = [{"title": f"Marathi song {i}", "tags": ["marathi", "rhymes"]} for i in range(5)]
+    mock_tags = [{"tags": ["marathi", "rhymes", "bal geet"]} for _ in range(10)]
+
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.chat_json") as mock_chat:
+        def table_side(name):
+            m = MagicMock()
+            if name == "videos":
+                m.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = mock_videos
+                m.select.return_value.eq.return_value.execute.return_value.data = mock_tags
+            elif name == "audit_configs":
+                m.update.return_value.eq.return_value.execute.return_value = None
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+        mock_chat.return_value = {"queries": ["marathi nursery rhymes", "bal geet"]}
+
+        from app.reflection import derive_niche_queries
+        result = derive_niche_queries("ch1")
+
+    assert "marathi nursery rhymes" in result
+    assert len(result) >= 1
+
+
+def test_get_or_derive_uses_cache():
+    """If niche_queries already stored, no LLM call is made."""
+    cached = ["marathi nursery rhymes", "bal geet"]
+
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.chat_json") as mock_chat:
+        m = MagicMock()
+        m.select.return_value.eq.return_value.execute.return_value.data = [
+            {"niche_queries": cached}
+        ]
+        mock_sb.return_value.table.return_value = m
+
+        from app.reflection import get_or_derive_niche_queries
+        result = get_or_derive_niche_queries("ch1")
+
+    mock_chat.assert_not_called()
+    assert result == cached
