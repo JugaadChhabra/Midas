@@ -271,3 +271,35 @@ def test_run_reflection_stores_candidate_prompt():
     assert len(inserted_rows) == 1
     assert inserted_rows[0]["prompt_text"] == "You are a YouTube SEO expert for regional content..."
     assert inserted_rows[0]["status"] == "shadow"
+
+
+def test_run_shadow_audits_uses_candidate_prompt():
+    applied_audits = [
+        {"video_id": f"vid{i}", "applied_at": "2026-05-01T00:00:00Z"}
+        for i in range(3)
+    ]
+
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.audit_video") as mock_audit:
+
+        def table_side(name):
+            m = MagicMock()
+            if name == "audits":
+                m.select.return_value.in_.return_value.eq.return_value \
+                    .order.return_value.limit.return_value.execute.return_value.data = applied_audits
+                m.update.return_value.eq.return_value.execute.return_value = None
+            elif name == "videos":
+                m.select.return_value.eq.return_value.execute.return_value.data = [
+                    {"id": f"vid{i}"} for i in range(3)
+                ]
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+        mock_audit.return_value = {"id": 99}
+
+        from app.reflection import _run_shadow_audits
+        count = _run_shadow_audits("ch1", "CANDIDATE PROMPT", version_id=42)
+
+    assert count == 3
+    for call in mock_audit.call_args_list:
+        assert call.kwargs.get("prompt_override") == "CANDIDATE PROMPT"
+        assert call.kwargs.get("status_override") == "shadow_pending"
