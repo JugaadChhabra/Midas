@@ -67,6 +67,7 @@ class AuditConfigIn(BaseModel):
     raw_insights: str | None = None
     generated_prompt: str | None = None
     shorts_prompt: str | None = None
+    reflection_mode: str | None = None
 
 
 @router.get("/channels/{channel_id}/audit-config")
@@ -86,6 +87,8 @@ def save_config(channel_id: str, body: AuditConfigIn):
     }
     if body.shorts_prompt is not None:
         payload["shorts_prompt"] = body.shorts_prompt
+    if body.reflection_mode is not None:
+        payload["reflection_mode"] = body.reflection_mode
     supabase().table("audit_configs").upsert(payload).execute()
     return {"ok": True}
 

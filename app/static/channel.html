@@ -217,6 +217,47 @@
       <textarea id="shorts-prompt" rows="10" placeholder="Paste your Shorts-specific audit prompt here…"></textarea>
       <button id="save-btn" style="margin-top:.5rem">Save prompts</button>
     </div>
+    <div class="card">
+      <!-- Reflection mode -->
+      <div class="mt-4 p-3 bg-gray-50 rounded border">
+        <div class="flex items-center justify-between mb-2">
+          <span class="font-medium text-sm text-gray-700">Self-Improvement Mode</span>
+          <select id="reflectionMode" onchange="saveReflectionMode(this.value)"
+                  class="text-sm border rounded px-2 py-1">
+            <option value="shadow">Shadow (review before applying)</option>
+            <option value="auto">Auto (apply + revert if regression)</option>
+          </select>
+        </div>
+        <p class="text-xs text-gray-500">
+          Shadow: generates improved prompts for your review. Auto: tests live, reverts automatically if performance drops.
+        </p>
+        <button onclick="triggerReflection()"
+                class="mt-2 text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">
+          Run Reflection Now
+        </button>
+      </div>
+
+      <!-- Shadow comparison panel -->
+      <div id="shadowPanel" class="mt-4 hidden">
+        <h3 class="font-semibold text-sm mb-2">Shadow Comparison</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          These are suggestions from the candidate prompt — not yet applied. Compare with live suggestions and promote if better.
+        </p>
+        <div id="shadowComparisons" class="space-y-3"></div>
+        <div id="shadowPromoteBtn" class="mt-3 hidden">
+          <button onclick="promoteCandidate()"
+                  class="text-sm bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+            Promote Candidate to Live
+          </button>
+        </div>
+      </div>
+
+      <!-- Reflection history -->
+      <div id="reflectionHistory" class="mt-4 hidden">
+        <h3 class="font-semibold text-sm mb-2">Prompt Version History</h3>
+        <div id="reflectionHistoryList" class="space-y-2 text-xs"></div>
+      </div>
+    </div>
   </div>
 
   <div id="toasts" aria-live="assertive" role="alert"></div>
@@ -411,6 +452,7 @@ $('save-btn').onclick = async () => {
       body: JSON.stringify({
         generated_prompt: $('prompt').value,
         shorts_prompt: $('shorts-prompt').value || null,
+        reflection_mode: document.getElementById('reflectionMode')?.value || 'shadow',
       }),
     });
     toast('Prompts saved.', 'ok');
@@ -975,9 +1017,116 @@ $('pl-reconcile-btn').onclick = async () => {
 
 (async () => {
   await loadChannel();
-  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview(), loadPlaylistStatus(), loadProposals()]);
+  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview(), loadPlaylistStatus(), loadProposals(), loadReflectionData()]);
   setInterval(loadAutopilotLog, 30000);
 })();
+
+// ── Reflection ────────────────────────────────────────────────────────────
+
+let _shadowVersionId = null;
+
+async function loadReflectionData() {
+  if (!channelId) return;
+
+  // Load reflection mode from audit config
+  try {
+    const cfg = await fetch(`/channels/${channelId}/audit-config`).then(r => r.json());
+    const modeEl = document.getElementById('reflectionMode');
+    if (modeEl && cfg.reflection_mode) modeEl.value = cfg.reflection_mode;
+  } catch (e) { /* non-fatal */ }
+
+  // Load shadow comparison
+  try {
+    const comparisons = await fetch(`/channels/${channelId}/reflection/shadow-comparison`).then(r => r.json());
+    renderShadowComparisons(comparisons);
+  } catch (e) { /* non-fatal */ }
+
+  // Load reflection history
+  try {
+    const history = await fetch(`/channels/${channelId}/reflection/history`).then(r => r.json());
+    renderReflectionHistory(history);
+  } catch (e) { /* non-fatal */ }
+}
+
+function renderShadowComparisons(items) {
+  const panel = document.getElementById('shadowPanel');
+  const container = document.getElementById('shadowComparisons');
+  const promoteBtn = document.getElementById('shadowPromoteBtn');
+  if (!panel || !container) return;
+  if (!items || items.length === 0) { panel.classList.add('hidden'); return; }
+
+  panel.classList.remove('hidden');
+  _shadowVersionId = items[0].prompt_version_id;
+  if (_shadowVersionId) promoteBtn && promoteBtn.classList.remove('hidden');
+
+  container.innerHTML = items.slice(0, 5).map(item => `
+    <div class="border rounded p-3 text-xs bg-white">
+      <div class="font-medium text-gray-600 mb-1 truncate">${item.video_id}</div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <div class="text-gray-400 mb-1">Current</div>
+          <div class="text-gray-700">${item.live_title || '(none)'}</div>
+        </div>
+        <div>
+          <div class="text-indigo-400 mb-1">Candidate</div>
+          <div class="text-indigo-700 font-medium">${item.shadow_title || '(none)'}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderReflectionHistory(versions) {
+  const el = document.getElementById('reflectionHistory');
+  const list = document.getElementById('reflectionHistoryList');
+  if (!el || !list || !versions || versions.length === 0) return;
+  el.classList.remove('hidden');
+
+  const statusColor = { live: 'text-green-600', shadow: 'text-indigo-600', retired: 'text-gray-400', retired_regression: 'text-red-400' };
+  list.innerHTML = versions.map(v => `
+    <div class="border rounded p-2 bg-white">
+      <div class="flex justify-between items-center">
+        <span class="font-medium ${statusColor[v.status] || 'text-gray-600'}">${v.status}</span>
+        <span class="text-gray-400">${v.created_at ? v.created_at.slice(0, 10) : ''}</span>
+      </div>
+      ${v.reflection_reasoning ? `<div class="text-gray-500 mt-1">${v.reflection_reasoning}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function saveReflectionMode(mode) {
+  if (!channelId) return;
+  await fetch(`/channels/${channelId}/audit-config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reflection_mode: mode }),
+  });
+}
+
+async function triggerReflection() {
+  if (!channelId) return;
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  try {
+    const result = await fetch(`/channels/${channelId}/reflection/trigger`, { method: 'POST' }).then(r => r.json());
+    btn.textContent = result.reflected ? `Done — version ${result.version_id}` : `Skipped: ${result.reason}`;
+    if (result.reflected) await loadReflectionData();
+  } catch (e) {
+    btn.textContent = 'Error';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Run Reflection Now'; }, 3000);
+}
+
+async function promoteCandidate() {
+  if (!channelId || !_shadowVersionId) return;
+  if (!confirm('Promote this candidate prompt to live? The current prompt will be retired.')) return;
+  const result = await fetch(`/channels/${channelId}/prompt-versions/${_shadowVersionId}/promote`, { method: 'POST' }).then(r => r.json());
+  if (result.ok) {
+    alert('Candidate promoted to live.');
+    await loadReflectionData();
+  }
+}
 </script>
 </body>
 </html>
