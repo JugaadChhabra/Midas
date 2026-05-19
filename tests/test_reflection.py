@@ -303,3 +303,11 @@ def test_run_shadow_audits_uses_candidate_prompt():
     for call in mock_audit.call_args_list:
         assert call.kwargs.get("prompt_override") == "CANDIDATE PROMPT"
         assert call.kwargs.get("status_override") == "shadow_pending"
+
+
+def test_autopilot_skip_statuses_include_shadow_pending():
+    """shadow_pending must be in the skip set so autopilot never applies shadow audits."""
+    from app.autopilot import _next_video_for_channel
+    import inspect
+    src = inspect.getsource(_next_video_for_channel)
+    assert "shadow_pending" in src
