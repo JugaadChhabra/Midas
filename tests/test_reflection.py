@@ -359,3 +359,105 @@ def test_cohort_median_lift_returns_none_insufficient():
         from app.reflection import _cohort_median_lift
         result = _cohort_median_lift(99, [])
     assert result is None
+
+
+def test_tune_thresholds_nudges_up_on_high_fpr():
+    """FPR > 20%: join_high should increase by 0.01."""
+    assignments = (
+        [{"action": "added", "decision_source": "embedding"} for _ in range(10)] +
+        [{"action": "removed"} for _ in range(3)]  # 30% FPR
+    )
+    stored = []
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.settings") as mock_settings:
+        mock_settings.PLAYLIST_JOIN_HIGH = 0.72
+        mock_settings.PLAYLIST_JOIN_LOW = 0.55
+        mock_settings.PLAYLIST_LEAVE = 0.60
+
+        def table_side(name):
+            m = MagicMock()
+            if name == "playlist_assignments":
+                m.select.return_value.eq.return_value.execute.return_value.data = assignments
+            elif name == "threshold_history":
+                m.select.return_value.eq.return_value.eq.return_value \
+                    .order.return_value.limit.return_value.execute.return_value.data = []
+                def capture(row):
+                    stored.append(row)
+                    inner = MagicMock()
+                    inner.execute.return_value = None
+                    return inner
+                m.insert.side_effect = capture
+                m.update.return_value.eq.return_value.execute.return_value = None
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+
+        from app.reflection import tune_thresholds
+        result = tune_thresholds("ch1")
+
+    assert result["new_join_high"] == pytest.approx(0.73, abs=0.001)
+    assert result["fpr"] == pytest.approx(0.30, abs=0.01)
+
+
+def test_tune_thresholds_nudges_down_on_low_fpr():
+    """FPR < 5%: join_high should decrease by 0.01."""
+    assignments = (
+        [{"action": "added", "decision_source": "embedding"} for _ in range(20)] +
+        [{"action": "removed"} for _ in range(0)]  # 0% FPR
+    )
+    stored = []
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.settings") as mock_settings:
+        mock_settings.PLAYLIST_JOIN_HIGH = 0.72
+        mock_settings.PLAYLIST_JOIN_LOW = 0.55
+        mock_settings.PLAYLIST_LEAVE = 0.60
+
+        def table_side(name):
+            m = MagicMock()
+            if name == "playlist_assignments":
+                m.select.return_value.eq.return_value.execute.return_value.data = assignments
+            elif name == "threshold_history":
+                m.select.return_value.eq.return_value.eq.return_value \
+                    .order.return_value.limit.return_value.execute.return_value.data = []
+                def capture(row):
+                    stored.append(row)
+                    inner = MagicMock()
+                    inner.execute.return_value = None
+                    return inner
+                m.insert.side_effect = capture
+                m.update.return_value.eq.return_value.execute.return_value = None
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+
+        from app.reflection import tune_thresholds
+        result = tune_thresholds("ch1")
+
+    assert result["new_join_high"] == pytest.approx(0.71, abs=0.001)
+
+
+def test_tune_thresholds_respects_upper_bound():
+    assignments = (
+        [{"action": "added", "decision_source": "embedding"} for _ in range(10)] +
+        [{"action": "removed"} for _ in range(4)]  # 40% FPR
+    )
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.settings") as mock_settings:
+        mock_settings.PLAYLIST_JOIN_HIGH = 0.84  # one nudge would exceed 0.85
+        mock_settings.PLAYLIST_JOIN_LOW = 0.55
+        mock_settings.PLAYLIST_LEAVE = 0.60
+
+        def table_side(name):
+            m = MagicMock()
+            if name == "playlist_assignments":
+                m.select.return_value.eq.return_value.execute.return_value.data = assignments
+            elif name == "threshold_history":
+                m.select.return_value.eq.return_value.eq.return_value \
+                    .order.return_value.limit.return_value.execute.return_value.data = []
+                m.insert.return_value.execute.return_value = None
+                m.update.return_value.eq.return_value.execute.return_value = None
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+
+        from app.reflection import tune_thresholds
+        result = tune_thresholds("ch1")
+
+    assert result["new_join_high"] <= 0.85
