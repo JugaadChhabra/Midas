@@ -83,3 +83,35 @@ def chat_json(prompt: str, model: str | None = None, system: str | None = None,
             return json.loads(repaired)
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Model returned unparseable JSON: {e}\n---\n{content[:2000]}")
+
+
+def chat_text(prompt: str, model: str | None = None, system: str | None = None) -> str:
+    """Call OpenRouter without response_format constraint. Returns raw text content.
+    Used for models that don't support json_object mode (e.g. perplexity/sonar).
+    """
+    model = model or settings.AUDIT_MODEL
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    r = httpx.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Midas",
+        },
+        json={"model": model, "messages": messages},
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"OpenRouter {r.status_code} for model {model}: {r.text}")
+    data = r.json()
+    if "choices" not in data:
+        raise RuntimeError(f"OpenRouter unexpected response: {data}")
+    return data["choices"][0]["message"]["content"].strip()
