@@ -264,3 +264,39 @@ def yt_playlist_items_delete(yt, channel_id: str, playlist_item_id: str) -> None
         raise
     finally:
         _log_quota(channel_id, "playlistItems.delete", 50, success)
+
+
+def yt_search_videos(yt, channel_id: str, query: str, max_results: int = 10, published_after: str | None = None) -> list[dict]:
+    """Search YouTube for videos matching query. Cost: 100 quota units.
+
+    Returns list of {video_id, title, description, tags}.
+    published_after: ISO 8601 string e.g. '2026-02-19T00:00:00Z'
+    """
+    success = False
+    try:
+        params: dict = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "order": "viewCount",
+            "maxResults": max_results,
+        }
+        if published_after:
+            params["publishedAfter"] = published_after
+        resp = yt.search().list(**params).execute()
+        success = True
+        results = []
+        for item in resp.get("items", []):
+            sn = item.get("snippet") or {}
+            results.append({
+                "video_id": (item.get("id") or {}).get("videoId", ""),
+                "title": sn.get("title", ""),
+                "description": (sn.get("description") or "")[:300],
+                "tags": sn.get("tags") or [],
+            })
+        return results
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(channel_id, "search.list", 100, success)
