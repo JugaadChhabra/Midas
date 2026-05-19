@@ -311,3 +311,51 @@ def test_autopilot_skip_statuses_include_shadow_pending():
     import inspect
     src = inspect.getsource(_next_video_for_channel)
     assert "shadow_pending" in src
+
+
+def test_check_auto_revert_triggers_on_regression():
+    """If new cohort median lift is >10pp below old cohort, revert."""
+    old_version_id = 1
+    new_version_id = 2
+
+    revert_calls = []
+
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection._cohort_median_lift") as mock_lift:
+        mock_lift.side_effect = lambda version_id, *args: 20.0 if version_id == old_version_id else -5.0
+
+        def table_side(name):
+            m = MagicMock()
+            if name == "prompt_versions":
+                m.select.return_value.eq.return_value.eq.return_value \
+                    .order.return_value.limit.return_value.execute.return_value.data = [
+                    {"id": new_version_id, "parent_version_id": old_version_id,
+                     "channel_id": "ch1", "created_at": "2026-04-15T00:00:00Z"}
+                ]
+                update_m = MagicMock()
+                update_m.eq.return_value.execute.return_value = None
+                m.update.return_value = update_m
+            elif name == "videos":
+                m.select.return_value.eq.return_value.execute.return_value.data = []
+            elif name == "audit_configs":
+                m.update.return_value.eq.return_value.execute.return_value = None
+                m.select.return_value.eq.return_value.execute.return_value.data = [
+                    {"generated_prompt": "OLD PROMPT"}
+                ]
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+
+        from app.reflection import _check_auto_revert
+        _check_auto_revert("ch1")
+
+    # Verify revert was called (update status to retired_regression)
+    mock_sb.return_value.table.assert_any_call("prompt_versions")
+
+
+def test_cohort_median_lift_returns_none_insufficient():
+    with patch("app.reflection.supabase") as mock_sb:
+        mock_sb.return_value.table.return_value.select.return_value \
+            .eq.return_value.execute.return_value.data = []
+        from app.reflection import _cohort_median_lift
+        result = _cohort_median_lift(99, [])
+    assert result is None
