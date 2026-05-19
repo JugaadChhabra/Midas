@@ -228,3 +228,46 @@ def test_get_platform_guidance_returns_text():
         result = _get_platform_guidance("marathi children's music")
     assert "titles" in result.lower() or len(result) > 0
     mock_ct.assert_called_once()
+
+
+def test_run_reflection_stores_candidate_prompt():
+    perf_report = _make_perf_report(win_rate=40.0)
+    perf_report["worst_audits"] = [{"title_before": "old", "title_after": "new", "velocity_lift_pct": -30.0, "ai_reasoning": "test"}]
+    perf_report["best_audits"] = []
+
+    mock_reflection_result = {
+        "reflection": "Titles too SEO-heavy for this niche",
+        "changes": ["Prioritise native language in titles"],
+        "candidate_prompt": "You are a YouTube SEO expert for regional content...",
+    }
+
+    inserted_rows = []
+
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.chat_json", return_value=mock_reflection_result) as mock_chat:
+        def table_side(name):
+            m = MagicMock()
+            if name == "audit_configs":
+                m.select.return_value.eq.return_value.execute.return_value.data = [
+                    {"generated_prompt": "OLD PROMPT", "reflection_mode": "shadow"}
+                ]
+            elif name == "prompt_versions":
+                def capture_insert(row):
+                    inserted_rows.append(row)
+                    inner = MagicMock()
+                    inner.execute.return_value.data = [{"id": 42, **row}]
+                    return inner
+                m.insert.side_effect = capture_insert
+                m.select.return_value.eq.return_value.eq.return_value \
+                    .order.return_value.limit.return_value.execute.return_value.data = []
+                m.update.return_value.eq.return_value.execute.return_value = None
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+
+        from app.reflection import _run_reflection
+        version_id = _run_reflection("ch1", perf_report, "competitive ctx", "platform guidance")
+
+    assert version_id == 42
+    assert len(inserted_rows) == 1
+    assert inserted_rows[0]["prompt_text"] == "You are a YouTube SEO expert for regional content..."
+    assert inserted_rows[0]["status"] == "shadow"
