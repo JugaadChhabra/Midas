@@ -649,3 +649,172 @@ def tune_thresholds(channel_id: str) -> dict:
         "new_join_high": new_high,
         "delta": delta,
     }
+
+
+# ── Main orchestrator ─────────────────────────────────────────────────────────
+
+def reflect(channel_id: str) -> dict:
+    """Full reflection cycle for one channel. Called weekly by scheduler.
+
+    Returns dict describing what happened.
+    """
+    log.info("Reflection tick for channel %s", channel_id)
+
+    should, reason = _should_reflect(channel_id)
+    if not should:
+        log.info("Reflection skipped for %s: %s", channel_id, reason)
+        # Still run threshold tuner regardless
+        tune_result = tune_thresholds(channel_id)
+        return {"reflected": False, "reason": reason, "threshold_tune": tune_result}
+
+    niche_queries = get_or_derive_niche_queries(channel_id)
+    perf_report = _build_perf_report(channel_id)
+    if perf_report is None:
+        return {"reflected": False, "reason": "insufficient_data_at_reflect_time"}
+
+    competitive_ctx = _sample_competitors(channel_id, niche_queries)
+    niche_desc = ", ".join(niche_queries[:2]) if niche_queries else "general"
+    platform_guidance = _get_platform_guidance(niche_desc)
+
+    version_id = _run_reflection(channel_id, perf_report, competitive_ctx, platform_guidance)
+    if version_id is None:
+        return {"reflected": False, "reason": "reflection_llm_failed"}
+
+    cfg_rows = (
+        supabase().table("audit_configs")
+        .select("reflection_mode")
+        .eq("channel_id", channel_id)
+        .execute()
+    ).data or []
+    mode = (cfg_rows[0].get("reflection_mode") if cfg_rows else None) or "shadow"
+
+    shadow_count = 0
+    if mode == "shadow":
+        version_row = (
+            supabase().table("prompt_versions")
+            .select("prompt_text")
+            .eq("id", version_id)
+            .single()
+            .execute()
+        ).data
+        if version_row:
+            shadow_count = _run_shadow_audits(channel_id, version_row["prompt_text"], version_id)
+
+    _check_auto_revert(channel_id)
+    tune_result = tune_thresholds(channel_id)
+
+    log.info(
+        "Reflection complete for %s: version_id=%s mode=%s shadow_count=%d",
+        channel_id, version_id, mode, shadow_count,
+    )
+    return {
+        "reflected": True,
+        "version_id": version_id,
+        "mode": mode,
+        "shadow_audits_created": shadow_count,
+        "threshold_tune": tune_result,
+    }
+
+
+# ── API endpoints ─────────────────────────────────────────────────────────────
+
+@router.get("/channels/{channel_id}/reflection/history")
+def reflection_history(channel_id: str):
+    """List all prompt versions for a channel, newest first."""
+    rows = (
+        supabase().table("prompt_versions")
+        .select("id,status,created_at,promoted_at,retired_at,reflection_reasoning,performance_snapshot,parent_version_id")
+        .eq("channel_id", channel_id)
+        .order("created_at", desc=True)
+        .execute()
+    ).data or []
+    return rows
+
+
+@router.post("/channels/{channel_id}/prompt-versions/{version_id}/promote")
+def promote_version(channel_id: str, version_id: int):
+    """Manually promote a shadow candidate to live. Only valid for status=shadow."""
+    version = (
+        supabase().table("prompt_versions")
+        .select("*")
+        .eq("id", version_id)
+        .eq("channel_id", channel_id)
+        .single()
+        .execute()
+    ).data
+    if not version:
+        raise HTTPException(404, "Version not found")
+    if version["status"] != "shadow":
+        raise HTTPException(400, f"Cannot promote version with status={version['status']}")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Retire any currently live version
+    supabase().table("prompt_versions").update(
+        {"status": "retired", "retired_at": now_iso}
+    ).eq("channel_id", channel_id).eq("status", "live").execute()
+
+    supabase().table("prompt_versions").update(
+        {"status": "live", "promoted_at": now_iso}
+    ).eq("id", version_id).execute()
+
+    supabase().table("audit_configs").update(
+        {"generated_prompt": version["prompt_text"]}
+    ).eq("channel_id", channel_id).execute()
+
+    log.info("Manually promoted prompt version %s for channel %s", version_id, channel_id)
+    return {"ok": True, "promoted_version_id": version_id}
+
+
+@router.post("/channels/{channel_id}/reflection/trigger")
+def trigger_reflection(channel_id: str):
+    """Manually trigger a reflection cycle (ignores cooldown check)."""
+    result = reflect(channel_id)
+    return result
+
+
+@router.get("/channels/{channel_id}/reflection/shadow-comparison")
+def shadow_comparison(channel_id: str):
+    """Return side-by-side comparison: live vs shadow_pending audits for same videos."""
+    shadow_audits = (
+        supabase().table("audits")
+        .select("id,video_id,suggested_title,suggested_description,suggested_tags,prompt_version_id,created_at")
+        .eq("status", "shadow_pending")
+        .execute()
+    ).data or []
+
+    if not shadow_audits:
+        return []
+
+    video_ids = list({a["video_id"] for a in shadow_audits})
+
+    live_audits = (
+        supabase().table("audits")
+        .select("video_id,suggested_title,suggested_description,suggested_tags,created_at")
+        .in_("video_id", video_ids)
+        .eq("status", "applied")
+        .order("created_at", desc=True)
+        .execute()
+    ).data or []
+
+    live_by_vid: dict[str, dict] = {}
+    for a in live_audits:
+        if a["video_id"] not in live_by_vid:
+            live_by_vid[a["video_id"]] = a
+
+    result = []
+    for shadow in shadow_audits:
+        vid = shadow["video_id"]
+        live = live_by_vid.get(vid)
+        result.append({
+            "video_id": vid,
+            "shadow_audit_id": shadow["id"],
+            "shadow_title": shadow.get("suggested_title"),
+            "shadow_description": shadow.get("suggested_description"),
+            "shadow_tags": shadow.get("suggested_tags"),
+            "live_title": (live or {}).get("suggested_title"),
+            "live_description": (live or {}).get("suggested_description"),
+            "live_tags": (live or {}).get("suggested_tags"),
+            "prompt_version_id": shadow.get("prompt_version_id"),
+        })
+    return result
