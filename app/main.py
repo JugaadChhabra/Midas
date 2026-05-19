@@ -18,6 +18,7 @@ from app.db import supabase
 from app.playlists import reconcile_channel
 from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
+from app.reflection import reflect as reflection_reflect, router as reflection_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 _main_log = logging.getLogger("midas.main")
@@ -52,6 +53,15 @@ def _weekly_discovery():
             _main_log.exception("Weekly discovery failed for %s: %s", channel_id, e)
 
 
+def _weekly_reflection():
+    for channel_id in _all_channel_ids():
+        try:
+            result = reflection_reflect(channel_id)
+            _main_log.info("Weekly reflection %s: %s", channel_id, result)
+        except Exception as e:
+            _main_log.exception("Weekly reflection failed for %s: %s", channel_id, e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.add_job(
@@ -81,6 +91,16 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        _weekly_reflection,
+        "cron",
+        day_of_week="mon",
+        hour=4,
+        minute=0,
+        id="reflection",
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     log.info("Autopilot scheduler started (every %ds, DRY_RUN=%s)",
              settings.AUTOPILOT_TICK_SECONDS, settings.DRY_RUN)
@@ -99,6 +119,7 @@ app.include_router(performance_router)
 app.include_router(autopilot_router)
 app.include_router(dashboard_router)
 app.include_router(playlists_router)
+app.include_router(reflection_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
