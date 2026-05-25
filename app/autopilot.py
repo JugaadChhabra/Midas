@@ -1,5 +1,6 @@
 import logging
 import math
+import httpx
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -12,13 +13,16 @@ from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.sync import sync_channel
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
-from app.playlists import join_pass
 
 log = logging.getLogger("midas.autopilot")
 router = APIRouter(tags=["autopilot"])
 
 # In-memory consecutive-failure counter per channel. Reset on successful apply.
 _failure_counts: dict[str, int] = defaultdict(int)
+
+# Consecutive timeout counter per video. After 2 timeouts we insert a failed
+# audit row so the video is deprioritized and the next video can be tried.
+_video_timeout_counts: dict[str, int] = defaultdict(int)
 
 # Set when YouTube returns quotaExceeded; cleared after quota resets.
 _yt_quota_exhausted_until: datetime | None = None
@@ -139,10 +143,10 @@ def tick():
     """One pass of the autopilot loop. Processes at most one video and returns."""
     global _yt_quota_exhausted_until
     try:
-        # 1. Quota gate — internal estimate
-        if not quota.can_afford(APPLY_COST):
-            log.info("Autopilot deferred: quota remaining %d < %d", quota.units_remaining(), APPLY_COST)
-            return
+        # 1. Quota gate — internal estimate (disabled: letting YouTube's quotaExceeded be the signal)
+        # if not quota.can_afford(APPLY_COST):
+        #     log.info("Autopilot deferred: quota remaining %d < %d", quota.units_remaining(), APPLY_COST)
+        #     return
 
         # 1b. YouTube-confirmed quota exhaustion gate
         if _yt_quota_exhausted_until is not None:
@@ -183,14 +187,14 @@ def tick():
 
         if needs_sync:
             # Estimate sync cost: 1 (channels.list) + ceil(known/50) for playlist pages + ceil(known/50) for video.list
-            known_count = (
-                supabase().table("videos").select("id", count="exact").eq("channel_id", channel_id).execute()
-            ).count or 0
-            estimated = 1 + 2 * max(1, math.ceil((known_count or 50) / 50))
-            if not quota.can_afford(estimated + APPLY_COST):
-                log.info("Autopilot skipping sync for %s: would not leave room for an apply", channel_id)
-                _touch_tick(channel_id)
-                return
+            # known_count = (
+            #     supabase().table("videos").select("id", count="exact").eq("channel_id", channel_id).execute()
+            # ).count or 0
+            # estimated = 1 + 2 * max(1, math.ceil((known_count or 50) / 50))
+            # if not quota.can_afford(estimated + APPLY_COST):
+            #     log.info("Autopilot skipping sync for %s: would not leave room for an apply", channel_id)
+            #     _touch_tick(channel_id)
+            #     return
             try:
                 sync_channel(channel_id)
             except TokenExpiredError:
@@ -232,6 +236,27 @@ def tick():
             log.warning("OAuth token expired or revoked for %s during audit; pausing", channel_id)
             _pause(channel_id, "token_expired")
             return
+        except httpx.TimeoutException as e:
+            vid = video["id"]
+            _video_timeout_counts[vid] += 1
+            if _video_timeout_counts[vid] >= 2:
+                log.warning(
+                    "Audit timed out for %s %d times; marking failed to skip",
+                    vid, _video_timeout_counts[vid],
+                )
+                _video_timeout_counts[vid] = 0
+                try:
+                    supabase().table("audits").insert({
+                        "video_id": vid,
+                        "status": "failed",
+                        "ai_reasoning": f"[autopilot] repeated read timeouts from OpenRouter",
+                    }).execute()
+                except Exception:
+                    pass
+            else:
+                log.warning("Audit timed out for %s (%s); skipping without penalty", vid, e)
+            _touch_tick(channel_id)
+            return
         except Exception as e:
             log.exception("Audit failed for %s: %s", video["id"], e)
             _failure_counts[channel_id] += 1
@@ -269,11 +294,11 @@ def tick():
             _touch_tick(channel_id)
             return
 
-        # 9. Re-check quota right before apply
-        if not quota.can_afford(APPLY_COST):
-            log.info("Quota dipped during audit; deferring apply of %s", audit_row.get("id"))
-            _touch_tick(channel_id)
-            return
+        # 9. Re-check quota right before apply (disabled: letting YouTube's quotaExceeded be the signal)
+        # if not quota.can_afford(APPLY_COST):
+        #     log.info("Quota dipped during audit; deferring apply of %s", audit_row.get("id"))
+        #     _touch_tick(channel_id)
+        #     return
 
         # 10. Apply
         try:
@@ -282,10 +307,11 @@ def tick():
             log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
             if not video.get("is_short"):
                 try:
-                    if embed_video(video["id"]):
-                        join_pass(channel_id, video["id"])
+                    embed_video(video["id"])
+                    # Playlist allocation skipped — workflow under review
+                    # join_pass(channel_id, video["id"])
                 except Exception as e:
-                    log.warning("Embed/playlist pass failed for %s: %s", video["id"], e)
+                    log.warning("Embed failed for %s: %s", video["id"], e)
         except HTTPException as e:
             log.warning("Apply HTTPException for %s: %s", audit_row["id"], e.detail)
             if e.detail == "blocked_test_and_compare":

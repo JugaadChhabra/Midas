@@ -27,15 +27,10 @@ You are a YouTube SEO and content optimization expert. Audit this video's metada
 
 CONTENT SOURCES
 You will receive: the current title/description/tags (which may be placeholder or
-inadequate), the video transcript when available (in any language — content signal
-only), and the current thumbnail image. Treat the transcript as the primary source
-of truth for what the video is actually about, with the thumbnail as supporting
-visual context. The current metadata is a starting point, not a constraint —
+inadequate) and the video transcript when available (in any language — content signal
+only). Treat the transcript as the primary source of truth for what the video is
+actually about. The current metadata is a starting point, not a constraint —
 rewrite freely to reflect the real content.
-
-ANALYZE THE THUMBNAIL DIRECTLY when present: describe what you actually see
-(composition, faces, on-screen text, colors, focal point). Do NOT say "no
-information provided" if an image is attached.
 
 LANGUAGE
 The user message will state the channel's configured language. ALL output (title,
@@ -48,10 +43,9 @@ Return strictly a JSON object with this exact shape:
   "comparisons": {
     "title":       { "current_problems": "what's weak about the current title", "suggested": "your rewrite", "why_better": "1-2 sentences" },
     "description": { "current_problems": "what the current description is missing or doing badly", "suggested": "your rewrite (full text)", "why_better": "..." },
-    "tags":        { "current_problems": "gaps or noise in the current tag list", "suggested": ["tag1","tag2",...], "why_better": "..." },
-    "thumbnail":   { "current_problems": "what is weak about the actual thumbnail you see", "suggested": "describe the ideal thumbnail concretely", "why_better": "..." }
+    "tags":        { "current_problems": "gaps or noise in the current tag list", "suggested": ["tag1","tag2",...], "why_better": "..." }
   },
-  "issues":   [ { "field":"title|description|tags|thumbnail", "severity":"high|medium|low", "problem":"...", "fix":"..." } ],
+  "issues":   [ { "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." } ],
   "reasoning": "short overall summary"
 }
 
@@ -109,13 +103,12 @@ The creator's notes (in their own words):
 
 Produce a single JSON object with one key: "generated_prompt".
 Its value must be a complete, well-organized audit prompt suitable for an LLM that will:
-- Evaluate the video's title, description, tags, and (when available) thumbnail.
+- Evaluate the video's title, description, and tags.
 - Return strictly a JSON object with keys:
   issues (array of {{field,severity,problem,fix}}),
   suggested_title (string, <70 chars),
   suggested_description (string),
   suggested_tags (array of 12-15 strings),
-  thumbnail_feedback (string),
   reasoning (string).
 
 Embed the creator's preferences and priorities directly into the prompt so the auditor
@@ -139,9 +132,8 @@ def _build_user_block(
     transcript: str | None,
     transcript_lang: str | None,
     channel_language: str,
-    thumb_attached: bool,
 ) -> str:
-    """Audit user message: language rule first, then metadata, transcript, thumbnail note."""
+    """Audit user message: language rule first, then metadata, transcript."""
     channel_lang_name = lang_display_name(channel_language)
     transcript_lang_name = lang_display_name(transcript_lang)
 
@@ -173,36 +165,22 @@ def _build_user_block(
     else:
         lines += [
             "",
-            "VIDEO TRANSCRIPT: not available — base content judgment on metadata + thumbnail only.",
+            "VIDEO TRANSCRIPT: not available — base content judgment on metadata only.",
         ]
 
     lines += [
         "",
-        f"THUMBNAIL: {'attached as image — analyze it directly' if thumb_attached else 'not available'}.",
-        "",
         "The current title and description may be placeholder or poorly written.",
-        "Use the transcript as the primary signal for what the video is about, with the",
-        "thumbnail as supporting visual context. Generate metadata that reflects the actual",
-        "content — do not just polish what's already there.",
+        "Use the transcript as the primary signal for what the video is about.",
+        "Generate metadata that reflects the actual content — do not just polish what's already there.",
         "",
         "Run the audit now and return only the JSON object.",
     ]
     return "\n".join(lines)
 
 
-def _is_image_fetch_error(err: Exception) -> bool:
-    msg = str(err).lower()
-    return "fetching image" in msg or ("image" in msg and "url" in msg)
-
-
 def audit_video(video_id: str, prompt_override: str | None = None, status_override: str | None = None) -> dict:
-    """Run a content-aware audit and insert a pending audit row.
-
-    Pulls the transcript alongside the existing thumbnail input, applies the
-    channel's language rule, and persists the transcript-signal columns.
-    Keyframe extraction is deliberately not used here — those are reserved for
-    thumbnail generation (see CONTENT_INTELLIGENCE_ROADMAP.md, Block D).
-    """
+    """Run a content-aware audit and insert a pending audit row."""
     v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
     if not v:
         raise HTTPException(404, "Video not found")
@@ -228,27 +206,13 @@ def audit_video(video_id: str, prompt_override: str | None = None, status_overri
 
     transcript, transcript_lang = fetch_transcript(video_id, channel_id=v["channel_id"])
 
-    stable_thumb_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-
-    def _call(thumb_attached: bool) -> dict:
-        user = _build_user_block(
-            video=v,
-            transcript=transcript,
-            transcript_lang=transcript_lang,
-            channel_language=channel_language,
-            thumb_attached=thumb_attached,
-        )
-        images = [stable_thumb_url] if thumb_attached else None
-        return chat_json(user, system=audit_prompt, image_urls=images)
-
-    try:
-        result = _call(thumb_attached=True)
-    except RuntimeError as e:
-        if _is_image_fetch_error(e):
-            log.warning("Thumbnail fetch failed for %s — text-only audit", video_id)
-            result = _call(thumb_attached=False)
-        else:
-            raise
+    user = _build_user_block(
+        video=v,
+        transcript=transcript,
+        transcript_lang=transcript_lang,
+        channel_language=channel_language,
+    )
+    result = chat_json(user, system=audit_prompt)
 
     if isinstance(result, list):
         # Some models occasionally return a bare JSON array (usually the issues list)
@@ -265,7 +229,6 @@ def audit_video(video_id: str, prompt_override: str | None = None, status_overri
         "suggested_title": (comparisons.get("title") or {}).get("suggested"),
         "suggested_description": (comparisons.get("description") or {}).get("suggested"),
         "suggested_tags": (comparisons.get("tags") or {}).get("suggested") or [],
-        "thumbnail_feedback": (comparisons.get("thumbnail") or {}).get("suggested"),
         "issues_found": {"comparisons": comparisons, "issues": result.get("issues") or []},
         "ai_reasoning": result.get("reasoning"),
         "transcript_available": transcript is not None,
