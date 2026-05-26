@@ -18,7 +18,7 @@ MIN_CLUSTER_SIZE = 4
 MAX_NEW_PLAYLISTS = 2
 CLUSTER_SIM_THRESHOLD = 0.75
 JOIN_THRESHOLD = settings.PLAYLIST_JOIN_HIGH
-JUDGE_MODEL = "anthropic/claude-haiku-4-5-20251001"
+JUDGE_MODEL = "anthropic/claude-haiku-4.5"
 
 
 def _orphan_video_ids(channel_id: str, all_video_ids: list[str]) -> list[str]:

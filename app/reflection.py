@@ -200,7 +200,7 @@ def derive_niche_queries(channel_id: str) -> list[str]:
         f"Be specific to the actual content niche, not the broad category. "
         f'Return JSON: {{"queries": ["query1", "query2"]}}'
     )
-    result = chat_json(prompt, model="anthropic/claude-haiku-4-5-20251001")
+    result = chat_json(prompt, model="anthropic/claude-haiku-4.5")
     queries = result.get("queries") or []
     queries = [q for q in queries if isinstance(q, str) and q.strip()][:3]
 
