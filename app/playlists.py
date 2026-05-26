@@ -18,7 +18,7 @@ from app.youtube_client import (
 
 log = logging.getLogger("midas.playlists")
 
-JUDGE_MODEL = "anthropic/claude-haiku-4-5-20251001"
+JUDGE_MODEL = "anthropic/claude-haiku-4.5"
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

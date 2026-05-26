@@ -1,0 +1,24 @@
+services:
+  midas:
+    image: ghcr.io/jugaadchhabra/midas:latest
+    container_name: midas
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      CLIENT_SECRETS_FILE: /app/client_secret.json
+      KEYFRAMES_LOCAL_DIR: /app/storage/keyframes
+    volumes:
+      - ./client_secret.json:/app/client_secret.json:ro
+      - midas_storage:/app/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  midas_storage:
