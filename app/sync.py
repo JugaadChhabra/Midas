@@ -95,7 +95,8 @@ def sync_channel(channel_id: str):
 
     if rows:
         deduped = list({r["id"]: r for r in rows}.values())
-        supabase().table("videos").upsert(deduped).execute()
+        for i in range(0, len(deduped), 100):
+            supabase().table("videos").upsert(deduped[i:i+100]).execute()
 
     if privacy_changed_to_private:
         supabase().table("videos").update(
