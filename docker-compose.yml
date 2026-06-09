@@ -1,6 +1,7 @@
 services:
   midas:
     image: ghcr.io/jugaadchhabra/midas:latest
+    pull_policy: always
     container_name: midas
     ports:
       - "8000:8000"
