@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Shorts — Midas</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    h1 { margin-bottom: 8px; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    select, input, button { font: inherit; padding: 6px 8px; }
+    input[type=text] { width: 100%; box-sizing: border-box; }
+    button { cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+    th, td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+    .status-DONE      { color: #0a7a2f; font-weight: 600; }
+    .status-FAILED    { color: #b00020; font-weight: 600; }
+    .status-UPLOADING { color: #b07a00; }
+    .muted { color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Shorts</h1>
+  <p class="muted">Prototype: pick a channel, paste a YouTube URL, generate shorts via WayinVideo, auto-upload as <b>private</b>.</p>
+
+  <label for="channel">Channel</label>
+  <select id="channel"></select>
+
+  <label for="url">YouTube URL</label>
+  <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=..." />
+
+  <p><button id="generate">Generate shorts</button></p>
+
+  <h2>Jobs</h2>
+  <table id="jobs">
+    <thead><tr><th>ID</th><th>Channel</th><th>URL</th><th>Status</th><th>Error</th><th>Clips</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+async function loadChannels() {
+  const r = await fetch('/auth/channels');
+  const channels = await r.json();
+  const sel = document.getElementById('channel');
+  sel.innerHTML = '';
+  for (const c of channels) {
+    const o = document.createElement('option');
+    o.value = c.id;
+    o.textContent = (c.name || c.id) + ' (' + c.id + ')';
+    sel.appendChild(o);
+  }
+}
+
+async function loadJobs() {
+  const r = await fetch('/shorts/jobs');
+  const jobs = await r.json();
+  const tbody = document.querySelector('#jobs tbody');
+  tbody.innerHTML = '';
+  for (const j of jobs) {
+    const detail = await fetch('/shorts/jobs/' + j.id).then(r => r.json());
+    const clipsHtml = (detail.clips || []).map(c => {
+      const link = c.yt_video_id
+        ? `<a href="https://studio.youtube.com/video/${c.yt_video_id}/edit" target="_blank">${c.yt_video_id}</a>`
+        : (c.local_path ? `<span class="muted">local: ${c.local_path}</span>` : '');
+      return `<div>#${c.rank} <span class="status-${c.upload_status}">${c.upload_status}</span> — ${c.title || ''} ${link}</div>`;
+    }).join('');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${j.id}</td>
+      <td>${j.channel_id}</td>
+      <td><a href="${j.source_url}" target="_blank">${j.source_url}</a></td>
+      <td class="status-${j.status}">${j.status}</td>
+      <td class="muted">${j.error_message || ''}</td>
+      <td>${clipsHtml || '<span class="muted">—</span>'}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('generate').addEventListener('click', async () => {
+  const channel_id = document.getElementById('channel').value;
+  const source_url = document.getElementById('url').value.trim();
+  if (!channel_id || !source_url) { alert('Pick a channel and paste a URL.'); return; }
+  const r = await fetch('/shorts/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel_id, source_url }),
+  });
+  if (!r.ok) { alert('Submit failed: ' + (await r.text())); return; }
+  document.getElementById('url').value = '';
+  loadJobs();
+});
+
+loadChannels();
+loadJobs();
+setInterval(loadJobs, 10000);
+</script>
+</body>
+</html>
