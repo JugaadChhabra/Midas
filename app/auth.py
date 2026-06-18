@@ -41,6 +41,12 @@ def callback(request: Request, code: str | None = None, error: str | None = None
     flow.fetch_token(code=code)
     creds = flow.credentials
 
+    # Whether Google's token response actually granted the analytics scope.
+    # If the user re-consented but unchecked the analytics box, we won't see it
+    # and Loop 0 polling will skip this channel until they reconnect again.
+    granted_scopes = set(getattr(creds, "granted_scopes", None) or [])
+    analytics_authorized = settings.ANALYTICS_SCOPE in granted_scopes
+
     if not creds.refresh_token:
         raise HTTPException(
             status_code=400,
@@ -68,6 +74,7 @@ def callback(request: Request, code: str | None = None, error: str | None = None
         "refresh_token": creds.refresh_token,
         "access_token": creds.token,
         "token_expiry": expiry,
+        "analytics_authorized": analytics_authorized,
     }
     # Seed default_language from YouTube on first connect. Subsequent reconnects
     # don't overwrite it — the user may have manually overridden it via PATCH.
@@ -102,7 +109,7 @@ def list_channels():
     res = supabase().table("channels").select(
         "id,name,handle,last_synced_at,default_language,"
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
-        "sync_shorts"
+        "sync_shorts,analytics_authorized"
     ).execute()
     return res.data
 

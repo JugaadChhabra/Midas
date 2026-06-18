@@ -20,6 +20,7 @@ from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
 from app.shorts.routes import router as shorts_router
+from app.metrics_poll import poll_metrics
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 _main_log = logging.getLogger("midas.main")
@@ -99,6 +100,27 @@ async def lifespan(app: FastAPI):
         hour=4,
         minute=0,
         id="reflection",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        poll_metrics,
+        "cron",
+        hour=5,
+        minute=0,
+        # Pinned to UTC unlike the other cron jobs above (which run in
+        # server-local time). Window math in metrics_poll._window_dates is
+        # anchored to UTC and the ~2-day Analytics data lag is UTC-anchored,
+        # so a server-tz shift would silently move the fire time and the
+        # window together — pin avoids that coupling.
+        #
+        # Side-effect: depending on server TZ, this UTC-05:00 fire may land
+        # before OR after the server-local 02:00 _daily_reconcile on the same
+        # calendar day. The two jobs touch disjoint tables, so there's no
+        # data race — but operators reading logs across TZs should expect
+        # the relative ordering to differ.
+        timezone="UTC",
+        id="metrics_poll",
         max_instances=1,
         coalesce=True,
     )

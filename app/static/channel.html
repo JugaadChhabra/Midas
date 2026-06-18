@@ -69,6 +69,13 @@
   <h1 id="title">Channel</h1>
   <p class="sub" id="subtitle"></p>
 
+  <div id="reconsent-banner" class="card" hidden
+       style="border-color:#d80; background:#d801">
+    <b>Reconnect for analytics.</b>
+    <span class="muted">This channel was connected before the analytics scope was added. Outcome measurement (CTR, playlist sessions) is skipped until you re-consent.</span>
+    <a class="btn" href="/auth/login" style="margin-left:.5rem">Reconnect Google account →</a>
+  </div>
+
   <div class="tabs" role="tablist">
     <div class="tab active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</div>
     <div class="tab" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">Videos</div>
@@ -325,6 +332,8 @@ async function loadChannel() {
   $('ap-cap').value = c.autopilot_daily_cap ?? 10;
   $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
   $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
+  // Surface the re-consent banner whenever the analytics scope hasn't been granted.
+  $('reconsent-banner').hidden = !!c.analytics_authorized;
 }
 
 // ── Overview KPIs ──────────────────────────────────────────────────────
