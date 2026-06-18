@@ -219,3 +219,16 @@ __marimo__/
 
 client_secret_*.json
 .claude/*
+
+# Supabase CLI local state (version pins churn per local CLI install)
+supabase/.temp/
+
+# Parallel-session / scratch artifacts
+sdd/
+
+# Local-only caches
+storage/keyframes/
+shorts_cache/
+
+# macOS
+.DS_Store
