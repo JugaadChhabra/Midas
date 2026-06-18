@@ -12,7 +12,8 @@ def _mock_openrouter_response(content: str):
 
 
 def test_chat_text_returns_string():
-    with patch("app.openrouter.httpx.post") as mock_post:
+    with patch("app.openrouter.settings.OPENROUTER_API_KEY", "test-key"), \
+            patch("app.openrouter.httpx.post") as mock_post:
         mock_post.return_value = _mock_openrouter_response("hello world")
         from app.openrouter import chat_text
         result = chat_text("say hello", model="perplexity/sonar")
@@ -20,7 +21,8 @@ def test_chat_text_returns_string():
 
 
 def test_chat_text_raises_on_http_error():
-    with patch("app.openrouter.httpx.post") as mock_post:
+    with patch("app.openrouter.settings.OPENROUTER_API_KEY", "test-key"), \
+            patch("app.openrouter.httpx.post") as mock_post:
         mock_resp = MagicMock()
         mock_resp.status_code = 429
         mock_resp.text = "rate limited"
