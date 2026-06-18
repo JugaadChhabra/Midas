@@ -2,14 +2,61 @@
 
 Called once at bootstrap and then daily to stay in sync with manual changes
 made directly in YouTube Studio.
+
+Phase 1B addition: also populates `role`, `origin`, `item_count`,
+`last_synced_at` on the `playlists` row so the recommend-only health-score
+job (app/playlist_health.py — Step 2) has the inventory metadata it needs.
 """
 import logging
+import re
 from datetime import datetime, timezone
 
 from app.db import supabase
 from app.youtube_client import youtube_for_channel, yt_playlists_list, yt_playlist_items_page
 
 log = logging.getLogger("midas.playlists_sync")
+
+
+# Role classification — regex-only, conservative (PHASE_1B_PLAN.md §4.2).
+# Order matters: first match wins. LLM-based classification is a deliberate
+# future upgrade; regex misses are acceptable (default `'inherited'` is
+# harmless to downstream scoring — only changes the UI badge).
+#
+# Bare `season|chapter|lesson` were rejected because they false-positive on
+# unrelated playlists ("Chapter Books for Kids", "Lesson Plans for Teachers",
+# "Season Cooking"). All series matchers now require a numeric qualifier OR
+# the unambiguous `episode` keyword.
+_SERIES_RX = re.compile(
+    r"\b("
+    r"episode"               # unambiguous standalone
+    r"|ep\.?\s*\d+"          # Ep 5, Ep. 12
+    r"|part\s*\d+"           # Part 1
+    r"|season\s*\d+"         # Season 2
+    r"|chapter\s*\d+"        # Chapter 3
+    r"|lesson\s*\d+"         # Lesson 7
+    r")\b",
+    re.IGNORECASE,
+)
+_FUNNEL_RX = re.compile(
+    r"^\s*(start\s+here|watch\s+first|beginners?|intro\s+to)\b",
+    re.IGNORECASE,
+)
+
+
+def _classify_role(title: str, description: str) -> str:
+    """Heuristic role classification.
+
+    Returns one of: 'series', 'funnel', 'inherited'. PO's `topic_cluster`
+    role needs LLM judgment to detect reliably from title alone and is
+    deliberately left to a follow-up — better to default conservatively
+    than mislabel.
+    """
+    text = f"{title or ''} {description or ''}"
+    if _SERIES_RX.search(text):
+        return "series"
+    if _FUNNEL_RX.match(title or ""):
+        return "funnel"
+    return "inherited"
 
 
 def sync_playlists(channel_id: str) -> dict:
@@ -31,7 +78,42 @@ def sync_playlists(channel_id: str) -> dict:
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # Upsert playlist rows
+    # Preserve provenance set by other code paths (notably Phase 2B's
+    # optimizer-created path). Without this read, every daily sync would
+    # silently clobber `origin='optimizer_created'` back to `'inherited'`
+    # and overwrite any non-regex `role` classification (e.g. a future LLM
+    # classifier or a manual override) with whatever the regex returns.
+    existing_rows = (
+        supabase().table("playlists")
+        .select("id,origin,role")
+        .eq("channel_id", channel_id)
+        .in_("id", [p["id"] for p in yt_playlists])
+        .execute()
+    ).data or []
+    existing_by_id: dict[str, dict] = {r["id"]: r for r in existing_rows}
+
+    def _preserved_origin(playlist_id: str) -> str:
+        existing = existing_by_id.get(playlist_id)
+        if existing and existing.get("origin") and existing["origin"] != "inherited":
+            return existing["origin"]
+        return "inherited"
+
+    def _preserved_role(playlist_id: str, title: str, description: str) -> str:
+        # If a previous run (or another code path) classified this playlist
+        # as anything other than the default `'inherited'`, keep that value.
+        # This lets a future LLM classifier or manual override survive daily
+        # re-syncs. If existing role is NULL or `'inherited'`, re-run the
+        # regex — handles freshly-renamed playlists picking up a series tag.
+        existing = existing_by_id.get(playlist_id)
+        if existing and existing.get("role") and existing["role"] != "inherited":
+            return existing["role"]
+        return _classify_role(title, description)
+
+    # Upsert playlist rows. Phase 1B writes role / origin / item_count /
+    # last_synced_at alongside the existing fields. `synced_at` is kept for
+    # backward compat with the legacy playlist allocator; `last_synced_at`
+    # is the PO-spec name (PHASE_1B_PLAN.md §3.1) consumers should prefer.
+    # TODO(phase-2x): drop synced_at once no callers consume it.
     supabase().table("playlists").upsert(
         [
             {
@@ -40,6 +122,12 @@ def sync_playlists(channel_id: str) -> dict:
                 "title": p["title"],
                 "description": p["description"],
                 "synced_at": now,
+                "last_synced_at": now,
+                "origin": _preserved_origin(p["id"]),
+                "role": _preserved_role(p["id"], p["title"], p["description"]),
+                "item_count": p.get("item_count"),
+                # created_by_optimizer_at and strategy_version stay NULL —
+                # only Phase 2B's optimizer-created path writes them.
             }
             for p in yt_playlists
         ],

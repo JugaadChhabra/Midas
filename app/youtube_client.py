@@ -185,14 +185,19 @@ def yt_videos_update(yt, channel_id: str | None, payload: dict, parts: str = "sn
 
 def yt_playlists_list(yt, channel_id: str) -> list[dict]:
     """All playlists for a channel (paginates internally). Cost: 1 per page.
-    Returns list of {id, title, description}."""
+
+    Returns list of {id, title, description, item_count}. `item_count` comes
+    free with `contentDetails` (Google bundles it into the same 1-unit list
+    call). Phase 1B uses it to populate `playlists.item_count` without an
+    additional per-playlist members walk.
+    """
     items: list[dict] = []
     page_token = None
     while True:
         success = False
         try:
             resp = yt.playlists().list(
-                part="snippet",
+                part="snippet,contentDetails",
                 channelId=channel_id,
                 maxResults=50,
                 pageToken=page_token,
@@ -208,6 +213,7 @@ def yt_playlists_list(yt, channel_id: str) -> list[dict]:
                 "id": item["id"],
                 "title": item["snippet"]["title"],
                 "description": item["snippet"].get("description", ""),
+                "item_count": (item.get("contentDetails") or {}).get("itemCount"),
             })
         page_token = resp.get("nextPageToken")
         if not page_token:

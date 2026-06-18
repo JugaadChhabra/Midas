@@ -16,6 +16,7 @@ from app.dashboard import router as dashboard_router
 from app.config import settings
 from app.db import supabase
 from app.playlists import reconcile_channel
+from app.playlists_sync import sync_playlists
 from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
@@ -39,6 +40,26 @@ def _all_channel_ids() -> list[str]:
 
 def _daily_reconcile():
     for channel_id in _all_channel_ids():
+        # Sync playlist inventory FIRST so any new playlists created in
+        # YouTube Studio since yesterday have rows (with role / item_count /
+        # last_synced_at populated) before reconcile_channel re-scores
+        # assignments and before playlist_health (Phase 1B Step 2) reads
+        # the inventory. Failures here are logged but do not block
+        # reconcile_channel — the older inventory is still better than no
+        # reconcile this tick.
+        #
+        # Partial-failure caveat: sync_playlists is not transactional (each
+        # supabase .execute() is its own round-trip). If sync crashes after
+        # upserting some playlists but before completing membership seeding,
+        # reconcile_channel runs against a partially-updated state and may
+        # produce add/remove decisions that the next clean sync will revert.
+        # Behavior is best-effort; the loud .exception() log is the operator
+        # signal to investigate.
+        try:
+            sync_result = sync_playlists(channel_id)
+            _main_log.info("Daily playlist sync %s: %s", channel_id, sync_result)
+        except Exception as e:
+            _main_log.exception("Daily playlist sync failed for %s: %s", channel_id, e)
         try:
             result = reconcile_channel(channel_id)
             _main_log.info("Daily reconcile %s: %s", channel_id, result)
