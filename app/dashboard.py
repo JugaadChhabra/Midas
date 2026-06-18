@@ -283,11 +283,18 @@ def dashboard():
     # Quota: today's used (authoritative via quota module) + 7-day sparkline.
     # The sparkline query fetches at most 1000 rows and is only used for the
     # chart; we never derive used_today from it to avoid silent truncation.
+    # `units > 0` filter (PHASE_0_GAPS.md Gap 8): Loop 0's metrics_poll and
+    # Step B's traffic-source poll write a `units=0` telemetry row per
+    # Analytics call. Including those zeros would flood the sparkline window
+    # and push real Data API rows past the 1000-row cap. Filtering them out
+    # is a safe approximation — the chart is meant to surface real quota
+    # consumption, not call-volume telemetry.
     used_today = quota_mod.units_used_today()
     quota_log = (
         supabase().table("quota_log")
         .select("units,occurred_at")
         .gte("occurred_at", _iso(now - timedelta(days=7)))
+        .gt("units", 0)
         .order("occurred_at", desc=False)
         .execute()
     ).data or []

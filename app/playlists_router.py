@@ -84,7 +84,26 @@ def _serialize_playlists(channel_id: str) -> list[dict]:
     return out
 
 
-def _envelope(channel_id: str, enabled: bool, computed_at: str | None) -> dict:
+def _channel_tier_2_available(channel_id: str) -> bool:
+    """True if any tier-2 row exists for this channel.
+
+    Mirrors playlist_health._tier2_available logic (any non-empty bucket is
+    enough). One HEAD-style count query; cheap. Used by `health` (cached
+    read) so the envelope's tier_2_available flag is accurate even when the
+    GET path doesn't re-run score_channel.
+    """
+    res = (
+        supabase().table("video_traffic_source_playlist")
+        .select("id", count="exact")
+        .eq("channel_id", channel_id)
+        .limit(1)
+        .execute()
+    )
+    return (res.count or 0) > 0
+
+
+def _envelope(channel_id: str, enabled: bool, computed_at: str | None,
+              tier_2_available: bool = False) -> dict:
     """Common response shape per PHASE_1B_PLAN.md §6.2."""
     return {
         "enabled": enabled,
@@ -98,10 +117,12 @@ def _envelope(channel_id: str, enabled: bool, computed_at: str | None) -> dict:
             "remove_pctl": settings.PLAYLIST_HEALTH_REMOVE_PCTL,
             "revive_pctl": settings.PLAYLIST_HEALTH_REVIVE_PCTL,
         },
-        # Hardcoded false until Phase 1B Step B (Gap 6 — insightTrafficSource=PLAYLIST
-        # member breakdown — see PHASE_1B_PLAN.md §9) lands. Every rationale
-        # also carries tier_2_pending=true; this is the per-response mirror.
-        "tier_2_available": False,
+        # True once Phase 1B Step B's metrics_poll extension has populated
+        # `video_traffic_source_playlist` for this channel. Mirror of the
+        # per-rationale `tier_2_pending` (inverse). Stays false on
+        # disabled-channel envelopes (the GET/POST short-circuit before
+        # reaching here in that case).
+        "tier_2_available": tier_2_available,
         "recommendations": [],
     }
 
@@ -120,7 +141,11 @@ def evaluate_playlists(channel_id: str):
         return _envelope(channel_id, enabled=False, computed_at=None)
 
     summary = score_channel(channel_id)
-    body = _envelope(channel_id, enabled=True, computed_at=summary.get("computed_at"))
+    body = _envelope(
+        channel_id, enabled=True,
+        computed_at=summary.get("computed_at"),
+        tier_2_available=bool(summary.get("tier_2_available")),
+    )
     body["summary"] = {
         "playlists_total": summary["playlists_total"],
         "gated_in": summary["gated_in"],
@@ -149,7 +174,10 @@ def get_playlist_health(channel_id: str):
     # call landed for this channel. Use it as the envelope's computed_at.
     computed_ats = [r["computed_at"] for r in recommendations if r.get("computed_at")]
     latest = max(computed_ats) if computed_ats else None
-    body = _envelope(channel_id, enabled=True, computed_at=latest)
+    body = _envelope(
+        channel_id, enabled=True, computed_at=latest,
+        tier_2_available=_channel_tier_2_available(channel_id),
+    )
     body["recommendations"] = recommendations
     return body
 

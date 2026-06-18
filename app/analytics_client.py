@@ -183,6 +183,52 @@ def yt_analytics_video_report(
         _log_quota(channel_id, "youtubeAnalytics.reports.query.video", success)
 
 
+def yt_analytics_video_traffic_source_playlist(
+    analytics, channel_id: str | None, video_id: str, start: str, end: str
+) -> list[dict]:
+    """Per-video playlist-source breakdown for [start, end] (YYYY-MM-DD).
+
+    Closes Phase 0 Gap 6 (PO §Control loop "secondary: playlist-source views
+    to members"). Returns ROWS — unlike the other report functions in this
+    module, since one video can be reached via many source playlists in a
+    single window. Each row is a dict:
+
+        {
+          "insightTrafficSourceDetail": "<source_playlist_id>",  # the playlist
+          "views": int,
+        }
+
+    Empty list when the video had no playlist-driven traffic in the window
+    (the common case for videos that get most of their views from search /
+    browse / suggested). Callers must NOT treat empty as failure.
+
+    Quota: Analytics pool (free against Data API).
+    """
+    success = False
+    try:
+        resp = analytics.reports().query(
+            ids="channel==MINE",
+            startDate=start,
+            endDate=end,
+            metrics="views",
+            dimensions="insightTrafficSourceDetail",
+            filters=f"video=={video_id};insightTrafficSourceType==PLAYLIST",
+        ).execute()
+        success = True
+        headers = resp.get("columnHeaders") or []
+        rows = resp.get("rows") or []
+        if not rows:
+            return []
+        return [{h["name"]: v for h, v in zip(headers, row)} for row in rows]
+    except Exception as e:
+        _guard_token(e, channel_id)
+        raise
+    finally:
+        _log_quota(
+            channel_id, "youtubeAnalytics.reports.query.video_traffic_source_playlist", success
+        )
+
+
 def yt_analytics_playlist_report(
     analytics, channel_id: str | None, playlist_id: str, start: str, end: str
 ) -> dict | None:

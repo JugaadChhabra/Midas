@@ -32,6 +32,7 @@ from app.analytics_client import (
     analytics_for_channel,
     yt_analytics_playlist_report,
     yt_analytics_video_report,
+    yt_analytics_video_traffic_source_playlist,
 )
 from app.db import supabase
 from app.youtube_client import TokenExpiredError
@@ -103,8 +104,47 @@ def _upsert_playlist_metrics(
     return True
 
 
-def _poll_channel(channel_id: str, start: str, end: str) -> dict:
-    """Pull one channel's video + playlist windows. Returns counts for logging."""
+def _upsert_traffic_source_rows(
+    *, video_id: str, channel_id: str, start: str, end: str, rows: list[dict]
+) -> int:
+    """Write one window's traffic-source breakdown for a single video.
+
+    Each Analytics row contains (source_playlist_id, views) for a single
+    member video; we land them keyed by (video_id, playlist_id, window) so
+    the UNIQUE constraint dedupes a same-day re-run. Returns the number of
+    rows upserted (zero when the video had no playlist-driven traffic in
+    the window — Analytics returned `rows: []`).
+    """
+    if not rows:
+        return 0
+    payload = [
+        {
+            "video_id": video_id,
+            "channel_id": channel_id,
+            "playlist_id": r.get("insightTrafficSourceDetail") or "",
+            "window_start": start,
+            "window_end": end,
+            "views": int(r.get("views") or 0),
+        }
+        for r in rows
+        if r.get("insightTrafficSourceDetail")  # defensive: skip rows missing the dimension
+    ]
+    if not payload:
+        return 0
+    supabase().table("video_traffic_source_playlist").upsert(
+        payload, on_conflict="video_id,playlist_id,window_start,window_end"
+    ).execute()
+    return len(payload)
+
+
+def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool) -> dict:
+    """Pull one channel's video + playlist windows. Returns counts for logging.
+
+    `tier_2`: if True, also pulls the playlist-source breakdown per video
+    (Phase 1B Step B — only useful when health scoring consumes it). Caller
+    should set this from `channels.playlist_health_enabled` so disabled
+    channels skip the extra API calls entirely.
+    """
     analytics = analytics_for_channel(channel_id)
 
     # Page past Supabase's 1000-row default cap so channels with >1000 synced
@@ -157,6 +197,9 @@ def _poll_channel(channel_id: str, start: str, end: str) -> dict:
     videos_written = 0
     videos_no_data = 0
     videos_err = 0
+    tier2_rows_written = 0
+    tier2_videos_no_data = 0
+    tier2_err = 0
     for vid in public_video_ids:
         try:
             row = yt_analytics_video_report(analytics, channel_id, vid, start, end)
@@ -173,6 +216,38 @@ def _poll_channel(channel_id: str, start: str, end: str) -> dict:
         except Exception as e:
             videos_err += 1
             log.warning("video metric pull failed for %s/%s: %s", channel_id, vid, e)
+
+        # Tier-2 traffic-source breakdown (PHASE_1B_PLAN.md §9, Gap 6).
+        # Gated per-channel so disabled channels skip the API call. Wrapped
+        # in its own try/except so a tier-2 failure never poisons the tier-1
+        # row we may have just written above.
+        #
+        # Note: tier-2 is intentionally attempted even when the tier-1 call
+        # raised. Gap 10's transient-DNS failures can hit one call but not
+        # the next, so a tier-1 fail does not predict a tier-2 fail. For
+        # genuinely bad videos (deleted / privacy-flipped) both calls will
+        # fail and inflate the err counters — accepted noise.
+        if tier_2:
+            try:
+                ts_rows = yt_analytics_video_traffic_source_playlist(
+                    analytics, channel_id, vid, start, end
+                )
+                n_written = _upsert_traffic_source_rows(
+                    video_id=vid, channel_id=channel_id,
+                    start=start, end=end, rows=ts_rows,
+                )
+                if n_written:
+                    tier2_rows_written += n_written
+                else:
+                    tier2_videos_no_data += 1
+            except TokenExpiredError:
+                raise
+            except Exception as e:
+                tier2_err += 1
+                log.warning(
+                    "video traffic-source pull failed for %s/%s: %s",
+                    channel_id, vid, e,
+                )
 
     playlists_written = 0
     playlists_no_data = 0
@@ -203,6 +278,10 @@ def _poll_channel(channel_id: str, start: str, end: str) -> dict:
         "playlists_written": playlists_written,
         "playlists_no_data": playlists_no_data,
         "playlists_err": playlists_err,
+        "tier2_enabled": tier_2,
+        "tier2_rows_written": tier2_rows_written,
+        "tier2_videos_no_data": tier2_videos_no_data,
+        "tier2_err": tier2_err,
     }
 
 
@@ -213,7 +292,7 @@ def poll_metrics() -> None:
 
     channels = (
         supabase().table("channels")
-        .select("id,analytics_authorized")
+        .select("id,analytics_authorized,playlist_health_enabled")
         .eq("analytics_authorized", True)
         .execute()
         .data or []
@@ -225,7 +304,10 @@ def poll_metrics() -> None:
     for ch in channels:
         cid = ch["id"]
         try:
-            counts = _poll_channel(cid, start, end)
+            counts = _poll_channel(
+                cid, start, end,
+                tier_2=bool(ch.get("playlist_health_enabled")),
+            )
             log.info("metrics_poll %s: %s", cid, counts)
         except AnalyticsNotAuthorizedError:
             # Race: row was true at query time, false now. Skip silently.

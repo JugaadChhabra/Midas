@@ -220,6 +220,44 @@ def score_channel(channel_id: str) -> dict[str, Any]:
         if len(bucket) < aggregation_weeks:
             bucket.append(r)
 
+    # ── Tier-2 (Phase 1B Step B, Gap 6) ─────────────────────────────────────
+    # Sum playlist-source views to member videos per (playlist_id) over the
+    # same trailing window. PO §Control loop: "secondary: playlist-source
+    # views to members." Reported in rationale; does NOT change the
+    # score/percentile formula (kept tier-1 only so the absolute scoring
+    # contract from Phase 1B Step 2 stays stable). When tier-2 rows exist
+    # for the channel we flip tier_2_pending=false on every rationale.
+    tier2_by_pid: dict[str, dict[str, int]] = {}  # playlist_id -> {video_id: views}
+    if playlist_ids:
+        tier2_rows: list[dict] = []
+        for chunk_start in range(0, len(playlist_ids), METRIC_ID_CHUNK):
+            id_chunk = playlist_ids[chunk_start:chunk_start + METRIC_ID_CHUNK]
+            row_offset = 0
+            while True:
+                page = (
+                    supabase().table("video_traffic_source_playlist")
+                    .select("playlist_id,video_id,window_end,views")
+                    .in_("playlist_id", id_chunk)
+                    .eq("channel_id", channel_id)
+                    .gte("window_end", cutoff_iso)
+                    .order("window_end", desc=True)
+                    .range(row_offset, row_offset + METRIC_ROW_PAGE - 1)
+                    .execute()
+                    .data or []
+                )
+                tier2_rows.extend(page)
+                if len(page) < METRIC_ROW_PAGE:
+                    break
+                row_offset += METRIC_ROW_PAGE
+        # Sum views across the window per (playlist_id, video_id). Multiple
+        # weekly rows for the same (playlist, video) collapse via dict-merge.
+        for r in tier2_rows:
+            pid = r["playlist_id"]
+            vid = r["video_id"]
+            bucket = tier2_by_pid.setdefault(pid, {})
+            bucket[vid] = bucket.get(vid, 0) + int(r.get("views") or 0)
+    tier2_available = bool(tier2_by_pid)
+
     # Aggregate + gate.
     aggregated: dict[str, dict] = {}      # playlist_id -> agg dict (gated in)
     insufficient: list[str] = []          # playlist_ids that fail the gate
@@ -269,6 +307,11 @@ def score_channel(channel_id: str) -> dict[str, Any]:
         )
         counts[rec] += 1
         agg = aggregated[pid]
+        # Tier-2 secondary signal: total playlist-source views to member
+        # videos over the same window, broken down per member video.
+        # Reported only; does NOT change the score or percentile.
+        t2_members = tier2_by_pid.get(pid) or {}
+        t2_total_views = sum(t2_members.values())
         rationale: dict[str, Any] = {
             "gate": "pass",
             "window_weeks": aggregation_weeks,
@@ -282,7 +325,17 @@ def score_channel(channel_id: str) -> dict[str, Any]:
                 "remove_pctl": settings.PLAYLIST_HEALTH_REMOVE_PCTL,
                 "revive_pctl": settings.PLAYLIST_HEALTH_REVIVE_PCTL,
             },
-            "tier_2_pending": True,
+            # Pending until metrics_poll has populated video_traffic_source_playlist
+            # for this channel. Flag is per-CHANNEL (not per-playlist) because the
+            # poll runs once per channel; if any rows exist for the channel,
+            # tier-2 is considered available even if a particular playlist drove
+            # zero playlist-source views in the window (legitimate zero).
+            "tier_2_pending": not tier2_available,
+            "tier_2_playlist_source_views": t2_total_views if tier2_available else None,
+            # Member videos with at least one playlist-source view in the window.
+            # NOT the playlist's total member count — that lives in
+            # `playlists.item_count`. Named explicitly to avoid the misread.
+            "tier_2_active_member_count": len(t2_members) if tier2_available else None,
             "comparison": f"percentile {pctl} of {gated_n} gated playlists on this channel",
         }
         if small_channel:
@@ -323,7 +376,7 @@ def score_channel(channel_id: str) -> dict[str, Any]:
                 "window_weeks": aggregation_weeks,
                 "playlist_starts_in_window": starts,
                 "min_required": settings.MIN_PLAYLIST_STARTS,
-                "tier_2_pending": True,
+                "tier_2_pending": not tier2_available,
             },
         })
 
@@ -341,6 +394,7 @@ def score_channel(channel_id: str) -> dict[str, Any]:
         "remove": counts["remove"],
         "revive": counts["revive"],
         "keep": counts["keep"],
+        "tier_2_available": tier2_available,
         "computed_at": now_iso,
     }
     log.info("playlist_health %s: %s", channel_id, summary)

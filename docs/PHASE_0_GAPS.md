@@ -218,33 +218,43 @@ doc.
 
 ---
 
-## Gap 6 — Traffic-source = PLAYLIST breakdown deferred — **OPEN**
+## Gap 6 — Traffic-source = PLAYLIST breakdown — **CLOSED (Phase 1B Step B, 2026-06-18)**
 
 ### Spec said
 > PO §Sensor: "Plus, on member videos, the **traffic-source = `PLAYLIST`**
 > breakdown (how much of a video's reach the playlist actually drives)."
 
-### What shipped
-`analytics_client.py` exposes `yt_analytics_video_report` and
-`yt_analytics_playlist_report`, but no `yt_analytics_video_traffic_source`
-function. The poll job consequently does not populate any "playlist-source
-views to members" signal.
+### What shipped (Phase 1B Step B)
+- `analytics_client.yt_analytics_video_traffic_source_playlist(...)` —
+  calls `youtubeAnalytics.reports.query` with
+  `filters=video==<id>;insightTrafficSourceType==PLAYLIST` and
+  `dimensions=insightTrafficSourceDetail`. Returns one row per source
+  playlist that drove views (empty list when none did — common case for
+  videos pulled mostly via search/browse).
+- New table `video_traffic_source_playlist` (migration
+  `20260618133036_phase1b_step_b_traffic_source.sql`). Keyed by
+  `(video_id, playlist_id, window_start, window_end)`. Indexed on
+  channel, playlist+window, and video+window for `score_channel`'s reads.
+- `metrics_poll._poll_channel` extended — pulls tier-2 per video gated
+  by `channels.playlist_health_enabled` so disabled channels skip the
+  extra API calls. Per-item exception isolation; tier-2 failures don't
+  poison the tier-1 row written above.
+- `playlist_health.score_channel` aggregates by playlist + reports
+  `tier_2_playlist_source_views` and `tier_2_active_member_count` in the
+  recommendation rationale. Flips `tier_2_pending=false` per-channel
+  when any tier-2 rows exist for that channel.
+- Endpoint envelope `tier_2_available` is now dynamic — POST reads it
+  from `summary.tier_2_available`; GET runs a `count` query on the
+  table.
 
-### What this blocks
-- **Phase 1B** scoring tier 2 ("secondary: playlist-source views to members"
-  per PO §Control loop). Phase 1B's tier-1 scoring (`averageTimeInPlaylist`,
-  `viewsPerPlaylistStart`) works without it; the tier-2 cross-check does not.
-- Not on the Phase 0 exit gate. Phase 1B can scope this either as a prereq
-  or as a tier-2 follow-up depending on how thorough the recommend-only
-  prune logic needs to be on day one.
-
-### Plan to close
-Add an `insightTrafficSource=PLAYLIST`-filtered video report function to
-`analytics_client.py` (Analytics API supports
-`filters=video==<id>;insightTrafficSourceType==PLAYLIST` with
-`dimensions=insightTrafficSourceDetail` to break down which playlist drove
-the views). No new scope needed. Land it inside Phase 1B's "score each
-playlist on session contribution" step, not as a Phase 0 amendment.
+### Design decision worth recording
+Tier-2 is **reported, not weighted**. The score formula stays
+`tier_1 = avg_time_in_playlist_sec * views_per_playlist_start`. PO's
+"primary / secondary" phrasing reads as "secondary informs but does not
+dominate," and keeping the percentile contract stable across the tier-1
+→ tier-2 transition was preferred over redefining the score mid-pilot.
+A later tuning pass can introduce a blended score once the pilot
+produces a feel for how the two signals correlate.
 
 ---
 
@@ -298,7 +308,7 @@ per month, ~190k per year. Per channel.
   for debugging "did the poll run today?" — so dropping the log entirely
   is a regression.
 
-### Plan to close (two paths)
+### Plan to close (three paths)
 - **A. Aggregate at the end of `_poll_channel`** — one summary row per
   channel per job: `{"operation": "youtubeAnalytics.poll", "units": 0,
   "channel_id": cid}` with the per-channel counts encoded in a new
@@ -307,12 +317,18 @@ per month, ~190k per year. Per channel.
 - **B. Add an explicit `success_count` / `call_count` column on
   `quota_log` and have analytics writes aggregate inline.** More
   invasive but better-typed.
-- **C. Filter the sparkline query to `units > 0`** as a workaround so
-  the dashboard truncation goes away even before we aggregate. Cheapest
-  win; defers the actual aggregation.
+- **C. ✅ APPLIED (Phase 1B Step B, 2026-06-18)** — filter
+  `dashboard.py` sparkline + `quota.units_used_today()` to `units > 0`
+  so the analytics zero-rows can't crowd real Data API rows out of the
+  1000-row window. Cheapest win; defers the actual aggregation.
 
-### Owed by
-Carry forward into Phase 1A planning. Not a Phase 0 exit-gate blocker.
+### Status
+**Partially closed.** Path C shipped (`quota.units_used_today` filter
+landed during Phase 0 reviewer pass; sparkline filter landed during
+Phase 1B Step B because Step B's tier-2 poll doubles the zero-unit row
+volume). The bloat-prevention path (A or B) stays open — `quota_log`
+still grows by ~K rows/channel/day. Revisit if table size becomes a
+concrete operational problem.
 
 ---
 
