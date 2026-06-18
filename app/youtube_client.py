@@ -124,10 +124,14 @@ def yt_videos_list_full(yt, channel_id: str | None, ids: list[str]) -> list[dict
 
 
 def yt_videos_list_stats(yt, channel_id: str | None, ids: list[str]) -> list[dict]:
-    """Statistics only. Cost: 1."""
+    """Statistics + status for up to 50 videos. Cost: 1.
+
+    `status` is included (same quota cost) so callers can detect privacy flips
+    on already-synced videos without a full snippet re-fetch.
+    """
     success = False
     try:
-        resp = yt.videos().list(part="statistics", id=",".join(ids)).execute()
+        resp = yt.videos().list(part="statistics,status", id=",".join(ids)).execute()
         success = True
         return resp.get("items", [])
     except Exception as e:

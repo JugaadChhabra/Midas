@@ -854,11 +854,16 @@ async function revertAudit(auditId, videoId) {
 $('sync-btn').onclick = async () => {
   $('sync-btn').disabled = true; $('sync-status').textContent = ' Syncing…';
   try {
+    // Incremental: discovers new uploads only (cheap), then refreshes counts +
+    // privacy on existing videos via the stats endpoint. Use ?full=true for a
+    // thorough re-pull (rebuilds snippets, catches old title/tag edits).
     const r = await fetch(`/channels/${channelId}/sync`, { method: 'POST' });
     const j = await r.json();
     if (!r.ok) throw new Error(JSON.stringify(j));
-    $('sync-status').textContent = ` ${j.synced} videos`;
-    toast(`Synced ${j.synced} videos.`, 'ok');
+    $('sync-status').textContent = ' Refreshing stats…';
+    await fetch(`/channels/${channelId}/refresh-stats`, { method: 'POST' });
+    $('sync-status').textContent = ` ${j.synced} new`;
+    toast(`Synced ${j.synced} new video(s); refreshed stats.`, 'ok');
     await loadVideos(); await loadChannel(); await loadOverview();
   } catch (e) {
     $('sync-status').textContent = ' Sync failed';

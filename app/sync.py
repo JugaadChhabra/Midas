@@ -28,7 +28,20 @@ router = APIRouter(tags=["sync"])
 
 
 @router.post("/channels/{channel_id}/sync")
-def sync_channel(channel_id: str):
+def sync_channel(channel_id: str, full: bool = False):
+    """Sync a channel's videos.
+
+    Incremental by default: the uploads playlist is returned newest-first, so we
+    page until we hit a video already in the DB and only fetch full metadata for
+    the genuinely new ids. This drops a typical resync from ~1+2*ceil(N/50) quota
+    units (full re-list of every video) to a handful.
+
+    Pass ``full=True`` for a backfill / first sync or to repair stale metadata —
+    it re-fetches every video's snippet so edits to old titles/tags/privacy are
+    picked up. Routine privacy-flip detection is handled more cheaply by
+    ``refresh_stats`` (statistics+status), so a full sync is only needed
+    occasionally.
+    """
     yt = youtube_for_channel(channel_id)
 
     # Read channel settings first so we know whether to include Shorts.
@@ -39,6 +52,14 @@ def sync_channel(channel_id: str):
     )
     sync_shorts: bool = channel_settings.get("sync_shorts") is not False
 
+    # For incremental syncs, load the ids we already have so we can stop early.
+    known_ids: set[str] = set()
+    if not full:
+        existing = (
+            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
+        )
+        known_ids = {v["id"] for v in existing}
+
     channel_meta = yt_channels_list_uploads(yt, channel_id)
     if not channel_meta:
         raise HTTPException(404, "Channel not found on YouTube")
@@ -46,9 +67,17 @@ def sync_channel(channel_id: str):
 
     video_ids: list[str] = []
     page_token: str | None = None
-    while True:
+    reached_known = False
+    while not reached_known:
         resp = yt_playlist_items_page(yt, channel_id, uploads_playlist, page_token)
-        video_ids.extend(item["contentDetails"]["videoId"] for item in resp.get("items", []))
+        for item in resp.get("items", []):
+            vid = item["contentDetails"]["videoId"]
+            if not full and vid in known_ids:
+                # Newest-first ordering: everything past this point is already
+                # stored, so stop walking the playlist entirely.
+                reached_known = True
+                break
+            video_ids.append(vid)
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
@@ -104,12 +133,67 @@ def sync_channel(channel_id: str):
         ).in_("id", privacy_changed_to_private).execute()
 
     # Refresh default_language from YouTube unless the channel has a manual override.
-    channel_patch: dict = {"last_synced_at": datetime.now(timezone.utc).isoformat()}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    channel_patch: dict = {"last_synced_at": now_iso}
+    if full:
+        # Records when we last rebuilt every snippet, so autopilot can space full
+        # passes a few days apart and run incremental syncs in between.
+        channel_patch["last_full_synced_at"] = now_iso
     if not channel_settings.get("default_language") and channel_meta.get("default_language"):
         channel_patch["default_language"] = channel_meta["default_language"]
     supabase().table("channels").update(channel_patch).eq("id", channel_id).execute()
 
     return {"synced": len(rows)}
+
+
+def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:
+    """Pull statistics+status for the given video ids (1 quota unit per 50) and
+    update counts plus privacy_status. Returns the number of videos refreshed.
+
+    Writing privacy_status here is how privacy flips on already-synced videos
+    get caught cheaply (option B) without a full snippet re-fetch — both
+    public→private (so autopilot stops touching it) and private→public.
+    """
+    refreshed = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for i in range(0, len(target_ids), 50):
+        batch = target_ids[i:i+50]
+        try:
+            items = yt_videos_list_stats(yt, channel_id, batch)
+        except HttpError as e:
+            if e.status_code == 403 and "quotaExceeded" in str(e):
+                raise HTTPException(429, "youtube_quota_exceeded")
+            raise HTTPException(502, f"YouTube API error: {e}")
+        for item in items:
+            stats = item.get("statistics", {})
+            patch = {
+                "view_count": int(stats.get("viewCount") or 0),
+                "like_count": int(stats.get("likeCount") or 0),
+                "comment_count": int(stats.get("commentCount") or 0),
+                "last_fetched_at": now,
+            }
+            privacy = (item.get("status") or {}).get("privacyStatus")
+            if privacy:
+                patch["privacy_status"] = privacy
+            supabase().table("videos").update(patch).eq("id", item["id"]).execute()
+            refreshed += 1
+    return refreshed
+
+
+@router.post("/channels/{channel_id}/refresh-stats")
+def refresh_stats(channel_id: str):
+    """Refresh view/like/comment counts and privacy_status for every synced
+    video on the channel. Cheap: 1 quota unit per 50 videos, and no playlist
+    walk. Run this on a routine cadence to keep stats fresh and catch privacy
+    flips between full syncs."""
+    vids = (
+        supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
+    )
+    target_ids = [v["id"] for v in vids]
+    if not target_ids:
+        return {"refreshed": 0}
+    yt = youtube_for_channel(channel_id)
+    return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
 @router.post("/channels/{channel_id}/refresh-applied-stats")
@@ -131,26 +215,7 @@ def refresh_applied_stats(channel_id: str):
         return {"refreshed": 0}
 
     yt = youtube_for_channel(channel_id)
-    refreshed = 0
-    now = datetime.now(timezone.utc).isoformat()
-    for i in range(0, len(target_ids), 50):
-        batch = target_ids[i:i+50]
-        try:
-            items = yt_videos_list_stats(yt, channel_id, batch)
-        except HttpError as e:
-            if e.status_code == 403 and "quotaExceeded" in str(e):
-                raise HTTPException(429, "youtube_quota_exceeded")
-            raise HTTPException(502, f"YouTube API error: {e}")
-        for item in items:
-            stats = item.get("statistics", {})
-            supabase().table("videos").update({
-                "view_count": int(stats.get("viewCount") or 0),
-                "like_count": int(stats.get("likeCount") or 0),
-                "comment_count": int(stats.get("commentCount") or 0),
-                "last_fetched_at": now,
-            }).eq("id", item["id"]).execute()
-            refreshed += 1
-    return {"refreshed": refreshed}
+    return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
 @router.get("/channels/{channel_id}/videos")
