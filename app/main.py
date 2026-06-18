@@ -19,6 +19,7 @@ from app.playlists import reconcile_channel
 from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
+from app.shorts.routes import router as shorts_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 _main_log = logging.getLogger("midas.main")
@@ -120,6 +121,7 @@ app.include_router(autopilot_router)
 app.include_router(dashboard_router)
 app.include_router(playlists_router)
 app.include_router(reflection_router)
+app.include_router(shorts_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

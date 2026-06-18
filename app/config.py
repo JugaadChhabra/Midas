@@ -24,6 +24,12 @@ class Settings:
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
 
+    # WayinVideo (https://wayinvideo-api.wayin.ai) — shorts automation prototype.
+    WAYINVIDEO_API_KEY  = os.getenv("WAYINVIDEO_API_KEY", "")
+    WAYINVIDEO_BASE_URL = os.getenv("WAYINVIDEO_BASE_URL", "https://wayinvideo-api.wayin.ai/api/v2")
+    # Local disk cache used only as fallback when streaming upload to YouTube fails.
+    SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
+
     # YouTube transcript proxy (to work around IP bans)
     # Option A: any HTTP/HTTPS/SOCKS proxy  e.g. "http://user:pass@host:port"
     YOUTUBE_PROXY_URL = os.getenv("YOUTUBE_PROXY_URL", "")
