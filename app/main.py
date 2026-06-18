@@ -22,6 +22,7 @@ from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
 from app.shorts.routes import router as shorts_router
 from app.metrics_poll import poll_metrics
+from app.playlist_health import score_channel as playlist_health_score_channel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 _main_log = logging.getLogger("midas.main")
@@ -85,6 +86,34 @@ def _weekly_reflection():
             _main_log.exception("Weekly reflection failed for %s: %s", channel_id, e)
 
 
+def _daily_playlist_health_score():
+    """Phase 1B Step 4 — score every channel where playlist_health_enabled=true.
+
+    Runs after metrics_poll (UTC 05:00) so each tick scores against fresh
+    playlist_metrics rows. Per-channel exceptions are isolated; one bad
+    channel does not kill the loop. Channels with the flag false are
+    skipped silently — same graceful-degradation pattern as Phase 0's
+    metrics_poll skipping `analytics_authorized=false`.
+    """
+    rows = (
+        supabase().table("channels")
+        .select("id")
+        .eq("playlist_health_enabled", True)
+        .execute()
+        .data or []
+    )
+    if not rows:
+        _main_log.info("playlist_health_score: no channels with playlist_health_enabled=true")
+        return
+    for r in rows:
+        channel_id = r["id"]
+        try:
+            summary = playlist_health_score_channel(channel_id)
+            _main_log.info("Daily playlist_health_score %s: %s", channel_id, summary)
+        except Exception as e:
+            _main_log.exception("Daily playlist_health_score failed for %s: %s", channel_id, e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.add_job(
@@ -142,6 +171,25 @@ async def lifespan(app: FastAPI):
         # the relative ordering to differ.
         timezone="UTC",
         id="metrics_poll",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        _daily_playlist_health_score,
+        "cron",
+        hour=7,
+        minute=0,
+        # UTC, two hours after metrics_poll's UTC 05:00 fire. The gap is the
+        # only ordering guarantee we have — APScheduler does not serialize
+        # across job IDs, so if metrics_poll spills past this fire time the
+        # scorer reads stale (yesterday's) playlist_metrics. Two hours covers
+        # the current fleet comfortably (analytics API ≈ 1s/video; ~7k videos
+        # ≈ 2hr ceiling). If we approach that ceiling, options are: widen the
+        # gap further, or chain `_daily_playlist_health_score()` at the tail
+        # of `poll_metrics` to make the ordering atomic. UTC pin rationale
+        # is the same as metrics_poll above.
+        timezone="UTC",
+        id="playlist_health_score",
         max_instances=1,
         coalesce=True,
     )

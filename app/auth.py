@@ -109,7 +109,7 @@ def list_channels():
     res = supabase().table("channels").select(
         "id,name,handle,last_synced_at,default_language,"
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
-        "sync_shorts,analytics_authorized"
+        "sync_shorts,analytics_authorized,playlist_health_enabled"
     ).execute()
     return res.data
 
@@ -119,6 +119,7 @@ class ChannelSettings(BaseModel):
     autopilot_enabled: bool | None = None
     autopilot_daily_cap: int | None = None
     sync_shorts: bool | None = None
+    playlist_health_enabled: bool | None = None
 
 
 @router.patch("/channels/{channel_id}")
@@ -132,6 +133,11 @@ def update_channel(channel_id: str, body: ChannelSettings):
         patch["autopilot_daily_cap"] = max(1, min(int(body.autopilot_daily_cap), 200))
     if body.sync_shorts is not None:
         patch["sync_shorts"] = body.sync_shorts
+    if body.playlist_health_enabled is not None:
+        # Phase 1B per-channel rollout gate. Operators flip this per
+        # channel as they widen the recommend-only health-scoring loop;
+        # the playlist_health_score cron skips channels where it's false.
+        patch["playlist_health_enabled"] = body.playlist_health_enabled
     if not patch:
         return {"ok": True, "noop": True}
     supabase().table("channels").update(patch).eq("id", channel_id).execute()

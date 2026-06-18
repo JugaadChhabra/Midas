@@ -226,6 +226,15 @@
       <button id="sync-settings-save">Save</button>
     </div>
     <div class="card">
+      <h3 style="margin-top:0">Playlist health <span class="muted" style="font-weight:400; font-size:.78rem">(recommend-only)</span></h3>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+        <input type="checkbox" id="playlist-health-enabled" />
+        <b>Enable playlist health scoring</b>
+      </label>
+      <p class="muted" style="margin:.35rem 0 .75rem">Daily job that scores each playlist on session contribution (web-only counts) and surfaces revive / remove recommendations under the Playlists tab. <b>Never deletes anything</b> — operator confirms. Disabled by default per channel.</p>
+      <button id="playlist-health-save">Save</button>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0">Audit prompt</h3>
       <label><b>Regular videos</b></label>
       <textarea id="prompt" rows="12" placeholder="Paste your audit prompt here…"></textarea>
@@ -341,6 +350,7 @@ async function loadChannel() {
   $('ap-enabled').checked = !!c.autopilot_enabled;
   $('ap-cap').value = c.autopilot_daily_cap ?? 10;
   $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
+  $('playlist-health-enabled').checked = !!c.playlist_health_enabled; // null/undefined → false (default off)
   $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
   // Surface the re-consent banner whenever the analytics scope hasn't been granted.
   $('reconsent-banner').hidden = !!c.analytics_authorized;
@@ -455,6 +465,19 @@ $('sync-settings-save').onclick = async () => {
     });
     if (!r.ok) throw new Error(await r.text());
     toast('Sync settings saved.', 'ok');
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
+};
+
+$('playlist-health-save').onclick = async () => {
+  try {
+    const r = await fetch(`/auth/channels/${channelId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ playlist_health_enabled: $('playlist-health-enabled').checked }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast(`Playlist health scoring ${$('playlist-health-enabled').checked ? 'enabled' : 'disabled'}.`, 'ok');
+    // Refresh the Playlists tab card so the "off" message clears immediately on enable.
+    await loadHealth();
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 
@@ -1062,8 +1085,7 @@ function renderHealth(envelope) {
   if (!envelope.enabled) {
     $('pl-health-status').innerHTML =
       'Playlist health scoring is <b>off</b> for this channel. ' +
-      'An operator can enable it by setting <code>channels.playlist_health_enabled = true</code>; ' +
-      'a UI toggle ships in a follow-up step.';
+      'Enable it under <b>Settings → Playlist health</b>, then click <b>Run evaluation</b>.';
     $('pl-health').innerHTML = '<em class="muted">No recommendations to show.</em>';
     return;
   }
