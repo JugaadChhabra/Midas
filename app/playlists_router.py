@@ -1,16 +1,157 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
 from app.db import supabase
 from app.embeddings import bootstrap_embeddings
 from app.openrouter import EMBED_MODEL
 from app.playlists import reconcile_channel, _record_assignment
 from app.playlists_sync import sync_playlists
+from app.playlist_health import score_channel
 from app.youtube_client import youtube_for_channel, yt_playlist_items_insert, yt_playlist_items_delete
 from app.playlists import _current_members
 
 router = APIRouter(tags=["playlists"])
+
+
+# Phase 1B health endpoints (PHASE_1B_PLAN.md §6).
+# Recommend-only — these never invoke YouTube write APIs.
+
+# Recommendation render order — most-actionable first so the UI can render
+# top-down without an extra sort step.
+_REC_PRIORITY = {
+    "remove": 0,
+    "revive": 1,
+    "keep": 2,
+    "insufficient_data": 3,
+    None: 4,
+}
+
+
+def _check_channel(channel_id: str) -> dict:
+    """Load the channel row or raise 404 — used by both health endpoints."""
+    row = (
+        supabase().table("channels")
+        .select("id,name,playlist_health_enabled")
+        .eq("id", channel_id)
+        .maybe_single()
+        .execute()
+        .data
+    )
+    if not row:
+        raise HTTPException(404, f"channel {channel_id} not found")
+    return row
+
+
+def _serialize_playlists(channel_id: str) -> list[dict]:
+    """Read back the playlists table for a channel, sorted recommendation-first."""
+    rows = (
+        supabase().table("playlists")
+        .select(
+            "id,title,role,origin,item_count,"
+            "health_score,health_recommendation,health_computed_at,health_rationale_json"
+        )
+        .eq("channel_id", channel_id)
+        .execute()
+        .data or []
+    )
+    # Sort: action priority first, then score ascending (lowest = worst).
+    rows.sort(key=lambda r: (
+        _REC_PRIORITY.get(r.get("health_recommendation"), 4),
+        # None scores last within their priority bucket; sort by negative
+        # would flip the sense, so substitute +inf when missing.
+        r.get("health_score") if r.get("health_score") is not None else float("inf"),
+    ))
+    out: list[dict] = []
+    for r in rows:
+        rationale = r.get("health_rationale_json") or {}
+        out.append({
+            "playlist_id": r["id"],
+            "title": r.get("title"),
+            "role": r.get("role"),
+            "origin": r.get("origin"),
+            "item_count": r.get("item_count"),
+            "current_score": r.get("health_score"),
+            # Hoisted from rationale to top-level per PHASE_1B_PLAN.md §6.2
+            # so UI consumers don't have to reach into the JSONB blob for
+            # the most-commonly-displayed number.
+            "percentile": rationale.get("percentile"),
+            "action": r.get("health_recommendation"),
+            "computed_at": r.get("health_computed_at"),
+            "rationale": rationale,
+        })
+    return out
+
+
+def _envelope(channel_id: str, enabled: bool, computed_at: str | None) -> dict:
+    """Common response shape per PHASE_1B_PLAN.md §6.2."""
+    return {
+        "enabled": enabled,
+        "channel_id": channel_id,
+        "computed_at": computed_at,
+        "window": {
+            "weeks": settings.PLAYLIST_HEALTH_AGG_WEEKS,
+            "min_starts_gate": settings.MIN_PLAYLIST_STARTS,
+        },
+        "thresholds": {
+            "remove_pctl": settings.PLAYLIST_HEALTH_REMOVE_PCTL,
+            "revive_pctl": settings.PLAYLIST_HEALTH_REVIVE_PCTL,
+        },
+        # Hardcoded false until Phase 1B Step B (Gap 6 — insightTrafficSource=PLAYLIST
+        # member breakdown — see PHASE_1B_PLAN.md §9) lands. Every rationale
+        # also carries tier_2_pending=true; this is the per-response mirror.
+        "tier_2_available": False,
+        "recommendations": [],
+    }
+
+
+@router.post("/channels/{channel_id}/playlists/evaluate")
+def evaluate_playlists(channel_id: str):
+    """Re-score this channel and return fresh recommendations.
+
+    Honours the per-channel `playlist_health_enabled` flag — if off, returns
+    an empty envelope with `enabled=false` (200, not 403; it's a UI
+    affordance, not a security gate). Recommend-only: never mutates
+    YouTube; only writes to `playlists.health_*` via score_channel.
+    """
+    channel = _check_channel(channel_id)
+    if not channel.get("playlist_health_enabled"):
+        return _envelope(channel_id, enabled=False, computed_at=None)
+
+    summary = score_channel(channel_id)
+    body = _envelope(channel_id, enabled=True, computed_at=summary.get("computed_at"))
+    body["summary"] = {
+        "playlists_total": summary["playlists_total"],
+        "gated_in": summary["gated_in"],
+        "insufficient_data": summary["insufficient_data"],
+        "remove": summary["remove"],
+        "revive": summary["revive"],
+        "keep": summary["keep"],
+    }
+    body["recommendations"] = _serialize_playlists(channel_id)
+    return body
+
+
+@router.get("/channels/{channel_id}/playlists/health")
+def get_playlist_health(channel_id: str):
+    """Read the LAST stored scoring without re-running.
+
+    Useful for the UI's initial paint and for ops debugging — does not pay
+    the score_channel cost. Same shape as POST /evaluate so the UI can
+    consume one envelope.
+    """
+    channel = _check_channel(channel_id)
+    if not channel.get("playlist_health_enabled"):
+        return _envelope(channel_id, enabled=False, computed_at=None)
+    recommendations = _serialize_playlists(channel_id)
+    # Latest computed_at across all rows == when the most recent score_channel
+    # call landed for this channel. Use it as the envelope's computed_at.
+    computed_ats = [r["computed_at"] for r in recommendations if r.get("computed_at")]
+    latest = max(computed_ats) if computed_ats else None
+    body = _envelope(channel_id, enabled=True, computed_at=latest)
+    body["recommendations"] = recommendations
+    return body
 
 
 @router.post("/channels/{channel_id}/playlists/bootstrap")

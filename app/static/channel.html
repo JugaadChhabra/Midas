@@ -171,6 +171,16 @@
       <h3 style="margin-top:0">Status</h3>
       <div id="pl-status">Loading…</div>
     </div>
+    <div class="card" id="pl-health-card">
+      <div class="row" style="margin-bottom:.6rem">
+        <h3 style="margin:0">Playlist health <span class="muted" style="font-weight:400; font-size:.78rem">(recommend-only)</span></h3>
+        <span style="flex:1"></span>
+        <button id="pl-health-evaluate-btn">Run evaluation</button>
+        <button id="pl-health-refresh-btn">Refresh</button>
+      </div>
+      <div id="pl-health-status" class="muted" style="font-size:.85rem; margin-bottom:.5rem"></div>
+      <div id="pl-health">Loading…</div>
+    </div>
     <div class="card" id="pl-proposals-card">
       <div class="row" style="margin-bottom:.75rem">
         <h3 style="margin:0">Pending proposals</h3>
@@ -1029,9 +1039,120 @@ $('pl-reconcile-btn').onclick = async () => {
   } finally { $('pl-reconcile-btn').disabled = false; }
 };
 
+// ── Playlist health (Phase 1B — recommend-only) ───────────────────────────
+const PL_ACTION_BG = {
+  remove: '#c33',
+  revive: '#d80',
+  keep: '#2a7',
+  insufficient_data: '#888',
+};
+const PL_ACTION_LABEL = {
+  remove: 'Recommend remove',
+  revive: 'Recommend revive',
+  keep: 'Keep',
+  insufficient_data: 'Not enough data',
+};
+function plActionPill(action) {
+  const bg = PL_ACTION_BG[action] || '#888';
+  const label = PL_ACTION_LABEL[action] || (action || '—');
+  return `<span class="pill" style="background:${bg};color:white">${label}</span>`;
+}
+
+function renderHealth(envelope) {
+  if (!envelope.enabled) {
+    $('pl-health-status').innerHTML =
+      'Playlist health scoring is <b>off</b> for this channel. ' +
+      'An operator can enable it by setting <code>channels.playlist_health_enabled = true</code>; ' +
+      'a UI toggle ships in a follow-up step.';
+    $('pl-health').innerHTML = '<em class="muted">No recommendations to show.</em>';
+    return;
+  }
+  const w = envelope.window || {};
+  const t = envelope.thresholds || {};
+  const tier2 = envelope.tier_2_available
+    ? ''
+    : ' · <span class="muted" title="Tier-2 (playlist-source views to members) ships in a follow-up step">tier-2 pending</span>';
+  $('pl-health-status').innerHTML =
+    `Last computed: ${envelope.computed_at ? envelope.computed_at.slice(0,16).replace('T',' ') : '—'} · ` +
+    `window ${w.weeks}w · gate ≥${w.min_starts_gate} starts · ` +
+    `thresholds remove≤${t.remove_pctl}%, revive≤${t.revive_pctl}%${tier2}`;
+
+  const recs = envelope.recommendations || [];
+  if (!recs.length) {
+    $('pl-health').innerHTML = '<em class="muted">No playlists for this channel yet — run sync first.</em>';
+    return;
+  }
+  const rows = recs.map(r => {
+    const score = r.current_score == null ? '—' : Number(r.current_score).toFixed(1);
+    const pctlRaw = r.percentile ?? r.rationale?.percentile;  // top-level preferred; rationale is fallback for older rows
+    const pctl = pctlRaw == null ? '—' : pctlRaw + '%';
+    const startsField = r.rationale?.playlist_starts ?? r.rationale?.playlist_starts_in_window ?? '—';
+    const small = r.rationale?.small_channel_note
+      ? ' <span class="pill" title="' + escapeHtml(r.rationale.small_channel_note) + '" style="background:#8884">small ch.</span>'
+      : '';
+    return `<tr>
+      <td>${plActionPill(r.action)}${small}</td>
+      <td>
+        <div style="font-weight:600">${escapeHtml(r.title || r.playlist_id)}</div>
+        <div class="muted" style="font-size:.78rem"><code>${escapeHtml(r.playlist_id)}</code>${r.role && r.role !== 'inherited' ? ` · ${escapeHtml(r.role)}` : ''}${r.origin && r.origin !== 'inherited' ? ` · ${escapeHtml(r.origin)}` : ''}</div>
+      </td>
+      <td class="muted">${r.item_count ?? '—'}</td>
+      <td>${score}</td>
+      <td>${pctl}</td>
+      <td class="muted" style="font-size:.78rem">${startsField} starts</td>
+      <td><details><summary class="muted">rationale</summary><pre style="font-size:.75rem; max-width:32rem; white-space:pre-wrap">${escapeHtml(JSON.stringify(r.rationale, null, 2))}</pre></details></td>
+    </tr>`;
+  }).join('');
+  $('pl-health').innerHTML =
+    `<table>
+      <thead><tr>
+        <th>Action</th><th>Playlist</th><th>Items</th><th>Score</th><th>Pctl</th><th>Window</th><th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function loadHealth() {
+  $('pl-health').innerHTML = 'Loading…';
+  try {
+    const r = await fetch(`/channels/${channelId}/playlists/health`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    renderHealth(j);
+  } catch (e) {
+    $('pl-health').innerHTML = '<em class="muted">Could not load playlist health.</em>';
+    $('pl-health-status').innerHTML = '';
+  }
+}
+
+$('pl-health-refresh-btn').onclick = loadHealth;
+
+$('pl-health-evaluate-btn').onclick = async () => {
+  $('pl-health-evaluate-btn').disabled = true;
+  $('pl-health-status').textContent = 'Re-scoring playlists…';
+  try {
+    const r = await fetch(`/channels/${channelId}/playlists/evaluate`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    if (!j.enabled) {
+      renderHealth(j);
+      toast('Playlist health is not enabled for this channel.', 'warn');
+      return;
+    }
+    const s = j.summary || {};
+    toast(`Evaluated: ${s.remove} remove, ${s.revive} revive, ${s.keep} keep, ${s.insufficient_data} insufficient.`,
+      s.remove ? 'warn' : 'ok', 6000);
+    renderHealth(j);
+  } catch (e) {
+    toast('Evaluation failed: ' + escapeHtml(String(e)), 'err');
+  } finally {
+    $('pl-health-evaluate-btn').disabled = false;
+  }
+};
+
 (async () => {
   await loadChannel();
-  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview(), loadPlaylistStatus(), loadProposals(), loadReflectionData()]);
+  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview(), loadPlaylistStatus(), loadProposals(), loadHealth(), loadReflectionData()]);
   setInterval(loadAutopilotLog, 30000);
 })();
 

@@ -391,6 +391,21 @@ re-running scoring). Useful so the UI can render fast without forcing a recomput
 on every page-load. **Recommendation:** ship both — POST forces a recompute,
 GET reads the cached snapshot.
 
+### 6.4 Additive envelope fields landed during implementation
+
+The shipped envelope contains two fields beyond the §6.2 sketch — recorded
+here so the spec stays honest about what the code actually returns:
+
+- `thresholds: {remove_pctl, revive_pctl}` — used by the UI status line so
+  the operator can see the current cutoff values at a glance.
+- `summary: {playlists_total, gated_in, insufficient_data, remove, revive,
+  keep}` — only on `POST /evaluate`; powers the post-run toast count.
+
+Recommendation row also has `percentile` hoisted to top-level (mirrored from
+`rationale.percentile`) so consumers don't have to reach into the JSONB blob
+for the most-commonly-displayed number. The nested copy stays for backward
+compatibility with anyone reading the rationale.
+
 ---
 
 ## 7. UI rendering
