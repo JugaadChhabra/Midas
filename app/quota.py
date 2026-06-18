@@ -15,10 +15,17 @@ def _today_start_iso() -> str:
 
 
 def units_used_today() -> int:
+    # Filter to units > 0 BEFORE Supabase's 1000-row default cap kicks in.
+    # Loop 0's metrics_poll writes one units=0 telemetry row per analytics
+    # call; without this filter those zero rows can crowd real Data API rows
+    # out of the 1000-row window mid-day, silently under-reporting quota and
+    # letting can_afford() return True past the real budget. See
+    # docs/PHASE_0_GAPS.md Gap 8.
     res = (
         supabase().table("quota_log")
         .select("units")
         .gte("occurred_at", _today_start_iso())
+        .gt("units", 0)
         .execute()
     )
     return sum((row.get("units") or 0) for row in (res.data or []))

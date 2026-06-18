@@ -3,11 +3,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Tolerate scope mismatch between the request and Google's token response.
+# Needed when a re-consenting user unchecks the analytics scope box: Google
+# returns a smaller scope set than we requested, and oauthlib would otherwise
+# raise. We detect the actual grant via creds.granted_scopes in /auth/callback.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
 
 class Settings:
     CLIENT_SECRETS_FILE = os.getenv("CLIENT_SECRETS_FILE", "client_secret.json")
     OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8000/auth/callback")
-    SCOPES = ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.readonly"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/youtube",
+        "https://www.googleapis.com/auth/youtube.readonly",
+        # Loop 0 sensor — per-video CTR + per-playlist session metrics.
+        # Existing tokens were granted without this scope; each channel must re-consent.
+        "https://www.googleapis.com/auth/yt-analytics.readonly",
+    ]
+    ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
 
     SUPABASE_URL = os.getenv("SUPABASE_URL", "")
     SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")

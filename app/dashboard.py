@@ -46,7 +46,8 @@ def dashboard():
     channels = (
         supabase().table("channels").select(
             "id,name,handle,last_synced_at,default_language,"
-            "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at"
+            "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
+            "analytics_authorized"
         ).execute()
     ).data or []
 

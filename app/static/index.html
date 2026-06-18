@@ -285,7 +285,8 @@ function renderChannels(list, pipeline) {
       const touched = (c.applied_total || 0) + (c.pending_count || 0);
       const touchedPct = totalVids > 0 ? Math.min(100, Math.round(touched / totalVids * 100)) : 0;
       return `<tr>
-        <td><b>${escapeHtml(c.name || c.id)}</b></td>
+        <td><b>${escapeHtml(c.name || c.id)}</b>
+            ${c.analytics_authorized ? '' : '<span class="pill" style="background:#d80;color:white;margin-left:.4rem" title="Reconnect for analytics — Loop 0 polling is skipped">Reconnect for analytics</span>'}</td>
         <td class="muted">${escapeHtml(c.handle || '')}</td>
         <td>
           <div class="mini-prog">
