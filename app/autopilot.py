@@ -10,7 +10,7 @@ from app.config import settings
 from app.db import supabase
 from app import quota
 from app.audits import audit_video, validate_audit, apply_audit_internal
-from app.sync import sync_channel
+from app.sync import sync_channel, refresh_stats
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
 
@@ -43,6 +43,24 @@ def _next_yt_quota_reset() -> datetime:
 COST_STATS_FETCH = 1
 COST_VIDEO_UPDATE = 50
 APPLY_COST = COST_STATS_FETCH + COST_VIDEO_UPDATE  # 51
+
+# How often to run a full (snippet-rebuilding) sync instead of an incremental
+# one. Incremental syncs miss edits to old titles/tags, so we do a full pass
+# this often to repair them.
+FULL_SYNC_INTERVAL = timedelta(days=3)
+
+
+def _needs_full_sync(channel: dict) -> bool:
+    """True if this channel has never had a full sync or the last one is older
+    than FULL_SYNC_INTERVAL."""
+    last = channel.get("last_full_synced_at")
+    if not last:
+        return True
+    try:
+        dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return True
+    return (datetime.now(timezone.utc) - dt) > FULL_SYNC_INTERVAL
 
 
 UNSAFE_MODELS = {
@@ -196,7 +214,19 @@ def tick():
             #     _touch_tick(channel_id)
             #     return
             try:
-                sync_channel(channel_id)
+                if _needs_full_sync(ch):
+                    # Full pass every FULL_SYNC_INTERVAL: rebuilds every snippet so
+                    # edits to old titles/tags/privacy are picked up, and refreshes
+                    # stats in the same call (no separate refresh_stats needed).
+                    sync_channel(channel_id, full=True)
+                else:
+                    # Incremental: only discovers genuinely new uploads (cheap).
+                    sync_channel(channel_id)
+                    # Incremental sync no longer re-lists already-stored videos, so
+                    # refresh their counts + privacy_status here (statistics+status,
+                    # 1 unit per 50). Catches view drift and privacy flips between
+                    # full passes.
+                    refresh_stats(channel_id)
             except TokenExpiredError:
                 log.warning("OAuth token expired or revoked for %s during sync; pausing", channel_id)
                 _pause(channel_id, "token_expired")
