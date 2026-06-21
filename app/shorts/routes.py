@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.db import supabase
-from app.shorts.wayin_client import submit_clipping, WayinVideoError
+from app.shorts.wayin_client import submit_clipping, WayinVideoError, WayinVideoNotConfigured
 from app.shorts.poller import schedule_poll
+
+log = logging.getLogger("midas.shorts.routes")
 
 router = APIRouter(prefix="/shorts", tags=["shorts"])
 
@@ -29,12 +33,21 @@ def create_job(body: CreateJob):
 
     try:
         project_id = submit_clipping(body.source_url)
-    except WayinVideoError as e:
+    except WayinVideoNotConfigured as e:
+        log.error("Shorts job %d: WayinVideo not configured", job_id)
         sb.table("shorts_jobs").update({
             "status": "FAILED",
             "error_message": str(e)[:1000],
         }).eq("id", job_id).execute()
-        raise HTTPException(502, f"WayinVideo rejected the submission: {e}")
+        raise HTTPException(503, str(e))
+    except WayinVideoError as e:
+        log.exception("Shorts job %d: WayinVideo submit failed", job_id)
+        sb.table("shorts_jobs").update({
+            "status": "FAILED",
+            "error_message": str(e)[:1000],
+        }).eq("id", job_id).execute()
+        upstream = e.status_code or 502
+        raise HTTPException(502, f"WayinVideo rejected the submission (upstream {upstream}): {e}")
 
     sb.table("shorts_jobs").update({
         "status": "QUEUED",

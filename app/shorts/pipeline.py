@@ -11,10 +11,10 @@ from app.shorts.youtube_upload import upload_short
 log = logging.getLogger("midas.shorts.pipeline")
 
 # Synonyms WayinVideo may emit for the same logical field. The first present
-# key wins. Adjust here when the real response shape diverges.
-_URL_KEYS   = ("source_url", "video_url", "download_url", "url", "mp4_url")
-_START_KEYS = ("start_s", "start_seconds", "start", "start_time")
-_END_KEYS   = ("end_s",   "end_seconds",   "end",   "end_time")
+# key wins. Real v2 names are listed first; the rest are defensive fallbacks.
+_URL_KEYS   = ("export_link", "source_url", "video_url", "download_url", "url", "mp4_url")
+_START_KEYS = ("begin_ms", "start_ms", "start_s", "start_seconds", "start", "start_time")
+_END_KEYS   = ("end_ms", "end_s", "end_seconds", "end", "end_time")
 
 
 def _first(d: dict, keys: tuple[str, ...]) -> Any:
@@ -24,17 +24,25 @@ def _first(d: dict, keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _seconds(d: dict, keys: tuple[str, ...]) -> float | None:
+    """Return a start/end time in seconds; *_ms keys are converted from ms."""
+    for k in keys:
+        if k in d and d[k] is not None:
+            return d[k] / 1000.0 if k.endswith("_ms") else d[k]
+    return None
+
+
 def normalize_clips(raw: list[dict]) -> list[dict]:
     """Coerce WayinVideo clip dicts to our internal shape."""
     out: list[dict] = []
     for i, c in enumerate(raw, start=1):
         out.append({
-            "rank":        c.get("rank") or i,
+            "rank":        (c["idx"] + 1) if isinstance(c.get("idx"), int) else (c.get("rank") or i),
             "title":       c.get("title") or "",
-            "description": c.get("description") or "",
-            "hashtags":    list(c.get("hashtags") or []),
-            "start_s":     _first(c, _START_KEYS),
-            "end_s":       _first(c, _END_KEYS),
+            "description": c.get("desc") or c.get("description") or "",
+            "hashtags":    list(c.get("tags") or c.get("hashtags") or []),
+            "start_s":     _seconds(c, _START_KEYS),
+            "end_s":       _seconds(c, _END_KEYS),
             "source_url":  _first(c, _URL_KEYS),
         })
     return out

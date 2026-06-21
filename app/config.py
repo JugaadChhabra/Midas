@@ -40,6 +40,15 @@ class Settings:
     # WayinVideo (https://wayinvideo-api.wayin.ai) — shorts automation prototype.
     WAYINVIDEO_API_KEY  = os.getenv("WAYINVIDEO_API_KEY", "")
     WAYINVIDEO_BASE_URL = os.getenv("WAYINVIDEO_BASE_URL", "https://wayinvideo-api.wayin.ai/api/v2")
+    # Export/reframe settings for rendered shorts. AI Reframe crops to a vertical
+    # ratio so exports are true Shorts, not letterboxed landscape.
+    WAYINVIDEO_REFRAME    = (os.getenv("WAYINVIDEO_REFRAME", "true").lower() == "true")
+    WAYINVIDEO_RATIO      = os.getenv("WAYINVIDEO_RATIO", "RATIO_9_16")
+    # Fixed reframe layout. "Full" crops every scene to fill the frame (no black
+    # bars). "Auto"/empty lets WayinVideo pick per scene, which can letterbox.
+    WAYINVIDEO_REFRAME_LAYOUT = os.getenv("WAYINVIDEO_REFRAME_LAYOUT", "Full")
+    WAYINVIDEO_RESOLUTION = os.getenv("WAYINVIDEO_RESOLUTION", "HD_720")
+    WAYINVIDEO_CAPTIONS   = (os.getenv("WAYINVIDEO_CAPTIONS", "true").lower() == "true")
     # Local disk cache used only as fallback when streaming upload to YouTube fails.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 

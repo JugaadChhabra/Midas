@@ -16,6 +16,17 @@
     .status-FAILED    { color: #b00020; font-weight: 600; }
     .status-UPLOADING { color: #b07a00; }
     .muted { color: #666; font-size: 12px; }
+    .banner {
+      display: none; margin: 12px 0; padding: 10px 12px;
+      border-radius: 6px; border: 1px solid; font-size: 13px;
+    }
+    .banner.error   { background: #fdecea; border-color: #f5c6c0; color: #8b1a13; }
+    .banner.success { background: #e8f5ec; border-color: #b6dcc0; color: #0a5a25; }
+    .banner pre {
+      margin: 6px 0 0; padding: 8px; background: rgba(0,0,0,.05);
+      border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    }
+    td.error-cell { color: #8b1a13; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-width: 280px; }
   </style>
 </head>
 <body>
@@ -30,6 +41,8 @@
 
   <p><button id="generate">Generate shorts</button></p>
 
+  <div id="banner" class="banner"></div>
+
   <h2>Jobs</h2>
   <table id="jobs">
     <thead><tr><th>ID</th><th>Channel</th><th>URL</th><th>Status</th><th>Error</th><th>Clips</th></tr></thead>
@@ -37,8 +50,42 @@
   </table>
 
 <script>
+const banner = document.getElementById('banner');
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+
+function showBanner(kind, title, detail) {
+  banner.className = 'banner ' + kind;
+  banner.style.display = 'block';
+  banner.innerHTML = `<b>${escapeHtml(title)}</b>` +
+    (detail ? `<pre>${escapeHtml(detail)}</pre>` : '');
+}
+
+function hideBanner() { banner.style.display = 'none'; }
+
+async function describeError(r) {
+  // FastAPI returns {detail: "..."} or {detail: [{...}]}; fall back to raw text.
+  let detail = '';
+  try {
+    const body = await r.json();
+    detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body, null, 2);
+  } catch {
+    try { detail = await r.text(); } catch { detail = ''; }
+  }
+  return { status: r.status, statusText: r.statusText, detail };
+}
+
 async function loadChannels() {
   const r = await fetch('/auth/channels');
+  if (!r.ok) {
+    const e = await describeError(r);
+    showBanner('error', `Couldn't load channels (HTTP ${e.status} ${e.statusText})`, e.detail);
+    return;
+  }
   const channels = await r.json();
   const sel = document.getElementById('channel');
   sel.innerHTML = '';
@@ -52,41 +99,75 @@ async function loadChannels() {
 
 async function loadJobs() {
   const r = await fetch('/shorts/jobs');
+  if (!r.ok) {
+    const e = await describeError(r);
+    showBanner('error', `Couldn't load jobs (HTTP ${e.status} ${e.statusText})`, e.detail);
+    return;
+  }
   const jobs = await r.json();
   const tbody = document.querySelector('#jobs tbody');
   tbody.innerHTML = '';
   for (const j of jobs) {
-    const detail = await fetch('/shorts/jobs/' + j.id).then(r => r.json());
+    const detail = await fetch('/shorts/jobs/' + j.id).then(r => r.json()).catch(() => ({clips: []}));
     const clipsHtml = (detail.clips || []).map(c => {
       const link = c.yt_video_id
-        ? `<a href="https://studio.youtube.com/video/${c.yt_video_id}/edit" target="_blank">${c.yt_video_id}</a>`
-        : (c.local_path ? `<span class="muted">local: ${c.local_path}</span>` : '');
-      return `<div>#${c.rank} <span class="status-${c.upload_status}">${c.upload_status}</span> — ${c.title || ''} ${link}</div>`;
+        ? `<a href="https://studio.youtube.com/video/${escapeHtml(c.yt_video_id)}/edit" target="_blank">${escapeHtml(c.yt_video_id)}</a>`
+        : (c.local_path ? `<span class="muted">local: ${escapeHtml(c.local_path)}</span>` : '');
+      const err = c.upload_error ? `<div class="muted" style="color:#8b1a13">${escapeHtml(c.upload_error)}</div>` : '';
+      return `<div>#${c.rank} <span class="status-${escapeHtml(c.upload_status)}">${escapeHtml(c.upload_status)}</span> — ${escapeHtml(c.title || '')} ${link}${err}</div>`;
     }).join('');
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${j.id}</td>
-      <td>${j.channel_id}</td>
-      <td><a href="${j.source_url}" target="_blank">${j.source_url}</a></td>
-      <td class="status-${j.status}">${j.status}</td>
-      <td class="muted">${j.error_message || ''}</td>
+      <td>${escapeHtml(j.channel_id)}</td>
+      <td><a href="${escapeHtml(j.source_url)}" target="_blank">${escapeHtml(j.source_url)}</a></td>
+      <td class="status-${escapeHtml(j.status)}">${escapeHtml(j.status)}</td>
+      <td class="error-cell">${escapeHtml(j.error_message || '')}</td>
       <td>${clipsHtml || '<span class="muted">—</span>'}</td>`;
     tbody.appendChild(tr);
   }
 }
 
 document.getElementById('generate').addEventListener('click', async () => {
+  hideBanner();
+  const btn = document.getElementById('generate');
   const channel_id = document.getElementById('channel').value;
   const source_url = document.getElementById('url').value.trim();
-  if (!channel_id || !source_url) { alert('Pick a channel and paste a URL.'); return; }
-  const r = await fetch('/shorts/jobs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel_id, source_url }),
-  });
-  if (!r.ok) { alert('Submit failed: ' + (await r.text())); return; }
-  document.getElementById('url').value = '';
-  loadJobs();
+  if (!channel_id || !source_url) {
+    showBanner('error', 'Pick a channel and paste a YouTube URL first.');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+  try {
+    const r = await fetch('/shorts/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel_id, source_url }),
+    });
+    if (!r.ok) {
+      const e = await describeError(r);
+      const titleByStatus = {
+        404: 'Channel not found',
+        503: 'WayinVideo is not configured',
+        502: 'WayinVideo rejected the submission',
+      };
+      const title = (titleByStatus[e.status] || `Submit failed`) + ` (HTTP ${e.status})`;
+      showBanner('error', title, e.detail);
+      return;
+    }
+    const body = await r.json();
+    showBanner('success',
+      `Job #${body.job_id} submitted.`,
+      `WayinVideo project: ${body.wayinvideo_project_id}\nPolling will start in ~15s. Watch the table below.`);
+    document.getElementById('url').value = '';
+    loadJobs();
+  } catch (err) {
+    showBanner('error', 'Network error while submitting', String(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate shorts';
+  }
 });
 
 loadChannels();
