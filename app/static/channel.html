@@ -10,6 +10,12 @@
          max-width: 1180px; margin: 1.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
   h1 { margin-bottom: .25rem; }
   .sub { opacity: .7; margin-top: 0; }
+  /* Top nav */
+  .nav { display:flex; align-items:center; gap:.4rem; padding:.5rem 0 .9rem; margin-bottom:.5rem; border-bottom:1px solid #8884; }
+  .nav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:inherit; margin-right:.6rem; }
+  .nav a.navlink { text-decoration:none; color:inherit; padding:.3rem .75rem; border-radius:999px; font-size:.9rem; opacity:.7; }
+  .nav a.navlink:hover { background:#8882; opacity:1; }
+  .nav a.navlink.active { background:#6af2; color:#6af; opacity:1; font-weight:600; }
   .card { border: 1px solid #8884; border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
   button, .btn { font: inherit; padding: .5rem .9rem; border-radius: 8px;
                  border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
@@ -65,6 +71,11 @@
 </style>
 </head>
 <body>
+  <nav class="nav">
+    <a href="/" class="brand">Midas</a>
+    <a href="/" class="navlink">Dashboard</a>
+    <a href="/shorts" class="navlink">Shorts</a>
+  </nav>
   <p><a href="/">← All channels</a></p>
   <h1 id="title">Channel</h1>
   <p class="sub" id="subtitle"></p>

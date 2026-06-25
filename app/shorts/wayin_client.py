@@ -72,9 +72,10 @@ def _clip_payload(video_url: str) -> dict:
         # ratio is required by the API whenever AI Reframe is on.
         body["enable_ai_reframe"] = True
         body["ratio"] = settings.WAYINVIDEO_RATIO
-        # Pin a fixed layout so every scene crops-to-fill. Leaving this unset
-        # (or "Auto") lets the model switch to a letterbox layout per scene,
-        # which produces black bars on wide shots mid-clip.
+        # Only send reframe_layout for non-default layouts. "Auto" (the API default)
+        # is the subject-tracking crop-to-fill we want — omitting the field gives the
+        # same proven-working shape as WayinVideo's reference integrations. Note the
+        # "Full"/"Fit" layouts PRESERVE the full source frame and therefore letterbox.
         layout = (settings.WAYINVIDEO_REFRAME_LAYOUT or "").strip()
         if layout and layout.lower() != "auto":
             body["reframe_layout"] = layout

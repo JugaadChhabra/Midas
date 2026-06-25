@@ -44,11 +44,14 @@ class Settings:
     # ratio so exports are true Shorts, not letterboxed landscape.
     WAYINVIDEO_REFRAME    = (os.getenv("WAYINVIDEO_REFRAME", "true").lower() == "true")
     WAYINVIDEO_RATIO      = os.getenv("WAYINVIDEO_RATIO", "RATIO_9_16")
-    # Fixed reframe layout. "Full" crops every scene to fill the frame (no black
-    # bars). "Auto"/empty lets WayinVideo pick per scene, which can letterbox.
-    WAYINVIDEO_REFRAME_LAYOUT = os.getenv("WAYINVIDEO_REFRAME_LAYOUT", "Full")
+    # Reframe layout. "Auto" (default) is WayinVideo's subject-tracking reframe:
+    # it crops the source to fill the vertical frame, no letterbox/filler. "Full"
+    # and "Fit" PRESERVE the whole original frame, so a 16:9 source gets letterboxed
+    # (blurred bars) inside 9:16 — not what we want. Other ratio-specific layouts
+    # (e.g. "Gameplay A/B", "Screen First") exist; see WayinVideo AI Clipping docs.
+    WAYINVIDEO_REFRAME_LAYOUT = os.getenv("WAYINVIDEO_REFRAME_LAYOUT", "Auto")
     WAYINVIDEO_RESOLUTION = os.getenv("WAYINVIDEO_RESOLUTION", "HD_720")
-    WAYINVIDEO_CAPTIONS   = (os.getenv("WAYINVIDEO_CAPTIONS", "true").lower() == "true")
+    WAYINVIDEO_CAPTIONS   = (os.getenv("WAYINVIDEO_CAPTIONS", "false").lower() == "true")
     # Local disk cache used only as fallback when streaming upload to YouTube fails.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 

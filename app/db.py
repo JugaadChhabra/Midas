@@ -117,6 +117,11 @@ _RETRYABLE = (
 _original_execute = SyncQueryRequestBuilder.execute
 
 
+def _is_closed_client_error(exc: BaseException) -> bool:
+    """httpx raises a bare RuntimeError when a request is issued on a closed client."""
+    return isinstance(exc, RuntimeError) and "client has been closed" in str(exc)
+
+
 def _execute_with_retry(self):
     last_exc: Exception | None = None
     for attempt in range(_EXECUTE_RETRIES + 1):
@@ -124,12 +129,24 @@ def _execute_with_retry(self):
             return _original_execute(self)
         except _RETRYABLE as e:
             last_exc = e
-            log.warning(
-                "supabase %s %s failed (%s), attempt %d/%d — recycling client",
-                self.http_method, self.path, type(e).__name__,
-                attempt + 1, _EXECUTE_RETRIES + 1,
-            )
-            _reset_thread_client()
+        except RuntimeError as e:
+            if not _is_closed_client_error(e):
+                raise
+            last_exc = e
+        log.warning(
+            "supabase %s %s failed (%s), attempt %d/%d — recycling client",
+            self.http_method, self.path, type(last_exc).__name__,
+            attempt + 1, _EXECUTE_RETRIES + 1,
+        )
+        # Recycle the thread's client AND rebind this request builder to the
+        # fresh session. _reset_thread_client() closes the old httpx session,
+        # but `self` still points at it — retrying without rebinding would just
+        # raise "Cannot send a request, as the client has been closed."
+        _reset_thread_client()
+        fresh = supabase()
+        new_session = getattr(getattr(fresh, "postgrest", None), "session", None)
+        if isinstance(new_session, httpx.Client):
+            self.session = new_session
     assert last_exc is not None
     raise last_exc
 
