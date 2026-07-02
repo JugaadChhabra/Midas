@@ -11,7 +11,7 @@ either (a) closes a gap here, or (b) adds a new row. No silent drift.
 
 ---
 
-## Gap 1 — No on-demand CTR/impressions (Reporting API deferred) — **LOAD-BEARING**
+## Gap 1 — No on-demand CTR/impressions (Reporting API deferred) — **CLOSING (implementation shipped 2026-07-02; exit gate pending)**
 
 ### Spec said
 > CIL §0.2: "Per-video reach + retention for a date window … metrics include
@@ -74,12 +74,53 @@ the YouTube Reporting API in Google Cloud. Findings:
   only exist for dates AFTER the job's create-time. **First CSV available
   no earlier than 2026-06-19; realistically 2026-06-20.**
 
-**Next action (blocks tasks #8-#11):** re-run
-`python scripts/probe_reporting.py UC8KjoL0Z9mTHKqB6gFutkJw`. When a
-report id is listed under the job, download with
-`--job 724b9fa7-ab5c-4c21-b45a-be936112bef1 --download <report_id>` to
-surface the real CSV columns + units. Only then design the client /
-schema / poll-job.
+### Status as of 2026-07-02 — CSV probed, ingestion shipped
+
+Gap 9 was resolved (OAuth app now **In production**; all three channels
+re-consented with durable tokens), unblocking the paused CSV probe. The
+2026-07-02 probe downloaded report `20159147398` from the Punjabi job and
+verified the real shape:
+
+- **CSV columns (exact):**
+  `date,channel_id,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr`
+  — `date` is `YYYYMMDD`; `ctr` is a **fraction** (0.1538 = 15.38%); one row
+  per video with ≥1 impression that day (zero-impression videos absent);
+  1,310 rows for one day on the Punjabi channel.
+- **Reports arrive erratically and out of order** — a report for data-day
+  2026-05-27 was generated on 2026-06-28. Never assume ordering.
+- **Historical backfill is real**: YouTube generated reports for data-days
+  BEFORE job creation (2026-05-27 < 2026-06-18), contrary to the earlier
+  "dates after create-time only" reading. The 60-day-loss worry above was
+  overly pessimistic.
+
+**Storage decision (flips the earlier lean, documented per no-silent-drift):**
+raw daily table `video_reach_daily` (UNIQUE video_id+date) is the source of
+truth, with `video_metrics.impressions`/`ctr` **derived** from it — filled
+only for windows whose every data-day is covered by an ingested report
+(ledger table `reporting_reports_ingested`). Rationale: (a) out-of-order
+report arrival makes direct window upserts un-certifiable; (b) Loop 1's
+baseline capture (CIL §1.2) needs arbitrary trailing windows anchored at
+apply time, which only daily grain can serve.
+
+**What shipped (Phase 0.5 implementation):**
+- Migration `20260702174235_phase05_reporting_reach.sql` —
+  `video_reach_daily` + `reporting_reports_ingested`.
+- `app/reporting_client.py` — auth handle (mirrors analytics_client; same
+  scope/gates), `ensure_reach_job` (find-or-create; create respects
+  DRY_RUN), paginated report listing, CSV download + header-asserting parse.
+- `app/reporting_poll.py` — daily ingest + fully-covered-window backfill
+  (weighted CTR = Σclicks/Σimpressions). Cron UTC 06:00 in `app/main.py`
+  (after metrics_poll 05:00, before playlist_health 07:00).
+- `scripts/create_reporting_job.py` — human-gated job creation for DRY_RUN
+  environments.
+
+**Reach jobs now exist for all three channels:**
+- Punjabi `UC8KjoL0Z9mTHKqB6gFutkJw`: `724b9fa7-ab5c-4c21-b45a-be936112bef1` (2026-06-18)
+- Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`: `05509a11-8c06-4c55-8978-13995bd1ca1f` (2026-06-18)
+- Hindi `UCR9qQMyP86aSt-1VgaMg7UA`: `fc919d9c-3fb1-4242-b388-ea41bb3976f1` (2026-07-02)
+
+**Remaining to fully close:** apply the migration, first live `poll_reporting`
+run, then the 0.5 exit gate — ≥1 week of trustworthy CTR on one channel.
 
 ### Plan to close
 Tagged as **Phase 0.5 — Reporting API ingestion** (to be sequenced before
@@ -334,7 +375,20 @@ concrete operational problem.
 
 ---
 
-## Gap 9 — 7-day refresh-token expiry in "Testing" OAuth consent screen — **OPEN (operational)**
+## Gap 9 — 7-day refresh-token expiry in "Testing" OAuth consent screen — **CLOSED (2026-07-02)**
+
+### Resolution (2026-07-02)
+The OAuth consent screen was moved to **In production** (unverified — fine at
+2/100 users; the only cost is a one-time "unverified app" click-through per
+consent). All three channels (Punjabi, Marathi, Hindi
+`UCR9qQMyP86aSt-1VgaMg7UA`) re-consented the same day; tokens issued under
+In-production status persist until manually revoked. Verified live: the
+2026-07-02 Reporting probe + job creation succeeded on all touched channels.
+Bit us twice before closing (Marathi 2026-06-17, Punjabi ~2026-06-25).
+
+The medium-term defensive item below (surface token-expiry in the UI, not
+just scope absence) remains a good Phase 1A hardening task — a durable token
+can still be revoked manually — but is no longer load-bearing.
 
 ### Observation
 The Google Cloud OAuth consent screen is currently in **Testing** mode. All

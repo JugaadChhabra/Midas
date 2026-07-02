@@ -22,6 +22,7 @@ from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
 from app.shorts.routes import router as shorts_router
 from app.metrics_poll import poll_metrics
+from app.reporting_poll import poll_reporting
 from app.playlist_health import score_channel as playlist_health_score_channel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -171,6 +172,25 @@ async def lifespan(app: FastAPI):
         # the relative ordering to differ.
         timezone="UTC",
         id="metrics_poll",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        poll_reporting,
+        "cron",
+        hour=6,
+        minute=0,
+        # UTC, one hour after metrics_poll (05:00): the window backfill in
+        # reporting_poll fills impressions/ctr on video_metrics rows that
+        # metrics_poll writes, so running after it means today's fresh window
+        # gets checked for reach coverage the same day it's created (it'll
+        # usually still be pending — reach CSVs for a data-day arrive 1-6
+        # days later per the 2026-07-02 probe — but the ordering avoids a
+        # systematic +1-day fill delay). No hard serialization guarantee,
+        # same caveat as playlist_health_score below; a missed pass self-
+        # heals next day since backfill re-scans NULL-impression windows.
+        timezone="UTC",
+        id="reporting_poll",
         max_instances=1,
         coalesce=True,
     )

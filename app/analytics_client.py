@@ -68,13 +68,17 @@ _PLAYLIST_METRICS = ",".join([
 
 # ── Auth ──────────────────────────────────────────────────────────────────
 
-def analytics_for_channel(channel_id: str):
-    """Build a youtubeAnalytics v2 client for a channel's stored creds.
+def analytics_creds_for_channel(channel_id: str) -> Credentials:
+    """Load + refresh a channel's creds, gated on the analytics scope grant.
 
     Mirrors `youtube_client.youtube_for_channel` exactly — same row read, same
-    refresh dance, same TokenExpiredError contract. Refuses to build a client
+    refresh dance, same TokenExpiredError contract. Refuses to hand out creds
     if the channel hasn't re-consented to the analytics scope; callers should
     treat that as "skip silently" (CIL §0.1 graceful-degradation rule).
+
+    Shared by the Analytics client below AND reporting_client (both APIs are
+    authorized by the same yt-analytics.readonly scope) so the token-refresh
+    logic lives exactly once.
     """
     row = supabase().table("channels").select("*").eq("id", channel_id).single().execute().data
     if not row:
@@ -104,6 +108,12 @@ def analytics_for_channel(channel_id: str):
             "token_expiry": creds.expiry.replace(tzinfo=timezone.utc).isoformat() if creds.expiry else None,
         }).eq("id", channel_id).execute()
 
+    return creds
+
+
+def analytics_for_channel(channel_id: str):
+    """Build a youtubeAnalytics v2 client for a channel's stored creds."""
+    creds = analytics_creds_for_channel(channel_id)
     return build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False)
 
 
