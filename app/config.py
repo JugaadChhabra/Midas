@@ -82,6 +82,24 @@ class Settings:
     PLAYLIST_HEALTH_REMOVE_PCTL         = int(os.getenv("PLAYLIST_HEALTH_REMOVE_PCTL")         or "5")
     PLAYLIST_HEALTH_REVIVE_PCTL         = int(os.getenv("PLAYLIST_HEALTH_REVIVE_PCTL")         or "20")
 
+    # Phase 1A — CIL Loop 1 (per-video measurement). §1.9 config table.
+    # Per-channel gate is channels.measurement_enabled (DB flag, not env).
+    MEASUREMENT_WINDOW_DAYS   = int(os.getenv("MEASUREMENT_WINDOW_DAYS")   or "21")
+    MIN_IMPRESSIONS           = int(os.getenv("MIN_IMPRESSIONS")           or "500")
+    CTR_WIN_THRESHOLD         = float(os.getenv("CTR_WIN_THRESHOLD")         or "0.10")   # relative, +10%
+    CTR_REGRESSION_THRESHOLD  = float(os.getenv("CTR_REGRESSION_THRESHOLD")  or "-0.10")  # relative, -10%
+    MAX_REDO                  = int(os.getenv("MAX_REDO")                  or "2")
+    # Destructive action — human-gated by default (CIL open-question decision:
+    # human-review-first in v1). Regressions surface via the outcomes endpoint;
+    # an operator reverts manually until this flag is trusted per-channel.
+    AUTO_REVERT_ON_REGRESSION = os.getenv("AUTO_REVERT_ON_REGRESSION", "false").lower() == "true"
+    # If a measurement window has elapsed but reach-CSV coverage for the post
+    # window still hasn't completed after this many extra days, give up and
+    # classify neutral ("can't tell") rather than waiting forever.
+    MEASUREMENT_COVERAGE_GRACE_DAYS = int(os.getenv("MEASUREMENT_COVERAGE_GRACE_DAYS") or "14")
+    # Strategy stamp for Loop 3 attribution (seeded in the Loop 1 migration).
+    STRATEGY_VERSION = os.getenv("STRATEGY_VERSION") or "2026.07-baseline-v1"
+
     # Content-aware audit (Block B)
     TRANSCRIPT_MAX_CHARS = int(os.getenv("TRANSCRIPT_MAX_CHARS") or "8000")
     KEYFRAME_MAX_FRAMES = int(os.getenv("KEYFRAME_MAX_FRAMES") or "4")

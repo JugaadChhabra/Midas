@@ -179,8 +179,42 @@ def _build_user_block(
     return "\n".join(lines)
 
 
+_strategy_row_ensured = False
+
+
+def _ensure_strategy_row() -> None:
+    """Guarantee settings.STRATEGY_VERSION exists in audit_strategies.
+
+    The audits.strategy_version FK means an unregistered version (env
+    override typo, or a deploy racing the migration) would hard-fail EVERY
+    audit insert fleet-wide. Auto-register once per process instead; Loop 3
+    ops can flesh out the row later.
+    """
+    global _strategy_row_ensured
+    if _strategy_row_ensured:
+        return
+    try:
+        supabase().table("audit_strategies").upsert(
+            {
+                "version": settings.STRATEGY_VERSION,
+                "prompt_template": "code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)",
+                "model": settings.AUDIT_MODEL,
+                "status": "champion",
+                "notes": "auto-registered by _ensure_strategy_row (STRATEGY_VERSION setting)",
+            },
+            on_conflict="version",
+            ignore_duplicates=True,  # never overwrite a real, curated row
+        ).execute()
+        _strategy_row_ensured = True
+    except Exception as e:
+        # Table missing (migration not applied yet) — insert below will fail
+        # on the column anyway; log the real cause instead of masking it.
+        log.warning("could not ensure audit_strategies row %s: %s", settings.STRATEGY_VERSION, e)
+
+
 def audit_video(video_id: str, prompt_override: str | None = None, status_override: str | None = None) -> dict:
     """Run a content-aware audit and insert a pending audit row."""
+    _ensure_strategy_row()
     v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
     if not v:
         raise HTTPException(404, "Video not found")
@@ -233,6 +267,9 @@ def audit_video(video_id: str, prompt_override: str | None = None, status_overri
         "ai_reasoning": result.get("reasoning"),
         "transcript_available": transcript is not None,
         "transcript_lang": transcript_lang,
+        # CIL §3.1: stamp every audit with the strategy that produced it so
+        # measured outcomes stay attributable when Loop 3 arrives.
+        "strategy_version": settings.STRATEGY_VERSION,
     }
     inserted = supabase().table("audits").insert(row).execute()
     return inserted.data[0] if inserted.data else row
@@ -371,11 +408,23 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         raise HTTPException(500, f"YouTube update failed: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
+    # CIL §1.2/§1.3 — enter the measurement pipeline on measurement-enabled
+    # channels. Entry only sets the state; window math, the dormant-video
+    # not_applicable rule, and the verdict all live in app/measurement.py's
+    # daily eval (reach CSVs for the apply date arrive days later anyway, so
+    # nothing more CAN be decided at apply time).
+    measurement_patch: dict = {}
+    if (channel or {}).get("measurement_enabled"):
+        measurement_patch = {
+            "measurement_status": "awaiting_window",
+            "measurement_started_at": now,
+        }
     supabase().table("audits").update({
         "status": "applied",
         "applied_at": now,
         **before_patch,
         **baseline_patch,
+        **measurement_patch,
     }).eq("id", audit_id).execute()
     supabase().table("videos").update({
         "title": new_title,
@@ -620,7 +669,9 @@ def revert_audit(audit_id: int):
 
     if settings.DRY_RUN:
         log.warning("[DRY_RUN] would revert video %s with %s", video["id"], payload)
-        supabase().table("audits").update({"status": "reverted"}).eq("id", audit_id).execute()
+        supabase().table("audits").update(
+            {"status": "reverted", "outcome_decision": "reverted"}
+        ).eq("id", audit_id).execute()
         return {"status": "dry_run", "payload": payload}
 
     yt = youtube_for_channel(video["channel_id"])
@@ -630,7 +681,19 @@ def revert_audit(audit_id: int):
         raise HTTPException(500, f"YouTube revert failed: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
-    supabase().table("audits").update({"status": "reverted"}).eq("id", audit_id).execute()
+    # Loop 1: record the human decision. A regression verdict reverted by an
+    # operator is the exact signal Loop 2's playbook distiller feeds on.
+    revert_patch: dict = {"status": "reverted", "outcome_decision": "reverted"}
+    if audit.get("measurement_status") in ("awaiting_window", "measuring"):
+        # Reverted BEFORE a verdict: the post window would now measure
+        # post-revert metadata, so no verdict is derivable. Park it out of
+        # the eval query (which also filters status='applied' as a second
+        # guard) instead of leaving it in-flight forever.
+        revert_patch["measurement_status"] = "not_applicable"
+        revert_patch["measurement_result"] = {
+            "rationale": "reverted by operator before the measurement window closed"
+        }
+    supabase().table("audits").update(revert_patch).eq("id", audit_id).execute()
     supabase().table("videos").update({
         "title": snippet["title"],
         "description": snippet["description"],

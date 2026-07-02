@@ -23,6 +23,7 @@ from app.reflection import reflect as reflection_reflect, router as reflection_r
 from app.shorts.routes import router as shorts_router
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
+from app.measurement import router as measurement_router, eval_measurements
 from app.playlist_health import score_channel as playlist_health_score_channel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -213,6 +214,21 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        eval_measurements,
+        "cron",
+        hour=8,
+        minute=0,
+        # UTC, two hours after reporting_poll (06:00) so the freshest reach
+        # CSVs and window backfills are in place before verdicts are read.
+        # Ordering is soft (same caveat as the other UTC crons); a pass that
+        # runs against yesterday's coverage just leaves audits in
+        # awaiting_window/measuring and self-heals tomorrow.
+        timezone="UTC",
+        id="measurement_eval",
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     log.info("Autopilot scheduler started (every %ds, DRY_RUN=%s)",
              settings.AUTOPILOT_TICK_SECONDS, settings.DRY_RUN)
@@ -233,6 +249,7 @@ app.include_router(dashboard_router)
 app.include_router(playlists_router)
 app.include_router(reflection_router)
 app.include_router(shorts_router)
+app.include_router(measurement_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

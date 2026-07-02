@@ -219,18 +219,24 @@ def download_report_csv(handle: ReportingHandle, channel_id: str, download_url: 
 
     Discovery-service calls auto-refresh through google-auth, but this raw
     download uses the bearer token directly — on a long backfill run the
-    ~1h access token can lapse between list and download, so refresh
-    explicitly when needed.
+    ~1h access token can lapse between list and download. A `creds.valid`
+    pre-check is NOT sufficient: we construct Credentials without an expiry
+    timestamp, so google-auth considers them valid forever. The reliable
+    signal is the 401 itself — refresh and retry once (observed live on the
+    2026-07-02 first backfill run: 10/49 downloads 401'd mid-run).
     """
-    if not handle.creds.valid:
-        handle.creds.refresh(GoogleRequest())
     success = False
     try:
-        with httpx.Client(timeout=60.0) as client:
-            resp = client.get(
-                download_url,
-                headers={"Authorization": f"Bearer {handle.creds.token}"},
-            )
+        for attempt in (1, 2):
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.get(
+                    download_url,
+                    headers={"Authorization": f"Bearer {handle.creds.token}"},
+                )
+            if resp.status_code == 401 and attempt == 1:
+                handle.creds.refresh(GoogleRequest())
+                continue
+            break
         resp.raise_for_status()
         success = True
         return resp.text
