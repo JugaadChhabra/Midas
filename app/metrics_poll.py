@@ -42,6 +42,16 @@ log = logging.getLogger("midas.metrics_poll")
 # Weekly trailing window (CIL §0.3: "v1 cadence: weekly windows").
 WINDOW_DAYS = 7
 
+# Gap 6 REOPENED 2026-07-02: the first live tier-2 run proved
+# `insightTrafficSourceDetail` is NOT supported for
+# insightTrafficSourceType==PLAYLIST — every call 400s. (The identical query
+# succeeds for YT_SEARCH, so it's the PLAYLIST type itself; maxResults/sort
+# don't help.) Tier-2 collection is disabled until a working source exists —
+# candidate: the Reporting API's traffic-source CSV report types (probe
+# first). The whole plumbed path (flag, counters, upsert, scorer fallback)
+# is kept intact behind this switch. See docs/PHASE_0_GAPS.md Gap 6.
+TIER2_TRAFFIC_SOURCE_SUPPORTED = False
+
 
 def _window_dates() -> tuple[str, str]:
     """Inclusive (start, end) for the trailing window ending T-LAG.
@@ -145,6 +155,13 @@ def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool) -> dic
     should set this from `channels.playlist_health_enabled` so disabled
     channels skip the extra API calls entirely.
     """
+    if tier_2 and not TIER2_TRAFFIC_SOURCE_SUPPORTED:
+        log.warning(
+            "metrics_poll %s: tier-2 requested but disabled (Gap 6 reopened: "
+            "insightTrafficSourceDetail unsupported for PLAYLIST); collecting tier-1 only",
+            channel_id,
+        )
+        tier_2 = False
     analytics = analytics_for_channel(channel_id)
 
     # Page past Supabase's 1000-row default cap so channels with >1000 synced

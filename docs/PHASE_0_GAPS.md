@@ -259,7 +259,49 @@ doc.
 
 ---
 
-## Gap 6 — Traffic-source = PLAYLIST breakdown — **CLOSED (Phase 1B Step B, 2026-06-18)**
+## Gap 6 — Traffic-source = PLAYLIST breakdown — **REOPENED (2026-07-02: query unsupported on live API)**
+
+### Reopening (2026-07-02) — first live run falsified Step B
+Tier-2 collection was gated on `channels.playlist_health_enabled`, which
+stayed `false` until 2026-07-02 — so the Step B code shipped reviewed but
+**never live-exercised**. On the first real run, EVERY tier-2 call failed:
+
+```
+HttpError 400 ... "The query is not supported."
+  dimensions=insightTrafficSourceDetail
+  filters=video==<id>;insightTrafficSourceType==PLAYLIST
+```
+
+Bisected live (channel UC8KjoL0Z9mTHKqB6gFutkJw, window 2026-06-24→30):
+- `insightTrafficSourceType==PLAYLIST` + detail dimension → **400**, with or
+  without `maxResults=25&sort=-views`, with or without the video filter.
+- Identical query with `insightTrafficSourceType==YT_SEARCH` → **200** with
+  real rows (search terms). The PLAYLIST source type itself does not
+  support detail breakdown on `youtubeAnalytics.v2` — not a shape issue.
+
+**Process lesson recorded:** Step B skipped the live-probe-first discipline
+because the reviewed code path "matched the probe pattern" — but the probe
+that mattered (this exact dimension+filter combo) was never run. Flag-gated
+code paths must be probed with the flag ON before their gap is closed.
+
+### Current state
+- `metrics_poll.TIER2_TRAFFIC_SOURCE_SUPPORTED = False` — tier-2 collection
+  disabled with a per-channel warning; tier-1 unaffected. The full plumbed
+  path (flag, counters, `video_traffic_source_playlist` table, scorer
+  fallback) is kept intact.
+- `playlist_health.score_channel` degrades exactly as designed:
+  `tier_2_pending=true` in rationales, `tier_2_available=false` in the
+  envelope. Recommendations remain tier-1-only.
+
+### Plan to re-close
+Probe the **Reporting API** traffic-source report types (e.g.
+`channel_traffic_source_a2`) — bulk CSVs carry `traffic_source_type` /
+`traffic_source_detail` per video per day and may include playlist detail
+where the on-demand API refuses it. Same probe-first discipline as Gap 1;
+the Phase 0.5 ingestion machinery (jobs, ledger, daily table) is reusable
+nearly verbatim if the CSV checks out.
+
+### Original close record (2026-06-18, now known to be code-only)
 
 ### Spec said
 > PO §Sensor: "Plus, on member videos, the **traffic-source = `PLAYLIST`**
