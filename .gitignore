@@ -231,5 +231,7 @@ sdd/
 storage/keyframes/
 shorts_cache/
 
+tools/bgutil-pot/
+
 # macOS
 .DS_Store
