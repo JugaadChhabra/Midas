@@ -10,6 +10,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+For the local shorts cutter (heavy ML deps, local runs only — not needed in Docker):
+`pip install -r requirements-ml.txt`. Also requires `ffmpeg` and `node` on PATH.
+
 ### 2. Configure env
 ```bash
 cp .env.example .env

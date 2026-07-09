@@ -1,0 +1,15 @@
+# Local shorts cutter ML stack — NOT installed in Docker (see Dockerfile note).
+# Pins mirror the working venv of the original RhymeShortsCutter_Mac app.
+torch==2.12.1
+torchvision==0.27.1
+torchaudio==2.11.0
+ultralytics==8.4.86
+opencv-python==5.0.0.93
+faster-whisper==1.2.1
+ctranslate2==4.8.0
+demucs==4.0.1
+librosa==0.11.0
+soundfile==0.14.0
+av==18.0.0
+numpy==2.4.6
+bgutil-ytdlp-pot-provider
