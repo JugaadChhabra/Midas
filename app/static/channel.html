@@ -352,6 +352,9 @@ const STATE_META = {
   RENDERING:   { bg:'#28a', label:'Rendering' },
   UPLOADING:   { bg:'#28a', label:'Uploading' },
   DONE:        { bg:'#2a7', label:'Shorts done' },
+  FAILED:      { bg:'#c33', label:'Failed' },
+  PENDING:     { bg:'#8884', label:'Pending' },
+  UPLOADED:    { bg:'#2a7', label:'Uploaded' },
 };
 function statusPill(s) {
   const m = STATE_META[s || 'none'] || { bg:'#888', label: s };
@@ -929,7 +932,15 @@ async function makeShort(videoId) {
   }
 }
 
-function viewShort(videoId, jobId) { pollShort(videoId, jobId); }
+function viewShort(videoId, jobId) {
+  const cell = $('shorts-' + videoId).firstChild;
+  // Toggle: if already showing this job, collapse it.
+  if (cell.innerHTML && cell.dataset && cell.dataset.shown === String(jobId)) {
+    cell.innerHTML = ''; cell.dataset.shown = '';
+    return;
+  }
+  pollShort(videoId, jobId);
+}
 
 async function pollShort(videoId, jobId) {
   const cell = $('shorts-' + videoId).firstChild;
@@ -939,7 +950,13 @@ async function pollShort(videoId, jobId) {
     if (!r.ok) throw new Error(await r.text());
     const { job, clips } = await r.json();
     cell.innerHTML = renderShort(job, clips);
-    if (WORKING.includes(job.status)) setTimeout(() => pollShort(videoId, jobId), 2000);
+    cell.dataset.shown = String(jobId);
+    if (WORKING.includes(job.status)) {
+      setTimeout(() => pollShort(videoId, jobId), 2000);
+    } else {
+      // Terminal state reached — refresh the video list so the summary-row pill updates.
+      loadVideos();
+    }
   } catch (e) {
     cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">${escapeHtml(String(e))}</div>`;
   }
