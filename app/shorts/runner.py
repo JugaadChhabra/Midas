@@ -1,0 +1,137 @@
+"""Local shorts-cutter job orchestration. Replaces the WayinVideo poller.
+
+Jobs run in a plain daemon thread (minutes of CPU: Whisper + YOLO + ffmpeg).
+All state lives in the shorts_jobs/shorts_clips tables; the UI polls those.
+The cutter itself is imported lazily so app startup never pays the torch tax
+and a container without requirements-ml.txt fails with a clear message only
+when a job is actually created.
+"""
+from __future__ import annotations
+
+import logging
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+
+from app.config import settings
+from app.db import supabase
+from app.shorts.youtube_upload import upload_short
+
+log = logging.getLogger("midas.shorts.runner")
+
+WORKING_STATUSES = ("CREATED", "DOWNLOADING", "ANALYSING", "RENDERING", "UPLOADING")
+
+
+def _fetch_video(url: str, dest_dir: Path):
+    from app.shorts.cutter.download import fetch_video
+    return fetch_video(url, dest_dir)
+
+
+def _cut_video(*args, **kwargs):
+    from app.shorts.cutter.pipeline import cut_video
+    return cut_video(*args, **kwargs)
+
+
+def _set_job(job_id: int, **fields) -> None:
+    supabase().table("shorts_jobs").update(fields).eq("id", job_id).execute()
+
+
+def has_active_job() -> bool:
+    rows = (supabase().table("shorts_jobs").select("id")
+            .in_("status", list(WORKING_STATUSES)).limit(1).execute().data) or []
+    return bool(rows)
+
+
+def start_job_thread(job_id: int) -> threading.Thread:
+    thread = threading.Thread(target=run_shorts_job, args=(job_id,),
+                              daemon=True, name=f"shorts-job-{job_id}")
+    thread.start()
+    return thread
+
+
+def run_shorts_job(job_id: int) -> None:
+    sb = supabase()
+    job = sb.table("shorts_jobs").select("*").eq("id", job_id).single().execute().data
+    if not job:
+        log.error("run_shorts_job: job %s not found", job_id)
+        return
+    job_dir = Path(settings.SHORTS_CACHE_DIR) / str(job_id)
+    source = None
+    try:
+        _set_job(job_id, status="DOWNLOADING", progress=5, progress_label="downloading video")
+        source, title = _fetch_video(job["source_url"], job_dir / "src")
+
+        def progress(stage: str, percent: int) -> None:
+            status = "RENDERING" if "render" in stage else "ANALYSING"
+            _set_job(job_id, status=status, progress=percent, progress_label=stage)
+
+        result = _cut_video(
+            source, job_dir, preferred_name=title,
+            cut_mode=job.get("cut_mode") or "highlights",
+            camera_motion=job.get("camera_motion") or "calm", progress=progress,
+        )
+
+        clips = result["clips"]
+        _set_job(job_id, status="UPLOADING", progress=95,
+                 progress_label=f"uploading {len(clips)} clips to YouTube")
+        all_ok = True
+        for clip in clips:
+            clip_title = f"{title.replace('_', ' ')} — Part {clip['rank']}"[:100]
+            row = sb.table("shorts_clips").insert({
+                "job_id": job_id, "rank": clip["rank"], "title": clip_title,
+                "description": "", "hashtags": ["shorts"],
+                "start_s": clip["start_s"], "end_s": clip["end_s"],
+                "local_path": clip["path"], "upload_status": "UPLOADING",
+            }).execute().data[0]
+            try:
+                video_id = upload_short(job["channel_id"], clip["path"],
+                                        clip_title, "", ["shorts"])
+                sb.table("shorts_clips").update(
+                    {"upload_status": "UPLOADED", "yt_video_id": video_id}
+                ).eq("id", row["id"]).execute()
+            except Exception as exc:
+                all_ok = False
+                log.exception("Job %s: upload failed for clip rank=%s", job_id, clip["rank"])
+                sb.table("shorts_clips").update(
+                    {"upload_status": "FAILED",
+                     "upload_error": f"{type(exc).__name__}: {exc}"[:1000]}
+                ).eq("id", row["id"]).execute()
+
+        _set_job(job_id, status="DONE" if all_ok else "FAILED", progress=100,
+                 progress_label="done",
+                 error_message=None if all_ok else "One or more clips failed to upload")
+        _notify_macos("Midas Shorts",
+                      f"Job {job_id}: {len(clips)} clips cut, "
+                      f"{'all uploaded' if all_ok else 'some uploads FAILED'}")
+    except Exception as exc:
+        log.exception("Job %s failed", job_id)
+        _set_job(job_id, status="FAILED", error_message=str(exc)[:1000])
+        _notify_macos("Midas Shorts", f"Job {job_id} failed: {exc}"[:120])
+    finally:
+        shutil.rmtree(job_dir / "src", ignore_errors=True)
+        shutil.rmtree(job_dir / "tmp", ignore_errors=True)
+
+
+def reap_stuck_jobs() -> int:
+    """Fail jobs stranded in a working status by a mid-job server restart."""
+    sb = supabase()
+    stuck = (sb.table("shorts_jobs").select("id")
+             .in_("status", list(WORKING_STATUSES)).execute().data) or []
+    for row in stuck:
+        sb.table("shorts_jobs").update({
+            "status": "FAILED", "error_message": "server restarted mid-job",
+        }).eq("id", row["id"]).execute()
+    if stuck:
+        log.warning("Reaped %d stuck shorts job(s) on startup", len(stuck))
+    return len(stuck)
+
+
+def _notify_macos(title: str, body: str) -> None:
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'display notification "{body}" with title "{title}"'],
+            check=False, capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass  # notification is best-effort
