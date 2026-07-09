@@ -235,3 +235,5 @@ tools/bgutil-pot/
 
 # macOS
 .DS_Store
+# YOLO weights (auto-downloaded by ultralytics on first cut)
+*.pt
