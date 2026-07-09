@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.db import supabase
-from app.shorts.wayin_client import submit_clipping, WayinVideoError, WayinVideoNotConfigured
-from app.shorts.poller import schedule_poll
+from app.shorts.cutter.download import is_youtube_url
+from app.shorts.runner import has_active_job, start_job_thread
 
 log = logging.getLogger("midas.shorts.routes")
 
@@ -15,6 +15,8 @@ router = APIRouter(prefix="/shorts", tags=["shorts"])
 class CreateJob(BaseModel):
     channel_id: str
     source_url: str
+    cut_mode: str = "highlights"        # highlights | coverage
+    camera_motion: str = "calm"         # locked | calm | follow
 
 
 @router.post("/jobs")
@@ -23,39 +25,22 @@ def create_job(body: CreateJob):
     chan = sb.table("channels").select("id").eq("id", body.channel_id).single().execute().data
     if not chan:
         raise HTTPException(404, f"Channel {body.channel_id} not found")
+    if not is_youtube_url(body.source_url):
+        raise HTTPException(400, "source_url must be a YouTube video link")
+    if has_active_job():
+        raise HTTPException(409, "A shorts job is already running; wait for it to finish")
 
     inserted = sb.table("shorts_jobs").insert({
-        "channel_id": body.channel_id,
-        "source_url": body.source_url,
-        "status":     "CREATED",
+        "channel_id":    body.channel_id,
+        "source_url":    body.source_url,
+        "cut_mode":      body.cut_mode,
+        "camera_motion": body.camera_motion,
+        "status":        "CREATED",
     }).execute().data
     job_id = inserted[0]["id"]
-
-    try:
-        project_id = submit_clipping(body.source_url)
-    except WayinVideoNotConfigured as e:
-        log.error("Shorts job %d: WayinVideo not configured", job_id)
-        sb.table("shorts_jobs").update({
-            "status": "FAILED",
-            "error_message": str(e)[:1000],
-        }).eq("id", job_id).execute()
-        raise HTTPException(503, str(e))
-    except WayinVideoError as e:
-        log.exception("Shorts job %d: WayinVideo submit failed", job_id)
-        sb.table("shorts_jobs").update({
-            "status": "FAILED",
-            "error_message": str(e)[:1000],
-        }).eq("id", job_id).execute()
-        upstream = e.status_code or 502
-        raise HTTPException(502, f"WayinVideo rejected the submission (upstream {upstream}): {e}")
-
-    sb.table("shorts_jobs").update({
-        "status": "QUEUED",
-        "wayinvideo_project_id": project_id,
-    }).eq("id", job_id).execute()
-
-    schedule_poll(job_id, delay_seconds=15)
-    return {"job_id": job_id, "wayinvideo_project_id": project_id}
+    start_job_thread(job_id)
+    log.info("Shorts job %d created for %s", job_id, body.source_url)
+    return {"job_id": job_id}
 
 
 @router.get("/jobs")

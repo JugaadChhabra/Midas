@@ -229,6 +229,11 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    from app.shorts.runner import reap_stuck_jobs
+    try:
+        reap_stuck_jobs()
+    except Exception:
+        log.exception("Startup reap of stuck shorts jobs failed")
     scheduler.start()
     log.info("Autopilot scheduler started (every %ds, DRY_RUN=%s)",
              settings.AUTOPILOT_TICK_SECONDS, settings.DRY_RUN)

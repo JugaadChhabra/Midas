@@ -37,22 +37,7 @@ class Settings:
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
 
-    # WayinVideo (https://wayinvideo-api.wayin.ai) — shorts automation prototype.
-    WAYINVIDEO_API_KEY  = os.getenv("WAYINVIDEO_API_KEY", "")
-    WAYINVIDEO_BASE_URL = os.getenv("WAYINVIDEO_BASE_URL", "https://wayinvideo-api.wayin.ai/api/v2")
-    # Export/reframe settings for rendered shorts. AI Reframe crops to a vertical
-    # ratio so exports are true Shorts, not letterboxed landscape.
-    WAYINVIDEO_REFRAME    = (os.getenv("WAYINVIDEO_REFRAME", "true").lower() == "true")
-    WAYINVIDEO_RATIO      = os.getenv("WAYINVIDEO_RATIO", "RATIO_9_16")
-    # Reframe layout. "Auto" (default) is WayinVideo's subject-tracking reframe:
-    # it crops the source to fill the vertical frame, no letterbox/filler. "Full"
-    # and "Fit" PRESERVE the whole original frame, so a 16:9 source gets letterboxed
-    # (blurred bars) inside 9:16 — not what we want. Other ratio-specific layouts
-    # (e.g. "Gameplay A/B", "Screen First") exist; see WayinVideo AI Clipping docs.
-    WAYINVIDEO_REFRAME_LAYOUT = os.getenv("WAYINVIDEO_REFRAME_LAYOUT", "Auto")
-    WAYINVIDEO_RESOLUTION = os.getenv("WAYINVIDEO_RESOLUTION", "HD_720")
-    WAYINVIDEO_CAPTIONS   = (os.getenv("WAYINVIDEO_CAPTIONS", "false").lower() == "true")
-    # Local disk cache used only as fallback when streaming upload to YouTube fails.
+    # Working/cache dir for locally cut shorts.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 
     # YouTube transcript proxy (to work around IP bans)
