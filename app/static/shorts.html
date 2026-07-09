@@ -78,7 +78,7 @@
     <a href="/shorts" class="navlink active">Shorts</a>
   </nav>
   <h1>Shorts</h1>
-  <p class="sub">Pick a channel, paste a YouTube URL, generate shorts via WayinVideo, auto-upload as <b>private</b>.</p>
+  <p class="sub">Pick a channel, paste a YouTube URL, cut shorts locally, auto-upload as <b>private</b>.</p>
 
   <div class="card">
     <div class="form-grid">
@@ -299,9 +299,9 @@ document.getElementById('generate').addEventListener('click', async () => {
     if (!r.ok) {
       const e = await describeError(r);
       const titleByStatus = {
+        400: 'That is not a YouTube video link',
         404: 'Channel not found',
-        503: 'WayinVideo is not configured',
-        502: 'WayinVideo rejected the submission',
+        409: 'A shorts job is already running',
       };
       const title = (titleByStatus[e.status] || 'Submit failed') + ` (HTTP ${e.status})`;
       showBanner('error', title, e.detail);
@@ -310,7 +310,7 @@ document.getElementById('generate').addEventListener('click', async () => {
     const body = await r.json();
     showBanner('success',
       `Job #${body.job_id} submitted.`,
-      `WayinVideo project: ${body.wayinvideo_project_id}\nPolling will start in ~15s. Watch the table below.`);
+      `Cutting has started. Watch the progress bar in the table below.`);
     document.getElementById('url').value = '';
     loadJobs();
   } catch (err) {
