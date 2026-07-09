@@ -223,7 +223,7 @@ def list_videos(channel_id: str):
     videos = (
         supabase().table("videos")
         .select("id,title,description,tags,view_count,like_count,comment_count,"
-                "published_at,thumbnail_url,privacy_status,last_fetched_at")
+                "published_at,thumbnail_url,privacy_status,last_fetched_at,is_short")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
         .execute()
@@ -282,5 +282,38 @@ def list_videos(channel_id: str):
             v["views_per_day"] = round((v.get("view_count") or 0) / age_days, 1)
         else:
             v["views_per_day"] = None
+
+    # Shorts enrichment: latest shorts_jobs row per source_video_id + clip counts.
+    jobs = (
+        supabase().table("shorts_jobs")
+        .select("id,source_video_id,status,created_at")
+        .in_("source_video_id", video_ids)
+        .order("created_at", desc=True)
+        .execute()
+    ).data or []
+    latest_job: dict[str, dict] = {}
+    for j in jobs:
+        svid = j.get("source_video_id")
+        if svid and svid not in latest_job:
+            latest_job[svid] = j
+    job_ids = [j["id"] for j in latest_job.values()]
+    clip_rows = []
+    if job_ids:
+        clip_rows = (
+            supabase().table("shorts_clips")
+            .select("job_id,upload_status")
+            .in_("job_id", job_ids)
+            .execute()
+        ).data or []
+    clips_by_job: dict[int, list] = {}
+    for c in clip_rows:
+        clips_by_job.setdefault(c["job_id"], []).append(c)
+    for v in videos:
+        j = latest_job.get(v["id"])
+        v["shorts_status"] = j["status"] if j else None
+        v["shorts_job_id"] = j["id"] if j else None
+        job_clips = clips_by_job.get(j["id"], []) if j else []
+        v["clips_count"] = len(job_clips)
+        v["clips_uploaded"] = sum(1 for c in job_clips if c["upload_status"] == "UPLOADED")
 
     return videos
