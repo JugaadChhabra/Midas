@@ -66,6 +66,9 @@
     .banner.error   { background: #c332; border-color: #c334; color: #c33; }
     .banner.success { background: #2a72; border-color: #2a74; color: #2a7; }
     .banner pre { margin: 6px 0 0; padding: 8px; background: #0002; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+
+    .prog { width: 120px; height: 6px; background: #8882; border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
+    .prog-bar { height: 100%; background: #6af; transition: width .5s; }
   </style>
 </head>
 <body>
@@ -86,6 +89,21 @@
       <div>
         <label for="url">YouTube URL</label>
         <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=..." />
+      </div>
+      <div>
+        <label for="cut-mode">Cut mode</label>
+        <select id="cut-mode">
+          <option value="highlights" selected>Highlights (best moments)</option>
+          <option value="coverage">Full coverage (whole song)</option>
+        </select>
+      </div>
+      <div>
+        <label for="camera-motion">Camera motion</label>
+        <select id="camera-motion">
+          <option value="locked">Camera: locked</option>
+          <option value="calm" selected>Camera: calm</option>
+          <option value="follow">Camera: follow</option>
+        </select>
       </div>
       <div class="form-actions">
         <button id="generate" class="primary">Generate shorts</button>
@@ -184,6 +202,14 @@ function clipsHtml(clips) {
   return `<div class="clips">${items}</div>`;
 }
 
+const WORKING = ['CREATED', 'DOWNLOADING', 'ANALYSING', 'RENDERING', 'UPLOADING'];
+function progressCell(j) {
+  if (!WORKING.includes(j.status)) return escapeHtml(j.status);
+  const pct = Math.max(0, Math.min(100, j.progress || 0));
+  return `<div class="prog"><div class="prog-bar" style="width:${pct}%"></div></div>` +
+         `<small>${escapeHtml(j.progress_label || j.status.toLowerCase())} ${pct}%</small>`;
+}
+
 // Returns the inner-HTML for a job's <td>s. Identical input => identical string,
 // so an unchanged row is never re-rendered (no flicker, no lost scroll/selection).
 function jobRowHtml(j, clips) {
@@ -191,7 +217,7 @@ function jobRowHtml(j, clips) {
     <td class="id">${escapeHtml(j.id)}</td>
     <td>${escapeHtml(j.channel_id)}</td>
     <td class="url"><a href="${escapeHtml(j.source_url)}" target="_blank">${escapeHtml(j.source_url)}</a></td>
-    <td>${pill(j.status)}</td>
+    <td>${progressCell(j)}</td>
     <td class="err-cell">${escapeHtml(j.error_message || '')}</td>
     <td>${clipsHtml(clips)}</td>`;
 }
@@ -255,13 +281,20 @@ document.getElementById('generate').addEventListener('click', async () => {
     showBanner('error', 'Pick a channel and paste a YouTube URL first.');
     return;
   }
+  const ytPattern = /youtube\.com\/watch|youtube\.com\/shorts\/|youtu\.be\//;
+  if (!ytPattern.test(source_url)) {
+    showBanner('error', 'Invalid YouTube URL. Please paste a youtube.com/watch, youtube.com/shorts/, or youtu.be/ link.');
+    return;
+  }
+  const cut_mode = document.getElementById('cut-mode').value;
+  const camera_motion = document.getElementById('camera-motion').value;
   btn.disabled = true;
   btn.textContent = 'Submitting…';
   try {
     const r = await fetch('/shorts/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id, source_url }),
+      body: JSON.stringify({ channel_id, source_url, cut_mode, camera_motion }),
     });
     if (!r.ok) {
       const e = await describeError(r);
