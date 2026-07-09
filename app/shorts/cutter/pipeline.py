@@ -146,9 +146,11 @@ def cut_video(
             clip_name = f"{safe_name(preferred_name)}_stanza_{index:02}_{int(stanza.start):04d}s.mp4"
             clip_path = clips_dir / clip_name
             export_clip(master, clip_path, stanza.start, stanza.end)
+            grade = grades[index - 1] if index - 1 < len(grades) else {}
             clip_records.append({
                 "path": str(clip_path), "rank": index,
                 "start_s": float(stanza.start), "end_s": float(stanza.end),
+                "verdict": grade.get("verdict", "CHECK"),
             })
 
         passed = sum(1 for g in grades if g["verdict"] == "PASS")

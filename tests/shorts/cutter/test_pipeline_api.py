@@ -38,5 +38,7 @@ def test_cut_video_returns_clip_records(tmp_path, monkeypatch):
     assert first["rank"] == 1 and first["start_s"] == 0.0 and first["end_s"] == 10.0
     assert Path(first["path"]).is_file()
     assert result["language"] == "en"
+    assert result["clips"][0]["verdict"] == "PASS"
+    assert result["clips"][1]["verdict"] == "PASS"
     assert not (tmp_path / "job" / "tmp").exists()       # scratch cleaned up
     assert any("render" in s for s, _ in stages)         # progress reported
