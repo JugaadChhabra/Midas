@@ -20,7 +20,7 @@ from app.playlists_sync import sync_playlists
 from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
-from app.shorts.routes import router as shorts_router
+from app.shorts.routes import router as shorts_router, video_router as shorts_video_router
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
 from app.measurement import router as measurement_router, eval_measurements
@@ -254,6 +254,7 @@ app.include_router(dashboard_router)
 app.include_router(playlists_router)
 app.include_router(reflection_router)
 app.include_router(shorts_router)
+app.include_router(shorts_video_router)
 app.include_router(measurement_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
