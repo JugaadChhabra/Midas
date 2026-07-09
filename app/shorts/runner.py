@@ -73,17 +73,27 @@ def run_shorts_job(job_id: int) -> None:
         )
 
         clips = result["clips"]
+        cap = job.get("upload_cap")
+        # PASS-graded clips first, then by rank. With a cap, upload only the first N; hold the rest.
+        ordered = sorted(clips, key=lambda c: (0 if c.get("verdict") == "PASS" else 1, c["rank"]))
+        hold_ranks = set() if cap is None else {c["rank"] for c in ordered[cap:]}
+
+        n_upload = len(clips) - len(hold_ranks)
         _set_job(job_id, status="UPLOADING", progress=95,
-                 progress_label=f"uploading {len(clips)} clips to YouTube")
+                 progress_label=f"uploading {n_upload} of {len(clips)} clips to YouTube")
         all_ok = True
-        for clip in clips:
+        for clip in ordered:
             clip_title = f"{title.replace('_', ' ')} — Part {clip['rank']}"[:100]
+            held = clip["rank"] in hold_ranks
             row = sb.table("shorts_clips").insert({
                 "job_id": job_id, "rank": clip["rank"], "title": clip_title,
                 "description": "", "hashtags": ["shorts"],
                 "start_s": clip["start_s"], "end_s": clip["end_s"],
-                "local_path": clip["path"], "upload_status": "UPLOADING",
+                "local_path": clip["path"],
+                "upload_status": "PENDING" if held else "UPLOADING",
             }).execute().data[0]
+            if held:
+                continue
             try:
                 video_id = upload_short(job["channel_id"], clip["path"],
                                         clip_title, "", ["shorts"])
@@ -98,12 +108,14 @@ def run_shorts_job(job_id: int) -> None:
                      "upload_error": f"{type(exc).__name__}: {exc}"[:1000]}
                 ).eq("id", row["id"]).execute()
 
+        held_note = f" ({len(hold_ranks)} held for review)" if hold_ranks else ""
         _set_job(job_id, status="DONE" if all_ok else "FAILED", progress=100,
                  progress_label="done",
                  error_message=None if all_ok else "One or more clips failed to upload")
         _notify_macos("Midas Shorts",
                       f"Job {job_id}: {len(clips)} clips cut, "
-                      f"{'all uploaded' if all_ok else 'some uploads FAILED'}")
+                      f"{n_upload} uploaded{held_note}"
+                      + ("" if all_ok else " — some uploads FAILED"))
     except Exception as exc:
         log.exception("Job %s failed", job_id)
         _set_job(job_id, status="FAILED", error_message=str(exc)[:1000])
