@@ -39,6 +39,8 @@
   .sev-medium { background: #d80; color: white; }
   .sev-low { background: #888; color: white; }
   .audit { margin-top: .75rem; border-left: 3px solid #6af; padding-left: .9rem; }
+  .prog { width: 160px; height: 6px; background: #8882; border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
+  .prog-bar { height: 100%; background: #6af; transition: width .5s; }
   .muted { opacity: .65; }
   details > summary { cursor: pointer; }
   /* Tabs */
@@ -343,6 +345,13 @@ const STATE_META = {
   reverted:    { bg:'#888', label:'Reverted' },
   approved:    { bg:'#28a', label:'Approved' },
   none:        { bg:'#8884', label:'Not audited' },
+  // shorts job statuses
+  CREATED:     { bg:'#28a', label:'Queued' },
+  DOWNLOADING: { bg:'#28a', label:'Downloading' },
+  ANALYSING:   { bg:'#28a', label:'Analysing' },
+  RENDERING:   { bg:'#28a', label:'Rendering' },
+  UPLOADING:   { bg:'#28a', label:'Uploading' },
+  DONE:        { bg:'#2a7', label:'Shorts done' },
 };
 function statusPill(s) {
   const m = STATE_META[s || 'none'] || { bg:'#888', label: s };
@@ -585,6 +594,7 @@ function renderVideos() {
       <th class="sortable" data-sort="views_per_day">v/day${arrow('views_per_day')}</th>
       <th class="sortable" data-sort="published_at">Published${arrow('published_at')}</th>
       <th class="sortable" data-sort="audit_last_at">Last audit${arrow('audit_last_at')}</th>
+      <th>Shorts</th>
       <th aria-label="Actions"></th>
     </tr></thead><tbody>` +
     sorted.map(v => `<tr id="row-${v.id}" class="vid-row${selected.has(v.id) ? ' selected':''}">
@@ -604,9 +614,13 @@ function renderVideos() {
       <td class="muted">${v.views_per_day != null ? fmt(v.views_per_day) : '—'}</td>
       <td class="muted">${(v.published_at || '').slice(0,10)}</td>
       <td class="muted">${v.audit_last_at ? v.audit_last_at.slice(0,10) : '—'}</td>
-      <td>${auditButton(v)}</td>
+      <td>${v.shorts_job_id
+            ? `<a href="#" onclick="viewShort('${v.id}', ${v.shorts_job_id}); return false;" style="text-decoration:none;color:inherit" title="View shorts">${statusPill(v.shorts_status)}${v.clips_count ? ` <span class="muted">(${v.clips_uploaded}/${v.clips_count})</span>` : ''}</a>`
+            : (v.is_short ? '<span class="muted">—</span>' : statusPill(null))}</td>
+      <td>${auditButton(v)} ${shortsButton(v)}</td>
     </tr>
-    <tr id="audit-${v.id}"><td colspan="11" style="border:none; padding:0"></td></tr>`).join('') +
+    <tr id="audit-${v.id}"><td colspan="12" style="border:none; padding:0"></td></tr>
+    <tr id="shorts-${v.id}"><td colspan="12" style="border:none; padding:0"></td></tr>`).join('') +
     '</tbody></table>';
 
   // Wire up sort headers
@@ -727,6 +741,12 @@ function auditButton(v) {
     : (v.audit_status === 'pending' || v.audit_status === 'quarantined') ? 'Re-audit'
     : 'Audit';
   return `<button onclick="audit('${v.id}')">${label}</button>`;
+}
+
+function shortsButton(v) {
+  if (v.is_short) return '';                 // don't cut shorts into shorts
+  const label = v.shorts_job_id ? 'Re-cut shorts' : 'Make shorts';
+  return `<button onclick="makeShort('${v.id}')">${label}</button>`;
 }
 
 async function viewAudit(videoId) {
@@ -892,6 +912,63 @@ async function revertAudit(auditId, videoId) {
     else toast('Reverted to previous metadata.', 'ok');
     await loadVideos();
   } catch (e) { toast('Revert failed: ' + escapeHtml(String(e)), 'err'); }
+}
+
+// ── Shorts handlers ───────────────────────────────────────────────────
+async function makeShort(videoId) {
+  const cell = $('shorts-' + videoId).firstChild;
+  cell.innerHTML = '<div class="audit muted">Starting shorts job…</div>';
+  try {
+    const r = await fetch(`/videos/${videoId}/short`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const { job_id } = await r.json();
+    pollShort(videoId, job_id);
+  } catch (e) {
+    cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Could not start: ${escapeHtml(String(e))}</div>`;
+    toast('Make shorts failed: ' + escapeHtml(String(e)), 'err');
+  }
+}
+
+function viewShort(videoId, jobId) { pollShort(videoId, jobId); }
+
+async function pollShort(videoId, jobId) {
+  const cell = $('shorts-' + videoId).firstChild;
+  const WORKING = ['CREATED','DOWNLOADING','ANALYSING','RENDERING','UPLOADING'];
+  try {
+    const r = await fetch(`/shorts/jobs/${jobId}`);
+    if (!r.ok) throw new Error(await r.text());
+    const { job, clips } = await r.json();
+    cell.innerHTML = renderShort(job, clips);
+    if (WORKING.includes(job.status)) setTimeout(() => pollShort(videoId, jobId), 2000);
+  } catch (e) {
+    cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function renderShort(job, clips) {
+  const WORKING = ['CREATED','DOWNLOADING','ANALYSING','RENDERING','UPLOADING'];
+  const bar = WORKING.includes(job.status)
+    ? `<div class="prog"><div class="prog-bar" style="width:${Math.max(0,Math.min(100,job.progress||0))}%"></div></div><small>${escapeHtml(job.progress_label||job.status)} ${job.progress||0}%</small>`
+    : statusPill(job.status);
+  const rows = (clips||[]).map(c => `<li>
+      <b>#${c.rank}</b> ${escapeHtml((c.start_s|0)+'s–'+(c.end_s|0)+'s')} · ${statusPill(c.upload_status)}
+      ${c.upload_status === 'UPLOADED' && c.yt_video_id ? ` · <a href="https://youtube.com/watch?v=${c.yt_video_id}" target="_blank">view</a>` : ''}
+      ${(c.upload_status === 'PENDING' || c.upload_status === 'FAILED') ? ` <button onclick="uploadClip(${c.id}, this)">Upload</button>` : ''}
+    </li>`).join('');
+  return `<div class="audit">${bar}${rows ? `<ul>${rows}</ul>` : ''}</div>`;
+}
+
+async function uploadClip(clipId, btn) {
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    const r = await fetch(`/shorts/clips/${clipId}/upload`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Clip uploaded as private.', 'ok');
+    btn.textContent = 'Uploaded';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Upload';
+    toast('Upload failed: ' + escapeHtml(String(e)), 'err');
+  }
 }
 
 // ── Sync + Apply All Pending (Overview tab) ───────────────────────────
