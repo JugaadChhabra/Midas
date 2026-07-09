@@ -204,7 +204,7 @@ function clipsHtml(clips) {
 
 const WORKING = ['CREATED', 'DOWNLOADING', 'ANALYSING', 'RENDERING', 'UPLOADING'];
 function progressCell(j) {
-  if (!WORKING.includes(j.status)) return escapeHtml(j.status);
+  if (!WORKING.includes(j.status)) return pill(j.status);
   const pct = Math.max(0, Math.min(100, j.progress || 0));
   return `<div class="prog"><div class="prog-bar" style="width:${pct}%"></div></div>` +
          `<small>${escapeHtml(j.progress_label || j.status.toLowerCase())} ${pct}%</small>`;
