@@ -1028,8 +1028,12 @@ $('sync-btn').onclick = async () => {
     // privacy on existing videos via the stats endpoint. Use ?full=true for a
     // thorough re-pull (rebuilds snippets, catches old title/tag edits).
     const r = await fetch(`/channels/${channelId}/sync`, { method: 'POST' });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail; } catch { try { detail = await r.text(); } catch {} }
+      throw new Error(detail || `HTTP ${r.status} ${r.statusText}`);
+    }
     const j = await r.json();
-    if (!r.ok) throw new Error(JSON.stringify(j));
     $('sync-status').textContent = ' Refreshing stats…';
     await fetch(`/channels/${channelId}/refresh-stats`, { method: 'POST' });
     $('sync-status').textContent = ` ${j.synced} new`;

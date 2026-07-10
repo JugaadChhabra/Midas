@@ -5,6 +5,7 @@ from googleapiclient.errors import HttpError
 
 from app.db import supabase
 from app.youtube_client import (
+    TokenExpiredError,
     youtube_for_channel,
     yt_channels_list_uploads,
     yt_playlist_items_page,
@@ -42,7 +43,10 @@ def sync_channel(channel_id: str, full: bool = False):
     ``refresh_stats`` (statistics+status), so a full sync is only needed
     occasionally.
     """
-    yt = youtube_for_channel(channel_id)
+    try:
+        yt = youtube_for_channel(channel_id)
+    except TokenExpiredError:
+        raise HTTPException(401, "token_expired")
 
     # Read channel settings first so we know whether to include Shorts.
     # sync_shorts defaults to True (None = not set yet = include Shorts).
@@ -60,7 +64,14 @@ def sync_channel(channel_id: str, full: bool = False):
         )
         known_ids = {v["id"] for v in existing}
 
-    channel_meta = yt_channels_list_uploads(yt, channel_id)
+    try:
+        channel_meta = yt_channels_list_uploads(yt, channel_id)
+    except TokenExpiredError:
+        raise HTTPException(401, "token_expired")
+    except HttpError as e:
+        if e.status_code == 403 and "quotaExceeded" in str(e):
+            raise HTTPException(429, "youtube_quota_exceeded")
+        raise HTTPException(502, f"YouTube API error: {e}")
     if not channel_meta:
         raise HTTPException(404, "Channel not found on YouTube")
     uploads_playlist = channel_meta["uploads_playlist_id"]
@@ -68,25 +79,39 @@ def sync_channel(channel_id: str, full: bool = False):
     video_ids: list[str] = []
     page_token: str | None = None
     reached_known = False
-    while not reached_known:
-        resp = yt_playlist_items_page(yt, channel_id, uploads_playlist, page_token)
-        for item in resp.get("items", []):
-            vid = item["contentDetails"]["videoId"]
-            if not full and vid in known_ids:
-                # Newest-first ordering: everything past this point is already
-                # stored, so stop walking the playlist entirely.
-                reached_known = True
+    try:
+        while not reached_known:
+            resp = yt_playlist_items_page(yt, channel_id, uploads_playlist, page_token)
+            for item in resp.get("items", []):
+                vid = item["contentDetails"]["videoId"]
+                if not full and vid in known_ids:
+                    # Newest-first ordering: everything past this point is already
+                    # stored, so stop walking the playlist entirely.
+                    reached_known = True
+                    break
+                video_ids.append(vid)
+            page_token = resp.get("nextPageToken")
+            if not page_token:
                 break
-            video_ids.append(vid)
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
+    except TokenExpiredError:
+        raise HTTPException(401, "token_expired")
+    except HttpError as e:
+        if e.status_code == 403 and "quotaExceeded" in str(e):
+            raise HTTPException(429, "youtube_quota_exceeded")
+        raise HTTPException(502, f"YouTube API error: {e}")
 
     rows: list[dict] = []
     privacy_changed_to_private: list[str] = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
-        items = yt_videos_list_full(yt, channel_id, batch)
+        try:
+            items = yt_videos_list_full(yt, channel_id, batch)
+        except TokenExpiredError:
+            raise HTTPException(401, "token_expired")
+        except HttpError as e:
+            if e.status_code == 403 and "quotaExceeded" in str(e):
+                raise HTTPException(429, "youtube_quota_exceeded")
+            raise HTTPException(502, f"YouTube API error: {e}")
         for item in items:
             duration = (item.get("contentDetails") or {}).get("duration", "")
             duration_seconds = _iso8601_to_seconds(duration)
@@ -194,7 +219,10 @@ def refresh_stats(channel_id: str):
     target_ids = [v["id"] for v in vids]
     if not target_ids:
         return {"refreshed": 0}
-    yt = youtube_for_channel(channel_id)
+    try:
+        yt = youtube_for_channel(channel_id)
+    except TokenExpiredError:
+        raise HTTPException(401, "token_expired")
     return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
@@ -216,7 +244,10 @@ def refresh_applied_stats(channel_id: str):
     if not target_ids:
         return {"refreshed": 0}
 
-    yt = youtube_for_channel(channel_id)
+    try:
+        yt = youtube_for_channel(channel_id)
+    except TokenExpiredError:
+        raise HTTPException(401, "token_expired")
     return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
