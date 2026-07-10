@@ -1,4 +1,5 @@
-# Local shorts cutter ML stack — NOT installed in Docker (see Dockerfile note).
+# Shorts cutter ML stack. Installed in Docker via the Dockerfile (torch/vision/audio
+# come from the CPU wheel index first, then this file); also used by the local Mac venv.
 # Pins mirror the working venv of the original RhymeShortsCutter_Mac app.
 torch==2.12.1
 torchvision==0.27.1
