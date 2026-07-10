@@ -109,7 +109,9 @@ def list_channels():
     res = supabase().table("channels").select(
         "id,name,handle,last_synced_at,default_language,"
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
-        "sync_shorts,analytics_authorized,playlist_health_enabled"
+        "sync_shorts,analytics_authorized,playlist_health_enabled,"
+        "autopilot_shorts_enabled,autopilot_shorts_daily_cap,autopilot_shorts_upload_cap,"
+        "shorts_cut_mode,shorts_camera_motion"
     ).execute()
     return res.data
 

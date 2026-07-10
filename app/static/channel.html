@@ -162,6 +162,28 @@
         </label>
         <button id="ap-save">Save</button>
       </div>
+      <div class="row" style="margin-top:.6rem; padding-top:.6rem; border-top:1px solid #8883">
+        <label><input type="checkbox" id="ap-shorts-enabled" /> Auto-generate shorts (long-form videos)</label>
+        <label class="muted">Videos/day:
+          <input id="ap-shorts-cap" type="number" min="1" max="20" value="1" style="width:4rem; margin-left:.25rem;" />
+        </label>
+        <label class="muted">Upload top:
+          <input id="ap-shorts-upload" type="number" min="1" max="8" value="2" style="width:4rem; margin-left:.25rem;" />
+        </label>
+        <label class="muted">Mode:
+          <select id="ap-shorts-mode" style="margin-left:.25rem;">
+            <option value="highlights">Highlights</option>
+            <option value="coverage">Full coverage</option>
+          </select>
+        </label>
+        <label class="muted">Camera:
+          <select id="ap-shorts-motion" style="margin-left:.25rem;">
+            <option value="locked">Locked</option>
+            <option value="calm" selected>Calm</option>
+            <option value="follow">Follow</option>
+          </select>
+        </label>
+      </div>
       <div id="ap-summary" style="margin-top:.75rem"></div>
       <div id="ap-eta" class="muted" style="margin-top:.25rem; font-size:.85rem"></div>
       <h4 style="margin-bottom:.25rem">Recent activity</h4>
@@ -372,6 +394,11 @@ async function loadChannel() {
   $('lang-select').value = c.default_language || '';
   $('ap-enabled').checked = !!c.autopilot_enabled;
   $('ap-cap').value = c.autopilot_daily_cap ?? 10;
+  $('ap-shorts-enabled').checked = !!c.autopilot_shorts_enabled;
+  $('ap-shorts-cap').value = c.autopilot_shorts_daily_cap ?? 1;
+  $('ap-shorts-upload').value = c.autopilot_shorts_upload_cap ?? 2;
+  if (c.shorts_cut_mode) $('ap-shorts-mode').value = c.shorts_cut_mode;
+  if (c.shorts_camera_motion) $('ap-shorts-motion').value = c.shorts_camera_motion;
   $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
   $('playlist-health-enabled').checked = !!c.playlist_health_enabled; // null/undefined → false (default off)
   $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
@@ -461,6 +488,11 @@ $('ap-save').onclick = async () => {
       body: JSON.stringify({
         autopilot_enabled: $('ap-enabled').checked,
         autopilot_daily_cap: parseInt($('ap-cap').value || '10', 10),
+        autopilot_shorts_enabled: $('ap-shorts-enabled').checked,
+        autopilot_shorts_daily_cap: parseInt($('ap-shorts-cap').value || '1', 10),
+        autopilot_shorts_upload_cap: parseInt($('ap-shorts-upload').value || '2', 10),
+        shorts_cut_mode: $('ap-shorts-mode').value,
+        shorts_camera_motion: $('ap-shorts-motion').value,
       }),
     });
     if (!r.ok) throw new Error(await r.text());
