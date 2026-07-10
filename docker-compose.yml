@@ -10,9 +10,14 @@ services:
     environment:
       CLIENT_SECRETS_FILE: /app/client_secret.json
       KEYFRAMES_LOCAL_DIR: /app/storage/keyframes
+      BGUTIL_POT_HTTP_BASE_URL: http://bgutil-provider:4416
+      SHORTS_CACHE_DIR: /app/shorts_cache
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
       - midas_storage:/app/storage
+      - shorts_cache:/app/shorts_cache
+    depends_on:
+      - bgutil-provider
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)"]
@@ -21,5 +26,12 @@ services:
       retries: 3
       start_period: 5s
 
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: bgutil-provider
+    restart: unless-stopped
+    # serves PO tokens on :4416 inside the compose network; no host port needed
+
 volumes:
   midas_storage:
+  shorts_cache:

@@ -38,3 +38,22 @@ def test_ytdlp_options_po_token_backend_follows_script_presence():
         assert Path(script) == BGUTIL_POT_SCRIPT
     else:
         assert "youtubepot-bgutilscript" not in options["extractor_args"]
+
+
+def test_ytdlp_options_uses_http_provider_when_env_set(monkeypatch):
+    monkeypatch.setenv("BGUTIL_POT_HTTP_BASE_URL", "http://bgutil-provider:4416")
+    from app.shorts.cutter.download import ytdlp_options
+    opts = ytdlp_options()
+    ea = opts["extractor_args"]
+    assert ea["youtubepot-bgutilhttp"]["base_url"] == ["http://bgutil-provider:4416"]
+    assert "youtubepot-bgutilscript" not in ea   # HTTP takes precedence over script
+
+
+def test_ytdlp_options_falls_back_to_script_when_env_absent(monkeypatch):
+    monkeypatch.delenv("BGUTIL_POT_HTTP_BASE_URL", raising=False)
+    from app.shorts.cutter.download import ytdlp_options, BGUTIL_POT_SCRIPT
+    opts = ytdlp_options()
+    ea = opts["extractor_args"]
+    assert "youtubepot-bgutilhttp" not in ea
+    # script provider present iff the local script exists (env-independent, matches CI)
+    assert ("youtubepot-bgutilscript" in ea) == BGUTIL_POT_SCRIPT.is_file()

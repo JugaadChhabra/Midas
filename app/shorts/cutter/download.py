@@ -1,6 +1,7 @@
 """Native-quality YouTube download: yt-dlp with mweb client + bgutil PO tokens."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -46,7 +47,12 @@ def ytdlp_options() -> dict:
         "remote_components": ["ejs:github"],
         "extractor_args": {"youtube": {"player_client": ["mweb", "default"]}},
     }
-    if BGUTIL_POT_SCRIPT.is_file():
+    http_base = os.getenv("BGUTIL_POT_HTTP_BASE_URL")
+    if http_base:
+        # Docker: a bgutil-provider sidecar mints tokens over HTTP.
+        options["extractor_args"]["youtubepot-bgutilhttp"] = {"base_url": [http_base]}
+    elif BGUTIL_POT_SCRIPT.is_file():
+        # Mac: mint tokens per request via the local node script.
         options["extractor_args"]["youtubepot-bgutilscript"] = {
             "script_path": [str(BGUTIL_POT_SCRIPT)],
         }
