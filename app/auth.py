@@ -120,6 +120,11 @@ class ChannelSettings(BaseModel):
     autopilot_daily_cap: int | None = None
     sync_shorts: bool | None = None
     playlist_health_enabled: bool | None = None
+    autopilot_shorts_enabled: bool | None = None
+    autopilot_shorts_daily_cap: int | None = None
+    autopilot_shorts_upload_cap: int | None = None
+    shorts_cut_mode: str | None = None
+    shorts_camera_motion: str | None = None
 
 
 @router.patch("/channels/{channel_id}")
@@ -138,6 +143,16 @@ def update_channel(channel_id: str, body: ChannelSettings):
         # channel as they widen the recommend-only health-scoring loop;
         # the playlist_health_score cron skips channels where it's false.
         patch["playlist_health_enabled"] = body.playlist_health_enabled
+    if body.autopilot_shorts_enabled is not None:
+        patch["autopilot_shorts_enabled"] = body.autopilot_shorts_enabled
+    if body.autopilot_shorts_daily_cap is not None:
+        patch["autopilot_shorts_daily_cap"] = max(1, min(int(body.autopilot_shorts_daily_cap), 20))
+    if body.autopilot_shorts_upload_cap is not None:
+        patch["autopilot_shorts_upload_cap"] = max(1, min(int(body.autopilot_shorts_upload_cap), 8))
+    if body.shorts_cut_mode in ("highlights", "coverage"):
+        patch["shorts_cut_mode"] = body.shorts_cut_mode
+    if body.shorts_camera_motion in ("locked", "calm", "follow"):
+        patch["shorts_camera_motion"] = body.shorts_camera_motion
     if not patch:
         return {"ok": True, "noop": True}
     supabase().table("channels").update(patch).eq("id", channel_id).execute()
