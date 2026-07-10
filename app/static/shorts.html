@@ -21,24 +21,12 @@
     .nav a.navlink:hover { background:#8882; opacity:1; }
     .nav a.navlink.active { background:#6af2; color:#6af; opacity:1; font-weight:600; }
 
-    .card { border: 1px solid #8884; border-radius: 12px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
-
-    /* Compose form: URL leads (the one thing you type), options tuck under it. */
-    .form-grid { display: grid; grid-template-columns: 2fr 1fr; gap: .8rem 1rem; align-items: end; }
-    .field-url { grid-column: 1 / -1; }
-    label { display: block; margin-bottom: .3rem; font-weight: 600; font-size: .68rem; opacity: .55; text-transform: uppercase; letter-spacing: .05em; }
-    select, input[type=text] { width: 100%; font: inherit; padding: .5rem .6rem; border: 1px solid #8886; border-radius: 8px; background: #8881; color: inherit; }
-    select:focus, input:focus { outline: none; border-color: #6af; box-shadow: 0 0 0 3px #6af3; }
-    .form-actions { grid-column: 1 / -1; display:flex; align-items:center; gap:.75rem; margin-top:.15rem; }
-
     button, .btn { font: inherit; padding: .5rem .9rem; border-radius: 8px; cursor: pointer;
                    border: 1px solid #8886; background: #8881; color: inherit; text-decoration: none;
                    display: inline-block; transition: background .12s, transform .08s, border-color .12s; }
     button:hover, .btn:hover { background: #8883; }
     button:active, .btn:active { transform: scale(.97); }
     button:disabled { opacity: .5; cursor: default; transform: none; }
-    button.primary { border-color: #6af; color: #6af; font-weight: 600; background: #6af1; }
-    button.primary:hover { background: #6af2; }
     .btn-sm { padding: .2rem .55rem; font-size: .8rem; border-radius: 6px; }
 
     .jobs-head { display: flex; align-items: baseline; justify-content: space-between; margin: 2rem 0 .5rem; }
@@ -110,7 +98,6 @@
     .banner pre { margin: 6px 0 0; padding: 8px; background: #0002; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 
     @media (max-width: 640px) {
-      .form-grid { grid-template-columns: 1fr; }
       table, thead, tbody, th, td, tr { display: block; }
       thead { display: none; }
       tbody td { border: none; padding: .2rem .5rem; }
@@ -125,40 +112,9 @@
     <a href="/shorts" class="navlink active">Shorts</a>
   </nav>
   <h1>Shorts</h1>
-  <p class="sub">Paste any YouTube link to cut shorts locally. Clips auto-upload as <b>private</b> — the rest wait here for you to publish.</p>
+  <p class="sub">Shorts are cut from each channel’s own videos — a video’s <b>Make shorts</b> button on the dashboard, or autopilot — and auto-upload as <b>private</b> to that same channel. Track jobs and publish leftover clips here.</p>
 
-  <div class="card">
-    <div class="form-grid">
-      <div class="field-url">
-        <label for="url">YouTube link to cut</label>
-        <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…  or  youtu.be/…" />
-      </div>
-      <div>
-        <label for="channel">Upload to channel</label>
-        <select id="channel"></select>
-      </div>
-      <div>
-        <label for="cut-mode">Cut mode</label>
-        <select id="cut-mode">
-          <option value="highlights" selected>Highlights — best moments</option>
-          <option value="coverage">Full coverage — whole song</option>
-        </select>
-      </div>
-      <div>
-        <label for="camera-motion">Camera motion</label>
-        <select id="camera-motion">
-          <option value="locked">Locked</option>
-          <option value="calm" selected>Calm</option>
-          <option value="follow">Follow</option>
-        </select>
-      </div>
-      <div class="form-actions">
-        <button id="generate" class="primary">Generate shorts</button>
-        <span class="muted" style="font-size:.82rem">One job runs at a time.</span>
-      </div>
-    </div>
-    <div id="banner" class="banner"></div>
-  </div>
+  <div id="banner" class="banner"></div>
 
   <div class="jobs-head">
     <div class="left"><h2>Jobs</h2><span class="count" id="job-count"></span></div>
@@ -221,24 +177,18 @@ async function describeError(r) {
   return { status: r.status, statusText: r.statusText, detail };
 }
 
+// Channel names label the jobs table. Cuts are started from the dashboard or
+// autopilot (which upload to the source video's own channel), so this page
+// intentionally has no channel picker or arbitrary-URL cut form.
 async function loadChannels() {
   const r = await fetch('/auth/channels');
   if (!r.ok) {
     const e = await describeError(r);
-    showBanner('error', `Couldn't load channels (HTTP ${e.status} ${e.statusText})`, e.detail);
+    showBanner('error', `Couldn't load channel names (HTTP ${e.status} ${e.statusText})`, e.detail);
     return;
   }
   const channels = await r.json();
-  const sel = document.getElementById('channel');
-  sel.innerHTML = '';
-  for (const c of channels) {
-    channelNames.set(c.id, c.name || c.id);
-    const o = document.createElement('option');
-    o.value = c.id;
-    o.textContent = c.name || c.id;
-    o.title = c.id;
-    sel.appendChild(o);
-  }
+  for (const c of channels) channelNames.set(c.id, c.name || c.id);
 }
 
 // Pull a watch id out of whatever URL shape the job stored.
@@ -383,53 +333,6 @@ tbody.addEventListener('click', async (ev) => {
     showBanner('error', 'Network error while uploading', String(err));
     btn.disabled = false;
     btn.textContent = 'Upload';
-  }
-});
-
-document.getElementById('generate').addEventListener('click', async () => {
-  hideBanner();
-  const btn = document.getElementById('generate');
-  const channel_id = document.getElementById('channel').value;
-  const source_url = document.getElementById('url').value.trim();
-  if (!channel_id || !source_url) {
-    showBanner('error', 'Pick a channel and paste a YouTube link first.');
-    return;
-  }
-  const ytPattern = /youtube\.com\/watch|youtube\.com\/shorts\/|youtu\.be\//;
-  if (!ytPattern.test(source_url)) {
-    showBanner('error', 'That doesn’t look like a YouTube link. Paste a youtube.com/watch, youtube.com/shorts/, or youtu.be/ URL.');
-    return;
-  }
-  const cut_mode = document.getElementById('cut-mode').value;
-  const camera_motion = document.getElementById('camera-motion').value;
-  btn.disabled = true;
-  btn.textContent = 'Submitting…';
-  try {
-    const r = await fetch('/shorts/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id, source_url, cut_mode, camera_motion }),
-    });
-    if (!r.ok) {
-      const e = await describeError(r);
-      const titleByStatus = {
-        400: 'That is not a YouTube video link',
-        404: 'Channel not found',
-        409: 'A shorts job is already running',
-      };
-      const title = (titleByStatus[e.status] || 'Submit failed') + ` (HTTP ${e.status})`;
-      showBanner('error', title, e.detail);
-      return;
-    }
-    const body = await r.json();
-    showBanner('success', `Job #${body.job_id} started.`, 'Watch its progress in the table below.');
-    document.getElementById('url').value = '';
-    loadJobs();
-  } catch (err) {
-    showBanner('error', 'Network error while submitting', String(err));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Generate shorts';
   }
 });
 
