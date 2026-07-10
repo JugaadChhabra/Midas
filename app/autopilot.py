@@ -13,6 +13,7 @@ from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.sync import sync_channel, refresh_stats
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
+from app.shorts.runner import has_active_job, start_job_thread
 
 log = logging.getLogger("midas.autopilot")
 router = APIRouter(tags=["autopilot"])
@@ -144,6 +145,87 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
             continue
         return v
     return None
+
+
+def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
+    """Newest-published public long-form video with no shorts_jobs row yet.
+
+    Long-form only (is_short=False); shorts are never re-cut into shorts. A
+    video with ANY existing shorts_jobs row (working, done, or failed) is
+    skipped — re-cutting is a manual action.
+    """
+    candidates = (
+        supabase().table("videos")
+        .select("*")
+        .eq("channel_id", channel_id)
+        .eq("is_short", False)
+        .order("published_at", desc=True)
+        .execute()
+    ).data or []
+    if not candidates:
+        return None
+    candidate_ids = [v["id"] for v in candidates]
+    jobs = (
+        supabase().table("shorts_jobs")
+        .select("source_video_id")
+        .eq("channel_id", channel_id)
+        .in_("source_video_id", candidate_ids)
+        .execute()
+    ).data or []
+    cut_ids = {j["source_video_id"] for j in jobs if j.get("source_video_id")}
+    for v in candidates:
+        if v["id"] in cut_ids:
+            continue
+        privacy = v.get("privacy_status")
+        if privacy is not None and privacy != "public":
+            continue
+        return v
+    return None
+
+
+def _shorts_made_today(channel_id: str) -> int:
+    res = (
+        supabase().table("shorts_jobs")
+        .select("id")
+        .eq("channel_id", channel_id)
+        .eq("autopilot_generated", True)
+        .gte("created_at", _today_start_iso())
+        .execute()
+    )
+    return len(res.data or [])
+
+
+def _run_shorts_action(ch: dict) -> None:
+    """Enqueue at most one autopilot shorts cut for this channel.
+
+    No-op when a cut is already running (one-at-a-time), when today's autopilot
+    shorts count is at/over the channel cap, or when there is no eligible video.
+    """
+    channel_id = ch["id"]
+    if has_active_job():
+        return  # a cut is already running; try again next tick
+    cap = ch.get("autopilot_shorts_daily_cap") or 1
+    if _shorts_made_today(channel_id) >= cap:
+        return
+    video = _next_uncut_video_for_channel(channel_id)
+    if not video:
+        return
+    upload_cap = ch.get("autopilot_shorts_upload_cap") or 2
+    inserted = (
+        supabase().table("shorts_jobs").insert({
+            "channel_id":          channel_id,
+            "source_video_id":     video["id"],
+            "source_url":          f"https://www.youtube.com/watch?v={video['id']}",
+            "cut_mode":            ch.get("shorts_cut_mode") or "highlights",
+            "camera_motion":       ch.get("shorts_camera_motion") or "calm",
+            "upload_cap":          upload_cap,
+            "autopilot_generated": True,
+            "status":              "CREATED",
+        }).execute()
+    ).data
+    job_id = inserted[0]["id"]
+    start_job_thread(job_id)
+    log.info("Autopilot shorts: started job %d for video %s (channel %s)", job_id, video["id"], channel_id)
 
 
 def _pause(channel_id: str, reason: str):
