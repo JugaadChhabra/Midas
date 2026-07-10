@@ -264,7 +264,7 @@ def tick():
         channels = (
             supabase().table("channels")
             .select("*")
-            .eq("autopilot_enabled", True)
+            .or_("autopilot_enabled.eq.true,autopilot_shorts_enabled.eq.true")
             .is_("autopilot_paused_reason", "null")
             .execute()
         ).data or []
@@ -320,6 +320,20 @@ def tick():
                     _pause(channel_id, "repeated_failures")
                 _touch_tick(channel_id)
                 return
+
+        # Shorts autopilot — independent of the metadata-audit path. Enqueues at
+        # most one cut per tick, serialized by has_active_job (never overlaps).
+        if ch.get("autopilot_shorts_enabled"):
+            try:
+                _run_shorts_action(ch)
+            except Exception as e:
+                log.exception("Shorts autopilot failed for %s: %s", channel_id, e)
+
+        # The metadata-audit path (daily cap → pick → audit → apply) runs only for
+        # channels with metadata autopilot enabled. Shorts-only channels stop here.
+        if not ch.get("autopilot_enabled"):
+            _touch_tick(channel_id)
+            return
 
         # 4. Daily cap check
         cap = ch.get("autopilot_daily_cap") or 10
