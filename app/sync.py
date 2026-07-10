@@ -89,7 +89,8 @@ def sync_channel(channel_id: str, full: bool = False):
         items = yt_videos_list_full(yt, channel_id, batch)
         for item in items:
             duration = (item.get("contentDetails") or {}).get("duration", "")
-            is_short = _iso8601_to_seconds(duration) <= SHORTS_MAX_SECONDS
+            duration_seconds = _iso8601_to_seconds(duration)
+            is_short = duration_seconds <= SHORTS_MAX_SECONDS
             if not sync_shorts and is_short:
                 continue  # skip shorts when channel has sync_shorts = false
             privacy = (item.get("status") or {}).get("privacyStatus")
@@ -113,6 +114,7 @@ def sync_channel(channel_id: str, full: bool = False):
                 "tags": sn.get("tags") or [],
                 "privacy_status": privacy,
                 "is_short": is_short,
+                "duration_seconds": duration_seconds,
                 "thumbnail_url": stable_thumb,
                 "category_id": sn.get("categoryId"),
                 "view_count": int(stats.get("viewCount", 0)),

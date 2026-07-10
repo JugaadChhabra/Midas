@@ -147,18 +147,29 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     return None
 
 
-def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
-    """Newest-published public long-form video with no shorts_jobs row yet.
+# Hard upper bound on source-video length for autopilot shorts. Videos at or
+# above this (e.g. compilations) are never auto-cut — only genuine single-item
+# uploads in the ~3–4 min band. NULL duration_seconds (not yet re-synced) is
+# excluded by the `.lt` too, which is the safe default: never cut a video whose
+# length we don't know. The manual "Make shorts" button is NOT bound by this.
+MAX_SHORTS_SOURCE_SECONDS = 240  # < 4 minutes
 
-    Long-form only (is_short=False); shorts are never re-cut into shorts. A
-    video with ANY existing shorts_jobs row (working, done, or failed) is
-    skipped — re-cutting is a manual action.
+
+def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
+    """Newest-published public long-form video under MAX_SHORTS_SOURCE_SECONDS
+    with no shorts_jobs row yet.
+
+    Long-form only (is_short=False) and under the duration cap (excludes
+    compilations); shorts are never re-cut into shorts. A video with ANY
+    existing shorts_jobs row (working, done, or failed) is skipped —
+    re-cutting is a manual action.
     """
     candidates = (
         supabase().table("videos")
         .select("*")
         .eq("channel_id", channel_id)
         .eq("is_short", False)
+        .lt("duration_seconds", MAX_SHORTS_SOURCE_SECONDS)
         .order("published_at", desc=True)
         .execute()
     ).data or []

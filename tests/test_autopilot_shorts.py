@@ -12,8 +12,9 @@ def _sb(videos, shorts_jobs, recorder):
     def table(name):
         t = MagicMock()
         if name == "videos":
-            # query is .select('*').eq('channel_id',..).eq('is_short', False).order(..).execute()
-            t.select.return_value.eq.return_value.eq.return_value.order.return_value.execute.return_value.data = videos
+            # query is .select('*').eq('channel_id',..).eq('is_short', False)
+            #          .lt('duration_seconds', 240).order(..).execute()
+            t.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.execute.return_value.data = videos
         if name == "shorts_jobs":
             # select chains used: .select(...).eq('channel_id',..).in_('source_video_id',..).execute()
             # and .select(...).eq('channel_id',..).eq('autopilot_generated',..).gte('created_at',..).execute()
@@ -52,6 +53,21 @@ def test_next_uncut_skips_shorts_nonpublic_and_already_cut():
     with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
         v = ap._next_uncut_video_for_channel("UC1")
     assert v is not None and v["id"] == "vGood"
+
+
+def test_next_uncut_applies_duration_upper_bound():
+    """The autopicker query must filter duration_seconds below the 4-min cap so
+    compilations are never auto-cut."""
+    import app.autopilot as ap
+    assert ap.MAX_SHORTS_SOURCE_SECONDS == 240
+    sb = MagicMock()
+    videos_tbl = MagicMock()
+    q = videos_tbl.select.return_value.eq.return_value.eq.return_value  # after the two .eq()
+    q.lt.return_value.order.return_value.execute.return_value.data = []
+    sb.table.side_effect = lambda name: videos_tbl if name == "videos" else MagicMock()
+    with patch("app.autopilot.supabase", return_value=sb):
+        ap._next_uncut_video_for_channel("UC1")
+    q.lt.assert_called_once_with("duration_seconds", 240)
 
 
 def test_run_shorts_action_enqueues_when_eligible():
