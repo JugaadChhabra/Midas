@@ -99,9 +99,16 @@ class MakeShort(BaseModel):
 def make_short(video_id: str, body: MakeShort | None = None):
     body = body or MakeShort()
     sb = supabase()
-    video = sb.table("videos").select("id,channel_id").eq("id", video_id).single().execute().data
+    video = sb.table("videos").select("id,channel_id,privacy_status").eq("id", video_id).single().execute().data
     if not video:
         raise HTTPException(404, f"Video {video_id} not found")
+    # Only cut confirmed-public videos: refuse private, unlisted, or unknown
+    # (unsynced NULL) privacy — cutting a non-public source risks reuploading
+    # content the owner did not make public.
+    if video.get("privacy_status") != "public":
+        raise HTTPException(
+            409, f"Video is {video.get('privacy_status') or 'of unknown privacy'}; "
+                 "only public videos can be cut into shorts")
     if has_active_job():
         raise HTTPException(409, "A shorts job is already running; wait for it to finish")
     inserted = sb.table("shorts_jobs").insert({

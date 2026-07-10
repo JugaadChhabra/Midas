@@ -7,11 +7,11 @@ def _client():
     return TestClient(app, raise_server_exceptions=False)
 
 
-def _sb_video(found=True, channel="UC123"):
+def _sb_video(found=True, channel="UC123", privacy="public"):
     sb = MagicMock()
     tbl = sb.table.return_value
     tbl.select.return_value.eq.return_value.single.return_value.execute.return_value.data = (
-        {"id": "vid123", "channel_id": channel} if found else None)
+        {"id": "vid123", "channel_id": channel, "privacy_status": privacy} if found else None)
     tbl.insert.return_value.execute.return_value.data = [{"id": 42}]
     return sb
 
@@ -36,6 +36,34 @@ def test_make_short_conflicts_when_busy():
          patch("app.shorts.routes.has_active_job", return_value=True):
         r = _client().post("/videos/vid123/short")
     assert r.status_code == 409
+
+
+def test_make_short_blocks_unlisted():
+    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy="unlisted")), \
+         patch("app.shorts.routes.has_active_job", return_value=False), \
+         patch("app.shorts.routes.start_job_thread") as start:
+        r = _client().post("/videos/vid123/short")
+    assert r.status_code == 409
+    start.assert_not_called()
+
+
+def test_make_short_blocks_private():
+    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy="private")), \
+         patch("app.shorts.routes.has_active_job", return_value=False), \
+         patch("app.shorts.routes.start_job_thread") as start:
+        r = _client().post("/videos/vid123/short")
+    assert r.status_code == 409
+    start.assert_not_called()
+
+
+def test_make_short_blocks_unknown_privacy():
+    # privacy_status not yet synced (NULL) -> refuse; only confirmed-public videos are cut.
+    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy=None)), \
+         patch("app.shorts.routes.has_active_job", return_value=False), \
+         patch("app.shorts.routes.start_job_thread") as start:
+        r = _client().post("/videos/vid123/short")
+    assert r.status_code == 409
+    start.assert_not_called()
 
 
 def _sb_clip(status="PENDING"):
