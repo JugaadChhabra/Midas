@@ -11,6 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Local shorts cutter ML stack (CPU-only — see docs Phase A). Install torch from
+# the CPU wheel index so the image doesn't pull ~2 GB of unused CUDA libs, then
+# the remaining ML deps. ffmpeg is already installed above.
+COPY requirements-ml.txt .
+RUN pip install --no-cache-dir torch==2.12.1 torchvision==0.27.1 torchaudio==2.11.0 \
+        --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements-ml.txt
+
 COPY app ./app
 
 RUN mkdir -p /app/storage/keyframes
