@@ -1,6 +1,11 @@
+import socket
+
+import pytest
 from pathlib import Path
 
 from app.shorts.cutter.download import BGUTIL_POT_SCRIPT, is_youtube_url, ytdlp_options
+from app.shorts.cutter.download import _ensure_pot_provider_ready
+from app.shorts.cutter.errors import CutterError
 
 
 def test_youtube_urls_accepted():
@@ -57,3 +62,22 @@ def test_ytdlp_options_falls_back_to_script_when_env_absent(monkeypatch):
     assert "youtubepot-bgutilhttp" not in ea
     # script provider present iff the local script exists (env-independent, matches CI)
     assert ("youtubepot-bgutilscript" in ea) == BGUTIL_POT_SCRIPT.is_file()
+
+
+def test_pot_provider_preflight_raises_when_unreachable():
+    # An unreachable provider must fail with an honest, actionable error rather
+    # than letting yt-dlp degrade to a token-less client and report the source
+    # video as "not available". Port 1 is not listening → connection refused.
+    with pytest.raises(CutterError, match="PO-token provider unreachable"):
+        _ensure_pot_provider_ready("http://127.0.0.1:1", attempts=1, delay=0)
+
+
+def test_pot_provider_preflight_passes_when_listening():
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        _ensure_pot_provider_ready(f"http://127.0.0.1:{port}", attempts=1, delay=0)
+    finally:
+        srv.close()

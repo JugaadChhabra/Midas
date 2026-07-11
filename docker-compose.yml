@@ -17,7 +17,11 @@ services:
       - midas_storage:/app/storage
       - shorts_cache:/app/shorts_cache
     depends_on:
-      - bgutil-provider
+      bgutil-provider:
+        # Don't start midas (or let autopilot fire a shorts job) until the
+        # PO-token sidecar is actually serving — plain "depends_on" only waits
+        # for container start, which loses the startup race and fails downloads.
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)"]
@@ -31,6 +35,14 @@ services:
     container_name: bgutil-provider
     restart: unless-stopped
     # serves PO tokens on :4416 inside the compose network; no host port needed
+    healthcheck:
+      # node is the sidecar's own runtime, so it's always present — no reliance
+      # on curl/wget being in the image. GET /ping returns 200 when ready.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4416/ping',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   midas_storage:

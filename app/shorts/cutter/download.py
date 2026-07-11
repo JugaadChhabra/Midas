@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import os
 import re
+import socket
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from app.shorts.cutter.errors import CutterError
 from app.shorts.cutter.util import safe_name
@@ -59,6 +62,35 @@ def ytdlp_options() -> dict:
     return options
 
 
+def _ensure_pot_provider_ready(base_url: str, attempts: int = 5, delay: float = 2.0) -> None:
+    """Wait for the bgutil PO-token sidecar to accept connections, or fail clearly.
+
+    In Docker the provider is a separate service, so a job can start before it is
+    ready (startup race) or when it is down. Without a token yt-dlp silently drops
+    to a token-less client and YouTube answers "This video is not available" — a
+    misleading error that looks like the source video is gone. A short connect
+    retry rides out the startup race; a persistent failure is reported honestly.
+    """
+    parsed = urlparse(base_url)
+    host = parsed.hostname
+    if not host:
+        return  # malformed URL — let yt-dlp surface its own error
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    last_err: Exception | None = None
+    for i in range(max(1, attempts)):
+        try:
+            with socket.create_connection((host, port), timeout=2.0):
+                return
+        except OSError as exc:
+            last_err = exc
+            if i < attempts - 1:
+                time.sleep(delay)
+    raise CutterError(
+        f"PO-token provider unreachable at {base_url} — shorts downloads need it. "
+        f"Is the bgutil-provider sidecar running? ({last_err})"
+    )
+
+
 def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
     """Download `url` into dest_dir at native quality. Returns (path, safe title)."""
     try:
@@ -67,6 +99,9 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
         raise CutterError("ML dependencies not installed — run: pip install -r requirements-ml.txt") from exc
     dest_dir.mkdir(parents=True, exist_ok=True)
     options = ytdlp_options()
+    http_base = os.getenv("BGUTIL_POT_HTTP_BASE_URL")
+    if http_base:
+        _ensure_pot_provider_ready(http_base)
     options["outtmpl"] = str(dest_dir / "source_%(id)s.%(ext)s")
     try:
         with yt_dlp.YoutubeDL(options) as downloader:
