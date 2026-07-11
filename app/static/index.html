@@ -35,9 +35,6 @@
   .freshness-ok { color:#2a7; }
   .freshness-stale { color:#d80; }
   .freshness-old { color:#c33; }
-  .spark { display:flex; align-items:flex-end; gap:2px; height:34px; }
-  .spark .b { width:14px; background:#6af; border-radius:2px 2px 0 0; min-height:2px; }
-  .spark .b.today { background:#2a7; }
   .pace-bar { display:inline-block; width:80px; height:6px; background:#8882; border-radius:3px; vertical-align:middle; overflow:hidden; }
   .pace-bar > i { display:block; height:100%; background:#2a7; }
 
@@ -137,13 +134,6 @@
     <div class="feed" id="activity-feed" aria-live="polite" role="log"><span class="muted">Loading…</span></div>
   </div>
 
-  <!-- Quota sparkline -->
-  <div class="card">
-    <h3 style="margin-top:0">Quota — last 8 days</h3>
-    <div id="spark-wrap" aria-label="Quota sparkline chart">Loading…</div>
-    <p class="muted" style="font-size:.82rem; margin:.5rem 0 0">Daily YouTube API units logged. Today is highlighted green. Resets at midnight Pacific.</p>
-  </div>
-
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => (n ?? 0).toLocaleString();
@@ -187,10 +177,9 @@ async function loadDashboard() {
     const j = await r.json();
     renderHealthBar(j.health, j.quota, j.kpis);
     renderPipeline(j.pipeline);
-    renderKpis(j.kpis, j.quota);
+    renderKpis(j.kpis);
     renderChannels(j.channels, j.pipeline);
     renderActivityFeed(j.activity || []);
-    renderSpark(j.quota);
     renderQuotaBadge(j.quota);
   } catch (e) {
     $('channels').innerHTML = '<em style="color:#c33">Failed to load. Is Supabase configured?</em>';
@@ -211,11 +200,14 @@ function renderHealthBar(h, q, k) {
   const remPct = q.remaining / Math.max(1, q.limit - q.safety_buffer);
   const qCls = remPct > 0.3 ? 'hp-ok' : remPct > 0.1 ? 'hp-warn' : 'hp-err';
   const qDot = remPct > 0.3 ? 'dot-ok' : remPct > 0.1 ? 'dot-warn' : 'dot-err';
+  const qOver = q.remaining < 0;
+  const qVal = qOver ? `${fmt(-q.remaining)} over` : `${fmt(q.remaining)} left`;
+  const qLabel = `${qOver ? 'Over safe cap' : 'Quota left'} · resets in ${fmtResetTime(q.reset_in_seconds)}`;
 
   const syncHours = h.worst_sync_hours;
   const syncCls = syncHours == null ? 'hp-err' : (syncHours < 6 ? 'hp-ok' : syncHours < 24 ? 'hp-warn' : 'hp-err');
   const syncDot = syncHours == null ? 'dot-err' : (syncHours < 6 ? 'dot-ok' : syncHours < 24 ? 'dot-warn' : 'dot-err');
-  const syncText = syncHours == null ? 'Never synced' : (syncHours < 1 ? `${Math.round(syncHours*60)}m ago` : `${Math.round(syncHours)}h ago`);
+  const syncText = syncHours == null ? 'Never synced' : freshnessText(syncHours);
 
   $('health-bar').innerHTML = `
     <div class="health-pill ${apCls}">
@@ -224,7 +216,7 @@ function renderHealthBar(h, q, k) {
     </div>
     <div class="health-pill ${qCls}">
       <div class="dot ${qDot}"></div>
-      <div><div class="val">${fmt(q.remaining)} units</div><div class="muted" style="font-size:.72rem">Quota left · resets in ${fmtResetTime(q.reset_in_seconds)}</div></div>
+      <div><div class="val">${qVal}</div><div class="muted" style="font-size:.72rem">${qLabel}</div></div>
     </div>
     <div class="health-pill hp-ok">
       <div class="dot dot-ok"></div>
@@ -232,7 +224,7 @@ function renderHealthBar(h, q, k) {
     </div>
     <div class="health-pill ${syncCls}">
       <div class="dot ${syncDot}"></div>
-      <div><div class="val">${escapeHtml(syncText)}</div><div class="muted" style="font-size:.72rem">Worst sync freshness</div></div>
+      <div><div class="val">${escapeHtml(syncText)}</div><div class="muted" style="font-size:.72rem">Oldest channel sync</div></div>
     </div>`;
 }
 
@@ -267,17 +259,13 @@ function renderPipeline(p) {
   $('pipeline-meta').textContent = p.daily_rate > 0 ? `${p.daily_rate} applies/day (7d avg)` : '';
 }
 
-function renderKpis(k, q) {
-  const remPct = q.remaining / Math.max(1, (q.limit - q.safety_buffer));
-  const qColor = remPct > 0.3 ? '#2a7' : remPct > 0.1 ? '#d80' : '#c33';
+function renderKpis(k) {
   $('kpis').innerHTML = `
     <div class="kpi"><div class="v">${k.channels}</div><div class="l">Channels</div></div>
-    <div class="kpi"><div class="v">${fmt(k.videos)}</div><div class="l">Videos tracked</div></div>
-    <div class="kpi"><div class="v">${k.pending_total}</div><div class="l">Pending audits</div></div>
-    <div class="kpi"><div class="v">${k.applied_today_total}</div><div class="l">Applied today</div></div>
+    <div class="kpi"><div class="v">${fmt(k.shorts_cut_total)}</div><div class="l">Shorts cut</div></div>
+    <div class="kpi"><div class="v">${fmt(k.shorts_uploaded_total)}</div><div class="l">Shorts uploaded</div></div>
     <div class="kpi"><div class="v">${k.applied_7d_total}</div><div class="l">Applied · 7d</div></div>
     <div class="kpi"><div class="v ${k.delta_views_7d_total >= 0 ? 'pos':'neg'}">${signed(k.delta_views_7d_total)}</div><div class="l">Δ views · 7d (applied)</div></div>
-    <div class="kpi"><div class="v" style="color:${qColor}">${fmt(q.used_today)}</div><div class="l">Quota today / ${fmt(q.limit)}</div></div>
   `;
 }
 
@@ -347,22 +335,6 @@ function timeAgo(iso) {
   } catch { return ''; }
 }
 
-function renderSpark(q) {
-  const max = Math.max(1, ...q.sparkline.map(d => d.units));
-  const today = q.sparkline[q.sparkline.length - 1]?.date;
-  $('spark-wrap').innerHTML = `
-    <div class="spark">
-      ${q.sparkline.map(d => {
-        const h = Math.max(2, Math.round(d.units / max * 34));
-        const cls = d.date === today ? 'b today' : 'b';
-        return `<div class="${cls}" style="height:${h}px" title="${d.date}: ${fmt(d.units)} units"></div>`;
-      }).join('')}
-    </div>
-    <div class="muted" style="font-size:.78rem; display:flex; justify-content:space-between; max-width:140px; margin-top:.25rem">
-      <span>${q.sparkline[0]?.date.slice(5)}</span><span>${today?.slice(5)}</span>
-    </div>`;
-}
-
 function renderQuotaBadge(q) {
   const remPct = q.remaining / Math.max(1, (q.limit - q.safety_buffer));
   const color = remPct > 0.3 ? '#2a7' : remPct > 0.1 ? '#d80' : '#c33';
@@ -370,7 +342,7 @@ function renderQuotaBadge(q) {
   $('quota-badge').innerHTML =
     `<span style="display:inline-block;width:.6rem;height:.6rem;border-radius:50%;background:${color};margin-right:.4rem"></span>` +
     `Quota today: <b>${fmt(q.used_today)}</b> / ${fmt(q.limit)} ` +
-    `<span class="muted">(${fmt(q.remaining)} usable${resetTxt})</span>`;
+    `<span class="muted">(${q.remaining < 0 ? fmt(-q.remaining) + ' over cap' : fmt(q.remaining) + ' usable'}${resetTxt})</span>`;
 }
 
 loadDashboard();

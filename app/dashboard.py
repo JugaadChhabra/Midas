@@ -250,6 +250,25 @@ def dashboard():
             "created_at": a.get("created_at"),
         })
 
+    # ── Shorts (clips cut + uploaded) ─────────────────────────────────────
+    # One shorts_clips row == one short cut from a source video; UPLOADED == live on YouTube.
+    # Paginated like the videos pull above — the table can exceed Supabase's 1000-row cap.
+    shorts_clips: list[dict] = []
+    clip_offset = 0
+    while True:
+        page = (
+            supabase().table("shorts_clips")
+            .select("upload_status")
+            .range(clip_offset, clip_offset + 999)
+            .execute()
+        ).data or []
+        shorts_clips.extend(page)
+        if len(page) < 1000:
+            break
+        clip_offset += 1000
+    shorts_cut_total = len(shorts_clips)
+    shorts_uploaded_total = sum(1 for c in shorts_clips if c.get("upload_status") == "UPLOADED")
+
     # ── KPIs ──────────────────────────────────────────────────────────────
     kpis = {
         "channels": len(channels),
@@ -258,6 +277,8 @@ def dashboard():
         "applied_today_total": sum(applied_today_by_channel.values()),
         "applied_7d_total": applied_7d_total,
         "delta_views_7d_total": sum(delta_views_7d_by_channel.values()),
+        "shorts_cut_total": shorts_cut_total,
+        "shorts_uploaded_total": shorts_uploaded_total,
     }
 
     health = {
