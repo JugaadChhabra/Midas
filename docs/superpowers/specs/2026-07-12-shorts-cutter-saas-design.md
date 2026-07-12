@@ -9,6 +9,22 @@ Give it a long video → get back ready-to-post vertical shorts. Upload a file o
 
 We ship *only* the Shorts Cutter. The rest of Midas (auditor, autopilot, playlists) stays separate. Dropping YouTube upload removes the Google OAuth verification blocker entirely.
 
+## Where we build it
+
+**A fresh repo.** The cutter engine (`app/shorts/cutter/*`) is already framework-free and self-contained; everything Midas-specific around it (routes, runner, YouTube coupling, dashboard) is shell we discard. New repo = independent deploy, own domain, own billing, no Midas baggage.
+
+Mechanic: copy the `cutter/` directory into the new repo as its core package.
+
+```
+shorts-cutter/
+  engine/     ← lifted from app/shorts/cutter/*  (ML pipeline, unchanged)
+  worker/     ← Modal app: wraps engine.cut_video() as a GPU function
+  api/        ← FastAPI control plane: auth · credits · jobs · presigned R2 URLs
+  web/        ← frontend: landing + app UI
+```
+
+Tradeoff: two copies of the engine (Midas keeps its own). Fine for now — products are diverging. If they ever need lockstep, extract the engine into a shared pip package later (YAGNI until then).
+
 ## Architecture
 
 Thin always-on control plane + scale-to-zero serverless GPU worker.
@@ -30,7 +46,7 @@ Browser ──▶ Control plane (FastAPI + Postgres)          ~$7–20/mo
 | Reuse as-is | Build new (the shell) |
 |---|---|
 | `app/shorts/cutter/*` engine (already framework-free) | Landing / marketing page |
-| Job + runner pattern | Auth — Supabase Auth (already in stack) |
+| Job + runner pattern | Auth — Supabase Auth + Google login |
 | Supabase (auth + storage) | Credits ledger + billing webhooks |
 | | Intake: file upload (presigned R2) + YouTube URL paste |
 | | Job UX: submit → live progress → download clips |
@@ -38,6 +54,10 @@ Browser ──▶ Control plane (FastAPI + Postgres)          ~$7–20/mo
 | | Thin Modal wrapper around `cut_video()` |
 
 The ML engine is done. The work is standard SaaS plumbing around it. Not a rewrite.
+
+## Auth
+
+**Supabase Auth with Google login.** Login uses only non-sensitive scopes (`openid`, `email`, `profile`) — no Google verification review, no "unverified app" screen, live in production the same day, $0. Create an OAuth client in Google Cloud (~15 min), paste client ID + secret into Supabase, and Supabase runs the flow. The weeks-long verification is only for YouTube *write* scopes, which we're not using.
 
 ## Billing — credits / pay-as-you-go
 
