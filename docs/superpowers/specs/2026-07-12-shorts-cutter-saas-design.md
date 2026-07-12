@@ -63,14 +63,16 @@ The ML engine is done. The work is standard SaaS plumbing around it. Not a rewri
 
 Compute costs real money per job, so revenue tracks usage.
 
-**Unit economics:** a 3–5 min source ≈ 45–90s on an L4 GPU ≈ **~$0.03–0.05 all-in per job**. Price so one processed video costs the user ~$0.30–0.60 → 6–10× margin, room for free-trial credits.
+**Unit = minutes of source video processed.** This is the real cost driver — demucs, whisper, and render all scale with source duration, not clip count. Credits are spent per minute of input. The length cap doubles as the free-trial unit (X free minutes).
+
+**Unit economics:** ~$0.01/min compute (a 3–5 min source ≈ 45–90s on an L4 GPU ≈ ~$0.03–0.05). Price ~$0.08–0.15/min to the user → healthy margin, room for free-trial minutes. Exact tiers: **pending.**
 
 **Gateway:** use a Merchant of Record (handles global VAT/sales tax, so no multi-jurisdiction registration). Primary: **Dodo Payments** (MoR, India-based → clean INR payouts) or **Polar** (best native credits/usage primitives + DX). Fallback: **Lemon Squeezy**. Not Stripe-direct — not an MoR, India export friction. The MoR choice is the real decision; all three qualify.
 
 ## Input handling (chosen: both upload + URL)
 
 - **Upload:** presigned direct-to-R2 so large files never touch the control plane.
-- **YouTube URL:** server-side `yt-dlp` download. Carries ToS / IP-ban risk at scale — needs proxy / pot-provider hardening before heavy traffic. Re-add the URL intake form (it was removed from `/shorts` in a recent commit).
+- **YouTube URL:** server-side download, **run inside the Modal worker** (ephemeral, disposable IPs; isolated from the app). Stack: `yt-dlp` + `bgutil-ytdlp-pot-provider` (POT token) + **rotating residential proxies**. Validate URL + enforce length cap before spending compute; **auto-refund credits on download/job failure**; process-and-delete source (no retain/rehost). Optional later: self-host **Cobalt** as the extraction layer if yt-dlp maintenance gets noisy. Re-add the URL intake form (removed from `/shorts` in a recent commit).
 
 ## Rollout
 
@@ -81,6 +83,5 @@ Compute costs real money per job, so revenue tracks usage.
 
 ## Open decisions (defer, don't block)
 
-- YouTube-download hardening (proxy / pot-provider).
-- Free-trial credit amount.
-- Pricing tiers / credit pack sizes.
+- Free-trial minutes + length cap (the max source duration per job).
+- Pricing tiers / credit pack sizes ($ per minute).
