@@ -14,7 +14,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import threading
 from pathlib import Path
 
 from app.config import settings
@@ -45,24 +44,11 @@ def _set_job(job_id: int, **fields) -> None:
     supabase().table("shorts_jobs").update(fields).eq("id", job_id).execute()
 
 
-def has_active_job() -> bool:
-    rows = (supabase().table("shorts_jobs").select("id")
-            .in_("status", list(WORKING_STATUSES)).limit(1).execute().data) or []
-    return bool(rows)
-
-
 def active_job_count() -> int:
     """Number of shorts jobs in flight (queued CREATED + actively running)."""
     rows = (supabase().table("shorts_jobs").select("id")
             .in_("status", list(WORKING_STATUSES)).execute().data) or []
     return len(rows)
-
-
-def start_job_thread(job_id: int) -> threading.Thread:
-    thread = threading.Thread(target=run_shorts_job, args=(job_id,),
-                              daemon=True, name=f"shorts-job-{job_id}")
-    thread.start()
-    return thread
 
 
 def run_shorts_job(job_id: int) -> None:
