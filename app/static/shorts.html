@@ -131,6 +131,7 @@
     <tbody></tbody>
   </table>
 
+<script src="/static/swr.js"></script>
 <script>
 const POLL_MS = 10000;
 const banner = document.getElementById('banner');
@@ -190,15 +191,20 @@ async function describeError(r) {
 // Channel names label the jobs table. Cuts are started from the dashboard or
 // autopilot (which upload to the source video's own channel), so this page
 // intentionally has no channel picker or arbitrary-URL cut form.
-async function loadChannels() {
-  const r = await fetch('/auth/channels');
-  if (!r.ok) {
-    const e = await describeError(r);
-    showBanner('error', `Couldn't load channel names (HTTP ${e.status} ${e.statusText})`, e.detail);
-    return;
-  }
-  const channels = await r.json();
+function applyChannelNames(channels) {
   for (const c of channels) channelNames.set(c.id, c.name || c.id);
+}
+// Cached-first (shares the '/auth/channels' key with the dashboard and channel
+// pages). The name map paints synchronously from cache so the first jobs render
+// already shows names, not raw UC… ids.
+function loadChannels() {
+  SWR.swr('/auth/channels', applyChannelNames, {
+    onError: (e) => {
+      if (SWR.get('/auth/channels') === undefined) {
+        showBanner('error', "Couldn't load channel names", String(e));
+      }
+    },
+  });
 }
 
 // Pull a watch id out of whatever URL shape the job stored.
@@ -312,6 +318,9 @@ async function loadJobs() {
     const clipsById = {};
     jobs.forEach((j, i) => { clipsById[j.id] = (details[i] && details[i].clips) || []; });
     renderJobs(jobs, clipsById);
+    // Snapshot the fully-resolved jobs+clips so reopening this page paints the
+    // last state instantly instead of a blank table while the poll fans out.
+    SWR.set('shorts:jobs', { jobs, clipsById });
     pollStatus.textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     pollStatus.textContent = 'update failed';
@@ -357,7 +366,12 @@ document.addEventListener('visibilitychange', () => {
   else { loadJobs(); startPolling(); }
 });
 
-loadChannels().then(loadJobs);
+// Paint from cache first (names, then last jobs snapshot), then kick off the
+// live fetch + polling. No blank-table wait on return visits.
+loadChannels();
+const _cachedJobs = SWR.get('shorts:jobs');
+if (_cachedJobs && _cachedJobs.jobs) renderJobs(_cachedJobs.jobs, _cachedJobs.clipsById || {});
+loadJobs();
 startPolling();
 </script>
 </body>
