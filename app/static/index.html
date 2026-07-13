@@ -51,13 +51,15 @@
   .dot-warn { background:#d80; }
   .dot-err  { background:#c33; }
 
-  /* Pipeline funnel */
-  .funnel { display:flex; gap:0; border-radius:8px; overflow:hidden; border:1px solid #8883; }
-  .funnel-step { flex:1; padding:.7rem .6rem; text-align:center; border-right:1px solid #8883;
+  /* Pipeline stat row — a breakdown of Total, not a proportional funnel.
+     Separate cards (not connected cells) so it doesn't imply a sequential flow. */
+  .funnel { display:flex; gap:.5rem; flex-wrap:wrap; }
+  .funnel-step { flex:1; min-width:118px; padding:.7rem .6rem; text-align:center;
+                 border:1px solid #8884; border-radius:8px;
                  display:flex; flex-direction:column; align-items:center; }
-  .funnel-step:last-child { border-right:none; }
   .funnel-step .fn { font-size:1.35rem; font-weight:700; line-height:1.1; }
   .funnel-step .fl { font-size:.7rem; opacity:.55; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
+  .funnel-step .fsub { font-size:.62rem; opacity:.4; margin-top:.15rem; }
   .progress-track { background:#8882; border-radius:4px; height:5px; overflow:hidden; margin-top:.5rem; }
   .progress-fill { height:100%; border-radius:4px; }
 
@@ -104,7 +106,7 @@
       <h3 style="margin:0; font-size:.95rem;">Audit pipeline</h3>
       <span id="pipeline-meta" class="muted" style="font-size:.8rem;"></span>
     </div>
-    <div class="funnel" id="pipeline-funnel" aria-label="Audit pipeline stages">Loading…</div>
+    <div class="funnel" id="pipeline-funnel" aria-label="Audit pipeline breakdown">Loading…</div>
     <div style="margin-top:.65rem;">
       <div style="display:flex; justify-content:space-between; font-size:.76rem; opacity:.55; margin-bottom:.25rem;">
         <span id="progress-label">—</span>
@@ -238,26 +240,32 @@ function renderHealthBar(h, q, k) {
 
 function renderPipeline(p) {
   if (!p) { $('pipeline-funnel').innerHTML = ''; return; }
+  // Total splits into Audited + Not-yet-audited; Pending/Applied are subsets of
+  // Audited. Ordered and sub-labelled to show that hierarchy rather than a flow.
   $('pipeline-funnel').innerHTML = `
     <div class="funnel-step">
       <div class="fn" style="color:#aaa">${fmt(p.total)}</div>
       <div class="fl">Total videos</div>
     </div>
     <div class="funnel-step">
+      <div class="fn" style="opacity:.5">${fmt(p.not_audited)}</div>
+      <div class="fl">Not yet audited</div>
+      <div class="fsub">of total</div>
+    </div>
+    <div class="funnel-step">
       <div class="fn" style="color:#6af">${fmt(p.audited)}</div>
       <div class="fl">Audited</div>
+      <div class="fsub">of total</div>
     </div>
     <div class="funnel-step">
       <div class="fn" style="color:#6af">${fmt(p.pending)}</div>
       <div class="fl">Pending apply</div>
+      <div class="fsub">of audited</div>
     </div>
     <div class="funnel-step">
       <div class="fn" style="color:#2a7">${fmt(p.applied)}</div>
       <div class="fl">Applied ✓</div>
-    </div>
-    <div class="funnel-step">
-      <div class="fn" style="opacity:.5">${fmt(p.not_audited)}</div>
-      <div class="fl">Not yet audited</div>
+      <div class="fsub">of audited</div>
     </div>`;
   $('progress-fill').style.width = (p.progress_pct ?? 0) + '%';
   $('progress-label').textContent = `${p.progress_pct ?? 0}% audited · ${p.apply_pct_of_audited ?? 0}% of those applied`;
