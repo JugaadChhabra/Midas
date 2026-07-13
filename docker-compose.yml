@@ -32,17 +32,27 @@ services:
 
   bgutil-provider:
     image: brainicism/bgutil-ytdlp-pot-provider:latest
+    # A stale cached image can drift out of sync with yt-dlp and silently stop
+    # minting valid tokens on a freshly-connected host — always pull the current
+    # one, matching the midas service above.
+    pull_policy: always
     container_name: bgutil-provider
     restart: unless-stopped
     # serves PO tokens on :4416 inside the compose network; no host port needed
     healthcheck:
       # node is the sidecar's own runtime, so it's always present — no reliance
-      # on curl/wget being in the image. GET /ping returns 200 when ready.
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4416/ping',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
+      # on curl/wget being in the image. A plain /ping only proves the HTTP
+      # server booted; it stays green while the provider hands back empty tokens
+      # and yt-dlp silently drops to a token-less client (YouTube then lies
+      # "video not available"). So the check actually MINTS: POST /get_pot and
+      # require a non-empty poToken. `service_healthy` then genuinely gates midas
+      # — a new machine/channel can't start jobs against a provider that can't
+      # mint. First botguard solve is slow, hence the generous start_period.
+      test: ["CMD", "node", "-e", "const http=require('http');const d='{}';const req=http.request({host:'127.0.0.1',port:4416,path:'/get_pot',method:'POST',headers:{'Content-Type':'application/json','Content-Length':d.length}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{try{process.exit(r.statusCode===200&&JSON.parse(b).poToken?0:1)}catch(e){process.exit(1)}})});req.on('error',()=>process.exit(1));req.write(d);req.end();"]
+      interval: 30s
+      timeout: 30s
       retries: 5
-      start_period: 20s
+      start_period: 60s
 
 volumes:
   midas_storage:

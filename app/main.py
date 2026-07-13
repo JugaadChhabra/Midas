@@ -116,6 +116,16 @@ def _daily_playlist_health_score():
             _main_log.exception("Daily playlist_health_score failed for %s: %s", channel_id, e)
 
 
+def _refresh_pot_provider():
+    """Periodically re-establish the bgutil PO-token sidecar's session so a
+    long-lived provider never drifts into serving a stale integrity token — the
+    failure mode that makes downloads report live videos as 'not available'."""
+    from app.shorts.cutter.download import refresh_pot_provider
+
+    refresh_pot_provider()
+    _main_log.info("Refreshed PO-token provider session")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.add_job(
@@ -229,6 +239,18 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    import os
+    if os.getenv("BGUTIL_POT_HTTP_BASE_URL"):
+        # Only meaningful for the Docker HTTP sidecar; the Mac mints per-request
+        # via a local script, so there's no long-lived session to go stale.
+        scheduler.add_job(
+            _refresh_pot_provider,
+            "interval",
+            hours=2,
+            id="pot_provider_refresh",
+            max_instances=1,
+            coalesce=True,
+        )
     from app.shorts.runner import reap_stuck_jobs
     try:
         reap_stuck_jobs()

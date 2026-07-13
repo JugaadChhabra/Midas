@@ -29,6 +29,90 @@ def is_youtube_url(url: str) -> bool:
     return bool(YOUTUBE_URL_RE.match(url.strip()))
 
 
+# yt-dlp emits these when it was forced onto a token-less client (the PO-token
+# provider handed it nothing). YouTube then wrongly reports a live video as gone.
+# Matching them lets us refresh the provider and retry instead of failing as if
+# the source video were deleted. Kept lowercase for case-insensitive matching.
+TOKENLESS_FAILURE_SIGNATURES = (
+    "this video is not available",
+    "sign in to confirm you're not a bot",
+    "requested format is not available",
+    "no video formats found",
+)
+
+
+def _looks_like_token_failure(message: str) -> bool:
+    """True when a yt-dlp error smells like a token-less fallback, not a real
+    missing/private video."""
+    m = (message or "").lower()
+    return any(sig in m for sig in TOKENLESS_FAILURE_SIGNATURES)
+
+
+def _provider_mint_token(base_url: str, timeout: float = 30.0, bypass_cache: bool = False) -> str:
+    """Ask the bgutil sidecar to actually mint a PO token. Returns a non-empty
+    token or raises CutterError. This proves the provider *works* — not merely
+    that its HTTP port is open, which is the gap that lets token-less downloads
+    slip through and surface as "video not available"."""
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/get_pot"
+    body = {"bypass_cache": True} if bypass_cache else {}
+    try:
+        resp = httpx.post(url, json=body, timeout=timeout)
+    except httpx.HTTPError as exc:
+        raise CutterError(
+            f"PO-token provider unreachable at {base_url} — shorts downloads need it. "
+            f"Is the bgutil-provider sidecar running? ({exc})"
+        ) from exc
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = (resp.json() or {}).get("error", "")
+        except Exception:
+            detail = (resp.text or "")[:200]
+        raise CutterError(
+            f"PO-token provider at {base_url} could not mint a token "
+            f"(HTTP {resp.status_code}: {detail}). Restart the bgutil-provider sidecar."
+        )
+    token = (resp.json() or {}).get("poToken")
+    if not token:
+        raise CutterError(
+            f"PO-token provider at {base_url} returned an empty token — it is up but not "
+            f"minting. yt-dlp would fall back to a token-less client and YouTube would "
+            f"wrongly report the video as unavailable. Restart the bgutil-provider sidecar."
+        )
+    return token
+
+
+def _provider_invalidate_caches(base_url: str, timeout: float = 10.0) -> None:
+    """Best-effort: drop the sidecar's cached tokens so the next mint is fresh."""
+    import httpx
+
+    try:
+        httpx.post(f"{base_url.rstrip('/')}/invalidate_caches", timeout=timeout)
+    except httpx.HTTPError:
+        pass  # the retry still attempts a fresh download; don't mask the real error
+
+
+def refresh_pot_provider(base_url: str | None = None, timeout: float = 10.0) -> None:
+    """Force the sidecar to re-establish its session. Called on a schedule so a
+    long-lived provider never drifts into serving a stale integrity token (a
+    known bgutil failure mode). Fully best-effort — never raises."""
+    import httpx
+
+    base_url = base_url or os.getenv("BGUTIL_POT_HTTP_BASE_URL")
+    if not base_url:
+        return
+    base = base_url.rstrip("/")
+    # /invalidate_it drops the integrity token (the deep session state that goes
+    # stale); /invalidate_caches drops cached per-video tokens. Do both.
+    for path in ("/invalidate_it", "/invalidate_caches"):
+        try:
+            httpx.post(f"{base}{path}", timeout=timeout)
+        except httpx.HTTPError:
+            pass
+
+
 def ytdlp_options() -> dict:
     # The user's channel videos are PO-token-gated: without a token YouTube caps
     # downloads at 360p (or returns no formats at all when embedding is disabled).
@@ -80,15 +164,44 @@ def _ensure_pot_provider_ready(base_url: str, attempts: int = 5, delay: float = 
     for i in range(max(1, attempts)):
         try:
             with socket.create_connection((host, port), timeout=2.0):
-                return
+                break
         except OSError as exc:
             last_err = exc
             if i < attempts - 1:
                 time.sleep(delay)
-    raise CutterError(
-        f"PO-token provider unreachable at {base_url} — shorts downloads need it. "
-        f"Is the bgutil-provider sidecar running? ({last_err})"
-    )
+    else:
+        raise CutterError(
+            f"PO-token provider unreachable at {base_url} — shorts downloads need it. "
+            f"Is the bgutil-provider sidecar running? ({last_err})"
+        )
+    # The port being open only proves the HTTP server booted — not that it can
+    # mint. Prove minting works before we start the download, else yt-dlp
+    # silently drops to a token-less client and YouTube lies "video not
+    # available". A couple retries ride out a slow first botguard solve.
+    mint_err: Exception | None = None
+    for i in range(max(1, attempts)):
+        try:
+            _provider_mint_token(base_url)
+            return
+        except CutterError as exc:
+            mint_err = exc
+            if i < attempts - 1:
+                time.sleep(delay)
+    raise mint_err
+
+
+def _download_once(options: dict, url: str, dest_dir: Path) -> tuple[Path, str]:
+    """One yt-dlp download pass. Raises yt_dlp.utils.DownloadError on failure so
+    the caller can decide whether it's a token issue worth retrying."""
+    import yt_dlp
+
+    with yt_dlp.YoutubeDL(options) as downloader:
+        info = downloader.extract_info(url.strip(), download=True)
+    requested = (info or {}).get("requested_downloads") or []
+    downloaded_path = Path(requested[0]["filepath"]) if requested else None
+    if downloaded_path is None or not downloaded_path.is_file():
+        raise CutterError("The link did not produce a playable video file. Check that the video is public.")
+    return downloaded_path, safe_name(str(info.get("title") or "downloaded_video"))
 
 
 def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
@@ -104,12 +217,29 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
         _ensure_pot_provider_ready(http_base)
     options["outtmpl"] = str(dest_dir / "source_%(id)s.%(ext)s")
     try:
-        with yt_dlp.YoutubeDL(options) as downloader:
-            info = downloader.extract_info(url.strip(), download=True)
+        return _download_once(options, url, dest_dir)
     except yt_dlp.utils.DownloadError as exc:
+        msg = str(exc)
+        # A token-less fallback makes YouTube wrongly report a live video as
+        # "not available". When a provider is configured, invalidate its cache
+        # to force a fresh token and retry once before giving up — and never
+        # surface the misleading "not available" as if the video were deleted.
+        if http_base and _looks_like_token_failure(msg):
+            _provider_invalidate_caches(http_base)
+            try:
+                _provider_mint_token(http_base, bypass_cache=True)
+            except CutterError as mint_exc:
+                raise CutterError(
+                    "Download failed and the PO-token provider is not minting valid tokens "
+                    "(this is a provider issue, not a missing video). "
+                    f"Restart the bgutil-provider sidecar. ({mint_exc})"
+                ) from exc
+            try:
+                return _download_once(options, url, dest_dir)
+            except yt_dlp.utils.DownloadError as exc2:
+                raise CutterError(
+                    "Download still failed after refreshing the PO-token provider. "
+                    "If the video plays in a browser, the provider likely needs updating or "
+                    f"restarting — the video is not the problem. ({exc2})"
+                ) from exc2
         raise CutterError(f"Could not download this video link: {exc}") from exc
-    requested = (info or {}).get("requested_downloads") or []
-    downloaded_path = Path(requested[0]["filepath"]) if requested else None
-    if downloaded_path is None or not downloaded_path.is_file():
-        raise CutterError("The link did not produce a playable video file. Check that the video is public.")
-    return downloaded_path, safe_name(str(info.get("title") or "downloaded_video"))
