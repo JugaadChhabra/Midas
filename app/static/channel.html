@@ -484,10 +484,10 @@ function renderOverview(j) {
       <div class="kpi"><div class="v">${fmt(c.shorts_count || 0)}</div><div class="l">Shorts</div></div>
       <div class="kpi"><div class="v">${fmt(c.audited_regular || 0)}</div><div class="l">Videos audited</div></div>
       <div class="kpi"><div class="v">${fmt(c.audited_shorts || 0)}</div><div class="l">Shorts audited</div></div>
-      <div class="kpi"><div class="v">${c.pending_count || 0}</div><div class="l">Pending</div></div>
-      <div class="kpi"><div class="v">${c.applied_today || 0}</div><div class="l">Applied today</div></div>
-      <div class="kpi"><div class="v">${c.applied_7d || 0}</div><div class="l">Applied · 7d</div></div>
-      <div class="kpi"><div class="v">${c.applied_total || 0}</div><div class="l">Applied · total</div></div>
+      <div class="kpi"><div class="v">${fmt(c.pending_count || 0)}</div><div class="l">Pending</div></div>
+      <div class="kpi"><div class="v">${fmt(c.applied_today || 0)}</div><div class="l">Applied today</div></div>
+      <div class="kpi"><div class="v">${fmt(c.applied_7d || 0)}</div><div class="l">Applied · 7d</div></div>
+      <div class="kpi"><div class="v">${fmt(c.applied_total || 0)}</div><div class="l">Applied · total</div></div>
       <div class="kpi"><div class="v ${(c.delta_views_7d||0)>=0?'':'neg'}" style="color:${(c.delta_views_7d||0)>=0?'#2a7':'#c33'}">${(c.delta_views_7d>0?'+':'') + fmt(c.delta_views_7d || 0)}</div><div class="l">Δ views · 7d</div></div>
     `;
 }
