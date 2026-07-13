@@ -9,9 +9,11 @@ when a job is actually created.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import signal
 import subprocess
-import threading
+import sys
 from pathlib import Path
 
 from app.config import settings
@@ -21,6 +23,11 @@ from app.shorts.youtube_upload import upload_short
 log = logging.getLogger("midas.shorts.runner")
 
 WORKING_STATUSES = ("CREATED", "DOWNLOADING", "ANALYSING", "RENDERING", "UPLOADING")
+
+# The subset of WORKING_STATUSES a worker has actually started (excludes the
+# queued CREATED state). Only these are reaped on restart; CREATED jobs survive
+# to be re-dispatched.
+IN_PROGRESS_STATUSES = tuple(s for s in WORKING_STATUSES if s != "CREATED")
 
 
 def _fetch_video(url: str, dest_dir: Path):
@@ -37,17 +44,11 @@ def _set_job(job_id: int, **fields) -> None:
     supabase().table("shorts_jobs").update(fields).eq("id", job_id).execute()
 
 
-def has_active_job() -> bool:
+def active_job_count() -> int:
+    """Number of shorts jobs in flight (queued CREATED + actively running)."""
     rows = (supabase().table("shorts_jobs").select("id")
-            .in_("status", list(WORKING_STATUSES)).limit(1).execute().data) or []
-    return bool(rows)
-
-
-def start_job_thread(job_id: int) -> threading.Thread:
-    thread = threading.Thread(target=run_shorts_job, args=(job_id,),
-                              daemon=True, name=f"shorts-job-{job_id}")
-    thread.start()
-    return thread
+            .in_("status", list(WORKING_STATUSES)).execute().data) or []
+    return len(rows)
 
 
 def run_shorts_job(job_id: int) -> None:
@@ -126,17 +127,37 @@ def run_shorts_job(job_id: int) -> None:
 
 
 def reap_stuck_jobs() -> int:
-    """Fail jobs stranded in a working status by a mid-job server restart."""
+    """Fail jobs a worker had started but a server restart abandoned.
+
+    Scans IN_PROGRESS_STATUSES (never CREATED — those stay queued and get
+    re-dispatched). Any still-alive worker process for a stuck job is killed
+    first so it can't keep writing to the row or hog ffmpeg/GPU.
+    """
     sb = supabase()
-    stuck = (sb.table("shorts_jobs").select("id")
-             .in_("status", list(WORKING_STATUSES)).execute().data) or []
+    stuck = (sb.table("shorts_jobs").select("id,worker_pid")
+             .in_("status", list(IN_PROGRESS_STATUSES)).execute().data) or []
     for row in stuck:
+        _kill_pid_if_alive(row.get("worker_pid"))
         sb.table("shorts_jobs").update({
             "status": "FAILED", "error_message": "server restarted mid-job",
         }).eq("id", row["id"]).execute()
     if stuck:
         log.warning("Reaped %d stuck shorts job(s) on startup", len(stuck))
     return len(stuck)
+
+
+def _kill_pid_if_alive(pid: int | None) -> None:
+    """Best-effort terminate a possibly-orphaned worker process. Cross-platform."""
+    if not pid:
+        return
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                           check=False, capture_output=True)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass  # already gone / not ours — nothing to do
 
 
 def _notify_macos(title: str, body: str) -> None:

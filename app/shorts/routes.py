@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
-from app.shorts.runner import has_active_job, start_job_thread
 from app.shorts.youtube_upload import upload_short
 
 log = logging.getLogger("midas.shorts.routes")
@@ -28,8 +27,6 @@ def create_job(body: CreateJob):
         raise HTTPException(404, f"Channel {body.channel_id} not found")
     if not is_youtube_url(body.source_url):
         raise HTTPException(400, "source_url must be a YouTube video link")
-    if has_active_job():
-        raise HTTPException(409, "A shorts job is already running; wait for it to finish")
 
     inserted = sb.table("shorts_jobs").insert({
         "channel_id":    body.channel_id,
@@ -39,8 +36,7 @@ def create_job(body: CreateJob):
         "status":        "CREATED",
     }).execute().data
     job_id = inserted[0]["id"]
-    start_job_thread(job_id)
-    log.info("Shorts job %d created for %s", job_id, body.source_url)
+    log.info("Shorts job %d queued for %s", job_id, body.source_url)
     return {"job_id": job_id}
 
 
@@ -130,8 +126,6 @@ def make_short(video_id: str, body: MakeShort | None = None):
         raise HTTPException(
             409, f"Video is {video.get('privacy_status') or 'of unknown privacy'}; "
                  "only public videos can be cut into shorts")
-    if has_active_job():
-        raise HTTPException(409, "A shorts job is already running; wait for it to finish")
     inserted = sb.table("shorts_jobs").insert({
         "channel_id":         video["channel_id"],
         "source_video_id":    video_id,
@@ -143,6 +137,5 @@ def make_short(video_id: str, body: MakeShort | None = None):
         "status":             "CREATED",
     }).execute().data
     job_id = inserted[0]["id"]
-    start_job_thread(job_id)
-    log.info("Shorts job %d created for video %s", job_id, video_id)
+    log.info("Shorts job %d queued for video %s", job_id, video_id)
     return {"job_id": job_id}

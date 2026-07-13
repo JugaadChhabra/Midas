@@ -20,26 +20,16 @@ def _sb_with_channel(found=True):
 BODY = {"channel_id": "UC123", "source_url": "https://youtu.be/dQw4w9WgXcQ"}
 
 
-def test_create_job_starts_thread():
-    with patch("app.shorts.routes.supabase", return_value=_sb_with_channel()), \
-         patch("app.shorts.routes.has_active_job", return_value=False), \
-         patch("app.shorts.routes.start_job_thread") as start:
+def test_create_job_enqueues():
+    with patch("app.shorts.routes.supabase", return_value=_sb_with_channel()):
         r = _client().post("/shorts/jobs", json={**BODY, "cut_mode": "coverage"})
     assert r.status_code == 200 and r.json() == {"job_id": 42}
-    start.assert_called_once_with(42)
 
 
 def test_create_job_rejects_non_youtube_url():
     with patch("app.shorts.routes.supabase", return_value=_sb_with_channel()):
         r = _client().post("/shorts/jobs", json={**BODY, "source_url": "https://vimeo.com/1"})
     assert r.status_code == 400
-
-
-def test_create_job_conflicts_when_job_running():
-    with patch("app.shorts.routes.supabase", return_value=_sb_with_channel()), \
-         patch("app.shorts.routes.has_active_job", return_value=True):
-        r = _client().post("/shorts/jobs", json=BODY)
-    assert r.status_code == 409
 
 
 def test_create_job_unknown_channel_404():

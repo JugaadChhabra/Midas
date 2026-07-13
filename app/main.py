@@ -21,6 +21,7 @@ from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
 from app.reflection import reflect as reflection_reflect, router as reflection_router
 from app.shorts.routes import router as shorts_router, video_router as shorts_video_router
+from app.shorts.dispatcher import dispatch_tick
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
 from app.measurement import router as measurement_router, eval_measurements
@@ -163,6 +164,14 @@ async def lifespan(app: FastAPI):
         "interval",
         seconds=settings.AUTOPILOT_TICK_SECONDS,
         id="autopilot",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        dispatch_tick,
+        "interval",
+        seconds=settings.SHORTS_DISPATCH_INTERVAL_SECONDS,
+        id="shorts_dispatch",
         max_instances=1,
         coalesce=True,
     )
