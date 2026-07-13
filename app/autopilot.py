@@ -13,7 +13,7 @@ from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.sync import sync_channel, refresh_stats
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
-from app.shorts.runner import has_active_job, start_job_thread
+from app.shorts.runner import active_job_count
 
 log = logging.getLogger("midas.autopilot")
 router = APIRouter(tags=["autopilot"])
@@ -234,8 +234,8 @@ def _run_shorts_action(ch: dict) -> None:
     shorts count is at/over the channel cap, or when there is no eligible video.
     """
     channel_id = ch["id"]
-    if has_active_job():
-        return  # a cut is already running; try again next tick
+    if active_job_count() >= settings.SHORTS_MAX_CONCURRENT_JOBS:
+        return  # queue + running already at capacity; try again next tick
     cap = ch.get("autopilot_shorts_daily_cap") or 1
     if _shorts_made_today(channel_id) >= cap:
         return
@@ -256,8 +256,7 @@ def _run_shorts_action(ch: dict) -> None:
         }).execute()
     ).data
     job_id = inserted[0]["id"]
-    start_job_thread(job_id)
-    log.info("Autopilot shorts: started job %d for video %s (channel %s)", job_id, video["id"], channel_id)
+    log.info("Autopilot shorts: queued job %d for video %s (channel %s)", job_id, video["id"], channel_id)
 
 
 def _pause(channel_id: str, reason: str):
@@ -354,7 +353,7 @@ def tick():
                 return
 
         # Shorts autopilot — independent of the metadata-audit path. Enqueues at
-        # most one cut per tick, serialized by has_active_job (never overlaps).
+        # most one cut per tick, gated by active_job_count vs the concurrency cap.
         if ch.get("autopilot_shorts_enabled"):
             try:
                 _run_shorts_action(ch)

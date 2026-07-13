@@ -115,8 +115,7 @@ def test_run_shorts_action_enqueues_when_eligible():
     long_videos = [{"id": "vGood", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
     sj = {"by_source": [], "today": []}
     with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, rec)), \
-         patch("app.autopilot.has_active_job", return_value=False), \
-         patch("app.autopilot.start_job_thread") as start:
+         patch("app.autopilot.active_job_count", return_value=0):
         ap._run_shorts_action(CH)
     assert len(rec) == 1
     job = rec[0]
@@ -125,17 +124,17 @@ def test_run_shorts_action_enqueues_when_eligible():
     assert job["upload_cap"] == 2
     assert job["cut_mode"] == "highlights" and job["camera_motion"] == "calm"
     assert job["status"] == "CREATED"
-    start.assert_called_once_with(99)
 
 
-def test_run_shorts_action_noop_when_busy():
+def test_run_shorts_action_noop_when_at_capacity():
     import app.autopilot as ap
     rec = []
     with patch("app.autopilot.supabase", return_value=_sb([], {"by_source": [], "today": []}, rec)), \
-         patch("app.autopilot.has_active_job", return_value=True), \
-         patch("app.autopilot.start_job_thread") as start:
+         patch("app.autopilot.active_job_count", return_value=2), \
+         patch("app.autopilot.settings") as st:
+        st.SHORTS_MAX_CONCURRENT_JOBS = 2
         ap._run_shorts_action(CH)
-    assert rec == [] and start.call_count == 0
+    assert rec == []
 
 
 def test_run_shorts_action_noop_over_daily_cap():
@@ -144,10 +143,9 @@ def test_run_shorts_action_noop_over_daily_cap():
     long_videos = [{"id": "vGood", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
     sj = {"by_source": [], "today": [{"id": 1}]}   # already 1 today, cap is 1
     with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, rec)), \
-         patch("app.autopilot.has_active_job", return_value=False), \
-         patch("app.autopilot.start_job_thread") as start:
+         patch("app.autopilot.active_job_count", return_value=0):
         ap._run_shorts_action(CH)
-    assert rec == [] and start.call_count == 0
+    assert rec == []
 
 
 def test_run_shorts_action_noop_when_no_eligible_video():
@@ -155,7 +153,6 @@ def test_run_shorts_action_noop_when_no_eligible_video():
     rec = []
     sj = {"by_source": [], "today": []}
     with patch("app.autopilot.supabase", return_value=_sb([], sj, rec)), \
-         patch("app.autopilot.has_active_job", return_value=False), \
-         patch("app.autopilot.start_job_thread") as start:
+         patch("app.autopilot.active_job_count", return_value=0):
         ap._run_shorts_action(CH)
-    assert rec == [] and start.call_count == 0
+    assert rec == []
