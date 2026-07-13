@@ -176,6 +176,18 @@
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('channel_id');
+// When embedded in the channel page's Performance tab (?embed=1), drop this
+// page's own nav / breadcrumb / redundant title and go full width.
+const embedded = params.get('embed') === '1';
+if (embedded) {
+  // This script runs at the end of <body>, so nav/breadcrumb/h1 are already parsed.
+  document.querySelector('nav.nav')?.remove();
+  document.querySelector('p[aria-label="Breadcrumb"]')?.remove();
+  document.querySelector('h1')?.remove();
+  document.body.style.margin = '0';
+  document.body.style.maxWidth = 'none';
+  document.body.style.padding = '0';
+}
 if (!channelId) { showMissingId('channel_id'); throw new Error('no id'); }
 // Render a missing-id error in the content area while keeping the top nav intact.
 function showMissingId(what) {

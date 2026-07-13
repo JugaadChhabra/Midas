@@ -101,6 +101,7 @@
   <div class="tabs" role="tablist">
     <div class="tab active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</div>
     <div class="tab" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">Videos</div>
+    <div class="tab" data-tab="performance" role="tab" tabindex="-1" aria-selected="false">Performance</div>
     <div class="tab" data-tab="autopilot" role="tab" tabindex="-1" aria-selected="false">Autopilot</div>
     <div class="tab" data-tab="playlists" role="tab" tabindex="-1" aria-selected="false">Playlists</div>
     <div class="tab" data-tab="settings" role="tab" tabindex="-1" aria-selected="false">Settings</div>
@@ -159,50 +160,77 @@
     </div>
   </div>
 
+  <!-- ─── PERFORMANCE ─── -->
+  <!-- Folded in as a tab via a same-origin iframe of /performance (embed mode
+       hides that page's own nav/breadcrumb). Avoids merging ~500 lines of JS/CSS
+       with colliding names into this file. -->
+  <div class="tab-panel" data-panel="performance">
+    <iframe id="perf-frame" title="Performance" style="width:100%; border:0; display:block; min-height:600px"></iframe>
+  </div>
+
   <!-- ─── AUTOPILOT ─── -->
   <div class="tab-panel" data-panel="autopilot">
+    <!-- Status first: what autopilot is doing right now. -->
     <div class="card">
-      <h3 style="margin-top:0">Autopilot</h3>
-      <p class="muted">Audits and applies changes automatically, starting with the lowest-view-count public video. Stops cleanly before quota runs out.</p>
+      <div class="row" style="justify-content:space-between; align-items:center; gap:.5rem">
+        <h3 style="margin:0">Autopilot status</h3>
+        <div id="ap-summary"><span class="muted">Loading…</span></div>
+      </div>
+      <div id="ap-eta" class="muted" style="margin-top:.4rem; font-size:.85rem"></div>
+    </div>
+
+    <!-- Settings: two clearly separated features, one Save at the bottom. -->
+    <div class="card">
+      <h3 style="margin-top:0">Autopilot settings</h3>
+
+      <h4 style="margin:.25rem 0 .25rem">Metadata</h4>
+      <p class="muted" style="margin-top:0">Audits and applies title / description / tag changes automatically, starting with the lowest-view-count public video. Stops cleanly before quota runs out.</p>
       <div class="row">
-        <label><input type="checkbox" id="ap-enabled" /> Enable autopilot</label>
+        <label><input type="checkbox" id="ap-enabled" /> Enable metadata autopilot</label>
         <label class="muted">Daily cap:
           <input id="ap-cap" type="number" min="1" max="200" value="10" style="width: 5rem; margin-left: .25rem;" />
         </label>
-        <button id="ap-save">Save</button>
       </div>
-      <div style="margin-top:.6rem; padding-top:.6rem; border-top:1px solid #8883">
-        <label><input type="checkbox" id="ap-shorts-enabled" /> Auto-generate shorts (long-form videos)</label>
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.6rem; margin-top:.6rem">
-          <label style="display:flex; flex-direction:column; gap:.2rem">
-            <span class="muted" style="font-size:.8rem">Videos / day</span>
-            <input id="ap-shorts-cap" type="number" min="1" max="20" value="1" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:.2rem">
-            <span class="muted" style="font-size:.8rem">Upload top</span>
-            <input id="ap-shorts-upload" type="number" min="1" max="8" value="2" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:.2rem">
-            <span class="muted" style="font-size:.8rem">Mode</span>
-            <select id="ap-shorts-mode">
-              <option value="highlights">Highlights</option>
-              <option value="coverage">Full coverage</option>
-            </select>
-          </label>
-          <label style="display:flex; flex-direction:column; gap:.2rem">
-            <span class="muted" style="font-size:.8rem">Camera</span>
-            <select id="ap-shorts-motion">
-              <option value="locked">Locked</option>
-              <option value="calm" selected>Calm</option>
-              <option value="follow">Follow</option>
-            </select>
-          </label>
-        </div>
+
+      <h4 style="margin:1.1rem 0 .25rem; padding-top:1rem; border-top:1px solid #8883">Shorts</h4>
+      <p class="muted" style="margin-top:0">Cuts long-form videos into Shorts and uploads the top clips as private, automatically.</p>
+      <label><input type="checkbox" id="ap-shorts-enabled" /> Enable shorts autopilot</label>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.6rem; margin-top:.6rem">
+        <label style="display:flex; flex-direction:column; gap:.2rem">
+          <span class="muted" style="font-size:.8rem">Videos / day</span>
+          <input id="ap-shorts-cap" type="number" min="1" max="20" value="1" />
+        </label>
+        <label style="display:flex; flex-direction:column; gap:.2rem">
+          <span class="muted" style="font-size:.8rem">Upload top</span>
+          <input id="ap-shorts-upload" type="number" min="1" max="8" value="2" />
+        </label>
+        <label style="display:flex; flex-direction:column; gap:.2rem">
+          <span class="muted" style="font-size:.8rem">Mode</span>
+          <select id="ap-shorts-mode">
+            <option value="highlights">Highlights</option>
+            <option value="coverage">Full coverage</option>
+          </select>
+        </label>
+        <label style="display:flex; flex-direction:column; gap:.2rem">
+          <span class="muted" style="font-size:.8rem">Camera</span>
+          <select id="ap-shorts-motion">
+            <option value="locked">Locked</option>
+            <option value="calm" selected>Calm</option>
+            <option value="follow">Follow</option>
+          </select>
+        </label>
       </div>
-      <div id="ap-summary" style="margin-top:.75rem"></div>
-      <div id="ap-eta" class="muted" style="margin-top:.25rem; font-size:.85rem"></div>
-      <h4 style="margin-bottom:.25rem">Recent activity</h4>
-      <div id="ap-activity"></div>
+
+      <div style="margin-top:1.1rem; display:flex; align-items:center; gap:.6rem">
+        <button id="ap-save">Save autopilot settings</button>
+        <span class="muted" style="font-size:.8rem">Saves both metadata and shorts settings.</span>
+      </div>
+    </div>
+
+    <!-- Recent activity -->
+    <div class="card">
+      <h3 style="margin-top:0">Recent activity</h3>
+      <div id="ap-activity"><span class="muted">Loading…</span></div>
     </div>
   </div>
 
@@ -407,10 +435,27 @@ const loadedTabs = new Set();
 const tabLoaders = {
   overview:  () => loadOverview(),
   videos:    () => loadVideos(),
+  performance: () => loadPerformanceFrame(),
   autopilot: () => { loadAutopilotLog(); if (!apInterval) apInterval = setInterval(loadAutopilotLog, 30000); },
   playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
   settings:  () => { loadConfig(); loadReflectionData(); },
 };
+
+// Performance is folded in as an embedded /performance page. Load it once, then
+// size the iframe to its content (same-origin, so we can read/observe its body).
+function loadPerformanceFrame() {
+  const f = $('perf-frame');
+  if (f.src) return;
+  f.src = `/performance?channel_id=${encodeURIComponent(channelId)}&embed=1`;
+  f.onload = () => {
+    try {
+      const doc = f.contentDocument;
+      const resize = () => { f.style.height = doc.body.scrollHeight + 'px'; };
+      resize();
+      new ResizeObserver(resize).observe(doc.body);
+    } catch (e) { /* cross-origin shouldn't happen (same origin); ignore */ }
+  };
+}
 function ensureTabLoaded(name) {
   if (loadedTabs.has(name)) return;
   const fn = tabLoaders[name];
@@ -465,7 +510,8 @@ function applyChannel(all) {
   if (c.shorts_camera_motion) $('ap-shorts-motion').value = c.shorts_camera_motion;
   $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
   $('playlist-health-enabled').checked = !!c.playlist_health_enabled; // null/undefined → false (default off)
-  $('perf-link').href = `/performance?channel_id=${encodeURIComponent(channelId)}`;
+  // "View performance" now switches to the in-page Performance tab.
+  $('perf-link').onclick = (e) => { e.preventDefault(); switchTab('performance'); };
   // Surface the re-consent banner whenever the analytics scope hasn't been granted.
   $('reconsent-banner').hidden = !!c.analytics_authorized;
 }
