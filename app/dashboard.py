@@ -3,6 +3,7 @@
 Adds endpoints used by index.html. Existing endpoints (e.g. /auth/channels) are
 left untouched so other pages keep working.
 """
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter
 
@@ -51,20 +52,31 @@ def dashboard():
         ).execute()
     ).data or []
 
-    # Pull all videos — paginated because the table can exceed Supabase's 1000-row default cap.
-    videos: list[dict] = []
-    vid_offset = 0
-    while True:
-        page = (
-            supabase().table("videos")
-            .select("id,channel_id,view_count,privacy_status,is_short")
-            .range(vid_offset, vid_offset + 999)
-            .execute()
-        ).data or []
-        videos.extend(page)
-        if len(page) < 1000:
-            break
-        vid_offset += 1000
+    # Pull all videos — the table can exceed Supabase's 1000-row page cap
+    # (~20 pages here). Fetch the first page together with an exact row count,
+    # then fetch the remaining pages CONCURRENTLY: Supabase clients are
+    # per-thread (see app/db.py — built for exactly this), so each worker gets
+    # its own hardened HTTP/1.1 client. This turns ~20 sequential round-trips
+    # into a handful of parallel waves.
+    VIDEO_COLS = "id,channel_id,view_count,privacy_status,is_short"
+    first_page = (
+        supabase().table("videos").select(VIDEO_COLS, count="exact")
+        .range(0, 999).execute()
+    )
+    videos: list[dict] = list(first_page.data or [])
+    total_video_rows = first_page.count if first_page.count is not None else len(videos)
+    if total_video_rows > 1000:
+        offsets = list(range(1000, total_video_rows, 1000))
+
+        def _fetch_video_page(off: int) -> list[dict]:
+            return (
+                supabase().table("videos").select(VIDEO_COLS)
+                .range(off, off + 999).execute()
+            ).data or []
+
+        with ThreadPoolExecutor(max_workers=min(5, len(offsets))) as ex:
+            for page in ex.map(_fetch_video_page, offsets):
+                videos.extend(page)
     video_to_channel: dict[str, str] = {v["id"]: v["channel_id"] for v in videos}
     # Only public (or legacy null privacy_status) videos are auditable
     public_video_ids: set[str] = {
@@ -86,31 +98,32 @@ def dashboard():
         else:
             channel_regular_counts[ch] = channel_regular_counts.get(ch, 0) + 1
 
-    # Fetch all audit records for known videos.
-    # Two levels of pagination:
-    #   outer — 200 video IDs per batch (keeps record counts manageable)
-    #   inner — range() pages within each batch for channels with heavy re-audits
-    # Both levels are needed because Supabase caps every .execute() at 1000 rows.
-    all_video_ids = list(video_to_channel.keys())
+    # Fetch ALL audit records, newest first, with a single-level range()
+    # pagination over the whole table.
+    #
+    # The previous implementation batched 200 video IDs per request and issued a
+    # separate `.in_("video_id", batch)` query for each batch — ~one round-trip
+    # per 200 videos (≈100 sequential HTTP calls on a 20k-video channel set),
+    # which dominated this endpoint's latency. The audits table is small
+    # relative to videos (one row per audit action, not per video), and every
+    # audit references a video that exists in `videos` (no orphans), so the
+    # video_id filter bought nothing but round-trips. Paginating the whole table
+    # returns identical data in ceil(total_audits / 1000) calls.
     audits_state: list[dict] = []
-    VID_BATCH = 200
     ROW_PAGE = 1000
-    for i in range(0, len(all_video_ids), VID_BATCH):
-        batch_ids = all_video_ids[i:i + VID_BATCH]
-        inner_offset = 0
-        while True:
-            page = (
-                supabase().table("audits")
-                .select("id,video_id,status,applied_at,created_at,view_count_at_apply")
-                .in_("video_id", batch_ids)
-                .order("created_at", desc=True)
-                .range(inner_offset, inner_offset + ROW_PAGE - 1)
-                .execute()
-            ).data or []
-            audits_state.extend(page)
-            if len(page) < ROW_PAGE:
-                break
-            inner_offset += ROW_PAGE
+    aud_offset = 0
+    while True:
+        page = (
+            supabase().table("audits")
+            .select("id,video_id,status,applied_at,created_at,view_count_at_apply")
+            .order("created_at", desc=True)
+            .range(aud_offset, aud_offset + ROW_PAGE - 1)
+            .execute()
+        ).data or []
+        audits_state.extend(page)
+        if len(page) < ROW_PAGE:
+            break
+        aud_offset += ROW_PAGE
     latest_per_video: dict[str, dict] = {}
     for a in audits_state:
         latest_per_video.setdefault(a["video_id"], a)
