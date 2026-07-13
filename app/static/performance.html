@@ -530,13 +530,26 @@ async function revert(auditId) {
   $(id).onchange = id === 'f-status' ? load : render;
 });
 
+// Seconds until YouTube's daily quota reset (midnight America/Los_Angeles),
+// DST-safe. Lets us show the same "resets in Xh Ym" countdown as the dashboard.
+function secondsToQuotaReset() {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    .formatToParts(new Date()).reduce((o, x) => (o[x.type] = x.value, o), {});
+  const secsIntoDay = (Number(p.hour) % 24) * 3600 + Number(p.minute) * 60 + Number(p.second);
+  return 86400 - secsIntoDay;
+}
+function fmtResetTime(seconds) {
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 $('sync-btn').onclick = async () => {
   $('sync-btn').disabled = true; $('sync-status').textContent = 'Refreshing…';
   try {
     const r = await fetch(`/channels/${channelId}/refresh-applied-stats`, { method: 'POST' });
     const j = await r.json();
     if (r.status === 429 || j.detail === 'youtube_quota_exceeded') {
-      toast('YouTube quota exhausted — stats refresh skipped. Will retry after midnight Pacific.', 'warn', 6000);
+      toast(`YouTube quota exhausted — stats refresh skipped. Quota resets in ${fmtResetTime(secondsToQuotaReset())}.`, 'warn', 6000);
       $('sync-status').textContent = 'Quota exhausted';
     } else if (!r.ok) {
       toast('Stats refresh failed: ' + escapeHtml(j.detail || JSON.stringify(j)), 'err');

@@ -32,7 +32,7 @@ is implemented and verified.
 - [x] #16 Don't nuke `document.body` on missing id — render error in content area — done both channel.html and performance.html now keep the top nav and show an error card (with a Dashboard link) via showMissingId() instead of replacing the whole body with a bare `<p>`
 - [x] #17 Remove reliance on global `event` in `triggerReflection` — done pass the button via onclick="triggerReflection(this)" and take it as a param instead of reading global event.target; also fixed the reset label casing ("Run reflection now")
 - [x] #18 Videos table: responsive fallback + clearer `#`/column trimming — done renamed the cryptic `#` header to "Audits" (with tooltip) and made #videos horizontally scrollable so the 12-col table stops overflowing the page on narrow screens. Left the "hide rarely-scanned columns behind a toggle" idea as optional future work (needs stateful JS) — noted, not done
-- [ ] #19 Unify quota reset copy (countdown vs "midnight Pacific")
+- [x] #19 Unify quota reset copy (countdown vs "midnight Pacific") — done performance.html's quota-exhausted toast now shows "resets in Xh Ym" (DST-safe client-side calc to Pacific midnight) matching the dashboard's phrasing; "midnight Pacific" hardcode removed (the other occurrence was already gone via #13)
 - [ ] #20 Factor shared time/number formatting helpers
 
 > **Structural items (#4, #6, #13, #18) change behavior or layout meaningfully.**
