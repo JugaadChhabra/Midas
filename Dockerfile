@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir torch==2.12.1 torchvision==0.27.1 torchaudio==2.1
 
 COPY app ./app
 
-RUN mkdir -p /app/storage/keyframes
+RUN mkdir -p /app/storage/keyframes /app/shorts_cache /app/logs
 
 EXPOSE 8000
 

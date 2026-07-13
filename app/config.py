@@ -40,6 +40,12 @@ class Settings:
     # Working/cache dir for locally cut shorts.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 
+    # Where to write rotating log files (in addition to stdout). Bind-mounted to
+    # the host in docker-compose so a quota-failed run is still traceable after
+    # the container has been pruned.
+    LOG_DIR             = os.getenv("LOG_DIR", "logs")
+    LOG_LEVEL           = os.getenv("LOG_LEVEL", "INFO").upper()
+
     # YouTube transcript proxy (to work around IP bans)
     # Option A: any HTTP/HTTPS/SOCKS proxy  e.g. "http://user:pass@host:port"
     YOUTUBE_PROXY_URL = os.getenv("YOUTUBE_PROXY_URL", "")

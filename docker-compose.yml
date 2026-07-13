@@ -12,10 +12,16 @@ services:
       KEYFRAMES_LOCAL_DIR: /app/storage/keyframes
       BGUTIL_POT_HTTP_BASE_URL: http://bgutil-provider:4416
       SHORTS_CACHE_DIR: /app/shorts_cache
+      LOG_DIR: /app/logs
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
-      - midas_storage:/app/storage
-      - shorts_cache:/app/shorts_cache
+      # Host bind mounts (not named volumes) so each job's artifacts stay
+      # reachable from the host. If an upload dies on a YouTube quota hit, the
+      # finished vertical master sits in ./shorts_cache/<channel>/tmp and the
+      # run's log lands in ./logs — both survive a container prune.
+      - ./storage:/app/storage
+      - ./shorts_cache:/app/shorts_cache
+      - ./logs:/app/logs
     depends_on:
       bgutil-provider:
         # Don't start midas (or let autopilot fire a shorts job) until the
@@ -53,7 +59,3 @@ services:
       timeout: 30s
       retries: 5
       start_period: 60s
-
-volumes:
-  midas_storage:
-  shorts_cache:

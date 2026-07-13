@@ -227,9 +227,10 @@ supabase/.temp/
 # Parallel-session / scratch artifacts
 sdd/
 
-# Local-only caches
+# Local-only caches / job artifacts (bind-mounted from docker-compose)
 storage/keyframes/
 shorts_cache/
+logs/
 
 tools/bgutil-pot/
 

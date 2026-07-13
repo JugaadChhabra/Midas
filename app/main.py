@@ -26,7 +26,37 @@ from app.reporting_poll import poll_reporting
 from app.measurement import router as measurement_router, eval_measurements
 from app.playlist_health import score_channel as playlist_health_score_channel
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+def _configure_logging() -> None:
+    """Log to stdout AND a rotating file under settings.LOG_DIR.
+
+    The file handler is what lets you trace a job that failed on a YouTube
+    quota hit after the container is gone — docker's own logs vanish on prune,
+    but LOG_DIR is bind-mounted to the host.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    level = getattr(logging, settings.LOG_LEVEL, logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        log_dir = Path(settings.LOG_DIR)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        # 10 MB × 5 files ≈ 50 MB ceiling — plenty to cover a run's history
+        # without letting the bind mount grow unbounded on a long-lived host.
+        fh = RotatingFileHandler(
+            log_dir / "midas.log", maxBytes=10_000_000, backupCount=5, encoding="utf-8"
+        )
+        handlers.append(fh)
+    except OSError as exc:  # read-only mount, permissions — don't crash boot
+        logging.getLogger("midas.main").warning("file logging disabled: %s", exc)
+
+    for h in handlers:
+        h.setFormatter(fmt)
+    logging.basicConfig(level=level, handlers=handlers)
+
+
+_configure_logging()
 _main_log = logging.getLogger("midas.main")
 # Quiet noisy library loggers — they emit one INFO line per HTTP call.
 for noisy in ("httpx", "httpcore", "google_auth_httplib2", "googleapiclient.discovery_cache", "hpack"):
