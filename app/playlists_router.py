@@ -225,22 +225,48 @@ def playlist_status(channel_id: str):
         .execute()
     ).data or []
 
-    # Count videos currently in at least one playlist
+    # Count videos currently in at least one playlist.
+    #
+    # Previously this issued one playlist_assignments query PER playlist (an N+1
+    # that scaled linearly with playlist count) AND each of those queries was
+    # capped at Supabase's 1000-row default — so any single playlist with >1000
+    # assignment rows silently lost its tail and undercounted membership (a real
+    # bug: a 1037-row playlist was dropping 37 rows in production data).
+    #
+    # Instead, pull every assignment for this channel's playlists in one
+    # paginated .in_() query, ordered newest-first. The membership rule is
+    # unchanged: for each (playlist, video) pair the latest assignment wins, and
+    # a video counts if that latest action is "added" in ANY playlist. The
+    # secondary `.order("id")` gives the sort a UNIQUE total order so OFFSET
+    # pagination can't skip or duplicate rows at a page boundary when several
+    # rows share a decided_at — the first row seen per pair is then reliably the
+    # latest.
     in_playlist: set[str] = set()
-    for p in playlists:
-        rows = (
-            supabase().table("playlist_assignments")
-            .select("video_id,action,decided_at")
-            .eq("playlist_id", p["id"])
-            .order("decided_at", desc=True)
-            .execute()
-        ).data or []
-        seen: set[str] = set()
-        for row in rows:
-            if row["video_id"] not in seen:
-                seen.add(row["video_id"])
+    playlist_ids = [p["id"] for p in playlists]
+    if playlist_ids:
+        seen_pairs: set[tuple] = set()
+        ROW_PAGE = 1000
+        offset = 0
+        while True:
+            page = (
+                supabase().table("playlist_assignments")
+                .select("playlist_id,video_id,action,decided_at")
+                .in_("playlist_id", playlist_ids)
+                .order("decided_at", desc=True)
+                .order("id", desc=True)
+                .range(offset, offset + ROW_PAGE - 1)
+                .execute()
+            ).data or []
+            for row in page:
+                key = (row["playlist_id"], row["video_id"])
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
                 if row["action"] == "added":
                     in_playlist.add(row["video_id"])
+            if len(page) < ROW_PAGE:
+                break
+            offset += ROW_PAGE
 
     return {
         "total_videos": total_videos,

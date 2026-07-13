@@ -12,7 +12,7 @@ def test_list_videos_includes_shorts_fields():
                "published_at": "2026-07-01T00:00:00Z", "view_count": 100},
               {"id": "v2", "channel_id": "UC1", "title": "A short", "is_short": True,
                "published_at": "2026-07-02T00:00:00Z", "view_count": 5}]
-    jobs = [{"id": 9, "source_video_id": "v1", "status": "DONE", "created_at": "2026-07-03T00:00:00Z"}]
+    jobs = [{"id": 9, "source_video_id": "v1", "channel_id": "UC1", "status": "DONE", "created_at": "2026-07-03T00:00:00Z"}]
     clips = [{"job_id": 9, "upload_status": "UPLOADED"}, {"job_id": 9, "upload_status": "PENDING"}]
 
     sb = MagicMock()
@@ -23,7 +23,9 @@ def test_list_videos_includes_shorts_fields():
         if name == "audits":
             t.select.return_value.in_.return_value.order.return_value.execute.return_value.data = []
         if name == "shorts_jobs":
-            t.select.return_value.in_.return_value.order.return_value.execute.return_value.data = jobs
+            # list_videos now filters shorts_jobs by channel_id (indexed) rather
+            # than by a large .in_(source_video_id) list — see app/sync.py.
+            t.select.return_value.eq.return_value.order.return_value.execute.return_value.data = jobs
         if name == "shorts_clips":
             t.select.return_value.in_.return_value.execute.return_value.data = clips
         return t

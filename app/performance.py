@@ -32,16 +32,28 @@ def _pct(delta: float, base: float) -> float | None:
     return round(100.0 * delta / base, 2)
 
 
-def _build_rows(channel_id: str, statuses: list[str] | None) -> list[dict]:
+def _build_rows(channel_id: str, statuses: list[str] | None,
+                include_reasoning: bool = True) -> list[dict]:
     """Pull audits filtered by status set and join video stats. Computes deltas,
-    % change, engagement ratios, views/day since apply, and a regression flag."""
+    % change, engagement ratios, views/day since apply, and a regression flag.
+
+    Column selection is deliberately lean:
+      - `issues_found` is NEVER selected — it's a large JSON blob that this
+        function does not read (it never appeared in the returned row), yet it
+        cost ~2s per call. Dropping it is pure win with no behaviour change.
+      - `ai_reasoning` is display-only (shown in the row's expandable diff). The
+        summary endpoint returns no rows, so it passes include_reasoning=False
+        to skip that column entirely.
+    """
+    cols = ("id,video_id,applied_at,created_at,status,"
+            "suggested_title,suggested_description,suggested_tags,"
+            "title_before,description_before,tags_before,"
+            "view_count_at_apply,like_count_at_apply,comment_count_at_apply")
+    if include_reasoning:
+        cols += ",ai_reasoning"
     q = (
         supabase().table("audits")
-        .select("id,video_id,applied_at,created_at,status,"
-                "suggested_title,suggested_description,suggested_tags,"
-                "title_before,description_before,tags_before,"
-                "view_count_at_apply,like_count_at_apply,comment_count_at_apply,"
-                "ai_reasoning,issues_found")
+        .select(cols)
         .order("applied_at", desc=True)
     )
     if statuses:
@@ -173,7 +185,9 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
         statuses = None
     else:
         statuses = [s.strip() for s in (status or "applied").split(",") if s.strip()]
-    rows = _build_rows(channel_id, statuses)
+    # Summary returns aggregates only — no per-row diff is rendered — so skip the
+    # display-only ai_reasoning column.
+    rows = _build_rows(channel_id, statuses, include_reasoning=False)
 
     if not rows:
         return {

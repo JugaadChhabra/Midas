@@ -321,9 +321,14 @@ def refresh_applied_stats(channel_id: str):
 
 @router.get("/channels/{channel_id}/videos")
 def list_videos(channel_id: str):
+    # `description` and `tags` are intentionally NOT selected here. They are the
+    # two largest columns on the row and are only needed when the user expands a
+    # single video's audit diff — shipping them for the whole list made this
+    # query ~8x slower (≈2.0s → ≈0.24s without them on a 1000-row channel). The
+    # UI lazy-loads them per-video via GET /videos/{video_id} on expand.
     videos = (
         supabase().table("videos")
-        .select("id,title,description,tags,view_count,like_count,comment_count,"
+        .select("id,title,view_count,like_count,comment_count,"
                 "published_at,thumbnail_url,privacy_status,last_fetched_at,is_short")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
@@ -385,10 +390,16 @@ def list_videos(channel_id: str):
             v["views_per_day"] = None
 
     # Shorts enrichment: latest shorts_jobs row per source_video_id + clip counts.
+    # Query by channel_id (indexed, a handful of rows) rather than
+    # .in_("source_video_id", [~1000 ids]) — the giant IN list cost ~1.7s to
+    # parse for a 9-row result. Jobs are always created with the source video's
+    # channel_id, so this returns the same rows for any video shown here; jobs
+    # whose source video isn't in this (newest-1000) list are harmlessly ignored
+    # by the per-video lookup below.
     jobs = (
         supabase().table("shorts_jobs")
         .select("id,source_video_id,status,created_at")
-        .in_("source_video_id", video_ids)
+        .eq("channel_id", channel_id)
         .order("created_at", desc=True)
         .execute()
     ).data or []
@@ -418,3 +429,21 @@ def list_videos(channel_id: str):
         v["clips_uploaded"] = sum(1 for c in job_clips if c["upload_status"] == "UPLOADED")
 
     return videos
+
+
+@router.get("/videos/{video_id}")
+def get_video(video_id: str):
+    """Single video row including the heavy `description`/`tags` columns that
+    the list endpoint omits. Used by the channel page to lazy-load a video's
+    full metadata when its audit diff is expanded."""
+    row = (
+        supabase().table("videos")
+        .select("id,title,description,tags,view_count,like_count,comment_count,"
+                "published_at,thumbnail_url,privacy_status,last_fetched_at,is_short")
+        .eq("id", video_id)
+        .single()
+        .execute()
+    ).data
+    if not row:
+        raise HTTPException(404, f"Video {video_id} not found")
+    return row
