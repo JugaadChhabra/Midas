@@ -19,7 +19,7 @@ is implemented and verified.
 - [x] #3 `shorts.html`: fix the impossible "paste a link above" empty state — done empty state now points to Dashboard → channel → Videos → Make shorts (real, reachable path) instead of a nonexistent input
 - [x] #4 Performance: fix orphaned nav / missing active state (see #6 for the structural call) — done added an active "Performance" nav marker (span, channel-scoped) + made nav selectors element-agnostic so it styles; safe regardless of #6's fold decision
 - [x] #5 Performance: collapse the two back-links into one breadcrumb — done replaced the two `←` links with `All channels / <channel name> / Performance`; middle crumb is labelled via a non-fatal /auth/channels fetch
-- [ ] #6 Resolve tabbed-SPA vs separate-page split for Performance
+- [ ] #6 Resolve tabbed-SPA vs separate-page split for Performance — BLOCKED: needs a product decision. Folding Performance into a 6th channel tab is a ~500-line migration that discards the working performance.html (and the #4/#5 nav marker + breadcrumb just added), changes the URL from `/performance?channel_id=X` to `/channel?id=X#performance`, and roughly doubles channel.html's size/complexity — high breakage risk to auto-apply. The alternative (keep it a separate page, which #4/#5 already made feel integrated) is a legitimate resolution. Deferring to a human call; see the two options presented in the loop summary.
 - [ ] #7 Channel page: lazy-load per-tab data instead of eager `Promise.all`
 - [ ] #8 Unify status→label vocabulary across all pages (shared map)
 - [ ] #9 Dashboard: use real `audited_*` counts instead of the proxy bar
