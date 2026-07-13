@@ -259,7 +259,7 @@ function renderJobs(jobs, clipsById) {
   if (!jobs.length) {
     for (const [, e] of rows) e.tr.remove();
     rows.clear();
-    if (!empty) tbody.innerHTML = `<tr class="empty-row"><td colspan="4">No jobs yet — paste a YouTube link above to cut your first short.</td></tr>`;
+    if (!empty) tbody.innerHTML = `<tr class="empty-row"><td colspan="4">No shorts jobs yet. Open a channel from the <a class="src" style="display:inline" href="/">Dashboard</a>, go to its Videos tab, and use <b>Make shorts</b> on a long-form video — or enable auto-shorts under the channel's Autopilot settings.</td></tr>`;
     return;
   }
   if (empty) empty.remove();
