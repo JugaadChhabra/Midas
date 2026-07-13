@@ -1096,7 +1096,7 @@ function renderShort(job, clips) {
     : statusPill(job.status);
   const rows = (clips||[]).map(c => `<li>
       <b>#${c.rank}</b> ${escapeHtml((c.start_s|0)+'s–'+(c.end_s|0)+'s')} · ${statusPill(c.upload_status)}
-      ${c.upload_status === 'UPLOADED' && c.yt_video_id ? ` · <a href="https://youtube.com/watch?v=${c.yt_video_id}" target="_blank">view</a>` : ''}
+      ${c.upload_status === 'UPLOADED' && c.yt_video_id ? ` · <a href="https://studio.youtube.com/video/${escapeHtml(c.yt_video_id)}/edit" target="_blank" rel="noopener">open ↗</a>` : ''}
       ${(c.upload_status === 'PENDING' || c.upload_status === 'FAILED') ? ` <button onclick="uploadClip(${c.id}, this)">Upload</button>` : ''}
     </li>`).join('');
   return `<div class="audit">${bar}${rows ? `<ul>${rows}</ul>` : ''}</div>`;
