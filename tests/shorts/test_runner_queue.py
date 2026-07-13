@@ -23,3 +23,28 @@ def test_active_job_count_counts_working_rows():
     # counted by the full in-flight status set (includes CREATED)
     sb.table.return_value.select.return_value.in_.assert_called_once_with(
         "status", list(runner.WORKING_STATUSES))
+
+
+def test_reap_kills_orphans_and_fails_them():
+    from app.shorts import runner
+    sb = MagicMock()
+    sb.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
+        {"id": 10, "worker_pid": 4242}, {"id": 11, "worker_pid": None}]
+    updates = []
+    sb.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [{}]
+    with patch("app.shorts.runner.supabase", return_value=sb), \
+         patch("app.shorts.runner._kill_pid_if_alive") as kill:
+        n = runner.reap_stuck_jobs()
+    assert n == 2
+    # only in-progress statuses are scanned, never CREATED
+    sb.table.return_value.select.return_value.in_.assert_called_once_with(
+        "status", list(runner.IN_PROGRESS_STATUSES))
+    kill.assert_any_call(4242)
+    kill.assert_any_call(None)
+
+
+def test_kill_pid_if_alive_noop_on_falsy():
+    from app.shorts import runner
+    # Must not raise for None/0.
+    runner._kill_pid_if_alive(None)
+    runner._kill_pid_if_alive(0)

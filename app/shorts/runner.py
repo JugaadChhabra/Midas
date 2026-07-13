@@ -9,8 +9,11 @@ when a job is actually created.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -138,17 +141,37 @@ def run_shorts_job(job_id: int) -> None:
 
 
 def reap_stuck_jobs() -> int:
-    """Fail jobs stranded in a working status by a mid-job server restart."""
+    """Fail jobs a worker had started but a server restart abandoned.
+
+    Scans IN_PROGRESS_STATUSES (never CREATED — those stay queued and get
+    re-dispatched). Any still-alive worker process for a stuck job is killed
+    first so it can't keep writing to the row or hog ffmpeg/GPU.
+    """
     sb = supabase()
-    stuck = (sb.table("shorts_jobs").select("id")
-             .in_("status", list(WORKING_STATUSES)).execute().data) or []
+    stuck = (sb.table("shorts_jobs").select("id,worker_pid")
+             .in_("status", list(IN_PROGRESS_STATUSES)).execute().data) or []
     for row in stuck:
+        _kill_pid_if_alive(row.get("worker_pid"))
         sb.table("shorts_jobs").update({
             "status": "FAILED", "error_message": "server restarted mid-job",
         }).eq("id", row["id"]).execute()
     if stuck:
         log.warning("Reaped %d stuck shorts job(s) on startup", len(stuck))
     return len(stuck)
+
+
+def _kill_pid_if_alive(pid: int | None) -> None:
+    """Best-effort terminate a possibly-orphaned worker process. Cross-platform."""
+    if not pid:
+        return
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                           check=False, capture_output=True)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass  # already gone / not ours — nothing to do
 
 
 def _notify_macos(title: str, body: str) -> None:
