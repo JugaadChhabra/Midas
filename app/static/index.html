@@ -308,7 +308,7 @@ function renderActivityFeed(items) {
     return;
   }
   const statusClass = { applied: 'fs-applied', pending: 'fs-pending', quarantined: 'fs-quarantined', failed: 'fs-failed' };
-  const statusLabel = { applied: 'Applied', pending: 'Pending', quarantined: 'Quarantined', failed: 'Failed' };
+  const statusLabel = { applied: 'Applied', pending: 'Pending', quarantined: 'Bad output', failed: 'Failed' };
   $('activity-feed').innerHTML = items.map(item => {
     const ts = item.applied_at || item.created_at || '';
     const ago = ts ? timeAgo(ts) : '';

@@ -152,9 +152,21 @@ function escapeHtml(s) {
   ));
 }
 
+// Friendly labels so job/clip statuses read as words, not raw ALL-CAPS enums —
+// matching the vocabulary used on the channel page (Title case, "Bad output"),
+// with "Done" instead of the channel's context-specific "Shorts done".
+const STATUS_LABEL = {
+  CREATED: 'Queued', QUEUED: 'Queued', ONGOING: 'Working', DOWNLOADING: 'Downloading',
+  ANALYSING: 'Analysing', RENDERING: 'Rendering', UPLOADING: 'Uploading',
+  DONE: 'Done', SUCCEEDED: 'Done', UPLOADED: 'Uploaded', FAILED: 'Failed', PENDING: 'Pending',
+};
+function statusLabel(status) {
+  const s = status || 'PENDING';
+  return STATUS_LABEL[s] || s;
+}
 function pill(status) {
   const s = status || 'PENDING';
-  return `<span class="pill pill-${escapeHtml(s)}">${escapeHtml(s)}</span>`;
+  return `<span class="pill pill-${escapeHtml(s)}">${escapeHtml(statusLabel(s))}</span>`;
 }
 
 function showBanner(kind, title, detail) {
@@ -209,7 +221,7 @@ function statusCell(j) {
   if (WORKING.includes(j.status)) {
     const pct = Math.max(0, Math.min(100, j.progress || 0));
     return `<div class="prog"><div class="prog-bar" style="width:${pct}%"></div></div>` +
-           `<div class="prog-label">${escapeHtml(j.progress_label || j.status.toLowerCase())} · ${pct}%</div>`;
+           `<div class="prog-label">${escapeHtml(j.progress_label || statusLabel(j.status))} · ${pct}%</div>`;
   }
   let html = pill(j.status);
   if (j.status === 'FAILED' && j.error_message) {
