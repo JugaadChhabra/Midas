@@ -67,6 +67,12 @@
   .toast.err { border-color: #c33; }
   .toast.warn { border-color: #d80; }
   @keyframes tin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  /* In-page confirm dialog (replaces native confirm/alert) */
+  .modal-backdrop { position:fixed; inset:0; background:#0006; display:flex; align-items:center; justify-content:center; z-index:10000; }
+  .modal { background:#fff; color:#000; border-radius:10px; padding:1.1rem 1.25rem; max-width:440px; width:90%; box-shadow:0 10px 40px #0004; }
+  @media (prefers-color-scheme: dark) { .modal { background:#222; color:#fff; } }
+  .modal-msg { line-height:1.5; margin-bottom:1rem; white-space:pre-wrap; }
+  .modal-actions { display:flex; gap:.5rem; justify-content:flex-end; }
   .pace-bar { display:inline-block; width:120px; height:8px; background:#8882; border-radius:4px; vertical-align:middle; overflow:hidden; }
   .pace-bar > i { display:block; height:100%; background:#2a7; }
   .vid-row.selected { background: #6af1; }
@@ -317,6 +323,7 @@
 
   <div id="toasts" aria-live="assertive" role="alert"></div>
 
+<script src="/static/swr.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('id');
@@ -334,6 +341,31 @@ function toast(msg, kind='ok', timeout=3500) {
   el.innerHTML = msg;
   $('toasts').appendChild(el);
   setTimeout(() => { el.style.opacity = 0; el.style.transition = '.3s'; setTimeout(() => el.remove(), 300); }, timeout);
+}
+
+// In-page confirm — a styled replacement for native confirm(). Resolves
+// true/false so callers can `if (!await confirmDialog(msg)) return;`.
+function confirmDialog(message, okLabel = 'Confirm') {
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true">
+      <div class="modal-msg"></div>
+      <div class="modal-actions">
+        <button class="btn modal-cancel">Cancel</button>
+        <button class="btn modal-ok"></button>
+      </div></div>`;
+    back.querySelector('.modal-msg').textContent = message;
+    back.querySelector('.modal-ok').textContent = okLabel;
+    const close = (val) => { back.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    back.querySelector('.modal-cancel').onclick = () => close(false);
+    back.querySelector('.modal-ok').onclick = () => close(true);
+    back.onclick = (e) => { if (e.target === back) close(false); };
+    function onKey(e) { if (e.key === 'Escape') close(false); else if (e.key === 'Enter') close(true); }
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(back);
+    back.querySelector('.modal-ok').focus();
+  });
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────
@@ -401,8 +433,7 @@ function statusPill(s) {
 
 // ── Channel meta ──────────────────────────────────────────────────────
 let channelMeta = {};
-async function loadChannel() {
-  const all = await (await fetch('/auth/channels')).json();
+function applyChannel(all) {
   const c = all.find(x => x.id === channelId) || {};
   channelMeta = c;
   $('title').textContent = c.name || channelId;
@@ -421,13 +452,17 @@ async function loadChannel() {
   // Surface the re-consent banner whenever the analytics scope hasn't been granted.
   $('reconsent-banner').hidden = !!c.analytics_authorized;
 }
+// Cached-first: paint the channel header/settings from the last /auth/channels
+// response instantly, then revalidate. Returns the fresh promise so callers can
+// still await a confirmed-fresh channelMeta if they need it.
+function loadChannel() {
+  return SWR.swr('/auth/channels', applyChannel).fresh;
+}
 
 // ── Overview KPIs ──────────────────────────────────────────────────────
-async function loadOverview() {
-  try {
-    const j = await (await fetch('/dashboard')).json();
-    const c = (j.channels || []).find(x => x.id === channelId) || {};
-    $('overview-kpis').innerHTML = `
+function renderOverview(j) {
+  const c = (j.channels || []).find(x => x.id === channelId) || {};
+  $('overview-kpis').innerHTML = `
       <div class="kpi"><div class="v">${fmt(c.regular_count || 0)}</div><div class="l">Videos</div></div>
       <div class="kpi"><div class="v">${fmt(c.shorts_count || 0)}</div><div class="l">Shorts</div></div>
       <div class="kpi"><div class="v">${fmt(c.audited_regular || 0)}</div><div class="l">Videos audited</div></div>
@@ -438,15 +473,23 @@ async function loadOverview() {
       <div class="kpi"><div class="v">${c.applied_total || 0}</div><div class="l">Applied · total</div></div>
       <div class="kpi"><div class="v ${(c.delta_views_7d||0)>=0?'':'neg'}" style="color:${(c.delta_views_7d||0)>=0?'#2a7':'#c33'}">${(c.delta_views_7d>0?'+':'') + fmt(c.delta_views_7d || 0)}</div><div class="l">Δ views · 7d</div></div>
     `;
-  } catch (e) {
-    $('overview-kpis').innerHTML = '<em class="muted">Could not load.</em>';
-  }
+}
+// Shares the '/dashboard' cache key with the home page, so arriving here after
+// the dashboard (or vice-versa) paints the KPIs with zero wait. In-flight
+// coalescing means loadOverview + a concurrent dashboard visit hit the network
+// once, not twice.
+function loadOverview() {
+  SWR.swr('/dashboard', renderOverview, {
+    onError: () => {
+      if (SWR.get('/dashboard') === undefined) {
+        $('overview-kpis').innerHTML = '<em class="muted">Could not load.</em>';
+      }
+    },
+  });
 }
 
 // ── Autopilot ──────────────────────────────────────────────────────────
-async function loadAutopilotLog() {
-  try {
-    const j = await (await fetch(`/channels/${channelId}/autopilot/log`)).json();
+function renderAutopilotLog(j) {
     let pill;
     let resumeBtn = '';
     if (j.paused_reason === 'token_expired') {
@@ -488,7 +531,16 @@ async function loadAutopilotLog() {
           <td class="muted" style="font-size:.82rem">${escapeHtml(truncate(it.note, 100))}</td>
         </tr>`).join('') + `</tbody></table>`;
     }
-  } catch (e) { $('ap-summary').innerHTML = '<em class="muted">Could not load autopilot status.</em>'; }
+}
+// Cached-first, and reused by the 30s interval below as a silent revalidate.
+function loadAutopilotLog() {
+  SWR.swr(`/channels/${channelId}/autopilot/log`, renderAutopilotLog, {
+    onError: () => {
+      if (SWR.get(`/channels/${channelId}/autopilot/log`) === undefined) {
+        $('ap-summary').innerHTML = '<em class="muted">Could not load autopilot status.</em>';
+      }
+    },
+  });
 }
 
 async function resumeAutopilot() {
@@ -553,10 +605,17 @@ $('playlist-health-save').onclick = async () => {
 };
 
 // ── Audit prompt ──────────────────────────────────────────────────────
-async function loadConfig() {
-  const cfg = await (await fetch(`/channels/${channelId}/audit-config`)).json();
+// Renders every field backed by /audit-config in one place — including the
+// reflection-mode select — so loadReflectionData no longer needs its own
+// duplicate fetch of this endpoint.
+function renderConfig(cfg) {
   $('prompt').value = cfg.generated_prompt || '';
   $('shorts-prompt').value = cfg.shorts_prompt || '';
+  const modeEl = document.getElementById('reflectionMode');
+  if (modeEl && cfg.reflection_mode) modeEl.value = cfg.reflection_mode;
+}
+function loadConfig() {
+  SWR.swr(`/channels/${channelId}/audit-config`, renderConfig);
 }
 $('save-btn').onclick = async () => {
   try {
@@ -568,6 +627,7 @@ $('save-btn').onclick = async () => {
         reflection_mode: document.getElementById('reflectionMode')?.value || 'shadow',
       }),
     });
+    SWR.invalidate(`/channels/${channelId}/audit-config`);
     toast('Prompts saved.', 'ok');
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
@@ -579,11 +639,24 @@ const selected = new Set();
 let sortKey = 'published_at';
 let sortDir = 'desc';
 
-async function loadVideos() {
-  const vids = await (await fetch(`/channels/${channelId}/videos`)).json();
+// Drop the caches an audit/apply/sync just invalidated, so the reload that
+// follows fetches fresh instead of flashing pre-mutation data. /dashboard is
+// shared with the home page and the Overview tab; invalidating it here means
+// the next visit to either re-derives the changed counts.
+function bustChannelData() {
+  SWR.invalidate(`/channels/${channelId}/videos`);
+  SWR.invalidate('/dashboard');
+}
+
+function renderVideosData(vids) {
   allVideos = vids || [];
   allVideos.forEach(v => currentVideos[v.id] = v);
   renderVideos();
+}
+// Cached-first: the videos table — usually the largest payload on the page —
+// paints from the last visit immediately instead of blocking on the network.
+function loadVideos() {
+  return SWR.swr(`/channels/${channelId}/videos`, renderVideosData).fresh;
 }
 
 function videoMatches(v, q, state, privacy) {
@@ -717,7 +790,7 @@ $('select-clear-btn').onclick = () => { selected.clear(); renderVideos(); };
 $('reaudit-quarantined-btn').onclick = async () => {
   const count = allVideos.filter(v => v.audit_status === 'quarantined').length;
   if (!count) return;
-  if (!confirm(`Re-audit ${count} video(s) with bad output? Each calls the LLM (no YouTube quota).`)) return;
+  if (!await confirmDialog(`Re-audit ${count} video(s) with bad output? Each calls the LLM (no YouTube quota).`)) return;
   $('reaudit-quarantined-btn').disabled = true;
   toast(`Re-auditing ${count} videos with bad output…`, 'warn', 6000);
   try {
@@ -726,6 +799,7 @@ $('reaudit-quarantined-btn').onclick = async () => {
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     toast(`Re-audited ${j.reaudited}, skipped ${j.skipped}, failed ${j.failed} (of ${j.total_quarantined}).`,
       j.failed ? 'warn' : 'ok');
+    bustChannelData();
     await loadVideos();
   } catch (e) {
     toast('Re-audit failed: ' + escapeHtml(String(e)), 'err');
@@ -737,7 +811,7 @@ $('reaudit-quarantined-btn').onclick = async () => {
 $('bulk-audit-btn').onclick = async () => {
   const ids = [...selected];
   if (!ids.length) return;
-  if (!confirm(`Audit ${ids.length} selected video(s)? Each audit calls the LLM (no YouTube quota).`)) return;
+  if (!await confirmDialog(`Audit ${ids.length} selected video(s)? Each audit calls the LLM (no YouTube quota).`)) return;
   $('bulk-audit-btn').disabled = true;
   toast(`Auditing ${ids.length} videos…`, 'warn', 5000);
   try {
@@ -748,6 +822,7 @@ $('bulk-audit-btn').onclick = async () => {
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     toast(`Audited ${j.audited}, failed ${j.failed} (of ${j.total}).`, j.failed ? 'warn' : 'ok');
+    bustChannelData();
     await loadVideos();
   } catch (e) { toast('Bulk audit failed: ' + escapeHtml(String(e)), 'err'); }
   finally { $('bulk-audit-btn').disabled = false; updateSelectionUi(); }
@@ -762,7 +837,7 @@ $('bulk-apply-btn').onclick = async () => {
     toast(`Cannot afford: needs ${pv.cost} units, ${pv.remaining} remaining today.`, 'err', 6000);
     return;
   }
-  if (!confirm(`Apply ${ids.length} pending audits? Estimated quota: ${pv.cost} units (${pv.pct_of_remaining}% of today's remaining).`)) return;
+  if (!await confirmDialog(`Apply ${ids.length} pending audits? Estimated quota: ${pv.cost} units (${pv.pct_of_remaining}% of today's remaining).`)) return;
   $('bulk-apply-btn').disabled = true;
   toast(`Applying ${ids.length}…`, 'warn', 5000);
   try {
@@ -782,6 +857,7 @@ $('bulk-apply-btn').onclick = async () => {
     } else {
       toast(`Applied ${ok}, failed ${fail}.`, fail ? 'warn' : 'ok');
     }
+    bustChannelData();
     await loadVideos();
   } catch (e) { toast('Bulk apply failed: ' + escapeHtml(String(e)), 'err'); }
   finally { $('bulk-apply-btn').disabled = false; updateSelectionUi(); }
@@ -932,7 +1008,7 @@ function diffSection(label, body, changed, why) {
 async function applyAudit(auditId, videoId) {
   const pv = await (await fetch(`/quota-cost-preview?action=apply&n=1`)).json();
   if (!pv.can_afford) { toast(`Cannot afford: needs ${pv.cost}, ${pv.remaining} left.`, 'err'); return; }
-  if (!confirm(`Push these changes to the live YouTube video? (~${pv.cost} quota units)`)) return;
+  if (!await confirmDialog(`Push these changes to the live YouTube video? (~${pv.cost} quota units)`)) return;
   const cell = $('audit-' + videoId).firstChild;
   const prev = cell.innerHTML;
   cell.innerHTML = '<div class="audit muted">Applying…</div>';
@@ -945,6 +1021,7 @@ async function applyAudit(auditId, videoId) {
       toast('DRY_RUN — not pushed.', 'warn');
     } else {
       toast('Applied ✓', 'ok');
+      bustChannelData();
       await loadVideos();
     }
   } catch (e) {
@@ -954,13 +1031,14 @@ async function applyAudit(auditId, videoId) {
 }
 
 async function revertAudit(auditId, videoId) {
-  if (!confirm('Restore the previous title / description / tags from before this audit?')) return;
+  if (!await confirmDialog('Restore the previous title / description / tags from before this audit?')) return;
   try {
     const r = await fetch(`/audits/${auditId}/revert`, { method: 'POST' });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     if (j.status === 'dry_run') toast('DRY_RUN — revert not pushed.', 'warn');
     else toast('Reverted to previous metadata.', 'ok');
+    bustChannelData();
     await loadVideos();
   } catch (e) { toast('Revert failed: ' + escapeHtml(String(e)), 'err'); }
 }
@@ -1003,6 +1081,7 @@ async function pollShort(videoId, jobId) {
       setTimeout(() => pollShort(videoId, jobId), 2000);
     } else {
       // Terminal state reached — refresh the video list so the summary-row pill updates.
+      bustChannelData();
       loadVideos();
     }
   } catch (e) {
@@ -1054,6 +1133,8 @@ $('sync-btn').onclick = async () => {
     await fetch(`/channels/${channelId}/refresh-stats`, { method: 'POST' });
     $('sync-status').textContent = ` ${j.synced} new`;
     toast(`Synced ${j.synced} new video(s); refreshed stats.`, 'ok');
+    bustChannelData();
+    SWR.invalidate('/auth/channels'); // last_synced_at / counts changed
     await loadVideos(); await loadChannel(); await loadOverview();
   } catch (e) {
     $('sync-status').textContent = ' Sync failed';
@@ -1066,7 +1147,7 @@ $('apply-pending-btn').onclick = async () => {
   const pendingCount = allVideos.filter(v => v.audit_status === 'pending').length;
   if (!pendingCount) { toast('No pending audits.', 'warn'); return; }
   const pv = await (await fetch(`/quota-cost-preview?action=apply&n=${pendingCount}`)).json();
-  if (!confirm(`Apply ${pendingCount} pending audits? Estimated quota: ${pv.cost} units${pv.pct_of_remaining ? ` (${pv.pct_of_remaining}% of remaining)`:''}.`)) return;
+  if (!await confirmDialog(`Apply ${pendingCount} pending audits? Estimated quota: ${pv.cost} units${pv.pct_of_remaining ? ` (${pv.pct_of_remaining}% of remaining)`:''}.`)) return;
   $('apply-pending-btn').disabled = true;
   $('apply-pending-status').textContent = ' Applying…';
   $('apply-pending-results').innerHTML = '';
@@ -1086,6 +1167,8 @@ $('apply-pending-btn').onclick = async () => {
           `<li><code>${r.video_id}</code> · <span style="color:${colorFor(r.outcome)}">${escapeHtml(r.outcome)}</span>${r.reason ? ` — ${escapeHtml(r.reason)}` : ''}</li>`
         ).join('') + '</ul></details>';
     }
+    bustChannelData();
+    SWR.invalidate('/auth/channels');
     await loadVideos(); await loadChannel(); await loadOverview();
   } catch (e) {
     $('apply-pending-status').textContent = ' Failed';
@@ -1141,12 +1224,18 @@ function updatePlBtns() {
   $('pl-reject-all-btn').disabled = plSelected.size === 0;
 }
 
-async function loadProposals() {
-  try {
-    plProposals = await (await fetch(`/channels/${channelId}/playlists/proposals`)).json();
+function loadProposals() {
+  SWR.swr(`/channels/${channelId}/playlists/proposals`, (data) => {
+    plProposals = data;
     plSelected.clear();
     renderProposals();
-  } catch (e) { $('pl-proposals').innerHTML = '<em class="muted">Could not load proposals.</em>'; }
+  }, {
+    onError: () => {
+      if (SWR.get(`/channels/${channelId}/playlists/proposals`) === undefined) {
+        $('pl-proposals').innerHTML = '<em class="muted">Could not load proposals.</em>';
+      }
+    },
+  });
 }
 
 async function decideProposals(decision) {
@@ -1162,6 +1251,7 @@ async function decideProposals(decision) {
     toast(decision === 'approved'
       ? `Executed ${j.executed} change(s) on YouTube.`
       : `Rejected ${ids.length} proposal(s).`, 'ok');
+    SWR.invalidatePrefix(`/channels/${channelId}/playlists`);
     await loadProposals();
     await loadPlaylistStatus();
   } catch (e) { toast('Failed: ' + escapeHtml(String(e)), 'err'); }
@@ -1172,9 +1262,7 @@ $('pl-reject-all-btn').onclick = () => decideProposals('rejected');
 $('pl-refresh-btn').onclick = loadProposals;
 
 
-async function loadPlaylistStatus() {
-  try {
-    const s = await (await fetch(`/channels/${channelId}/playlists/status`)).json();
+function renderPlaylistStatus(s) {
     const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
     $('pl-status').innerHTML =
       `<div class="kpi-grid">
@@ -1183,7 +1271,15 @@ async function loadPlaylistStatus() {
         <div><div class="kpi-val">${s.videos_in_playlists}</div><div class="kpi-label">Videos in playlists</div></div>
         <div><div class="kpi-val">${s.orphans}</div><div class="kpi-label">Orphans (no playlist)</div></div>
       </div>`;
-  } catch (e) { $('pl-status').innerHTML = '<em class="muted">Could not load playlist status.</em>'; }
+}
+function loadPlaylistStatus() {
+  SWR.swr(`/channels/${channelId}/playlists/status`, renderPlaylistStatus, {
+    onError: () => {
+      if (SWR.get(`/channels/${channelId}/playlists/status`) === undefined) {
+        $('pl-status').innerHTML = '<em class="muted">Could not load playlist status.</em>';
+      }
+    },
+  });
 }
 
 $('pl-bootstrap-btn').onclick = async () => {
@@ -1195,6 +1291,7 @@ $('pl-bootstrap-btn').onclick = async () => {
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     toast(`Bootstrap done: ${j.playlists} playlists, ${j.memberships_seeded} memberships seeded, ${j.videos_embedded} videos embedded.`, 'ok', 8000);
     $('pl-action-status').textContent = '';
+    SWR.invalidatePrefix(`/channels/${channelId}/playlists`);
     await loadPlaylistStatus();
   } catch (e) {
     toast('Bootstrap failed: ' + escapeHtml(String(e)), 'err');
@@ -1212,6 +1309,7 @@ $('pl-reconcile-btn').onclick = async () => {
     const cap = j.skipped_cap ? ' (mutation cap hit)' : '';
     toast(`Reconcile done: ${j.added} added, ${j.removed} removed${cap}.`, 'ok');
     $('pl-action-status').textContent = '';
+    SWR.invalidatePrefix(`/channels/${channelId}/playlists`);
     await loadPlaylistStatus();
   } catch (e) {
     toast('Reconcile failed: ' + escapeHtml(String(e)), 'err');
@@ -1291,17 +1389,17 @@ function renderHealth(envelope) {
     </table>`;
 }
 
-async function loadHealth() {
-  $('pl-health').innerHTML = 'Loading…';
-  try {
-    const r = await fetch(`/channels/${channelId}/playlists/health`);
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-    renderHealth(j);
-  } catch (e) {
-    $('pl-health').innerHTML = '<em class="muted">Could not load playlist health.</em>';
-    $('pl-health-status').innerHTML = '';
-  }
+function loadHealth() {
+  const healthUrl = `/channels/${channelId}/playlists/health`;
+  if (SWR.get(healthUrl) === undefined) $('pl-health').innerHTML = 'Loading…';
+  SWR.swr(healthUrl, renderHealth, {
+    onError: () => {
+      if (SWR.get(healthUrl) === undefined) {
+        $('pl-health').innerHTML = '<em class="muted">Could not load playlist health.</em>';
+        $('pl-health-status').innerHTML = '';
+      }
+    },
+  });
 }
 
 $('pl-health-refresh-btn').onclick = loadHealth;
@@ -1321,6 +1419,9 @@ $('pl-health-evaluate-btn').onclick = async () => {
     const s = j.summary || {};
     toast(`Evaluated: ${s.remove} remove, ${s.revive} revive, ${s.keep} keep, ${s.insufficient_data} insufficient.`,
       s.remove ? 'warn' : 'ok', 6000);
+    // Re-scoring rewrote the health data; keep the cache consistent with what
+    // a plain loadHealth() would now return.
+    SWR.set(`/channels/${channelId}/playlists/health`, j);
     renderHealth(j);
   } catch (e) {
     toast('Evaluation failed: ' + escapeHtml(String(e)), 'err');
@@ -1329,38 +1430,25 @@ $('pl-health-evaluate-btn').onclick = async () => {
   }
 };
 
-(async () => {
-  await loadChannel();
-  // Header + form defaults are ready; now load only the tab that's actually visible.
-  tabsReady = true;
-  ensureTabLoaded(document.querySelector('.tab.active')?.dataset.tab || 'overview');
-})();
+// loadChannel() paints the header/settings from cache synchronously (and
+// revalidates in the background), so there's no need to await the network
+// before loading the visible tab — everything paints from cache on this tick.
+loadChannel();
+tabsReady = true;
+ensureTabLoaded(document.querySelector('.tab.active')?.dataset.tab || 'overview');
 
 // ── Reflection ────────────────────────────────────────────────────────────
 
 let _shadowVersionId = null;
 
-async function loadReflectionData() {
+function loadReflectionData() {
   if (!channelId) return;
-
-  // Load reflection mode from audit config
-  try {
-    const cfg = await fetch(`/channels/${channelId}/audit-config`).then(r => r.json());
-    const modeEl = document.getElementById('reflectionMode');
-    if (modeEl && cfg.reflection_mode) modeEl.value = cfg.reflection_mode;
-  } catch (e) { /* non-fatal */ }
-
-  // Load shadow comparison
-  try {
-    const comparisons = await fetch(`/channels/${channelId}/reflection/shadow-comparison`).then(r => r.json());
-    renderShadowComparisons(comparisons);
-  } catch (e) { /* non-fatal */ }
-
-  // Load reflection history
-  try {
-    const history = await fetch(`/channels/${channelId}/reflection/history`).then(r => r.json());
-    renderReflectionHistory(history);
-  } catch (e) { /* non-fatal */ }
+  // Reflection mode comes from /audit-config, which loadConfig() already fetches
+  // and renders (renderConfig sets the select) — so we don't re-fetch it here.
+  // Both loaders live in the same 'settings' tab; dropping the duplicate fetch
+  // removes the redundant round-trip this page used to make.
+  SWR.swr(`/channels/${channelId}/reflection/shadow-comparison`, renderShadowComparisons);
+  SWR.swr(`/channels/${channelId}/reflection/history`, renderReflectionHistory);
 }
 
 function renderShadowComparisons(items) {
@@ -1416,6 +1504,7 @@ async function saveReflectionMode(mode) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reflection_mode: mode }),
   });
+  SWR.invalidate(`/channels/${channelId}/audit-config`);
 }
 
 async function triggerReflection() {
@@ -1426,7 +1515,7 @@ async function triggerReflection() {
   try {
     const result = await fetch(`/channels/${channelId}/reflection/trigger`, { method: 'POST' }).then(r => r.json());
     btn.textContent = result.reflected ? `Done — version ${result.version_id}` : `Skipped: ${result.reason}`;
-    if (result.reflected) await loadReflectionData();
+    if (result.reflected) { SWR.invalidatePrefix(`/channels/${channelId}/reflection`); await loadReflectionData(); }
   } catch (e) {
     btn.textContent = 'Error';
   }
@@ -1435,10 +1524,12 @@ async function triggerReflection() {
 
 async function promoteCandidate() {
   if (!channelId || !_shadowVersionId) return;
-  if (!confirm('Promote this candidate prompt to live? The current prompt will be retired.')) return;
+  if (!await confirmDialog('Promote this candidate prompt to live? The current prompt will be retired.')) return;
   const result = await fetch(`/channels/${channelId}/prompt-versions/${_shadowVersionId}/promote`, { method: 'POST' }).then(r => r.json());
   if (result.ok) {
-    alert('Candidate promoted to live.');
+    toast('Candidate promoted to live.', 'ok');
+    SWR.invalidatePrefix(`/channels/${channelId}/reflection`);
+    SWR.invalidate(`/channels/${channelId}/audit-config`);
     await loadReflectionData();
   }
 }

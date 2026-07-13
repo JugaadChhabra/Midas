@@ -24,7 +24,7 @@ is implemented and verified.
 - [x] #8 Unify status→label vocabulary across all pages (shared map) — done aligned labels in place: index activity feed now says "Bad output" (not "Quarantined"); shorts.html renders friendly Title-case labels (Queued/Downloading/… not raw CREATED). Chose in-place alignment over a global map because some labels are context-specific (channel's "Shorts done" vs shorts page's "Done")
 - [x] #9 Dashboard: use real `audited_*` counts instead of the proxy bar — done channel-table Pipeline bar now uses audited_regular+audited_shorts / video_count (all in the /dashboard payload); dropped the applied+pending proxy and its apology comment; added a "N of M audited" tooltip
 - [x] #10 Dashboard: make the "funnel" honest (proportional or drop the metaphor) — done dropped the funnel metaphor: separate stat cards (not connected cells), reordered to Total · Not-audited · Audited · Pending · Applied, with "of total"/"of audited" sublabels so the subset hierarchy is explicit instead of implying a flow
-- [ ] #11 Replace native `confirm()`/`alert()` with the toast/confirm system
+- [x] #11 Replace native `confirm()`/`alert()` with the toast/confirm system — done added a styled in-page confirmDialog() modal (Esc/Enter/backdrop, dark-mode aware) to channel.html + performance.html; swapped all 8 native confirm() calls to `await confirmDialog(...)`; the lone alert() in promoteCandidate is now a toast
 - [ ] #12 One destination for "open uploaded clip" (Studio vs watch)
 - [ ] #13 Route both apply-pending paths through one server endpoint
 - [ ] #14 Autopilot config placement + shorts controls layout

@@ -78,6 +78,12 @@
   .toast.err { border-color: #c33; }
   .toast.warn { border-color: #d80; }
   @keyframes tin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  /* In-page confirm dialog (replaces native confirm) */
+  .modal-backdrop { position:fixed; inset:0; background:#0006; display:flex; align-items:center; justify-content:center; z-index:10000; }
+  .modal { background:#fff; color:#000; border-radius:10px; padding:1.1rem 1.25rem; max-width:440px; width:90%; box-shadow:0 10px 40px #0004; }
+  @media (prefers-color-scheme: dark) { .modal { background:#222; color:#fff; } }
+  .modal-msg { line-height:1.5; margin-bottom:1rem; white-space:pre-wrap; }
+  .modal-actions { display:flex; gap:.5rem; justify-content:flex-end; }
 </style>
 </head>
 <body>
@@ -166,6 +172,7 @@
 
   <div id="rows" class="card" aria-live="polite">Loading…</div>
 
+<script src="/static/swr.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('channel_id');
@@ -184,6 +191,29 @@ function toast(msg, kind='ok', timeout=3500) {
   el.innerHTML = msg;
   $('toasts').appendChild(el);
   setTimeout(() => { el.style.opacity = 0; el.style.transition = '.3s'; setTimeout(() => el.remove(), 300); }, timeout);
+}
+// In-page confirm — styled replacement for native confirm(); resolves true/false.
+function confirmDialog(message, okLabel = 'Confirm') {
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true">
+      <div class="modal-msg"></div>
+      <div class="modal-actions">
+        <button class="btn modal-cancel">Cancel</button>
+        <button class="btn modal-ok"></button>
+      </div></div>`;
+    back.querySelector('.modal-msg').textContent = message;
+    back.querySelector('.modal-ok').textContent = okLabel;
+    const close = (val) => { back.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    back.querySelector('.modal-cancel').onclick = () => close(false);
+    back.querySelector('.modal-ok').onclick = () => close(true);
+    back.onclick = (e) => { if (e.target === back) close(false); };
+    function onKey(e) { if (e.key === 'Escape') close(false); else if (e.key === 'Enter') close(true); }
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(back);
+    back.querySelector('.modal-ok').focus();
+  });
 }
 const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = (n) => (n ?? 0).toLocaleString();
@@ -213,21 +243,27 @@ let sortDir = 'desc';
 function statusParam() { return $('f-status').value || 'applied'; }
 function csvHref() { return `/channels/${channelId}/performance.csv?status=${encodeURIComponent(statusParam())}`; }
 
-async function load() {
-  $('rows').innerHTML = 'Loading…';
-  $('csv-btn').href = csvHref();
-  const [rs, sm] = await Promise.all([
-    fetch(`/channels/${channelId}/performance?status=${encodeURIComponent(statusParam())}`).then(r => r.json()),
-    fetch(`/channels/${channelId}/performance/summary?status=${encodeURIComponent(statusParam())}`).then(r => r.json()),
-  ]);
-  rowsData = rs;
-  summary = sm;
+function renderAll() {
   renderInsights();
   renderVelocityChart();
   renderOutcomeDistribution();
   renderKpis();
   renderLeverGrid();
   render();
+}
+
+// Stale-while-revalidate, keyed by status (the URL carries ?status=…), so
+// flipping the filter to a value seen before paints instantly. The two
+// endpoints are cached independently and renderAll() tolerates either arriving
+// first — every render* fn already guards on empty rowsData/summary.
+function load() {
+  $('csv-btn').href = csvHref();
+  const s = statusParam();
+  const perfUrl = `/channels/${channelId}/performance?status=${encodeURIComponent(s)}`;
+  const summaryUrl = `/channels/${channelId}/performance/summary?status=${encodeURIComponent(s)}`;
+  if (SWR.get(perfUrl) === undefined) $('rows').innerHTML = 'Loading…';
+  SWR.swr(perfUrl, (d) => { rowsData = d; renderAll(); });
+  SWR.swr(summaryUrl, (d) => { summary = d; renderAll(); });
 }
 
 function renderInsights() {
@@ -468,12 +504,13 @@ function toggle(i) {
 }
 
 async function revert(auditId) {
-  if (!confirm('Restore the previous title / description / tags from before this audit?')) return;
+  if (!await confirmDialog('Restore the previous title / description / tags from before this audit?')) return;
   try {
     const r = await fetch(`/audits/${auditId}/revert`, { method: 'POST' });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     toast(j.status === 'dry_run' ? 'DRY_RUN — payload logged but not pushed.' : 'Reverted to previous metadata.', j.status === 'dry_run' ? 'warn' : 'ok');
+    SWR.invalidatePrefix(`/channels/${channelId}/performance`);
     await load();
   } catch (e) { toast('Revert failed: ' + escapeHtml(String(e)), 'err'); }
 }
