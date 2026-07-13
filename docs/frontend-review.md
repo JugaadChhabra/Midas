@@ -30,7 +30,7 @@ is implemented and verified.
 - [x] #14 Autopilot config placement + shorts controls layout — done the 5-control shorts-autopilot row is now a labeled auto-fit grid (Videos/day, Upload top, Mode, Camera) with the enable checkbox on its own line; no longer a messily-wrapping flex row. Left config in the Autopilot tab (keeps enable+config+status together) rather than moving to Settings — noted as a deliberate choice
 - [x] #15 Co-locate playlist-health enable toggle with its card — done moved the Enable-scoring toggle + Save into the Playlists-tab health card (same IDs, JS wiring untouched), removed the duplicate Settings card, and updated the "off" empty-state to point at the toggle above instead of Settings
 - [x] #16 Don't nuke `document.body` on missing id — render error in content area — done both channel.html and performance.html now keep the top nav and show an error card (with a Dashboard link) via showMissingId() instead of replacing the whole body with a bare `<p>`
-- [ ] #17 Remove reliance on global `event` in `triggerReflection`
+- [x] #17 Remove reliance on global `event` in `triggerReflection` — done pass the button via onclick="triggerReflection(this)" and take it as a param instead of reading global event.target; also fixed the reset label casing ("Run reflection now")
 - [ ] #18 Videos table: responsive fallback + clearer `#`/column trimming
 - [ ] #19 Unify quota reset copy (countdown vs "midnight Pacific")
 - [ ] #20 Factor shared time/number formatting helpers

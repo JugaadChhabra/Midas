@@ -300,7 +300,7 @@
             <option value="auto">Auto (apply + revert if regression)</option>
           </select>
         </label>
-        <button onclick="triggerReflection()">Run reflection now</button>
+        <button onclick="triggerReflection(this)">Run reflection now</button>
       </div>
       <p class="muted" style="font-size:.85rem; margin:.5rem 0 0">
         Shadow: generates improved prompts for your review. Auto: tests live, reverts automatically if performance drops.
@@ -1514,9 +1514,8 @@ async function saveReflectionMode(mode) {
   SWR.invalidate(`/channels/${channelId}/audit-config`);
 }
 
-async function triggerReflection() {
+async function triggerReflection(btn) {
   if (!channelId) return;
-  const btn = event.target;
   btn.disabled = true;
   btn.textContent = 'Running…';
   try {
@@ -1526,7 +1525,7 @@ async function triggerReflection() {
   } catch (e) {
     btn.textContent = 'Error';
   }
-  setTimeout(() => { btn.disabled = false; btn.textContent = 'Run Reflection Now'; }, 3000);
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Run reflection now'; }, 3000);
 }
 
 async function promoteCandidate() {
