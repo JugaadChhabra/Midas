@@ -226,6 +226,14 @@
         <button id="pl-health-evaluate-btn">Run evaluation</button>
         <button id="pl-health-refresh-btn">Refresh</button>
       </div>
+      <div class="row" style="margin-bottom:.6rem; gap:.6rem">
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="playlist-health-enabled" />
+          <b>Enable scoring</b>
+        </label>
+        <button id="playlist-health-save">Save</button>
+        <span class="muted" style="font-size:.78rem; flex:1; min-width:200px">Daily job scoring each playlist on session contribution (web-only counts). <b>Never deletes anything</b> — operator confirms. Off by default.</span>
+      </div>
       <div id="pl-health-status" class="muted" style="font-size:.85rem; margin-bottom:.5rem"></div>
       <div id="pl-health">Loading…</div>
     </div>
@@ -272,15 +280,6 @@
       </label>
       <p class="muted" style="margin:.35rem 0 .75rem">When enabled, YouTube Shorts (&le;3 min) are included in the sync and eligible for auditing alongside regular videos.</p>
       <button id="sync-settings-save">Save</button>
-    </div>
-    <div class="card">
-      <h3 style="margin-top:0">Playlist health <span class="muted" style="font-weight:400; font-size:.78rem">(recommend-only)</span></h3>
-      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-        <input type="checkbox" id="playlist-health-enabled" />
-        <b>Enable playlist health scoring</b>
-      </label>
-      <p class="muted" style="margin:.35rem 0 .75rem">Daily job that scores each playlist on session contribution (web-only counts) and surfaces revive / remove recommendations under the Playlists tab. <b>Never deletes anything</b> — operator confirms. Disabled by default per channel.</p>
-      <button id="playlist-health-save">Save</button>
     </div>
     <div class="card">
       <h3 style="margin-top:0">Audit prompt</h3>
@@ -1338,7 +1337,7 @@ function renderHealth(envelope) {
   if (!envelope.enabled) {
     $('pl-health-status').innerHTML =
       'Playlist health scoring is <b>off</b> for this channel. ' +
-      'Enable it under <b>Settings → Playlist health</b>, then click <b>Run evaluation</b>.';
+      'Tick <b>Enable scoring</b> above and Save, then click <b>Run evaluation</b>.';
     $('pl-health').innerHTML = '<em class="muted">No recommendations to show.</em>';
     return;
   }

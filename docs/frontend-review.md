@@ -28,7 +28,7 @@ is implemented and verified.
 - [x] #12 One destination for "open uploaded clip" (Studio vs watch) — done channel.html clip link now opens YouTube Studio edit (matching shorts.html) instead of the public watch page, which is right since clips upload private; also aligned label to "open ↗" + rel=noopener
 - [x] #13 Route both apply-pending paths through one server endpoint — done extended POST /channels/{id}/audits/apply-pending with an optional `video_ids` filter (backward-compatible: no body = all pending); "Apply selected pending" now calls it instead of the client-side per-video fetch+apply loop. pytest: 72 passed (unrelated cv2 collection error ignored)
 - [x] #14 Autopilot config placement + shorts controls layout — done the 5-control shorts-autopilot row is now a labeled auto-fit grid (Videos/day, Upload top, Mode, Camera) with the enable checkbox on its own line; no longer a messily-wrapping flex row. Left config in the Autopilot tab (keeps enable+config+status together) rather than moving to Settings — noted as a deliberate choice
-- [ ] #15 Co-locate playlist-health enable toggle with its card
+- [x] #15 Co-locate playlist-health enable toggle with its card — done moved the Enable-scoring toggle + Save into the Playlists-tab health card (same IDs, JS wiring untouched), removed the duplicate Settings card, and updated the "off" empty-state to point at the toggle above instead of Settings
 - [ ] #16 Don't nuke `document.body` on missing id — render error in content area
 - [ ] #17 Remove reliance on global `event` in `triggerReflection`
 - [ ] #18 Videos table: responsive fallback + clearer `#`/column trimming
