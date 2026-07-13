@@ -77,6 +77,8 @@
   .pace-bar > i { display:block; height:100%; background:#2a7; }
   .vid-row.selected { background: #6af1; }
   .filter-bar { display:flex; gap:.5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
+  /* The videos table is wide (12 cols); scroll it instead of overflowing the page on narrow screens. */
+  #videos { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 </style>
 </head>
 <body>
@@ -728,7 +730,7 @@ function renderVideos() {
       <th class="sortable" data-sort="title">Title${arrow('title')}</th>
       <th class="sortable" data-sort="audit_status">State${arrow('audit_status')}</th>
       <th class="sortable" data-sort="issues_count">Issues${arrow('issues_count')}</th>
-      <th class="sortable" data-sort="audit_count">#${arrow('audit_count')}</th>
+      <th class="sortable" data-sort="audit_count" title="Number of audits run on this video">Audits${arrow('audit_count')}</th>
       <th class="sortable" data-sort="view_count">Views${arrow('view_count')}</th>
       <th class="sortable" data-sort="views_per_day">v/day${arrow('views_per_day')}</th>
       <th class="sortable" data-sort="published_at">Published${arrow('published_at')}</th>
