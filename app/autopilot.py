@@ -154,15 +154,24 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
 # length we don't know. The manual "Make shorts" button is NOT bound by this.
 MAX_SHORTS_SOURCE_SECONDS = 240  # < 4 minutes
 
+# A source whose ONLY shorts_jobs are FAILED is retried on later ticks — early
+# failures are often transient (e.g. a PO-token download error that "This video
+# is not available" masks). But a video that has failed this many times is left
+# alone, so a permanently-broken source can never wedge the queue (the picker
+# returns the newest eligible video each tick and would otherwise retry the same
+# poison video forever, starving every older one).
+MAX_SHORTS_RETRY_ATTEMPTS = 3
+
 
 def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
     """Newest-published public long-form video under MAX_SHORTS_SOURCE_SECONDS
-    with no shorts_jobs row yet.
+    that is eligible for an autopilot cut.
 
     Long-form only (is_short=False) and under the duration cap (excludes
-    compilations); shorts are never re-cut into shorts. A video with ANY
-    existing shorts_jobs row (working, done, or failed) is skipped —
-    re-cutting is a manual action.
+    compilations); shorts are never re-cut into shorts. A video with a
+    non-FAILED shorts_jobs row (done or in-flight) is skipped — re-cutting a
+    successful cut is a manual action. A video whose only jobs are FAILED is
+    retried until it hits MAX_SHORTS_RETRY_ATTEMPTS.
     """
     candidates = (
         supabase().table("videos")
@@ -178,14 +187,26 @@ def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
     candidate_ids = [v["id"] for v in candidates]
     jobs = (
         supabase().table("shorts_jobs")
-        .select("source_video_id")
+        .select("source_video_id,status")
         .eq("channel_id", channel_id)
         .in_("source_video_id", candidate_ids)
         .execute()
     ).data or []
-    cut_ids = {j["source_video_id"] for j in jobs if j.get("source_video_id")}
+    settled: set[str] = set()          # has a non-FAILED job (done or in-flight): never re-cut
+    failed_counts: dict[str, int] = defaultdict(int)
+    for j in jobs:
+        sid = j.get("source_video_id")
+        if not sid:
+            continue
+        if (j.get("status") or "").upper() == "FAILED":
+            failed_counts[sid] += 1
+        else:
+            settled.add(sid)
     for v in candidates:
-        if v["id"] in cut_ids:
+        vid = v["id"]
+        if vid in settled:
+            continue
+        if failed_counts[vid] >= MAX_SHORTS_RETRY_ATTEMPTS:
             continue
         privacy = v.get("privacy_status")
         if privacy is not None and privacy != "public":

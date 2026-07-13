@@ -55,6 +55,45 @@ def test_next_uncut_skips_shorts_nonpublic_and_already_cut():
     assert v is not None and v["id"] == "vGood"
 
 
+def test_next_uncut_retries_video_with_only_failed_jobs():
+    """A source whose only shorts_jobs are FAILED is retryable — the earlier
+    failures (e.g. transient PO-token download errors) must not burn it out of
+    the autopilot pool permanently."""
+    import app.autopilot as ap
+    long_videos = [{"id": "vFailed", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
+    sj = {"by_source": [{"source_video_id": "vFailed", "status": "FAILED"}], "today": []}
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+        v = ap._next_uncut_video_for_channel("UC1")
+    assert v is not None and v["id"] == "vFailed"
+
+
+def test_next_uncut_skips_video_at_retry_cap():
+    """A source that has failed MAX_SHORTS_RETRY_ATTEMPTS times is not retried,
+    so a permanently-broken video can never wedge the queue."""
+    import app.autopilot as ap
+    long_videos = [
+        {"id": "vPoison", "channel_id": "UC1", "is_short": False, "privacy_status": "public"},
+        {"id": "vGood", "channel_id": "UC1", "is_short": False, "privacy_status": "public"},
+    ]
+    sj = {"by_source": [{"source_video_id": "vPoison", "status": "FAILED"}] * ap.MAX_SHORTS_RETRY_ATTEMPTS,
+          "today": []}
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+        v = ap._next_uncut_video_for_channel("UC1")
+    assert v is not None and v["id"] == "vGood"
+
+
+def test_next_uncut_skips_video_with_done_job():
+    """A source with a successful (non-FAILED) job is never re-cut, even if it
+    also has earlier FAILED attempts."""
+    import app.autopilot as ap
+    long_videos = [{"id": "vDone", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
+    sj = {"by_source": [{"source_video_id": "vDone", "status": "FAILED"},
+                        {"source_video_id": "vDone", "status": "DONE"}], "today": []}
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+        v = ap._next_uncut_video_for_channel("UC1")
+    assert v is None
+
+
 def test_next_uncut_applies_duration_upper_bound():
     """The autopicker query must filter duration_seconds below the 4-min cap so
     compilations are never auto-cut."""
