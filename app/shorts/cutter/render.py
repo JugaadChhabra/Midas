@@ -56,9 +56,11 @@ def require_ffmpeg() -> str:
 
 
 def pick_detection_setup() -> tuple[str, str]:
-    """(model_name, device). YOLO11m on Apple GPU; YOLO11s on CPU."""
+    """(model_name, device). YOLO11m on GPU (CUDA or Apple MPS); YOLO11s on CPU."""
     try:
         import torch
+        if torch.cuda.is_available():
+            return "yolo11m.pt", "cuda"
         if torch.backends.mps.is_available():
             return "yolo11m.pt", "mps"
     except Exception:
