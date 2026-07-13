@@ -84,16 +84,6 @@ def _provider_mint_token(base_url: str, timeout: float = 30.0, bypass_cache: boo
     return token
 
 
-def _provider_invalidate_caches(base_url: str, timeout: float = 10.0) -> None:
-    """Best-effort: drop the sidecar's cached tokens so the next mint is fresh."""
-    import httpx
-
-    try:
-        httpx.post(f"{base_url.rstrip('/')}/invalidate_caches", timeout=timeout)
-    except httpx.HTTPError:
-        pass  # the retry still attempts a fresh download; don't mask the real error
-
-
 def refresh_pot_provider(base_url: str | None = None, timeout: float = 10.0) -> None:
     """Force the sidecar to re-establish its session. Called on a schedule so a
     long-lived provider never drifts into serving a stale integrity token (a
@@ -221,11 +211,15 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
     except yt_dlp.utils.DownloadError as exc:
         msg = str(exc)
         # A token-less fallback makes YouTube wrongly report a live video as
-        # "not available". When a provider is configured, invalidate its cache
-        # to force a fresh token and retry once before giving up — and never
-        # surface the misleading "not available" as if the video were deleted.
+        # "not available". When a provider is configured, fully refresh it —
+        # dropping BOTH the stale integrity token (the deep session state that
+        # goes stale, /invalidate_it) and the per-video caches (/invalidate_caches)
+        # — then re-mint and retry once. Only invalidating the per-video cache
+        # (the old behaviour) re-mints on top of the same stale session, so the
+        # retry fails again with the identical "not available". Never surface the
+        # misleading "not available" as if the video were deleted.
         if http_base and _looks_like_token_failure(msg):
-            _provider_invalidate_caches(http_base)
+            refresh_pot_provider(http_base)
             try:
                 _provider_mint_token(http_base, bypass_cache=True)
             except CutterError as mint_exc:

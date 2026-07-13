@@ -187,14 +187,17 @@ def test_fetch_video_retries_after_refreshing_provider_on_token_failure():
     with patch.dict("os.environ", {"BGUTIL_POT_HTTP_BASE_URL": "http://prov:4416"}), \
          patch.object(dl, "_ensure_pot_provider_ready"), \
          patch.object(dl, "_download_once", side_effect=_dl_once), \
-         patch.object(dl, "_provider_invalidate_caches") as inval, \
+         patch.object(dl, "refresh_pot_provider") as refresh, \
          patch.object(dl, "_provider_mint_token", return_value="tok"), \
          patch("pathlib.Path.mkdir"):
         result = dl.fetch_video("https://youtu.be/x", dest)
 
     assert result == good
     assert attempts["n"] == 2          # retried exactly once
-    inval.assert_called_once()         # cache was invalidated before retry
+    # The retry must reset the *integrity token* (deep session state that goes
+    # stale), not just per-video caches — otherwise a fresh mint is still built
+    # on the stale session and the download fails again with "not available".
+    refresh.assert_called_once_with("http://prov:4416")
 
 
 def test_fetch_video_raises_honest_provider_error_when_mint_stays_dead():
@@ -209,7 +212,7 @@ def test_fetch_video_raises_honest_provider_error_when_mint_stays_dead():
     with patch.dict("os.environ", {"BGUTIL_POT_HTTP_BASE_URL": "http://prov:4416"}), \
          patch.object(dl, "_ensure_pot_provider_ready"), \
          patch.object(dl, "_download_once", side_effect=_dl_once), \
-         patch.object(dl, "_provider_invalidate_caches"), \
+         patch.object(dl, "refresh_pot_provider"), \
          patch.object(dl, "_provider_mint_token", side_effect=CutterError("empty token")), \
          patch("pathlib.Path.mkdir"):
         with pytest.raises(CutterError, match="provider is not minting"):
