@@ -217,3 +217,48 @@ def test_fetch_video_raises_honest_provider_error_when_mint_stays_dead():
          patch("pathlib.Path.mkdir"):
         with pytest.raises(CutterError, match="provider is not minting"):
             dl.fetch_video("https://youtu.be/x", dest)
+
+
+def test_fetch_video_retries_in_script_mode_on_token_failure(monkeypatch):
+    # Script mode (no BGUTIL_POT_HTTP_BASE_URL): the local node script re-mints a
+    # fresh token on every yt-dlp invocation, so a transient token-less failure
+    # clears on a plain retry ("failed, but worked on retry"). Without a retry
+    # here the very first token-less blip failed the job outright.
+    yt_dlp = pytest.importorskip("yt_dlp")
+    from app.shorts.cutter import download as dl
+
+    dest = Path("/tmp/does-not-matter")
+    good = (Path("/tmp/vid.mkv"), "Title")
+    attempts = {"n": 0}
+
+    def _dl_once(options, url, dest_dir):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise yt_dlp.utils.DownloadError("ERROR: [youtube] x: This video is not available")
+        return good
+
+    monkeypatch.delenv("BGUTIL_POT_HTTP_BASE_URL", raising=False)
+    with patch.object(dl, "_download_once", side_effect=_dl_once), \
+         patch("pathlib.Path.mkdir"):
+        result = dl.fetch_video("https://youtu.be/x", dest)
+
+    assert result == good
+    assert attempts["n"] == 2          # retried exactly once, no HTTP provider involved
+
+
+def test_fetch_video_script_mode_raises_after_second_token_failure(monkeypatch):
+    # If the local script genuinely can't mint (node/bgutil broken), both attempts
+    # fail — surface an honest token error, not the generic "could not download".
+    yt_dlp = pytest.importorskip("yt_dlp")
+    from app.shorts.cutter import download as dl
+
+    dest = Path("/tmp/does-not-matter")
+
+    def _dl_once(options, url, dest_dir):
+        raise yt_dlp.utils.DownloadError("ERROR: [youtube] x: This video is not available")
+
+    monkeypatch.delenv("BGUTIL_POT_HTTP_BASE_URL", raising=False)
+    with patch.object(dl, "_download_once", side_effect=_dl_once), \
+         patch("pathlib.Path.mkdir"):
+        with pytest.raises(CutterError, match="token-less error"):
+            dl.fetch_video("https://youtu.be/x", dest)

@@ -211,29 +211,45 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
     except yt_dlp.utils.DownloadError as exc:
         msg = str(exc)
         # A token-less fallback makes YouTube wrongly report a live video as
-        # "not available". When a provider is configured, fully refresh it —
-        # dropping BOTH the stale integrity token (the deep session state that
-        # goes stale, /invalidate_it) and the per-video caches (/invalidate_caches)
-        # — then re-mint and retry once. Only invalidating the per-video cache
-        # (the old behaviour) re-mints on top of the same stale session, so the
-        # retry fails again with the identical "not available". Never surface the
-        # misleading "not available" as if the video were deleted.
-        if http_base and _looks_like_token_failure(msg):
-            refresh_pot_provider(http_base)
-            try:
-                _provider_mint_token(http_base, bypass_cache=True)
-            except CutterError as mint_exc:
-                raise CutterError(
-                    "Download failed and the PO-token provider is not minting valid tokens "
-                    "(this is a provider issue, not a missing video). "
-                    f"Restart the bgutil-provider sidecar. ({mint_exc})"
-                ) from exc
-            try:
-                return _download_once(options, url, dest_dir)
-            except yt_dlp.utils.DownloadError as exc2:
-                raise CutterError(
-                    "Download still failed after refreshing the PO-token provider. "
-                    "If the video plays in a browser, the provider likely needs updating or "
-                    f"restarting — the video is not the problem. ({exc2})"
-                ) from exc2
+        # "not available". Retry once on that signature — in BOTH provider modes,
+        # because the failure is transient and a fresh token usually fixes it
+        # ("failed, but worked on retry"). Never surface the misleading "not
+        # available" as if the video were deleted.
+        if _looks_like_token_failure(msg):
+            if http_base:
+                # HTTP provider (Docker): fully refresh — drop BOTH the stale
+                # integrity token (/invalidate_it) and per-video caches
+                # (/invalidate_caches) — then re-mint and retry. Only clearing the
+                # per-video cache re-mints on the same stale session and fails
+                # again identically.
+                refresh_pot_provider(http_base)
+                try:
+                    _provider_mint_token(http_base, bypass_cache=True)
+                except CutterError as mint_exc:
+                    raise CutterError(
+                        "Download failed and the PO-token provider is not minting valid tokens "
+                        "(this is a provider issue, not a missing video). "
+                        f"Restart the bgutil-provider sidecar. ({mint_exc})"
+                    ) from exc
+                try:
+                    return _download_once(options, url, dest_dir)
+                except yt_dlp.utils.DownloadError as exc2:
+                    raise CutterError(
+                        "Download still failed after refreshing the PO-token provider. "
+                        "If the video plays in a browser, the provider likely needs updating or "
+                        f"restarting — the video is not the problem. ({exc2})"
+                    ) from exc2
+            else:
+                # Script mode (local node script): it re-mints a fresh token on
+                # every yt-dlp invocation, so a plain retry is the equivalent of
+                # refresh-and-retry. Previously this path had NO retry, so the
+                # first transient token-less blip failed the whole job.
+                try:
+                    return _download_once(options, url, dest_dir)
+                except yt_dlp.utils.DownloadError as exc2:
+                    raise CutterError(
+                        "Download failed twice with a token-less error. If the video plays "
+                        "in a browser, the local PO-token script isn't minting a valid token "
+                        f"— check that node and the bgutil script work. ({exc2})"
+                    ) from exc2
         raise CutterError(f"Could not download this video link: {exc}") from exc
