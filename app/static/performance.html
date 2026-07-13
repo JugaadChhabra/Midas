@@ -87,7 +87,13 @@
     <a href="/shorts" class="navlink">Shorts</a>
     <span class="navlink active" aria-current="page">Performance</span>
   </nav>
-  <p><a href="/">← All channels</a> · <a id="channel-link" href="#">← Back to channel</a></p>
+  <p class="sub" aria-label="Breadcrumb">
+    <a href="/">All channels</a>
+    <span class="muted"> / </span>
+    <a id="channel-link" href="#">Channel</a>
+    <span class="muted"> / </span>
+    <span aria-current="page">Performance</span>
+  </p>
   <h1>Performance</h1>
   <p class="sub">Tracking starts at Apply. Use Sync to refresh stats.</p>
 
@@ -165,6 +171,11 @@ const params = new URLSearchParams(location.search);
 const channelId = params.get('channel_id');
 if (!channelId) { document.body.innerHTML = '<p>Missing channel_id.</p>'; throw new Error('no id'); }
 document.getElementById('channel-link').href = `/channel?id=${encodeURIComponent(channelId)}`;
+// Label the middle crumb with the channel's name (non-fatal if it can't load).
+fetch('/auth/channels').then(r => r.json()).then(chs => {
+  const c = (chs || []).find(x => x.id === channelId);
+  if (c && c.name) document.getElementById('channel-link').textContent = c.name;
+}).catch(() => {});
 
 const $ = (id) => document.getElementById(id);
 function toast(msg, kind='ok', timeout=3500) {
