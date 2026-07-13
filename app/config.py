@@ -37,6 +37,12 @@ class Settings:
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
 
+    # Shorts job queue: how many cutter jobs run concurrently, and how often
+    # the dispatcher polls for CREATED jobs / reaps finished workers. Cap 1
+    # reproduces the old single-job behavior.
+    SHORTS_MAX_CONCURRENT_JOBS = int(os.getenv("SHORTS_MAX_CONCURRENT_JOBS") or "2")
+    SHORTS_DISPATCH_INTERVAL_SECONDS = int(os.getenv("SHORTS_DISPATCH_INTERVAL_SECONDS") or "5")
+
     # Working/cache dir for locally cut shorts.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 
