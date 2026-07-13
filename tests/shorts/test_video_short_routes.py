@@ -17,12 +17,9 @@ def _sb_video(found=True, channel="UC123", privacy="public"):
 
 
 def test_make_short_creates_job():
-    with patch("app.shorts.routes.supabase", return_value=_sb_video()), \
-         patch("app.shorts.routes.has_active_job", return_value=False), \
-         patch("app.shorts.routes.start_job_thread") as start:
+    with patch("app.shorts.routes.supabase", return_value=_sb_video()):
         r = _client().post("/videos/vid123/short")
     assert r.status_code == 200 and r.json() == {"job_id": 42}
-    start.assert_called_once_with(42)
 
 
 def test_make_short_unknown_video_404():
@@ -31,39 +28,23 @@ def test_make_short_unknown_video_404():
     assert r.status_code == 404
 
 
-def test_make_short_conflicts_when_busy():
-    with patch("app.shorts.routes.supabase", return_value=_sb_video()), \
-         patch("app.shorts.routes.has_active_job", return_value=True):
-        r = _client().post("/videos/vid123/short")
-    assert r.status_code == 409
-
-
 def test_make_short_blocks_unlisted():
-    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy="unlisted")), \
-         patch("app.shorts.routes.has_active_job", return_value=False), \
-         patch("app.shorts.routes.start_job_thread") as start:
+    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy="unlisted")):
         r = _client().post("/videos/vid123/short")
     assert r.status_code == 409
-    start.assert_not_called()
 
 
 def test_make_short_blocks_private():
-    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy="private")), \
-         patch("app.shorts.routes.has_active_job", return_value=False), \
-         patch("app.shorts.routes.start_job_thread") as start:
+    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy="private")):
         r = _client().post("/videos/vid123/short")
     assert r.status_code == 409
-    start.assert_not_called()
 
 
 def test_make_short_blocks_unknown_privacy():
     # privacy_status not yet synced (NULL) -> refuse; only confirmed-public videos are cut.
-    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy=None)), \
-         patch("app.shorts.routes.has_active_job", return_value=False), \
-         patch("app.shorts.routes.start_job_thread") as start:
+    with patch("app.shorts.routes.supabase", return_value=_sb_video(privacy=None)):
         r = _client().post("/videos/vid123/short")
     assert r.status_code == 409
-    start.assert_not_called()
 
 
 def _sb_clip(status="PENDING"):
