@@ -2,7 +2,11 @@ import logging
 import threading
 
 import httpx
-from postgrest._sync.request_builder import SyncQueryRequestBuilder
+from postgrest._sync.request_builder import (
+    SyncMaybeSingleRequestBuilder,
+    SyncQueryRequestBuilder,
+    SyncSingleRequestBuilder,
+)
 from supabase import create_client, Client
 
 from app.config import settings
@@ -108,13 +112,19 @@ def _reset_thread_client() -> None:
 # "the connection was secretly dead, server didn't ack" failures and a fresh
 # connection almost always succeeds. We monkey-patch once at import time so
 # every call site benefits without changing call sites.
+#
+# IMPORTANT: .single() and .maybe_single() return DIFFERENT builder classes
+# (SyncSingleRequestBuilder / SyncMaybeSingleRequestBuilder), each with its OWN
+# execute(). Patching only SyncQueryRequestBuilder left every `.single().execute()`
+# call — e.g. run_shorts_job fetching its job row — unwrapped, so a transient
+# Supabase ReadTimeout escaped unretried and killed the background job thread.
+# Patch each builder that defines its own execute.
 _RETRYABLE = (
     httpx.ReadTimeout,
     httpx.RemoteProtocolError,
     httpx.ConnectError,
     httpx.ConnectTimeout,
 )
-_original_execute = SyncQueryRequestBuilder.execute
 
 
 def _is_closed_client_error(exc: BaseException) -> bool:
@@ -122,36 +132,49 @@ def _is_closed_client_error(exc: BaseException) -> bool:
     return isinstance(exc, RuntimeError) and "client has been closed" in str(exc)
 
 
-def _execute_with_retry(self):
-    last_exc: Exception | None = None
-    for attempt in range(_EXECUTE_RETRIES + 1):
-        try:
-            return _original_execute(self)
-        except _RETRYABLE as e:
-            last_exc = e
-        except RuntimeError as e:
-            if not _is_closed_client_error(e):
-                raise
-            last_exc = e
-        log.warning(
-            "supabase %s %s failed (%s), attempt %d/%d — recycling client",
-            self.http_method, self.path, type(last_exc).__name__,
-            attempt + 1, _EXECUTE_RETRIES + 1,
-        )
-        # Recycle the thread's client AND rebind this request builder to the
-        # fresh session. _reset_thread_client() closes the old httpx session,
-        # but `self` still points at it — retrying without rebinding would just
-        # raise "Cannot send a request, as the client has been closed."
-        _reset_thread_client()
-        fresh = supabase()
-        new_session = getattr(getattr(fresh, "postgrest", None), "session", None)
-        if isinstance(new_session, httpx.Client):
-            self.session = new_session
-    assert last_exc is not None
-    raise last_exc
+def _make_execute_with_retry(original_execute):
+    """Wrap one builder class's execute() with connection-recycling retries."""
+    def _execute_with_retry(self):
+        last_exc: Exception | None = None
+        for attempt in range(_EXECUTE_RETRIES + 1):
+            try:
+                return original_execute(self)
+            except _RETRYABLE as e:
+                last_exc = e
+            except RuntimeError as e:
+                if not _is_closed_client_error(e):
+                    raise
+                last_exc = e
+            log.warning(
+                "supabase %s %s failed (%s), attempt %d/%d — recycling client",
+                getattr(self, "http_method", "?"), getattr(self, "path", "?"),
+                type(last_exc).__name__, attempt + 1, _EXECUTE_RETRIES + 1,
+            )
+            # Recycle the thread's client AND rebind this request builder to the
+            # fresh session. _reset_thread_client() closes the old httpx session,
+            # but `self` still points at it — retrying without rebinding would just
+            # raise "Cannot send a request, as the client has been closed."
+            _reset_thread_client()
+            fresh = supabase()
+            new_session = getattr(getattr(fresh, "postgrest", None), "session", None)
+            if isinstance(new_session, httpx.Client):
+                self.session = new_session
+        assert last_exc is not None
+        raise last_exc
+    return _execute_with_retry
 
 
-SyncQueryRequestBuilder.execute = _execute_with_retry
+# Patch each builder class that defines its OWN execute (via __dict__, not
+# inherited). Filter/Select builders inherit Query.execute and are covered by
+# patching the parent; Single / MaybeSingle override it and must be patched too.
+_RETRY_PATCHED_BUILDERS = (
+    SyncQueryRequestBuilder,
+    SyncSingleRequestBuilder,
+    SyncMaybeSingleRequestBuilder,
+)
+for _builder_cls in _RETRY_PATCHED_BUILDERS:
+    if "execute" in _builder_cls.__dict__:
+        _builder_cls.execute = _make_execute_with_retry(_builder_cls.__dict__["execute"])
 
 
 def supabase() -> Client:
