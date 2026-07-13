@@ -35,6 +35,26 @@
   pre { padding: .75rem; overflow:auto; white-space: pre-wrap; }
   .row { display:flex; gap:.5rem; flex-wrap: wrap; align-items:center; }
   .pill { display:inline-block; padding: .15rem .55rem; border-radius: 999px; background:#8882; font-size:.78rem; }
+  /* Shorts job/clip status pills */
+  .spill { display:inline-block; padding:.13rem .55rem; border-radius:999px; font-size:.76rem; font-weight:600; white-space:nowrap; }
+  .spill.work { background:#28a2; color:#6af; }
+  .spill.up   { background:#d802; color:#d80; }
+  .spill.done { background:#2a72; color:#2a7; }
+  .spill.fail { background:#c332; color:#c33; }
+  .spill.pend { background:#8882; opacity:.9; }
+  .shorts-src { color:#6af; text-decoration:none; font-size:.86rem; }
+  .shorts-src:hover { text-decoration:underline; }
+  .shorts-src .vid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .shorts-reason { margin-top:.35rem; font-size:.8rem; }
+  .shorts-reason > summary { color:#c33; cursor:pointer; list-style:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .shorts-reason > summary::-webkit-details-marker { display:none; }
+  .shorts-reason > summary::before { content:"▸ "; opacity:.7; }
+  .shorts-reason[open] > summary { white-space:normal; }
+  .shorts-reason[open] > summary::before { content:"▾ "; }
+  .shorts-reason pre { margin:.35rem 0 0; font-size:.78rem; white-space:pre-wrap; word-break:break-word; color:#c33; }
+  .clip-line { display:flex; align-items:center; gap:.5rem; font-size:.86rem; padding:.15rem 0; }
+  .clip-line .rank { opacity:.5; min-width:1.6rem; font-variant-numeric:tabular-nums; }
+  .clip-line .ctitle { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .sev-high { background: #c33; color: white; }
   .sev-medium { background: #d80; color: white; }
   .sev-low { background: #888; color: white; }
@@ -85,7 +105,6 @@
   <nav class="nav">
     <a href="/" class="brand">Midas</a>
     <a href="/" class="navlink">Dashboard</a>
-    <a href="/shorts" class="navlink">Shorts</a>
   </nav>
   <p><a href="/">← All channels</a></p>
   <h1 id="title">Channel</h1>
@@ -101,6 +120,7 @@
   <div class="tabs" role="tablist">
     <div class="tab active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</div>
     <div class="tab" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">Videos</div>
+    <div class="tab" data-tab="shorts" role="tab" tabindex="-1" aria-selected="false">Shorts</div>
     <div class="tab" data-tab="performance" role="tab" tabindex="-1" aria-selected="false">Performance</div>
     <div class="tab" data-tab="autopilot" role="tab" tabindex="-1" aria-selected="false">Autopilot</div>
     <div class="tab" data-tab="playlists" role="tab" tabindex="-1" aria-selected="false">Playlists</div>
@@ -157,6 +177,33 @@
         <span id="selection-count" class="muted"></span>
       </div>
       <div id="videos">No videos yet — run a sync.</div>
+    </div>
+  </div>
+
+  <!-- ─── SHORTS ─── -->
+  <!-- Native (not an iframe): this channel's shorts-generation jobs, rendered
+       straight into the page so there's no inner scrollbar and numbering is
+       this channel's own sequence, not raw global job ids. -->
+  <div class="tab-panel" data-panel="shorts">
+    <div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center; gap:.5rem">
+        <div class="row" style="gap:.5rem; align-items:baseline">
+          <h3 style="margin:0">Shorts jobs</h3>
+          <span class="muted" id="shorts-count"></span>
+        </div>
+        <div class="row" style="gap:.5rem; align-items:center">
+          <span class="muted" id="shorts-poll" style="font-size:.78rem"></span>
+          <button class="btn" id="shorts-refresh">Refresh</button>
+          <button class="btn" id="shorts-clear-failed">Clear failed</button>
+        </div>
+      </div>
+      <table id="shorts-table">
+        <thead><tr>
+          <th style="width:3.5rem">#</th><th style="width:22%">Source</th>
+          <th style="width:30%">Status</th><th>Clips</th>
+        </tr></thead>
+        <tbody id="shorts-body"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+      </table>
     </div>
   </div>
 
@@ -431,10 +478,12 @@ function switchTab(name) {
 // tab's data up front. loadChannel() (header + form defaults) stays eager.
 let tabsReady = false;
 let apInterval = null;
+let shortsInterval = null;
 const loadedTabs = new Set();
 const tabLoaders = {
   overview:  () => loadOverview(),
   videos:    () => loadVideos(),
+  shorts:    () => { loadShorts(); if (!shortsInterval) shortsInterval = setInterval(pollShorts, 10000); },
   performance: () => loadPerformanceFrame(),
   autopilot: () => { loadAutopilotLog(); if (!apInterval) apInterval = setInterval(loadAutopilotLog, 30000); },
   playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
@@ -456,6 +505,151 @@ function loadPerformanceFrame() {
     } catch (e) { /* cross-origin shouldn't happen (same origin); ignore */ }
   };
 }
+// ── Shorts tab (native) ────────────────────────────────────────────────
+// Rendered straight into the page — no iframe, so no inner scrollbar — and
+// scoped to this channel via /shorts/jobs?channel_id=…. Rows are numbered by
+// this channel's own sequence (oldest = 1), not the raw global job id.
+const SHORTS_WORKING = ['CREATED','QUEUED','ONGOING','DOWNLOADING','ANALYSING','RENDERING','UPLOADING'];
+const SHORTS_LABEL = {
+  CREATED:'Queued', QUEUED:'Queued', ONGOING:'Working', DOWNLOADING:'Downloading',
+  ANALYSING:'Analysing', RENDERING:'Rendering', UPLOADING:'Uploading',
+  DONE:'Done', SUCCEEDED:'Done', UPLOADED:'Uploaded', FAILED:'Failed', PENDING:'Pending',
+};
+function shortsPillClass(s) {
+  if (SHORTS_WORKING.includes(s)) return 'work';
+  if (s === 'UPLOADING') return 'up';
+  if (s === 'DONE' || s === 'SUCCEEDED' || s === 'UPLOADED') return 'done';
+  if (s === 'FAILED') return 'fail';
+  return 'pend';
+}
+function shortsPill(s) {
+  s = s || 'PENDING';
+  return `<span class="spill ${shortsPillClass(s)}">${escapeHtml(SHORTS_LABEL[s] || s)}</span>`;
+}
+function shortsVideoId(j) {
+  if (j.source_video_id) return j.source_video_id;
+  const m = (j.source_url || '').match(/(?:v=|youtu\.be\/|\/shorts\/)([A-Za-z0-9_-]{6,})/);
+  return m ? m[1] : '';
+}
+function shortsSourceCell(j) {
+  const vid = shortsVideoId(j);
+  const href = escapeHtml(j.source_url || (vid ? `https://youtu.be/${vid}` : '#'));
+  const label = vid ? `<span class="vid">${escapeHtml(vid)}</span>` : escapeHtml(j.source_url || '—');
+  return `<a class="shorts-src" href="${href}" target="_blank" rel="noopener" title="${escapeHtml(j.source_url||'')}">▶ ${label}</a>`;
+}
+function shortsStatusCell(j) {
+  if (SHORTS_WORKING.includes(j.status)) {
+    const pct = Math.max(0, Math.min(100, j.progress || 0));
+    return `<div class="prog"><div class="prog-bar" style="width:${pct}%"></div></div>` +
+           `<div class="muted" style="font-size:.78rem">${escapeHtml(j.progress_label || SHORTS_LABEL[j.status] || j.status)} · ${pct}%</div>`;
+  }
+  let html = shortsPill(j.status);
+  if (j.status === 'FAILED' && j.error_message) {
+    const msg = String(j.error_message);
+    html += `<details class="shorts-reason"><summary>${escapeHtml(msg)}</summary><pre>${escapeHtml(msg)}</pre></details>`;
+  }
+  return html;
+}
+function shortsClipsCell(clips) {
+  if (!clips || !clips.length) return '<span class="muted">—</span>';
+  return clips.map(c => {
+    const st = c.upload_status || 'PENDING';
+    let act = '';
+    if (c.yt_video_id) {
+      act = `<a class="shorts-src" href="https://studio.youtube.com/video/${escapeHtml(c.yt_video_id)}/edit" target="_blank" rel="noopener">open ↗</a>`;
+    } else if (st === 'PENDING' || st === 'FAILED') {
+      act = `<button class="btn" style="padding:.15rem .5rem;font-size:.78rem" data-upload-clip="${escapeHtml(c.id)}">Upload</button>`;
+    } else if (c.local_path) {
+      act = '<span class="muted">local</span>';
+    }
+    return `<div class="clip-line"><span class="rank">#${escapeHtml(c.rank)}</span>${shortsPill(st)}` +
+           `<span class="ctitle" title="${escapeHtml(c.title||'')}">${escapeHtml(c.title||'clip')}</span>${act}</div>`;
+  }).join('');
+}
+
+// Diff-render so the 10s poll never collapses an open failure <details> or
+// jumps scroll: keep a jobId → {tr, html} map and only touch changed rows.
+const shortsRows = new Map();
+function renderShorts(jobs, clipsById) {
+  const body = $('shorts-body');
+  $('shorts-count').textContent = jobs.length ? `${jobs.length} job${jobs.length===1?'':'s'}` : '';
+  if (!jobs.length) {
+    shortsRows.clear();
+    body.innerHTML = `<tr><td colspan="4" class="muted" style="padding:1.5rem .35rem">No shorts jobs for this channel yet. Go to the <b>Videos</b> tab and use <b>Make shorts</b> on a long-form video — or enable auto-shorts under <b>Autopilot</b>.</td></tr>`;
+    return;
+  }
+  // jobs arrive newest-first; oldest gets ordinal 1 so numbers stay put as new
+  // jobs land on top.
+  const N = jobs.length;
+  const seen = new Set();
+  jobs.forEach((j, i) => {
+    const ordinal = N - i;
+    const html = `<td class="muted" style="font-variant-numeric:tabular-nums">#${ordinal}</td>` +
+                 `<td>${shortsSourceCell(j)}</td><td>${shortsStatusCell(j)}</td>` +
+                 `<td>${shortsClipsCell(clipsById[j.id] || [])}</td>`;
+    let entry = shortsRows.get(j.id);
+    if (!entry) { entry = { tr: document.createElement('tr'), html: null }; shortsRows.set(j.id, entry); }
+    if (entry.html !== html) { entry.tr.innerHTML = html; entry.html = html; }
+    if (body.children[i] !== entry.tr) body.insertBefore(entry.tr, body.children[i] || null);
+    seen.add(j.id);
+  });
+  for (const [id, entry] of shortsRows) {
+    if (!seen.has(id)) { entry.tr.remove(); shortsRows.delete(id); }
+  }
+}
+
+let shortsBusy = false;
+async function loadShorts() {
+  if (shortsBusy) return;
+  shortsBusy = true;
+  $('shorts-poll').textContent = 'updating…';
+  try {
+    const jobs = await fetch(`/shorts/jobs?channel_id=${encodeURIComponent(channelId)}`).then(r => r.json());
+    const details = await Promise.all(jobs.map(j =>
+      fetch(`/shorts/jobs/${j.id}`).then(r => r.json()).catch(() => ({ clips: [] }))
+    ));
+    const clipsById = {};
+    jobs.forEach((j, i) => { clipsById[j.id] = (details[i] && details[i].clips) || []; });
+    renderShorts(jobs, clipsById);
+    $('shorts-poll').textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    $('shorts-poll').textContent = 'update failed';
+  } finally {
+    shortsBusy = false;
+  }
+}
+// Only poll while the Shorts tab is actually visible.
+function pollShorts() {
+  if (document.hidden) return;
+  const panel = document.querySelector('.tab-panel[data-panel="shorts"]');
+  if (panel && panel.classList.contains('active')) loadShorts();
+}
+
+// Upload a single un-published clip, then refresh.
+$('shorts-body').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('[data-upload-clip]');
+  if (!btn) return;
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    const r = await fetch(`/shorts/clips/${btn.getAttribute('data-upload-clip')}/upload`, { method: 'POST' });
+    if (!r.ok) { toast('Upload failed', 'err'); btn.disabled = false; btn.textContent = 'Upload'; return; }
+    toast('Clip uploaded', 'ok');
+    loadShorts();
+  } catch (e) { toast('Network error', 'err'); btn.disabled = false; btn.textContent = 'Upload'; }
+});
+$('shorts-refresh').onclick = () => loadShorts();
+$('shorts-clear-failed').onclick = async () => {
+  if (!(await confirmDialog('Delete all FAILED shorts jobs for this channel?', 'Clear failed'))) return;
+  const btn = $('shorts-clear-failed'); btn.disabled = true;
+  try {
+    const r = await fetch(`/shorts/jobs/clear-failed?channel_id=${encodeURIComponent(channelId)}`, { method: 'POST' });
+    const out = await r.json();
+    toast(`Cleared ${out.deleted || 0} failed job${out.deleted === 1 ? '' : 's'}`, 'ok');
+    loadShorts();
+  } catch (e) { toast('Clear failed', 'err'); }
+  finally { btn.disabled = false; }
+};
+
 function ensureTabLoaded(name) {
   if (loadedTabs.has(name)) return;
   const fn = tabLoaders[name];
@@ -931,6 +1125,18 @@ function shortsButton(v) {
   return `<button onclick="makeShort('${v.id}')">${label}</button>`;
 }
 
+// The /videos list omits the heavy description/tags columns for speed; fetch
+// them for a single video the first time its audit diff is expanded, and cache
+// them on the currentVideos entry so re-expanding is free.
+async function ensureVideoDetail(videoId) {
+  const v = currentVideos[videoId];
+  if (v && v.description !== undefined) return;  // heavy fields already present
+  try {
+    const d = await (await fetch(`/videos/${encodeURIComponent(videoId)}`)).json();
+    if (d && d.id) currentVideos[videoId] = { ...(currentVideos[videoId] || {}), ...d };
+  } catch (e) { /* non-fatal — the diff just renders an empty description */ }
+}
+
 async function viewAudit(videoId) {
   const cell = $('audit-' + videoId).firstChild;
   // Toggle: if already showing, collapse it.
@@ -940,7 +1146,10 @@ async function viewAudit(videoId) {
   }
   cell.innerHTML = '<div class="audit muted">Loading latest audit…</div>';
   try {
-    const arr = await (await fetch(`/videos/${videoId}/audits`)).json();
+    const [arr] = await Promise.all([
+      fetch(`/videos/${videoId}/audits`).then(r => r.json()),
+      ensureVideoDetail(videoId),
+    ]);
     if (!arr || !arr.length) {
       cell.innerHTML = '<div class="audit muted">No audit yet — click Audit to run one.</div>';
       return;
@@ -959,6 +1168,7 @@ async function audit(videoId) {
     const r = await fetch(`/videos/${videoId}/audit`, { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
     const a = await r.json();
+    await ensureVideoDetail(videoId);
     cell.innerHTML = renderAudit(a);
   } catch (e) {
     cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Audit failed: ${escapeHtml(String(e))}</div>`;

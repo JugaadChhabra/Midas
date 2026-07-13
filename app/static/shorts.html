@@ -134,6 +134,31 @@
 <script src="/static/swr.js"></script>
 <script>
 const POLL_MS = 10000;
+// Scope: when opened as /shorts?channel_id=… only that channel's jobs are shown.
+// When embedded in the channel page's Shorts tab (?embed=1), drop this page's own
+// nav / title and go full width, exactly like the Performance tab.
+const params = new URLSearchParams(location.search);
+const scopeChannelId = params.get('channel_id');
+const embedded = params.get('embed') === '1';
+const jobsUrl = scopeChannelId
+  ? '/shorts/jobs?channel_id=' + encodeURIComponent(scopeChannelId)
+  : '/shorts/jobs';
+// Channel-scoped cache key so per-channel embeds don't clobber each other's
+// (or the all-channels page's) last-jobs snapshot.
+const cacheKey = scopeChannelId ? 'shorts:jobs:' + scopeChannelId : 'shorts:jobs';
+// Empty-state copy: inside a channel (scoped/embedded) the user is already here,
+// so point them at this channel's Videos tab; the all-channels page tells them
+// how to pick a channel first.
+const EMPTY_MSG = scopeChannelId
+  ? `No shorts jobs for this channel yet. Go to the <b>Videos</b> tab and use <b>Make shorts</b> on a long-form video — or enable auto-shorts under <b>Autopilot</b>.`
+  : `No shorts jobs yet. Open a channel from the <a class="src" style="display:inline" href="/">Dashboard</a>, go to its Videos tab, and use <b>Make shorts</b> on a long-form video — or enable auto-shorts under the channel's Autopilot settings.`;
+if (embedded) {
+  document.querySelector('nav.nav')?.remove();
+  document.querySelector('h1')?.remove();
+  document.body.style.margin = '0';
+  document.body.style.maxWidth = 'none';
+  document.body.style.padding = '0';
+}
 const banner = document.getElementById('banner');
 const tbody = document.querySelector('#jobs tbody');
 const pollDot = document.getElementById('poll-dot');
@@ -277,7 +302,7 @@ function renderJobs(jobs, clipsById) {
   if (!jobs.length) {
     for (const [, e] of rows) e.tr.remove();
     rows.clear();
-    if (!empty) tbody.innerHTML = `<tr class="empty-row"><td colspan="4">No shorts jobs yet. Open a channel from the <a class="src" style="display:inline" href="/">Dashboard</a>, go to its Videos tab, and use <b>Make shorts</b> on a long-form video — or enable auto-shorts under the channel's Autopilot settings.</td></tr>`;
+    if (!empty) tbody.innerHTML = `<tr class="empty-row"><td colspan="4">${EMPTY_MSG}</td></tr>`;
     return;
   }
   if (empty) empty.remove();
@@ -305,7 +330,7 @@ async function loadJobs() {
   pollDot.classList.add('live');
   pollStatus.textContent = 'updating…';
   try {
-    const r = await fetch('/shorts/jobs');
+    const r = await fetch(jobsUrl);
     if (!r.ok) {
       const e = await describeError(r);
       showBanner('error', `Couldn't load jobs (HTTP ${e.status} ${e.statusText})`, e.detail);
@@ -320,7 +345,7 @@ async function loadJobs() {
     renderJobs(jobs, clipsById);
     // Snapshot the fully-resolved jobs+clips so reopening this page paints the
     // last state instantly instead of a blank table while the poll fans out.
-    SWR.set('shorts:jobs', { jobs, clipsById });
+    SWR.set(cacheKey, { jobs, clipsById });
     pollStatus.textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     pollStatus.textContent = 'update failed';
@@ -369,7 +394,7 @@ document.addEventListener('visibilitychange', () => {
 // Paint from cache first (names, then last jobs snapshot), then kick off the
 // live fetch + polling. No blank-table wait on return visits.
 loadChannels();
-const _cachedJobs = SWR.get('shorts:jobs');
+const _cachedJobs = SWR.get(cacheKey);
 if (_cachedJobs && _cachedJobs.jobs) renderJobs(_cachedJobs.jobs, _cachedJobs.clipsById || {});
 loadJobs();
 startPolling();

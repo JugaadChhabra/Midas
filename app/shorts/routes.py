@@ -45,9 +45,30 @@ def create_job(body: CreateJob):
 
 
 @router.get("/jobs")
-def list_jobs():
+def list_jobs(channel_id: str | None = None):
     sb = supabase()
-    return sb.table("shorts_jobs").select("*").order("id", desc=True).limit(50).execute().data or []
+    q = sb.table("shorts_jobs").select("*")
+    if channel_id:
+        q = q.eq("channel_id", channel_id)
+    return q.order("id", desc=True).limit(50).execute().data or []
+
+
+@router.post("/jobs/clear-failed")
+def clear_failed_jobs(channel_id: str | None = None):
+    """Delete FAILED shorts jobs (and their clips) so the list can start fresh.
+    Scoped to one channel when channel_id is given, else all channels."""
+    sb = supabase()
+    q = sb.table("shorts_jobs").select("id").eq("status", "FAILED")
+    if channel_id:
+        q = q.eq("channel_id", channel_id)
+    ids = [r["id"] for r in (q.execute().data or [])]
+    if ids:
+        # child rows first (FK), then the jobs; chunk to keep the URL short.
+        for i in range(0, len(ids), 100):
+            batch = ids[i:i + 100]
+            sb.table("shorts_clips").delete().in_("job_id", batch).execute()
+            sb.table("shorts_jobs").delete().in_("id", batch).execute()
+    return {"deleted": len(ids)}
 
 
 @router.get("/jobs/{job_id}")
