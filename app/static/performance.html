@@ -176,7 +176,17 @@
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('channel_id');
-if (!channelId) { document.body.innerHTML = '<p>Missing channel_id.</p>'; throw new Error('no id'); }
+if (!channelId) { showMissingId('channel_id'); throw new Error('no id'); }
+// Render a missing-id error in the content area while keeping the top nav intact.
+function showMissingId(what) {
+  const nav = document.querySelector('nav.nav');
+  document.body.innerHTML = '';
+  if (nav) document.body.appendChild(nav);
+  const err = document.createElement('div');
+  err.className = 'card';
+  err.innerHTML = `<p style="color:#c33;margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
+  document.body.appendChild(err);
+}
 document.getElementById('channel-link').href = `/channel?id=${encodeURIComponent(channelId)}`;
 // Label the middle crumb with the channel's name (non-fatal if it can't load).
 fetch('/auth/channels').then(r => r.json()).then(chs => {

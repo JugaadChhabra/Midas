@@ -332,7 +332,17 @@
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('id');
-if (!channelId) { document.body.innerHTML = '<p>Missing channel id.</p>'; throw new Error('no id'); }
+if (!channelId) { showMissingId('channel id'); throw new Error('no id'); }
+// Render a missing-id error in the content area while keeping the top nav intact.
+function showMissingId(what) {
+  const nav = document.querySelector('nav.nav');
+  document.body.innerHTML = '';
+  if (nav) document.body.appendChild(nav);
+  const err = document.createElement('div');
+  err.className = 'card';
+  err.innerHTML = `<p style="color:#c33;margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
+  document.body.appendChild(err);
+}
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

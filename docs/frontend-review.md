@@ -29,7 +29,7 @@ is implemented and verified.
 - [x] #13 Route both apply-pending paths through one server endpoint — done extended POST /channels/{id}/audits/apply-pending with an optional `video_ids` filter (backward-compatible: no body = all pending); "Apply selected pending" now calls it instead of the client-side per-video fetch+apply loop. pytest: 72 passed (unrelated cv2 collection error ignored)
 - [x] #14 Autopilot config placement + shorts controls layout — done the 5-control shorts-autopilot row is now a labeled auto-fit grid (Videos/day, Upload top, Mode, Camera) with the enable checkbox on its own line; no longer a messily-wrapping flex row. Left config in the Autopilot tab (keeps enable+config+status together) rather than moving to Settings — noted as a deliberate choice
 - [x] #15 Co-locate playlist-health enable toggle with its card — done moved the Enable-scoring toggle + Save into the Playlists-tab health card (same IDs, JS wiring untouched), removed the duplicate Settings card, and updated the "off" empty-state to point at the toggle above instead of Settings
-- [ ] #16 Don't nuke `document.body` on missing id — render error in content area
+- [x] #16 Don't nuke `document.body` on missing id — render error in content area — done both channel.html and performance.html now keep the top nav and show an error card (with a Dashboard link) via showMissingId() instead of replacing the whole body with a bare `<p>`
 - [ ] #17 Remove reliance on global `event` in `triggerReflection`
 - [ ] #18 Videos table: responsive fallback + clearer `#`/column trimming
 - [ ] #19 Unify quota reset copy (countdown vs "midnight Pacific")
