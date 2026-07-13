@@ -209,6 +209,35 @@ def test_full_sync_stamps_last_full_synced_at():
         assert ("last_full_synced_at" in channel_patch) is is_full
 
 
+def test_sync_bounds_probes_per_run():
+    """Only the newest MAX_SHORTS_PROBES_PER_SYNC new videos are probed; the
+    rest fall back to the duration label so a big first sync can't hammer
+    YouTube with thousands of probes."""
+    recorder = {"upserts": [], "updates": []}
+
+    def fake_full(yt, cid, ids):
+        return [_video_item(v, duration="PT1M30S") for v in ids]  # 90s, all sub-180
+
+    # newest-first: n1, n2, n3
+    pages = [_playlist_page(["n1", "n2", "n3"], next_token=None)]
+    with patch("app.sync.supabase", return_value=_fake_supabase([], recorder)), \
+         patch("app.sync.youtube_for_channel", return_value=MagicMock()), \
+         patch("app.sync.yt_channels_list_uploads",
+               return_value={"uploads_playlist_id": "UP", "default_language": None}), \
+         patch("app.sync.yt_playlist_items_page", side_effect=pages), \
+         patch("app.sync.yt_videos_list_full", side_effect=fake_full), \
+         patch("app.sync.MAX_SHORTS_PROBES_PER_SYNC", 2), \
+         patch("app.sync.is_actually_short", return_value=False) as probe:
+        from app.sync import sync_channel
+        sync_channel("UCchan")
+
+    assert probe.call_count == 2   # only the newest 2 are probed
+    upserted = {r["id"]: r for batch in recorder["upserts"] for r in batch}
+    assert upserted["n1"]["is_short"] is False   # probed
+    assert upserted["n2"]["is_short"] is False   # probed
+    assert upserted["n3"]["is_short"] is True    # duration fallback (<=180s)
+
+
 # ── is_short detection (URL probe, not duration heuristic) ────────────────
 
 def test_is_actually_short_skips_probe_for_long_video():

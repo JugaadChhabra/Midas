@@ -1,3 +1,4 @@
+import logging
 import re
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -15,6 +16,15 @@ from app.youtube_client import (
 )
 
 SHORTS_MAX_SECONDS = 180  # YouTube Shorts are <= 3 minutes
+
+# Cap on Shorts-URL probes per sync run. A brand-new channel's first sync can
+# have thousands of new sub-3-min videos; probing all of them sequentially adds
+# huge latency and risks YouTube throttling the caller's IP. We probe the newest
+# N new videos (playlist is newest-first) and duration-label the rest — a later
+# scripts/backfill_is_short.py run corrects the remainder in a throttled pass.
+# Incremental syncs only ever have a handful of new videos, so this never bites
+# them; it only bounds the first bulk sync of a large channel.
+MAX_SHORTS_PROBES_PER_SYNC = 300
 
 # A desktop UA — the /shorts/ endpoint 30x-redirects real Shorts to /watch for
 # some mobile UAs, which would break the probe below.
@@ -60,6 +70,7 @@ def _iso8601_to_seconds(d: str) -> int:
     h, mi, s = (int(x) if x else 0 for x in m.groups())
     return h * 3600 + mi * 60 + s
 
+log = logging.getLogger("midas.sync")
 router = APIRouter(tags=["sync"])
 
 
@@ -139,6 +150,7 @@ def sync_channel(channel_id: str, full: bool = False):
 
     rows: list[dict] = []
     privacy_changed_to_private: list[str] = []
+    probes_used = 0            # bounded per sync — see MAX_SHORTS_PROBES_PER_SYNC
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         try:
@@ -152,10 +164,26 @@ def sync_channel(channel_id: str, full: bool = False):
         for item in items:
             duration = (item.get("contentDetails") or {}).get("duration", "")
             duration_seconds = _iso8601_to_seconds(duration)
-            # Reuse the stored verdict for videos we've already classified;
-            # probe the Shorts URL for new ones (see is_actually_short).
+            # Reuse the stored verdict for videos we've already classified.
+            # For new ones, probe the Shorts URL (see is_actually_short) — but
+            # only up to MAX_SHORTS_PROBES_PER_SYNC per run; past that, fall back
+            # to the duration label (a later backfill corrects the remainder).
             prior = existing_is_short.get(item["id"])
-            is_short = prior if prior is not None else is_actually_short(item["id"], duration_seconds)
+            if prior is not None:
+                is_short = prior
+            elif duration_seconds is None or duration_seconds > SHORTS_MAX_SECONDS:
+                is_short = False                       # too long to be a Short; no probe
+            elif probes_used < MAX_SHORTS_PROBES_PER_SYNC:
+                is_short = is_actually_short(item["id"], duration_seconds)
+                probes_used += 1
+                if probes_used == MAX_SHORTS_PROBES_PER_SYNC:
+                    log.warning(
+                        "sync %s hit the %d Shorts-probe cap; remaining new videos "
+                        "are duration-labeled — run scripts/backfill_is_short.py to correct them",
+                        channel_id, MAX_SHORTS_PROBES_PER_SYNC,
+                    )
+            else:
+                is_short = duration_seconds <= SHORTS_MAX_SECONDS   # duration fallback
             if not sync_shorts and is_short:
                 continue  # skip shorts when channel has sync_shorts = false
             privacy = (item.get("status") or {}).get("privacyStatus")
