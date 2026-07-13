@@ -17,7 +17,7 @@ is implemented and verified.
 - [x] #1 Reflection panel: replace Tailwind classes with the native design system — done markup + both JS renderers use .card/.pill/.muted; added `.hidden{display:none}` so the classList toggles work; escaped titles/status while rewriting
 - [x] #2 `shorts.html`: add viewport meta tag — done added standard viewport meta; the 640px mobile-stack media query now fires
 - [x] #3 `shorts.html`: fix the impossible "paste a link above" empty state — done empty state now points to Dashboard → channel → Videos → Make shorts (real, reachable path) instead of a nonexistent input
-- [ ] #4 Performance: fix orphaned nav / missing active state (see #6 for the structural call)
+- [x] #4 Performance: fix orphaned nav / missing active state (see #6 for the structural call) — done added an active "Performance" nav marker (span, channel-scoped) + made nav selectors element-agnostic so it styles; safe regardless of #6's fold decision
 - [ ] #5 Performance: collapse the two back-links into one breadcrumb
 - [ ] #6 Resolve tabbed-SPA vs separate-page split for Performance
 - [ ] #7 Channel page: lazy-load per-tab data instead of eager `Promise.all`
