@@ -30,7 +30,6 @@ def test_reap_kills_orphans_and_fails_them():
     sb = MagicMock()
     sb.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
         {"id": 10, "worker_pid": 4242}, {"id": 11, "worker_pid": None}]
-    updates = []
     sb.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [{}]
     with patch("app.shorts.runner.supabase", return_value=sb), \
          patch("app.shorts.runner._kill_pid_if_alive") as kill:

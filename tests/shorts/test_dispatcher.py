@@ -71,6 +71,7 @@ def test_reap_frees_slot_and_fails_nonterminal():
     assert 7 not in d._running                        # slot freed
     upd = sb.table.return_value.update.call_args[0][0]
     assert upd["status"] == "FAILED"
+    assert "rc=1" in upd["error_message"]
 
 
 def test_reap_leaves_done_job_alone():

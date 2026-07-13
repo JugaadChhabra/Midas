@@ -9,15 +9,12 @@ written to the shorts_jobs/shorts_clips tables — no IPC beyond the DB.
 """
 from __future__ import annotations
 
-import logging
 import os
 import sys
 from datetime import datetime, timezone
 
 from app.db import supabase
 from app.shorts.runner import run_shorts_job
-
-log = logging.getLogger("midas.shorts.worker")
 
 
 def main(argv: list[str] | None = None) -> int:
