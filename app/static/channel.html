@@ -841,22 +841,14 @@ $('bulk-apply-btn').onclick = async () => {
   $('bulk-apply-btn').disabled = true;
   toast(`Applying ${ids.length}…`, 'warn', 5000);
   try {
-    const audits = (await Promise.all(ids.map(id =>
-      fetch(`/videos/${id}/audits`).then(r => r.json()).then(arr => arr[0]?.id).catch(() => null)
-    ))).filter(Boolean);
-    let ok = 0, fail = 0, quotaHit = false;
-    for (const aid of audits) {
-      try {
-        const rr = await fetch(`/audits/${aid}/apply`, { method:'POST' });
-        if (rr.status === 429) { quotaHit = true; break; }
-        if (rr.ok) ok++; else fail++;
-      } catch { fail++; }
-    }
-    if (quotaHit) {
-      toast(`Applied ${ok} before hitting YouTube quota limit. Remaining videos skipped — retry after midnight Pacific.`, 'warn', 8000);
-    } else {
-      toast(`Applied ${ok}, failed ${fail}.`, fail ? 'warn' : 'ok');
-    }
+    // Same server endpoint as "Apply all pending", narrowed to the selected ids.
+    const r = await fetch(`/channels/${channelId}/audits/apply-pending`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ video_ids: ids }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    toast(`Applied ${j.applied}, skipped ${j.skipped}, failed ${j.failed}.`, (j.failed || j.skipped) ? 'warn' : 'ok');
     bustChannelData();
     await loadVideos();
   } catch (e) { toast('Bulk apply failed: ' + escapeHtml(String(e)), 'err'); }

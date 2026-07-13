@@ -442,13 +442,21 @@ def apply_audit(audit_id: int, body: ApplyIn | None = None):
     return apply_audit_internal(audit_id, body)
 
 
-@router.post("/channels/{channel_id}/audits/apply-pending")
-def apply_pending_audits(channel_id: str):
-    """Bulk-apply every pending audit for this channel.
+class ApplyPendingIn(BaseModel):
+    # Optional subset. When omitted, every pending audit in the channel is applied
+    # (the "Apply all pending" button). When present, only these videos' pending
+    # audits are applied (the "Apply selected pending" button) — still scoped to
+    # this channel, so ids from other channels are ignored.
+    video_ids: list[str] | None = None
 
-    For each video in the channel, finds the latest audit. If status='pending'
-    AND validate_audit passes, applies it. Stops early if quota runs out.
-    Returns per-audit outcomes for the UI.
+
+@router.post("/channels/{channel_id}/audits/apply-pending")
+def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
+    """Bulk-apply pending audits for this channel.
+
+    For each video in the channel (optionally narrowed to body.video_ids), finds
+    the latest audit. If status='pending' AND validate_audit passes, applies it.
+    Stops early if quota runs out. Returns per-audit outcomes for the UI.
 
     Each apply costs ~51 YouTube quota units (1 stats fetch + 50 update).
     DRY_RUN is honored by apply_audit_internal.
@@ -462,6 +470,9 @@ def apply_pending_audits(channel_id: str):
             supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
         )
     ]
+    if body and body.video_ids:
+        requested = set(body.video_ids)
+        video_ids = [v for v in video_ids if v in requested]
     if not video_ids:
         return {"applied": 0, "skipped": 0, "failed": 0, "results": []}
 
