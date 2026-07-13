@@ -134,6 +134,7 @@
     <div class="feed" id="activity-feed" aria-live="polite" role="log"><span class="muted">Loading…</span></div>
   </div>
 
+<script src="/static/swr.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => (n ?? 0).toLocaleString();
@@ -171,19 +172,26 @@ function fmtResetTime(seconds) {
   return `${h}h ${m}m`;
 }
 
-async function loadDashboard() {
-  try {
-    const r = await fetch('/dashboard');
-    const j = await r.json();
-    renderHealthBar(j.health, j.quota, j.kpis);
-    renderPipeline(j.pipeline);
-    renderKpis(j.kpis);
-    renderChannels(j.channels, j.pipeline);
-    renderActivityFeed(j.activity || []);
-    renderQuotaBadge(j.quota);
-  } catch (e) {
-    $('channels').innerHTML = '<em style="color:#c33">Failed to load. Is Supabase configured?</em>';
-  }
+function renderDashboard(j) {
+  renderHealthBar(j.health, j.quota, j.kpis);
+  renderPipeline(j.pipeline);
+  renderKpis(j.kpis);
+  renderChannels(j.channels, j.pipeline);
+  renderActivityFeed(j.activity || []);
+  renderQuotaBadge(j.quota);
+}
+
+// Stale-while-revalidate: paint the last dashboard instantly, then refresh in
+// the background and repaint only if something changed. The 30s interval below
+// reuses this, so each tick is a silent revalidate rather than a blank reload.
+function loadDashboard() {
+  SWR.swr('/dashboard', renderDashboard, {
+    onError: () => {
+      if (SWR.get('/dashboard') === undefined) {
+        $('channels').innerHTML = '<em style="color:#c33">Failed to load. Is Supabase configured?</em>';
+      }
+    },
+  });
 }
 
 function renderHealthBar(h, q, k) {
@@ -278,16 +286,15 @@ function renderChannels(list, pipeline) {
     </tr></thead><tbody>` +
     list.map(c => {
       const totalVids = c.video_count || 0;
-      // audited = applied + pending + other audit statuses; approximate as total - we don't have exact per-channel audited count
-      // Use pending_count + applied_total as proxy for "has been touched"
-      const touched = (c.applied_total || 0) + (c.pending_count || 0);
-      const touchedPct = totalVids > 0 ? Math.min(100, Math.round(touched / totalVids * 100)) : 0;
+      // Exact per-channel audited count from /dashboard (audited_regular + audited_shorts).
+      const audited = (c.audited_regular || 0) + (c.audited_shorts || 0);
+      const touchedPct = totalVids > 0 ? Math.min(100, Math.round(audited / totalVids * 100)) : 0;
       return `<tr>
         <td><b>${escapeHtml(c.name || c.id)}</b>
             ${c.analytics_authorized ? '' : '<span class="pill" style="background:#d80;color:white;margin-left:.4rem" title="Reconnect for analytics — Loop 0 polling is skipped">Reconnect for analytics</span>'}</td>
         <td class="muted">${escapeHtml(c.handle || '')}</td>
         <td>
-          <div class="mini-prog">
+          <div class="mini-prog" title="${audited} of ${totalVids} videos audited">
             <div class="mini-track"><div class="mini-fill" style="width:${touchedPct}%"></div></div>
             <span class="muted" style="font-size:.76rem">${touchedPct}%</span>
           </div>
