@@ -15,7 +15,7 @@ Work in this order. Check the box and append `— done <one-line note>` when a f
 is implemented and verified.
 
 - [x] #1 Reflection panel: replace Tailwind classes with the native design system — done markup + both JS renderers use .card/.pill/.muted; added `.hidden{display:none}` so the classList toggles work; escaped titles/status while rewriting
-- [ ] #2 `shorts.html`: add viewport meta tag
+- [x] #2 `shorts.html`: add viewport meta tag — done added standard viewport meta; the 640px mobile-stack media query now fires
 - [ ] #3 `shorts.html`: fix the impossible "paste a link above" empty state
 - [ ] #4 Performance: fix orphaned nav / missing active state (see #6 for the structural call)
 - [ ] #5 Performance: collapse the two back-links into one breadcrumb
