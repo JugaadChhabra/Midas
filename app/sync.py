@@ -1,4 +1,5 @@
 import re
+import httpx
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone
 from googleapiclient.errors import HttpError
@@ -14,6 +15,40 @@ from app.youtube_client import (
 )
 
 SHORTS_MAX_SECONDS = 180  # YouTube Shorts are <= 3 minutes
+
+# A desktop UA — the /shorts/ endpoint 30x-redirects real Shorts to /watch for
+# some mobile UAs, which would break the probe below.
+_SHORTS_PROBE_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def is_actually_short(video_id: str, duration_seconds: int | None) -> bool:
+    """Whether `video_id` was actually posted as a YouTube Short.
+
+    The Data API v3 exposes no Shorts flag, so we probe the Shorts watch URL:
+    ``youtube.com/shorts/<id>`` serves HTTP 200 for a genuine Short and
+    30x-redirects to ``/watch`` for a regular video (even a short-duration one).
+    A duration-only heuristic mislabels every sub-3-min landscape upload as a
+    Short, so the probe is the source of truth for the ambiguous band.
+
+    Videos longer than the Shorts max length can never be Shorts, so we skip
+    the network probe entirely for them. On any network error we fall back to
+    the duration heuristic so a sync is never blocked by this best-effort check.
+    """
+    if duration_seconds is None or duration_seconds > SHORTS_MAX_SECONDS:
+        return False
+    try:
+        resp = httpx.get(
+            f"https://www.youtube.com/shorts/{video_id}",
+            follow_redirects=False,
+            timeout=10.0,
+            headers={"User-Agent": _SHORTS_PROBE_UA},
+        )
+        return resp.status_code == 200
+    except httpx.HTTPError:
+        return duration_seconds <= SHORTS_MAX_SECONDS
 
 
 def _iso8601_to_seconds(d: str) -> int:
@@ -56,13 +91,15 @@ def sync_channel(channel_id: str, full: bool = False):
     )
     sync_shorts: bool = channel_settings.get("sync_shorts") is not False
 
-    # For incremental syncs, load the ids we already have so we can stop early.
-    known_ids: set[str] = set()
-    if not full:
-        existing = (
-            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
-        )
-        known_ids = {v["id"] for v in existing}
+    # Load the ids we already have, plus their stored is_short. is_short never
+    # changes for a video, so we reuse the stored value and only probe genuinely
+    # new ids (see is_actually_short) — an incremental sync also uses these ids
+    # to stop paginating early once it reaches known videos.
+    existing_rows = (
+        supabase().table("videos").select("id,is_short").eq("channel_id", channel_id).execute().data or []
+    )
+    existing_is_short: dict[str, bool | None] = {r["id"]: r.get("is_short") for r in existing_rows}
+    known_ids: set[str] = set(existing_is_short) if not full else set()
 
     try:
         channel_meta = yt_channels_list_uploads(yt, channel_id)
@@ -115,7 +152,10 @@ def sync_channel(channel_id: str, full: bool = False):
         for item in items:
             duration = (item.get("contentDetails") or {}).get("duration", "")
             duration_seconds = _iso8601_to_seconds(duration)
-            is_short = duration_seconds <= SHORTS_MAX_SECONDS
+            # Reuse the stored verdict for videos we've already classified;
+            # probe the Shorts URL for new ones (see is_actually_short).
+            prior = existing_is_short.get(item["id"])
+            is_short = prior if prior is not None else is_actually_short(item["id"], duration_seconds)
             if not sync_shorts and is_short:
                 continue  # skip shorts when channel has sync_shorts = false
             privacy = (item.get("status") or {}).get("privacyStatus")

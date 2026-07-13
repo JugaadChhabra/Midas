@@ -209,6 +209,89 @@ def test_full_sync_stamps_last_full_synced_at():
         assert ("last_full_synced_at" in channel_patch) is is_full
 
 
+# ── is_short detection (URL probe, not duration heuristic) ────────────────
+
+def test_is_actually_short_skips_probe_for_long_video():
+    """A video over the Shorts max length can never be a Short, so no network
+    probe is made — is_short is False purely from duration."""
+    from app.sync import is_actually_short
+    with patch("app.sync.httpx.get") as get:
+        assert is_actually_short("vid", 300) is False
+        get.assert_not_called()
+
+
+def test_is_actually_short_true_when_shorts_url_serves_200():
+    from app.sync import is_actually_short
+    resp = MagicMock(status_code=200)
+    with patch("app.sync.httpx.get", return_value=resp) as get:
+        assert is_actually_short("vid", 90) is True
+        assert "youtube.com/shorts/vid" in get.call_args.args[0]
+
+
+def test_is_actually_short_false_when_shorts_url_redirects():
+    """A regular sub-3-min video 30x-redirects /shorts/<id> to /watch."""
+    from app.sync import is_actually_short
+    resp = MagicMock(status_code=303)
+    with patch("app.sync.httpx.get", return_value=resp):
+        assert is_actually_short("vid", 116) is False
+
+
+def test_is_actually_short_falls_back_to_duration_on_network_error():
+    import httpx
+    from app.sync import is_actually_short
+    with patch("app.sync.httpx.get", side_effect=httpx.ConnectError("boom")):
+        assert is_actually_short("vid", 90) is True    # <=180 -> short by fallback
+
+
+def test_sync_reuses_stored_is_short_and_probes_only_new_videos():
+    """is_short never changes for a video, so a full sync must reuse the stored
+    value for known ids and probe only genuinely new ids."""
+    recorder = {"upserts": [], "updates": []}
+
+    def fake_full(yt, cid, ids):
+        # both are sub-180s so, absent reuse, both would be probed
+        return [_video_item(v, duration="PT1M30S") for v in ids]
+
+    # 'known1' already stored as is_short=True; 'newvid' is new.
+    def make_sb():
+        sb_fn = MagicMock()
+
+        def table(name):
+            t = MagicMock()
+            if name == "channels":
+                t.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {}
+                t.update.return_value.eq.return_value.execute.return_value = MagicMock()
+            elif name == "videos":
+                t.select.return_value.eq.return_value.execute.return_value.data = [
+                    {"id": "known1", "is_short": True},
+                ]
+                t.upsert.side_effect = lambda rows: recorder["upserts"].append(rows) or MagicMock()
+                m = MagicMock()
+                m.in_.return_value.execute.return_value = MagicMock()
+                t.update.return_value = m
+            return t
+        sb_fn.table.side_effect = table
+        return sb_fn
+
+    pages = [_playlist_page(["newvid", "known1"], next_token=None)]
+    with patch("app.sync.supabase", return_value=make_sb()), \
+         patch("app.sync.youtube_for_channel", return_value=MagicMock()), \
+         patch("app.sync.yt_channels_list_uploads",
+               return_value={"uploads_playlist_id": "UP", "default_language": None}), \
+         patch("app.sync.yt_playlist_items_page", side_effect=pages), \
+         patch("app.sync.yt_videos_list_full", side_effect=fake_full), \
+         patch("app.sync.is_actually_short", return_value=False) as probe:
+        from app.sync import sync_channel
+        sync_channel("UCchan", full=True)
+
+    # probe called only for the new id, never for the already-stored one
+    probed_ids = [c.args[0] for c in probe.call_args_list]
+    assert probed_ids == ["newvid"]
+    upserted = {r["id"]: r for batch in recorder["upserts"] for r in batch}
+    assert upserted["known1"]["is_short"] is True     # reused, not re-probed
+    assert upserted["newvid"]["is_short"] is False     # from probe
+
+
 def test_yt_videos_list_stats_requests_status_part():
     mock_yt = MagicMock()
     mock_yt.videos.return_value.list.return_value.execute.return_value = {"items": []}
