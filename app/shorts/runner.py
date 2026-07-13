@@ -22,6 +22,11 @@ log = logging.getLogger("midas.shorts.runner")
 
 WORKING_STATUSES = ("CREATED", "DOWNLOADING", "ANALYSING", "RENDERING", "UPLOADING")
 
+# The subset of WORKING_STATUSES a worker has actually started (excludes the
+# queued CREATED state). Only these are reaped on restart; CREATED jobs survive
+# to be re-dispatched.
+IN_PROGRESS_STATUSES = tuple(s for s in WORKING_STATUSES if s != "CREATED")
+
 
 def _fetch_video(url: str, dest_dir: Path):
     from app.shorts.cutter.download import fetch_video
@@ -41,6 +46,13 @@ def has_active_job() -> bool:
     rows = (supabase().table("shorts_jobs").select("id")
             .in_("status", list(WORKING_STATUSES)).limit(1).execute().data) or []
     return bool(rows)
+
+
+def active_job_count() -> int:
+    """Number of shorts jobs in flight (queued CREATED + actively running)."""
+    rows = (supabase().table("shorts_jobs").select("id")
+            .in_("status", list(WORKING_STATUSES)).execute().data) or []
+    return len(rows)
 
 
 def start_job_thread(job_id: int) -> threading.Thread:
