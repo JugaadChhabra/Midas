@@ -27,7 +27,7 @@ is implemented and verified.
 - [x] #11 Replace native `confirm()`/`alert()` with the toast/confirm system — done added a styled in-page confirmDialog() modal (Esc/Enter/backdrop, dark-mode aware) to channel.html + performance.html; swapped all 8 native confirm() calls to `await confirmDialog(...)`; the lone alert() in promoteCandidate is now a toast
 - [x] #12 One destination for "open uploaded clip" (Studio vs watch) — done channel.html clip link now opens YouTube Studio edit (matching shorts.html) instead of the public watch page, which is right since clips upload private; also aligned label to "open ↗" + rel=noopener
 - [x] #13 Route both apply-pending paths through one server endpoint — done extended POST /channels/{id}/audits/apply-pending with an optional `video_ids` filter (backward-compatible: no body = all pending); "Apply selected pending" now calls it instead of the client-side per-video fetch+apply loop. pytest: 72 passed (unrelated cv2 collection error ignored)
-- [ ] #14 Autopilot config placement + shorts controls layout
+- [x] #14 Autopilot config placement + shorts controls layout — done the 5-control shorts-autopilot row is now a labeled auto-fit grid (Videos/day, Upload top, Mode, Camera) with the enable checkbox on its own line; no longer a messily-wrapping flex row. Left config in the Autopilot tab (keeps enable+config+status together) rather than moving to Settings — noted as a deliberate choice
 - [ ] #15 Co-locate playlist-health enable toggle with its card
 - [ ] #16 Don't nuke `document.body` on missing id — render error in content area
 - [ ] #17 Remove reliance on global `event` in `triggerReflection`
