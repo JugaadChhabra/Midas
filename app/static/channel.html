@@ -347,7 +347,29 @@ function switchTab(name) {
     t.setAttribute('tabindex', isActive ? '0' : '-1');
   });
   history.replaceState(null, '', `?id=${encodeURIComponent(channelId)}#${name}`);
+  if (tabsReady) ensureTabLoaded(name);
 }
+
+// Lazy-load each tab's data on first activation instead of fetching every
+// tab's data up front. loadChannel() (header + form defaults) stays eager.
+let tabsReady = false;
+let apInterval = null;
+const loadedTabs = new Set();
+const tabLoaders = {
+  overview:  () => loadOverview(),
+  videos:    () => loadVideos(),
+  autopilot: () => { loadAutopilotLog(); if (!apInterval) apInterval = setInterval(loadAutopilotLog, 30000); },
+  playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
+  settings:  () => { loadConfig(); loadReflectionData(); },
+};
+function ensureTabLoaded(name) {
+  if (loadedTabs.has(name)) return;
+  const fn = tabLoaders[name];
+  if (!fn) return;
+  loadedTabs.add(name);
+  fn();
+}
+
 const initialTab = location.hash.slice(1);
 if (initialTab) switchTab(initialTab);
 
@@ -1309,8 +1331,9 @@ $('pl-health-evaluate-btn').onclick = async () => {
 
 (async () => {
   await loadChannel();
-  await Promise.all([loadConfig(), loadVideos(), loadAutopilotLog(), loadOverview(), loadPlaylistStatus(), loadProposals(), loadHealth(), loadReflectionData()]);
-  setInterval(loadAutopilotLog, 30000);
+  // Header + form defaults are ready; now load only the tab that's actually visible.
+  tabsReady = true;
+  ensureTabLoaded(document.querySelector('.tab.active')?.dataset.tab || 'overview');
 })();
 
 // ── Reflection ────────────────────────────────────────────────────────────
