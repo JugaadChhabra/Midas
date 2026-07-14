@@ -121,7 +121,9 @@ def ytdlp_options() -> dict:
         "max_filesize": MAX_DOWNLOAD_BYTES,
         # YouTube requires a JS runtime to solve the "n" signature challenge, or it
         # returns no formats ("video not available") even with a valid PO token.
-        # node ships on the dev Mac and is installed in the Docker image (Dockerfile).
+        # yt-dlp's EJS solver only accepts Deno here (it reports node as
+        # "unsupported"); the Docker image installs Deno (Dockerfile), and the dev
+        # Mac has it on PATH. deno is listed first so it's preferred.
         "js_runtimes": {"deno": {"path": None}, "node": {"path": None}},
         "remote_components": ["ejs:github"],
         "extractor_args": {"youtube": {"player_client": ["mweb", "default"]}},
