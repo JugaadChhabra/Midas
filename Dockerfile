@@ -3,17 +3,25 @@ FROM python:3.13-slim AS base
 
 WORKDIR /app
 
-# ffmpeg: frame extraction (app/keyframes.py).
-# nodejs: REQUIRED by yt-dlp to solve YouTube's "n" signature challenge. Without
-# a JS runtime yt-dlp can't decrypt formats and YouTube returns "This video is
-# not available" even with a valid PO token — the exact failure that broke
-# shorts downloads on the box while the dev Mac (which has node) worked fine.
-# yt-dlp's ytdlp_options() already declares node/deno as js_runtimes; this makes
-# node actually present in the image.
+# ffmpeg is used by app/keyframes.py for frame extraction.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Deno: the JS runtime yt-dlp's EJS solver REQUIRES to solve YouTube's "n"
+# signature challenge. Without it yt-dlp returns no formats ("This video is not
+# available") even with a valid PO token — the failure that broke shorts on the
+# box. node is NOT accepted (yt-dlp reports "node (unsupported)"); Deno is, and
+# verified good with yt-dlp==2026.6.9 (log: "[jsc:deno] Solving JS challenges").
+# Pinned for reproducibility; fetched+unzipped via the image's own python so we
+# don't add curl/unzip. ytdlp_options() already lists deno first in js_runtimes.
+ARG DENO_VERSION=2.9.2
+RUN DENO_VERSION="${DENO_VERSION}" python -c "import urllib.request,zipfile,io,os; \
+v=os.environ['DENO_VERSION']; \
+url=f'https://github.com/denoland/deno/releases/download/v{v}/deno-x86_64-unknown-linux-gnu.zip'; \
+zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(url).read())).extractall('/usr/local/bin'); \
+os.chmod('/usr/local/bin/deno', 0o755)" \
+ && /usr/local/bin/deno --version
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
