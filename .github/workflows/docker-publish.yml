@@ -9,11 +9,6 @@ on:
   pull_request:
     branches:
       - main
-  schedule:
-    # Weekly rebuild (Mondays 06:00 UTC) so :latest picks up the newest yt-dlp
-    # nightly even with no code changes — YouTube breaks extraction faster than
-    # we push commits. Pairs with the YTDLP_CACHEBUST build-arg below.
-    - cron: "0 6 * * 1"
 
 jobs:
   build-and-push:
@@ -61,10 +56,5 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Unique per run, so the ARG YTDLP_CACHEBUST layer in the Dockerfile
-          # always misses cache and reinstalls the current yt-dlp nightly — the
-          # whole point of the weekly scheduled rebuild.
-          build-args: |
-            YTDLP_CACHEBUST=${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
