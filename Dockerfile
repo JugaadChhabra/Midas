@@ -19,6 +19,15 @@ RUN pip install --no-cache-dir torch==2.12.1 torchvision==0.27.1 torchaudio==2.1
         --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir -r requirements-ml.txt
 
+# yt-dlp chases YouTube's server-side changes (roughly weekly), so the version
+# resolved into the cached pip layer above freezes stale within days and YouTube
+# starts lying "this video is not available". Reinstall the nightly build in its
+# own late layer (after the expensive torch/ML layers, so those stay cached) that
+# CI busts on EVERY build via YTDLP_CACHEBUST — a unique run id, including the
+# weekly scheduled rebuild — so :latest always ships a current extractor.
+ARG YTDLP_CACHEBUST=dev
+RUN pip install --no-cache-dir -U --pre "yt-dlp[default]"
+
 COPY app ./app
 
 RUN mkdir -p /app/storage/keyframes /app/shorts_cache /app/logs
