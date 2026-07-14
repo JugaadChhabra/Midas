@@ -119,7 +119,9 @@ def ytdlp_options() -> dict:
         "quiet": True,
         "no_warnings": True,
         "max_filesize": MAX_DOWNLOAD_BYTES,
-        # YouTube requires a JS runtime for anti-bot challenges; node ships on this Mac.
+        # YouTube requires a JS runtime to solve the "n" signature challenge, or it
+        # returns no formats ("video not available") even with a valid PO token.
+        # node ships on the dev Mac and is installed in the Docker image (Dockerfile).
         "js_runtimes": {"deno": {"path": None}, "node": {"path": None}},
         "remote_components": ["ejs:github"],
         "extractor_args": {"youtube": {"player_client": ["mweb", "default"]}},
