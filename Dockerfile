@@ -29,12 +29,19 @@ ARG YTDLP_CACHEBUST=dev
 RUN pip install --no-cache-dir -U --pre "yt-dlp[default]"
 
 COPY app ./app
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 RUN mkdir -p /app/storage/keyframes /app/shorts_cache /app/logs
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# start-period covers the entrypoint's boot-time yt-dlp refresh (a pip install +
+# network round-trip runs before uvicorn binds :8000) so the container isn't
+# marked unhealthy while it's still legitimately starting.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)" || exit 1
 
+# Entrypoint refreshes yt-dlp, then exec's this CMD (uvicorn).
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

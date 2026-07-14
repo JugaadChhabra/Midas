@@ -34,7 +34,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      # Covers the entrypoint's boot-time yt-dlp refresh (pip install + network)
+      # that runs before uvicorn binds :8000 — keep in sync with the Dockerfile.
+      start_period: 60s
 
   bgutil-provider:
     # Pinned to match the bgutil-ytdlp-pot-provider PLUGIN version baked into the
