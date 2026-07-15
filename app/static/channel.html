@@ -245,7 +245,7 @@
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.6rem; margin-top:.6rem">
         <label style="display:flex; flex-direction:column; gap:.2rem">
           <span class="muted" style="font-size:.8rem">Videos / day</span>
-          <input id="ap-shorts-cap" type="number" min="1" max="20" value="1" />
+          <input id="ap-shorts-cap" type="number" min="1" value="1" />
         </label>
         <label style="display:flex; flex-direction:column; gap:.2rem">
           <span class="muted" style="font-size:.8rem">Upload top</span>
@@ -822,7 +822,8 @@ $('ap-save').onclick = async () => {
     });
     if (!r.ok) throw new Error(await r.text());
     toast('Autopilot settings saved.', 'ok');
-    await loadAutopilotLog();
+    SWR.invalidate('/auth/channels'); // drop stale channel meta so the form can't repaint old caps
+    await Promise.all([loadChannel(), loadAutopilotLog()]);
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 

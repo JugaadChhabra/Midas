@@ -148,7 +148,7 @@ def update_channel(channel_id: str, body: ChannelSettings):
     if body.autopilot_shorts_enabled is not None:
         patch["autopilot_shorts_enabled"] = body.autopilot_shorts_enabled
     if body.autopilot_shorts_daily_cap is not None:
-        patch["autopilot_shorts_daily_cap"] = max(1, min(int(body.autopilot_shorts_daily_cap), 20))
+        patch["autopilot_shorts_daily_cap"] = max(1, int(body.autopilot_shorts_daily_cap))
     if body.autopilot_shorts_upload_cap is not None:
         patch["autopilot_shorts_upload_cap"] = max(1, min(int(body.autopilot_shorts_upload_cap), 8))
     if body.shorts_cut_mode in ("highlights", "coverage"):
