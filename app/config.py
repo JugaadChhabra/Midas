@@ -99,6 +99,13 @@ class Settings:
     # human-review-first in v1). Regressions surface via the outcomes endpoint;
     # an operator reverts manually until this flag is trusted per-channel.
     AUTO_REVERT_ON_REGRESSION = os.getenv("AUTO_REVERT_ON_REGRESSION", "false").lower() == "true"
+    # When true, /dashboard computes per-channel aggregates via the Postgres
+    # dashboard_summary() RPC (a few KB) instead of pulling the whole videos +
+    # audits + shorts_clips tables into the app and counting in Python (~2 MB
+    # egress/call). The in-app path (_aggregate_legacy) stays as the fallback and
+    # correctness oracle; flip this off to revert instantly. Falls back to the
+    # in-app path automatically if the RPC errors (e.g. an unmigrated env).
+    DASHBOARD_USE_RPC = os.getenv("DASHBOARD_USE_RPC", "true").lower() == "true"
     # If a measurement window has elapsed but reach-CSV coverage for the post
     # window still hasn't completed after this many extra days, give up and
     # classify neutral ("can't tell") rather than waiting forever.

@@ -3,6 +3,7 @@
 Adds endpoints used by index.html. Existing endpoints (e.g. /auth/channels) are
 left untouched so other pages keep working.
 """
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,7 @@ from app.config import settings
 from app.db import supabase
 from app import quota as quota_mod
 
+log = logging.getLogger("midas.dashboard")
 router = APIRouter(tags=["dashboard"])
 
 
@@ -62,32 +64,49 @@ def dashboard():
         return payload
 
 
-def _compute_dashboard():
-    """One-shot payload for the home page.
+# ── Per-channel aggregates ────────────────────────────────────────────────
+# Both aggregators (_aggregate_rpc, _aggregate_legacy) return the SAME shape:
+#   (stats_by_channel: {channel_id -> dict of _STAT_KEYS}, cut_total, uploaded_total)
+# so _compute_dashboard's enrichment/KPI/pipeline code is path-agnostic.
+_STAT_KEYS = (
+    "video_count", "regular_count", "shorts_count",
+    "audited_regular", "audited_shorts", "pending_count",
+    "applied_latest", "applied_today", "applied_7d", "applied_total",
+    "delta_views_7d",
+)
 
-    Returns:
-      channels: per-channel rows enriched with pending/applied/Δviews/autopilot pace
-      kpis: global counts (channels, total pending, applied today, applied 7d, quota used)
-      quota: today's used + safety + 7d sparkline (per-day usage)
-    """
+
+def _empty_stat() -> dict:
+    return {k: 0 for k in _STAT_KEYS}
+
+
+def _aggregate_rpc() -> tuple[dict, int, int]:
+    """Per-channel aggregates via the dashboard_summary() Postgres function.
+    Returns a few KB of JSON instead of egressing the whole videos/audits/
+    shorts_clips tables — the ~100x egress cut over _aggregate_legacy."""
+    summary = supabase().rpc("dashboard_summary").execute().data or {}
+    stats: dict[str, dict] = {}
+    for row in summary.get("channels") or []:
+        cid = row.get("channel_id")
+        if cid is None:
+            continue
+        stats[cid] = {k: (row.get(k) or 0) for k in _STAT_KEYS}
+    shorts = summary.get("shorts") or {}
+    return stats, int(shorts.get("cut_total") or 0), int(shorts.get("uploaded_total") or 0)
+
+
+def _aggregate_legacy() -> tuple[dict, int, int]:
+    """Per-channel aggregates computed in-app by pulling the whole videos,
+    audits and shorts_clips tables (~2 MB egress). Retained as the correctness
+    oracle for the RPC path and as the fallback when DASHBOARD_USE_RPC is off."""
     now = _now()
     today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
     seven_d_ago = now - timedelta(days=7)
 
-    channels = (
-        supabase().table("channels").select(
-            "id,name,handle,last_synced_at,default_language,"
-            "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
-            "analytics_authorized"
-        ).execute()
-    ).data or []
-
     # Pull all videos — the table can exceed Supabase's 1000-row page cap
     # (~20 pages here). Fetch the first page together with an exact row count,
     # then fetch the remaining pages CONCURRENTLY: Supabase clients are
-    # per-thread (see app/db.py — built for exactly this), so each worker gets
-    # its own hardened HTTP/1.1 client. This turns ~20 sequential round-trips
-    # into a handful of parallel waves.
+    # per-thread (see app/db.py), so each worker gets its own hardened client.
     VIDEO_COLS = "id,channel_id,view_count,privacy_status,is_short"
     first_page = (
         supabase().table("videos").select(VIDEO_COLS, count="exact")
@@ -107,38 +126,35 @@ def _compute_dashboard():
         with ThreadPoolExecutor(max_workers=min(5, len(offsets))) as ex:
             for page in ex.map(_fetch_video_page, offsets):
                 videos.extend(page)
+
     video_to_channel: dict[str, str] = {v["id"]: v["channel_id"] for v in videos}
-    # Only public (or legacy null privacy_status) videos are auditable
+    # Only public (or legacy null privacy_status) videos are auditable.
     public_video_ids: set[str] = {
         v["id"] for v in videos
         if v.get("privacy_status") is None or v.get("privacy_status") == "public"
     }
-    channel_video_counts: dict[str, int] = {}
-    channel_shorts_counts: dict[str, int] = {}
-    channel_regular_counts: dict[str, int] = {}
-    shorts_video_ids: set[str] = set()
+    shorts_video_ids: set[str] = {
+        v["id"] for v in videos
+        if v["id"] in public_video_ids and v.get("is_short")
+    }
+
+    stats: dict[str, dict] = {}
+
+    def _s(cid: str) -> dict:
+        return stats.setdefault(cid, _empty_stat())
+
     for v in videos:
         if v["id"] not in public_video_ids:
             continue
-        ch = v["channel_id"]
-        channel_video_counts[ch] = channel_video_counts.get(ch, 0) + 1
+        s = _s(v["channel_id"])
+        s["video_count"] += 1
         if v.get("is_short"):
-            channel_shorts_counts[ch] = channel_shorts_counts.get(ch, 0) + 1
-            shorts_video_ids.add(v["id"])
+            s["shorts_count"] += 1
         else:
-            channel_regular_counts[ch] = channel_regular_counts.get(ch, 0) + 1
+            s["regular_count"] += 1
 
-    # Fetch ALL audit records, newest first, with a single-level range()
-    # pagination over the whole table.
-    #
-    # The previous implementation batched 200 video IDs per request and issued a
-    # separate `.in_("video_id", batch)` query for each batch — ~one round-trip
-    # per 200 videos (≈100 sequential HTTP calls on a 20k-video channel set),
-    # which dominated this endpoint's latency. The audits table is small
-    # relative to videos (one row per audit action, not per video), and every
-    # audit references a video that exists in `videos` (no orphans), so the
-    # video_id filter bought nothing but round-trips. Paginating the whole table
-    # returns identical data in ceil(total_audits / 1000) calls.
+    # ALL audit records, newest first, paginated over the whole (small) table;
+    # latest-per-video is derived in Python.
     audits_state: list[dict] = []
     ROW_PAGE = 1000
     aud_offset = 0
@@ -154,78 +170,120 @@ def _compute_dashboard():
         if len(page) < ROW_PAGE:
             break
         aud_offset += ROW_PAGE
+
     latest_per_video: dict[str, dict] = {}
     for a in audits_state:
         latest_per_video.setdefault(a["video_id"], a)
 
-    # Per-channel aggregates
-    pending_by_channel: dict[str, int] = {}
-    applied_today_by_channel: dict[str, int] = {}
-    applied_7d_by_channel: dict[str, int] = {}
-    delta_views_7d_by_channel: dict[str, int] = {}
-    total_applied_by_channel: dict[str, int] = {}
-    channel_audited_shorts: dict[str, int] = {}
-    channel_audited_regular: dict[str, int] = {}
-
-    for vid in latest_per_video:
+    # audited / pending / applied_latest — PUBLIC videos, by their LATEST audit.
+    for vid, a in latest_per_video.items():
         if vid not in public_video_ids:
             continue
         ch = video_to_channel.get(vid)
         if not ch:
             continue
+        s = _s(ch)
         if vid in shorts_video_ids:
-            channel_audited_shorts[ch] = channel_audited_shorts.get(ch, 0) + 1
+            s["audited_shorts"] += 1
         else:
-            channel_audited_regular[ch] = channel_audited_regular.get(ch, 0) + 1
+            s["audited_regular"] += 1
+        if a["status"] == "pending":
+            s["pending_count"] += 1
+        elif a["status"] == "applied":
+            s["applied_latest"] += 1
 
-    # current view counts for delta calc
-    cur_views_by_video: dict[str, int] = {v["id"]: (v.get("view_count") or 0) for v in videos}
-
-    # pending: unique public videos whose current audit state is pending
-    for vid, a in latest_per_video.items():
-        if vid not in public_video_ids:
-            continue
-        ch = video_to_channel.get(vid)
-        if ch and a["status"] == "pending":
-            pending_by_channel[ch] = pending_by_channel.get(ch, 0) + 1
-
-    # applied counts: scan ALL applied records so total matches the raw DB count
+    # applied_today/7d/total + delta_views_7d — RAW applied rows, ALL videos.
+    cur_views = {v["id"]: (v.get("view_count") or 0) for v in videos}
     for a in audits_state:
         if a["status"] != "applied":
             continue
         ch = video_to_channel.get(a["video_id"])
         if not ch:
             continue
-        total_applied_by_channel[ch] = total_applied_by_channel.get(ch, 0) + 1
+        s = _s(ch)
+        s["applied_total"] += 1
         ap = _parse_iso(a.get("applied_at"))
         if ap and ap >= today_start:
-            applied_today_by_channel[ch] = applied_today_by_channel.get(ch, 0) + 1
+            s["applied_today"] += 1
         if ap and ap >= seven_d_ago:
-            applied_7d_by_channel[ch] = applied_7d_by_channel.get(ch, 0) + 1
-            cur = cur_views_by_video.get(a["video_id"], 0)
+            s["applied_7d"] += 1
             base = a.get("view_count_at_apply") or 0
-            delta_views_7d_by_channel[ch] = delta_views_7d_by_channel.get(ch, 0) + (cur - base)
+            s["delta_views_7d"] += cur_views.get(a["video_id"], 0) - base
 
-    # Sync-freshness color buckets done client-side; we just send last_synced_at.
+    # Shorts totals (paginated; table can exceed the 1000-row cap).
+    shorts_clips: list[dict] = []
+    clip_offset = 0
+    while True:
+        page = (
+            supabase().table("shorts_clips")
+            .select("upload_status")
+            .range(clip_offset, clip_offset + 999)
+            .execute()
+        ).data or []
+        shorts_clips.extend(page)
+        if len(page) < 1000:
+            break
+        clip_offset += 1000
+    cut_total = len(shorts_clips)
+    uploaded_total = sum(1 for c in shorts_clips if c.get("upload_status") == "UPLOADED")
+
+    return stats, cut_total, uploaded_total
+
+
+def _compute_dashboard():
+    """One-shot payload for the home page.
+
+    Per-channel aggregates come from the RPC path (DASHBOARD_USE_RPC) or the
+    in-app legacy path; enrichment, KPIs, health, pipeline, activity feed and
+    quota are shared and path-agnostic.
+
+    Returns:
+      channels: per-channel rows enriched with pending/applied/Δviews/autopilot pace
+      kpis: global counts (channels, total pending, applied today, applied 7d, quota used)
+      quota: today's used + safety + 7d sparkline (per-day usage)
+    """
+    now = _now()
+
+    channels = (
+        supabase().table("channels").select(
+            "id,name,handle,last_synced_at,default_language,"
+            "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
+            "analytics_authorized"
+        ).execute()
+    ).data or []
+
+    if settings.DASHBOARD_USE_RPC:
+        try:
+            stats, shorts_cut_total, shorts_uploaded_total = _aggregate_rpc()
+        except Exception:
+            # RPC missing (unmigrated env) or errored — fall back to the in-app
+            # path so the dashboard never breaks, just costs more egress.
+            log.warning("dashboard RPC failed; falling back to legacy aggregation", exc_info=True)
+            stats, shorts_cut_total, shorts_uploaded_total = _aggregate_legacy()
+    else:
+        stats, shorts_cut_total, shorts_uploaded_total = _aggregate_legacy()
+
+    # ── Per-channel enrichment ────────────────────────────────────────────
     enriched = []
     for c in channels:
         cid = c["id"]
+        s = stats.get(cid) or _empty_stat()
         last_sync = _parse_iso(c.get("last_synced_at"))
         hours_since_sync = None
         if last_sync:
             hours_since_sync = round((now - last_sync).total_seconds() / 3600.0, 2)
         enriched.append({
             **c,
-            "video_count": channel_video_counts.get(cid, 0),
-            "regular_count": channel_regular_counts.get(cid, 0),
-            "shorts_count": channel_shorts_counts.get(cid, 0),
-            "audited_regular": channel_audited_regular.get(cid, 0),
-            "audited_shorts": channel_audited_shorts.get(cid, 0),
-            "pending_count": pending_by_channel.get(cid, 0),
-            "applied_today": applied_today_by_channel.get(cid, 0),
-            "applied_7d": applied_7d_by_channel.get(cid, 0),
-            "applied_total": total_applied_by_channel.get(cid, 0),
-            "delta_views_7d": delta_views_7d_by_channel.get(cid, 0),
+            "video_count": s["video_count"],
+            "regular_count": s["regular_count"],
+            "shorts_count": s["shorts_count"],
+            "audited_regular": s["audited_regular"],
+            "audited_shorts": s["audited_shorts"],
+            "pending_count": s["pending_count"],
+            "applied_today": s["applied_today"],
+            "applied_7d": s["applied_7d"],
+            "applied_total": s["applied_total"],
+            "delta_views_7d": s["delta_views_7d"],
             "hours_since_sync": hours_since_sync,
         })
 
@@ -237,16 +295,14 @@ def _compute_dashboard():
     worst_sync_hours = round(max(sync_hours), 1) if sync_hours else None
 
     # ── Pipeline funnel ───────────────────────────────────────────────────
-    total_videos_global = sum(channel_video_counts.values())
-    # Only count public videos as audited/applied — keeps numerator and denominator consistent
-    audited_video_ids = {vid for vid in latest_per_video if vid in public_video_ids}
-    total_audited_global = len(audited_video_ids)
+    # Globals are summed from the per-channel aggregates. audited/applied use the
+    # latest-audit view (audited_regular+shorts / applied_latest) so numerator and
+    # denominator stay consistent with the per-channel cards.
+    total_videos_global = sum(s["video_count"] for s in stats.values())
+    total_audited_global = sum(s["audited_regular"] + s["audited_shorts"] for s in stats.values())
     total_not_audited_global = max(0, total_videos_global - total_audited_global)
-    total_applied_global = sum(
-        1 for vid, a in latest_per_video.items()
-        if vid in public_video_ids and a["status"] == "applied"
-    )
-    applied_7d_total = sum(applied_7d_by_channel.values())
+    total_applied_global = sum(s["applied_latest"] for s in stats.values())
+    applied_7d_total = sum(s["applied_7d"] for s in stats.values())
     daily_rate = applied_7d_total / 7.0
     eta_days = round(total_not_audited_global / daily_rate) if daily_rate > 0 and total_not_audited_global > 0 else None
     progress_pct = round(100.0 * total_audited_global / total_videos_global, 1) if total_videos_global > 0 else 0
@@ -293,33 +349,14 @@ def _compute_dashboard():
             "created_at": a.get("created_at"),
         })
 
-    # ── Shorts (clips cut + uploaded) ─────────────────────────────────────
-    # One shorts_clips row == one short cut from a source video; UPLOADED == live on YouTube.
-    # Paginated like the videos pull above — the table can exceed Supabase's 1000-row cap.
-    shorts_clips: list[dict] = []
-    clip_offset = 0
-    while True:
-        page = (
-            supabase().table("shorts_clips")
-            .select("upload_status")
-            .range(clip_offset, clip_offset + 999)
-            .execute()
-        ).data or []
-        shorts_clips.extend(page)
-        if len(page) < 1000:
-            break
-        clip_offset += 1000
-    shorts_cut_total = len(shorts_clips)
-    shorts_uploaded_total = sum(1 for c in shorts_clips if c.get("upload_status") == "UPLOADED")
-
     # ── KPIs ──────────────────────────────────────────────────────────────
     kpis = {
         "channels": len(channels),
         "videos": total_videos_global,
-        "pending_total": sum(pending_by_channel.values()),
-        "applied_today_total": sum(applied_today_by_channel.values()),
+        "pending_total": sum(s["pending_count"] for s in stats.values()),
+        "applied_today_total": sum(s["applied_today"] for s in stats.values()),
         "applied_7d_total": applied_7d_total,
-        "delta_views_7d_total": sum(delta_views_7d_by_channel.values()),
+        "delta_views_7d_total": sum(s["delta_views_7d"] for s in stats.values()),
         "shorts_cut_total": shorts_cut_total,
         "shorts_uploaded_total": shorts_uploaded_total,
     }
@@ -335,7 +372,7 @@ def _compute_dashboard():
     pipeline = {
         "total": total_videos_global,
         "audited": total_audited_global,
-        "pending": sum(pending_by_channel.values()),
+        "pending": sum(s["pending_count"] for s in stats.values()),
         "applied": total_applied_global,
         "not_audited": total_not_audited_global,
         "progress_pct": progress_pct,
