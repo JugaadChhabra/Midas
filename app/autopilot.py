@@ -147,12 +147,13 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     return None
 
 
-# Hard upper bound on source-video length for autopilot shorts. Videos at or
-# above this (e.g. compilations) are never auto-cut — only genuine single-item
-# uploads in the ~3–4 min band. NULL duration_seconds (not yet re-synced) is
-# excluded by the `.lt` too, which is the safe default: never cut a video whose
-# length we don't know. The manual "Make shorts" button is NOT bound by this.
-MAX_SHORTS_SOURCE_SECONDS = 240  # < 4 minutes
+# Upper bound (seconds) on source-video length for autopilot shorts, from
+# settings (env SHORTS_MAX_SOURCE_SECONDS, default 3600). Videos at or above it
+# are never auto-cut. Set to 0 to disable the length cap entirely. Either way,
+# only videos with a known, non-NULL duration_seconds are eligible — never cut a
+# video whose length we don't know. The manual "Make shorts" button is NOT bound
+# by this.
+MAX_SHORTS_SOURCE_SECONDS = settings.SHORTS_MAX_SOURCE_SECONDS
 
 # A source whose ONLY shorts_jobs are FAILED is retried on later ticks — early
 # failures are often transient (e.g. a PO-token download error that "This video
@@ -173,15 +174,20 @@ def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
     successful cut is a manual action. A video whose only jobs are FAILED is
     retried until it hits MAX_SHORTS_RETRY_ATTEMPTS.
     """
-    candidates = (
+    q = (
         supabase().table("videos")
         .select("*")
         .eq("channel_id", channel_id)
         .eq("is_short", False)
-        .lt("duration_seconds", MAX_SHORTS_SOURCE_SECONDS)
-        .order("published_at", desc=True)
-        .execute()
-    ).data or []
+    )
+    if MAX_SHORTS_SOURCE_SECONDS > 0:
+        # `.lt` also drops NULL durations (PostgREST excludes them) — the safe
+        # default: never cut a video whose length we don't know.
+        q = q.lt("duration_seconds", MAX_SHORTS_SOURCE_SECONDS)
+    else:
+        # No length cap, but still require a known duration.
+        q = q.not_.is_("duration_seconds", "null")
+    candidates = q.order("published_at", desc=True).execute().data or []
     if not candidates:
         return None
     candidate_ids = [v["id"] for v in candidates]

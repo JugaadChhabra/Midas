@@ -43,6 +43,15 @@ class Settings:
     SHORTS_MAX_CONCURRENT_JOBS = int(os.getenv("SHORTS_MAX_CONCURRENT_JOBS") or "2")
     SHORTS_DISPATCH_INTERVAL_SECONDS = int(os.getenv("SHORTS_DISPATCH_INTERVAL_SECONDS") or "5")
 
+    # Upper bound (seconds) on a source video's length for autopilot shorts.
+    # Videos at/above this are never auto-cut. Kept just above the individual
+    # rhyme uploads (~3–4 min) and below the long compilations, which are just
+    # those same rhymes concatenated — auto-cutting them would re-produce clips
+    # already made from the standalone videos. Configurable; set to 0 to disable
+    # the length cap entirely (only videos with a known, non-NULL duration are
+    # ever eligible regardless). Default 300 (5 min).
+    SHORTS_MAX_SOURCE_SECONDS = int(os.getenv("SHORTS_MAX_SOURCE_SECONDS") or "300")
+
     # Working/cache dir for locally cut shorts.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 
