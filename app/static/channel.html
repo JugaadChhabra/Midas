@@ -478,12 +478,16 @@ function switchTab(name) {
 // tab's data up front. loadChannel() (header + form defaults) stays eager.
 let tabsReady = false;
 let apInterval = null;
-let shortsInterval = null;
+let shortsTimer = null;
+let shortsPolling = false;         // guards against starting a second poll chain
+const SHORTS_POLL_FAST = 10000;    // cadence while a job is actively working
+const SHORTS_POLL_IDLE = 30000;    // cadence when every job is settled — just watching for new ones
+let shortsAnyActive = false;       // set from the latest job list; drives the cadence
 const loadedTabs = new Set();
 const tabLoaders = {
   overview:  () => loadOverview(),
   videos:    () => loadVideos(),
-  shorts:    () => { loadShorts(); if (!shortsInterval) shortsInterval = setInterval(pollShorts, 10000); },
+  shorts:    () => { loadShorts(); if (!shortsPolling) { shortsPolling = true; scheduleShorts(); } },
   performance: () => loadPerformanceFrame(),
   autopilot: () => { loadAutopilotLog(); if (!apInterval) apInterval = setInterval(loadAutopilotLog, 30000); },
   playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
@@ -599,17 +603,39 @@ function renderShorts(jobs, clipsById) {
 }
 
 let shortsBusy = false;
+// job.id -> clips[]. A finished job's clips stop changing once every clip is
+// published, so we cache them and skip re-fetching. Without this, each 10s poll
+// re-pulled every terminal job's clips from Supabase (the egress sink that blew
+// the free-tier cap). Only WORKING jobs — and terminal jobs with a still-pending
+// clip — are re-fetched; at the concurrency cap that's ≤2 detail calls per tick,
+// dropping to 0 once the queue drains. Self-correcting: any WORKING status or
+// non-UPLOADED clip forces a refresh, so no manual cache invalidation is needed.
+const shortsClipsCache = {};
+function shortsClipsFrozen(j) {
+  if (SHORTS_WORKING.includes(j.status)) return false;   // active → always refresh
+  const cached = shortsClipsCache[j.id];
+  if (!cached) return false;                              // terminal, not yet snapshotted
+  return cached.every(c => (c.upload_status === 'UPLOADED') || c.yt_video_id);
+}
 async function loadShorts() {
   if (shortsBusy) return;
   shortsBusy = true;
   $('shorts-poll').textContent = 'updating…';
   try {
     const jobs = await fetch(`/shorts/jobs?channel_id=${encodeURIComponent(channelId)}`).then(r => r.json());
-    const details = await Promise.all(jobs.map(j =>
-      fetch(`/shorts/jobs/${j.id}`).then(r => r.json()).catch(() => ({ clips: [] }))
+    shortsAnyActive = jobs.some(j => SHORTS_WORKING.includes(j.status));   // drives the poll cadence
+    // Fan out ONLY to jobs whose clips can still change; reuse the cache for the rest.
+    const stale = jobs.filter(j => !shortsClipsFrozen(j));
+    await Promise.all(stale.map(j =>
+      fetch(`/shorts/jobs/${j.id}`).then(r => r.json())
+        .then(d => { shortsClipsCache[j.id] = (d && d.clips) || []; })
+        .catch(() => { if (!shortsClipsCache[j.id]) shortsClipsCache[j.id] = []; })
     ));
     const clipsById = {};
-    jobs.forEach((j, i) => { clipsById[j.id] = (details[i] && details[i].clips) || []; });
+    const live = new Set(jobs.map(j => String(j.id)));
+    jobs.forEach(j => { clipsById[j.id] = shortsClipsCache[j.id] || []; });
+    // Drop cache entries for jobs no longer listed so it can't grow unbounded.
+    Object.keys(shortsClipsCache).forEach(id => { if (!live.has(String(id))) delete shortsClipsCache[id]; });
     renderShorts(jobs, clipsById);
     $('shorts-poll').textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (e) {
@@ -618,11 +644,19 @@ async function loadShorts() {
     shortsBusy = false;
   }
 }
-// Only poll while the Shorts tab is actually visible.
-function pollShorts() {
-  if (document.hidden) return;
+// Adaptive cadence: poll fast only while a job is working; drop to idle once every
+// job is settled. Only polls while the Shorts tab is actually visible and active —
+// a background/hidden tab just re-arms cheaply without hitting the network.
+function scheduleShorts() {
+  clearTimeout(shortsTimer);
+  shortsTimer = setTimeout(shortsTick, shortsAnyActive ? SHORTS_POLL_FAST : SHORTS_POLL_IDLE);
+}
+function shortsTick() {
+  shortsTimer = null;
+  if (document.hidden) { scheduleShorts(); return; }
   const panel = document.querySelector('.tab-panel[data-panel="shorts"]');
-  if (panel && panel.classList.contains('active')) loadShorts();
+  if (panel && panel.classList.contains('active')) loadShorts().finally(scheduleShorts);
+  else scheduleShorts();
 }
 
 // Upload a single un-published clip, then refresh.

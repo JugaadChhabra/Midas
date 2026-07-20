@@ -3,6 +3,8 @@
 Adds endpoints used by index.html. Existing endpoints (e.g. /auth/channels) are
 left untouched so other pages keep working.
 """
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter
@@ -31,8 +33,36 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
 
 
+# Short TTL cache for /dashboard. The endpoint scans the entire videos + audits
+# tables to compute global counts; index.html polls it every 30s and each open
+# tab used to trigger its own full scan — the dominant Supabase-egress source
+# after the shorts poll. The payload is global (no per-request args) and the
+# underlying data changes slowly (audits apply on a schedule), so every poll
+# within the TTL is served from one computed result.
+_DASHBOARD_TTL_SECONDS = 30.0
+_dashboard_lock = threading.Lock()
+_dashboard_cache: dict = {"at": 0.0, "payload": None}
+
+
 @router.get("/dashboard")
 def dashboard():
+    """Cached wrapper around _compute_dashboard(). Double-checked locking so a
+    burst of concurrent polls arriving after expiry recomputes exactly once —
+    not once per request — then shares the result."""
+    now = time.monotonic()
+    if _dashboard_cache["payload"] is not None and now - _dashboard_cache["at"] < _DASHBOARD_TTL_SECONDS:
+        return _dashboard_cache["payload"]
+    with _dashboard_lock:
+        now = time.monotonic()
+        if _dashboard_cache["payload"] is not None and now - _dashboard_cache["at"] < _DASHBOARD_TTL_SECONDS:
+            return _dashboard_cache["payload"]
+        payload = _compute_dashboard()
+        _dashboard_cache["payload"] = payload
+        _dashboard_cache["at"] = time.monotonic()
+        return payload
+
+
+def _compute_dashboard():
     """One-shot payload for the home page.
 
     Returns:

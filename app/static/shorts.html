@@ -133,7 +133,9 @@
 
 <script src="/static/swr.js"></script>
 <script>
-const POLL_MS = 10000;
+const POLL_MS = 10000;         // cadence while a job is actively working
+const POLL_MS_IDLE = 30000;    // cadence when every job is settled — just watching for new ones
+let anyActive = false;         // set from the latest job list; drives the cadence
 // Scope: when opened as /shorts?channel_id=… only that channel's jobs are shown.
 // When embedded in the channel page's Shorts tab (?embed=1), drop this page's own
 // nav / title and go full width, exactly like the Performance tab.
@@ -324,6 +326,18 @@ function renderJobs(jobs, clipsById) {
   }
 }
 
+// job.id -> clips[]. A finished job's clips stop changing once every clip is
+// published, so we cache them and skip re-fetching. Without this, each 10s poll
+// re-pulled every terminal job's clips from Supabase (the egress sink that blew
+// the free-tier cap). Only WORKING jobs — and terminal jobs with a still-pending
+// clip — are re-fetched; self-correcting, so no manual cache invalidation.
+const clipsCache = {};
+function clipsFrozen(j) {
+  if (WORKING.includes(j.status)) return false;          // active → always refresh
+  const cached = clipsCache[j.id];
+  if (!cached) return false;                             // terminal, not yet snapshotted
+  return cached.every(c => (c.upload_status === 'UPLOADED') || c.yt_video_id);
+}
 async function loadJobs() {
   if (polling) return;          // never overlap polls
   polling = true;
@@ -337,11 +351,18 @@ async function loadJobs() {
       return;
     }
     const jobs = await r.json();
-    const details = await Promise.all(jobs.map(j =>
-      fetch('/shorts/jobs/' + j.id).then(r => r.json()).catch(() => ({ clips: [] }))
+    anyActive = jobs.some(j => WORKING.includes(j.status));   // drives the poll cadence
+    // Fan out ONLY to jobs whose clips can still change; reuse the cache for the rest.
+    const stale = jobs.filter(j => !clipsFrozen(j));
+    await Promise.all(stale.map(j =>
+      fetch('/shorts/jobs/' + j.id).then(r => r.json())
+        .then(d => { clipsCache[j.id] = (d && d.clips) || []; })
+        .catch(() => { if (!clipsCache[j.id]) clipsCache[j.id] = []; })
     ));
     const clipsById = {};
-    jobs.forEach((j, i) => { clipsById[j.id] = (details[i] && details[i].clips) || []; });
+    const live = new Set(jobs.map(j => String(j.id)));
+    jobs.forEach(j => { clipsById[j.id] = clipsCache[j.id] || []; });
+    Object.keys(clipsCache).forEach(id => { if (!live.has(String(id))) delete clipsCache[id]; });
     renderJobs(jobs, clipsById);
     // Snapshot the fully-resolved jobs+clips so reopening this page paints the
     // last state instantly instead of a blank table while the poll fans out.
@@ -382,13 +403,20 @@ tbody.addEventListener('click', async (ev) => {
 
 document.getElementById('refresh').addEventListener('click', loadJobs);
 
-function startPolling() { if (!timer) timer = setInterval(loadJobs, POLL_MS); }
-function stopPolling() { clearInterval(timer); timer = null; }
+// Adaptive cadence: poll fast only while something is actually working; once every
+// job is settled, drop to POLL_MS_IDLE. Most of the time nothing is running, so this
+// is where the steady-state Supabase egress actually falls.
+function scheduleNext() {
+  clearTimeout(timer);
+  timer = setTimeout(pollTick, anyActive ? POLL_MS : POLL_MS_IDLE);
+}
+function pollTick() { timer = null; loadJobs().finally(scheduleNext); }
+function stopPolling() { clearTimeout(timer); timer = null; }
 
 // Pause polling while the tab is hidden; resume (and refresh immediately) on return.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { stopPolling(); }
-  else { loadJobs(); startPolling(); }
+  else { stopPolling(); pollTick(); }
 });
 
 // Paint from cache first (names, then last jobs snapshot), then kick off the
@@ -396,8 +424,10 @@ document.addEventListener('visibilitychange', () => {
 loadChannels();
 const _cachedJobs = SWR.get(cacheKey);
 if (_cachedJobs && _cachedJobs.jobs) renderJobs(_cachedJobs.jobs, _cachedJobs.clipsById || {});
-loadJobs();
-startPolling();
+// Seed the clips cache from the snapshot so a cold reload also skips re-fetching
+// clips for jobs that were already settled last visit.
+if (_cachedJobs && _cachedJobs.clipsById) Object.assign(clipsCache, _cachedJobs.clipsById);
+pollTick();   // load now, then self-schedule at the adaptive cadence
 </script>
 </body>
 </html>

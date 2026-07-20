@@ -40,10 +40,20 @@ def create_job(body: CreateJob):
     return {"job_id": job_id}
 
 
+# Columns the Shorts table actually renders. Selecting these instead of "*" keeps
+# the 10s poll's list payload lean (drops cut_mode/camera_motion/timestamps/
+# upload_cap/etc. the list view never reads) — part of trimming Supabase egress.
+# Per-job clip detail still comes from GET /jobs/{id}, which returns full rows.
+_JOB_LIST_COLUMNS = (
+    "id,channel_id,status,progress,progress_label,"
+    "error_message,source_url,source_video_id"
+)
+
+
 @router.get("/jobs")
 def list_jobs(channel_id: str | None = None):
     sb = supabase()
-    q = sb.table("shorts_jobs").select("*")
+    q = sb.table("shorts_jobs").select(_JOB_LIST_COLUMNS)
     if channel_id:
         q = q.eq("channel_id", channel_id)
     return q.order("id", desc=True).limit(50).execute().data or []

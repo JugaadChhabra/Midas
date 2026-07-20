@@ -103,9 +103,14 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
 
     Walks newest → oldest so freshly uploaded videos are optimized first.
     """
+    # Only the columns the picker filters on and the caller reads (id for the
+    # audit call, is_short for the post-apply embed gate, privacy_status for the
+    # eligibility filter). `videos` is a wide table (description/tags/snippet/…)
+    # and this runs every autopilot tick, so select("*") here egressed KBs per row
+    # for nothing — audit_video() re-fetches the full row by id when it needs it.
     candidates = (
         supabase().table("videos")
-        .select("*")
+        .select("id,is_short,privacy_status")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
         .execute()
@@ -174,9 +179,12 @@ def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
     successful cut is a manual action. A video whose only jobs are FAILED is
     retried until it hits MAX_SHORTS_RETRY_ATTEMPTS.
     """
+    # is_short / duration_seconds are server-side WHERE filters (not read back);
+    # the caller only uses video["id"]. privacy_status is read by the loop below.
+    # Narrowed from select("*") — this runs every tick over a wide table.
     q = (
         supabase().table("videos")
-        .select("*")
+        .select("id,privacy_status")
         .eq("channel_id", channel_id)
         .eq("is_short", False)
     )

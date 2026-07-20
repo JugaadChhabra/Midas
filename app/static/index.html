@@ -359,7 +359,17 @@ function renderQuotaBadge(q) {
 }
 
 loadDashboard();
-setInterval(loadDashboard, 30000);
+// Poll only while the tab is visible. A backgrounded dashboard tab otherwise keeps
+// triggering full videos+audits scans on the server (Supabase egress) for nothing;
+// refresh immediately whenever the tab regains focus.
+let dashTimer = null;
+function startDashPolling() { if (!dashTimer) dashTimer = setInterval(loadDashboard, 30000); }
+function stopDashPolling() { clearInterval(dashTimer); dashTimer = null; }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopDashPolling(); }
+  else { loadDashboard(); startDashPolling(); }
+});
+if (!document.hidden) startDashPolling();
 </script>
 </body>
 </html>
