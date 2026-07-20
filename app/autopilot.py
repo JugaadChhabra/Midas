@@ -80,19 +80,17 @@ def _today_start_iso() -> str:
 
 
 def _applies_today(channel_id: str) -> int:
-    video_ids = [
-        v["id"] for v in (
-            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
-        )
-    ]
-    if not video_ids:
-        return 0
+    # Applied audits today for this channel, via an embedded inner-join to videos.
+    # The old approach first pulled the channel's entire video-id list to scope the
+    # `.in_()` — which capped at Supabase's 1000-row page limit and thus UNDERCOUNTED
+    # the daily-cap gate for channels with >1000 videos (autopilot could exceed cap).
+    # The join scopes by channel directly, with no truncation and no all-ids egress.
     res = (
         supabase().table("audits")
-        .select("id")
+        .select("id,videos!inner(channel_id)")
         .eq("status", "applied")
         .gte("applied_at", _today_start_iso())
-        .in_("video_id", video_ids)
+        .eq("videos.channel_id", channel_id)
         .execute()
     )
     return len(res.data or [])
@@ -523,21 +521,19 @@ def resume_autopilot(channel_id: str):
 
 @router.get("/channels/{channel_id}/autopilot/log")
 def autopilot_log(channel_id: str):
-    videos = (
-        supabase().table("videos").select("id,title").eq("channel_id", channel_id).execute().data or []
-    )
-    title_by_id = {v["id"]: v["title"] for v in videos}
-    video_ids = list(title_by_id.keys())
-    audits = []
-    if video_ids:
-        audits = (
-            supabase().table("audits")
-            .select("id,video_id,status,applied_at,created_at,ai_reasoning")
-            .in_("video_id", video_ids)
-            .order("created_at", desc=True)
-            .limit(50)
-            .execute()
-        ).data or []
+    # Embedded inner-join to videos: the 50 latest audits for THIS channel, with
+    # the video title, in one query. The old approach pulled EVERY one of the
+    # channel's videos (id + title) on each 30s poll just to scope + label these
+    # ≤50 rows — heavy egress — and silently truncated at Supabase's 1000-row cap,
+    # so large channels' newer audits never showed. The join has neither problem.
+    audits = (
+        supabase().table("audits")
+        .select("id,video_id,status,applied_at,created_at,ai_reasoning,videos!inner(channel_id,title)")
+        .eq("videos.channel_id", channel_id)
+        .order("created_at", desc=True)
+        .limit(50)
+        .execute()
+    ).data or []
     applies = _applies_today(channel_id)
     ch = supabase().table("channels").select("autopilot_daily_cap,autopilot_paused_reason,autopilot_enabled").eq("id", channel_id).single().execute().data or {}
     return {
@@ -549,7 +545,7 @@ def autopilot_log(channel_id: str):
             {
                 "audit_id": a["id"],
                 "video_id": a["video_id"],
-                "video_title": title_by_id.get(a["video_id"]),
+                "video_title": (a.get("videos") or {}).get("title"),
                 "status": a["status"],
                 "applied_at": a.get("applied_at"),
                 "created_at": a.get("created_at"),
