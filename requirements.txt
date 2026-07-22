@@ -17,3 +17,4 @@ youtube-transcript-api>=0.6.2
 # 2026.6.9 is the version running on the dev Mac that has never hit the error.
 yt-dlp==2026.6.9
 pytest==8.3.4
+smbprotocol
