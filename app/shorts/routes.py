@@ -5,6 +5,9 @@ from pydantic import BaseModel
 
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
+from app.shorts.nas_source import (
+    enqueue_language_jobs, list_source_languages, uncut_count,
+)
 from app.shorts.youtube_upload import upload_short
 
 log = logging.getLogger("midas.shorts.routes")
@@ -57,6 +60,29 @@ def list_jobs(channel_id: str | None = None):
     if channel_id:
         q = q.eq("channel_id", channel_id)
     return q.order("id", desc=True).limit(50).execute().data or []
+
+
+class CutLanguage(BaseModel):
+    language: str
+
+
+@router.post("/cut")
+def cut_language(body: CutLanguage):
+    """Enqueue a shorts job for every uncut video in a NAS language folder."""
+    language = body.language.strip().upper()
+    try:
+        enqueued = enqueue_language_jobs(language)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    log.info("NAS cut: %d job(s) queued for %s", enqueued, language)
+    return {"language": language, "enqueued": enqueued}
+
+
+@router.get("/languages")
+def languages():
+    """NAS source language folders with their uncut video counts."""
+    return [{"language": lang, "uncut": uncut_count(lang)}
+            for lang in list_source_languages()]
 
 
 @router.post("/jobs/clear-failed")

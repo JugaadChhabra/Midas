@@ -119,6 +119,23 @@ class Settings:
     KEYFRAMES_LOCAL_DIR = os.getenv("KEYFRAMES_LOCAL_DIR", "storage/keyframes")
     KEYFRAME_FFMPEG_TIMEOUT = int(os.getenv("KEYFRAME_FFMPEG_TIMEOUT") or "30")
 
+    # --- NAS (shorts cutter source) ---
+    # SMB share holding rhyme source videos, organized as
+    # <NAS_SOURCE_ROOT_PATH>/<LANGUAGE>/<file>.mp4. Cut clips + the moved
+    # source land under <NAS_DESTINATION_ROOT_PATH>/<LANGUAGE>/. "local" mode
+    # (a plain filesystem root) exists for tests and dev without a NAS.
+    NAS_MODE            = os.getenv("NAS_MODE", "smb").lower()
+    NAS_SERVER          = os.getenv("NAS_SERVER", "")
+    NAS_SHARE           = os.getenv("NAS_SHARE", "")
+    NAS_USERNAME        = os.getenv("NAS_USERNAME", "")
+    NAS_PASSWORD        = os.getenv("NAS_PASSWORD", "")
+    NAS_DOMAIN          = os.getenv("NAS_DOMAIN", "")
+    NAS_PORT            = int(os.getenv("NAS_PORT") or "445")
+    NAS_SOURCE_ROOT_PATH      = os.getenv("NAS_SOURCE_ROOT_PATH", "Animations/SHORTS CUTTER/RHYMES")
+    NAS_DESTINATION_ROOT_PATH = os.getenv("NAS_DESTINATION_ROOT_PATH", "Animations/SHORTS CUTTER/COMPLETED")
+    # local-mode root (mode="local"): a directory that stands in for the share.
+    NAS_LOCAL_ROOT      = os.getenv("NAS_LOCAL_ROOT", "./nas_data")
+
 
 settings = Settings()
 
