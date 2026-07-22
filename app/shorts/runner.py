@@ -18,6 +18,8 @@ from pathlib import Path
 
 from app.config import settings
 from app.db import supabase
+from app.services.nas_service import nas_service
+from app.shorts.cutter.util import safe_name
 from app.shorts.youtube_upload import upload_short
 
 log = logging.getLogger("midas.shorts.runner")
@@ -57,6 +59,8 @@ def run_shorts_job(job_id: int) -> None:
     if not job:
         log.error("run_shorts_job: job %s not found", job_id)
         return
+    if job.get("source_nas_path"):
+        return _run_nas_shorts_job(job_id, job)
     job_dir = Path(settings.SHORTS_CACHE_DIR) / str(job_id)
     source = None
     try:
@@ -119,6 +123,61 @@ def run_shorts_job(job_id: int) -> None:
                       + ("" if all_ok else " — some uploads FAILED"))
     except Exception as exc:
         log.exception("Job %s failed", job_id)
+        _set_job(job_id, status="FAILED", error_message=str(exc)[:1000])
+        _notify_macos("Midas Shorts", f"Job {job_id} failed: {exc}"[:120])
+    finally:
+        shutil.rmtree(job_dir / "src", ignore_errors=True)
+        shutil.rmtree(job_dir / "tmp", ignore_errors=True)
+
+
+def _run_nas_shorts_job(job_id: int, job: dict) -> None:
+    """Cut a NAS-sourced video: copy from NAS, cut, push clips + move the source
+    into COMPLETED/<language>/. No YouTube upload."""
+    sb = supabase()
+    job_dir = Path(settings.SHORTS_CACHE_DIR) / str(job_id)
+    language = job["language"]
+    src_rel = job["source_nas_path"]                 # e.g. "HINDI/song.mp4"
+    filename = src_rel.rsplit("/", 1)[-1]
+    dest_dir = f"{settings.NAS_DESTINATION_ROOT_PATH}/{language}"
+    try:
+        _set_job(job_id, status="DOWNLOADING", progress=5, progress_label="fetching from NAS")
+        local_src = nas_service.copy_to_local(
+            f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}", job_dir / "src" / filename)
+        title = safe_name(Path(filename).stem)
+
+        def progress(stage: str, percent: int) -> None:
+            status = "RENDERING" if "render" in stage else "ANALYSING"
+            _set_job(job_id, status=status, progress=percent, progress_label=stage)
+
+        result = _cut_video(
+            local_src, job_dir, preferred_name=title,
+            cut_mode=job.get("cut_mode") or "highlights",
+            camera_motion=job.get("camera_motion") or "calm", progress=progress,
+        )
+        clips = result["clips"]
+
+        _set_job(job_id, status="UPLOADING", progress=95,
+                 progress_label=f"saving {len(clips)} clips to NAS")
+        for clip in clips:
+            clip_name = Path(clip["path"]).name
+            nas_path = f"{dest_dir}/{clip_name}"
+            nas_service.copy_from_local(Path(clip["path"]), nas_path)
+            sb.table("shorts_clips").insert({
+                "job_id": job_id, "rank": clip["rank"],
+                "title": f"{title.replace('_', ' ')} — Part {clip['rank']}"[:100],
+                "description": "", "hashtags": ["shorts"],
+                "start_s": clip["start_s"], "end_s": clip["end_s"],
+                "local_path": clip["path"], "nas_path": nas_path,
+                "upload_status": "SAVED",
+            }).execute()
+
+        # Move the consumed source out of RHYMES so it is never re-cut.
+        nas_service.move(f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}",
+                         f"{dest_dir}/{filename}")
+        _set_job(job_id, status="DONE", progress=100, progress_label="done")
+        _notify_macos("Midas Shorts", f"Job {job_id}: {len(clips)} clips cut from {filename}")
+    except Exception as exc:
+        log.exception("NAS job %s failed", job_id)
         _set_job(job_id, status="FAILED", error_message=str(exc)[:1000])
         _notify_macos("Midas Shorts", f"Job {job_id} failed: {exc}"[:120])
     finally:
