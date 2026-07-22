@@ -78,6 +78,11 @@ def enqueue_language_jobs(language: str, *, channel_id: str | None = None,
             "channel_id":          channel_id,
             "language":            language,
             "source_nas_path":     path,
+            # shorts_jobs.source_url is NOT NULL. NAS jobs have no YouTube URL,
+            # so store a self-describing nas:// URI: it satisfies the constraint,
+            # is ignored by the runner (which branches on source_nas_path), and
+            # renders sanely in the legacy job-list UI.
+            "source_url":          f"nas://{path}",
             "cut_mode":            cut_mode,
             "camera_motion":       camera_motion,
             "autopilot_generated": autopilot,

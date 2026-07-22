@@ -174,7 +174,8 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
         # Move the consumed source out of RHYMES so it is never re-cut.
         nas_service.move(f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}",
                          f"{dest_dir}/{filename}")
-        _set_job(job_id, status="DONE", progress=100, progress_label="done")
+        _set_job(job_id, status="DONE", progress=100, progress_label="done",
+                 error_message=None)
         _notify_macos("Midas Shorts", f"Job {job_id}: {len(clips)} clips cut from {filename}")
     except Exception as exc:
         log.exception("NAS job %s failed", job_id)
