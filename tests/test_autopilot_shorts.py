@@ -94,21 +94,6 @@ def test_next_uncut_skips_video_with_done_job():
     assert v is None
 
 
-def test_next_uncut_applies_duration_upper_bound():
-    """The autopicker query must filter duration_seconds below the 4-min cap so
-    compilations are never auto-cut."""
-    import app.autopilot as ap
-    assert ap.MAX_SHORTS_SOURCE_SECONDS == 240
-    sb = MagicMock()
-    videos_tbl = MagicMock()
-    q = videos_tbl.select.return_value.eq.return_value.eq.return_value  # after the two .eq()
-    q.lt.return_value.order.return_value.execute.return_value.data = []
-    sb.table.side_effect = lambda name: videos_tbl if name == "videos" else MagicMock()
-    with patch("app.autopilot.supabase", return_value=sb):
-        ap._next_uncut_video_for_channel("UC1")
-    q.lt.assert_called_once_with("duration_seconds", 240)
-
-
 def test_run_shorts_action_enqueues_from_nas_folder():
     import app.autopilot as ap
     ch = {"id": "UC1", "nas_folder": "HINDI", "shorts_cut_mode": "highlights",

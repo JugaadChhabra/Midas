@@ -111,7 +111,7 @@ def list_channels():
         "id,name,handle,last_synced_at,default_language,"
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
         "sync_shorts,analytics_authorized,playlist_health_enabled,"
-        "autopilot_shorts_enabled,autopilot_shorts_daily_cap,autopilot_shorts_upload_cap,"
+        "autopilot_shorts_enabled,"
         "shorts_cut_mode,shorts_camera_motion,nas_folder"
     ).execute()
     return res.data
@@ -124,8 +124,6 @@ class ChannelSettings(BaseModel):
     sync_shorts: bool | None = None
     playlist_health_enabled: bool | None = None
     autopilot_shorts_enabled: bool | None = None
-    autopilot_shorts_daily_cap: int | None = None
-    autopilot_shorts_upload_cap: int | None = None
     shorts_cut_mode: str | None = None
     shorts_camera_motion: str | None = None
     nas_folder: str | None = None
@@ -149,10 +147,6 @@ def update_channel(channel_id: str, body: ChannelSettings):
         patch["playlist_health_enabled"] = body.playlist_health_enabled
     if body.autopilot_shorts_enabled is not None:
         patch["autopilot_shorts_enabled"] = body.autopilot_shorts_enabled
-    if body.autopilot_shorts_daily_cap is not None:
-        patch["autopilot_shorts_daily_cap"] = max(1, int(body.autopilot_shorts_daily_cap))
-    if body.autopilot_shorts_upload_cap is not None:
-        patch["autopilot_shorts_upload_cap"] = max(1, min(int(body.autopilot_shorts_upload_cap), 8))
     if body.shorts_cut_mode in ("highlights", "coverage"):
         patch["shorts_cut_mode"] = body.shorts_cut_mode
     if body.shorts_camera_motion in ("locked", "calm", "follow"):
