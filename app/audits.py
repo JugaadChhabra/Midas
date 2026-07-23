@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
+from app.apply_outcome import ApplyError, ApplyOutcome
 from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
@@ -371,7 +372,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     try:
         yt = youtube_for_channel(video["channel_id"])
     except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
+        raise ApplyError(ApplyOutcome.TOKEN_EXPIRED)
 
     # Fresh stats for an accurate apply-time baseline (1 quota unit).
     baseline_patch: dict = {}
@@ -385,14 +386,16 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
                 "comment_count_at_apply": int(stats.get("commentCount") or 0),
             }
     except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
+        raise ApplyError(ApplyOutcome.TOKEN_EXPIRED)
     except Exception as e:
         log.warning("Failed to fetch baseline stats for %s: %s", video["id"], e)
 
+    # Classify YouTube's failure ONCE here (the only place the raw error exists) and
+    # raise a typed ApplyError; callers switch on .outcome, not on the error text.
     try:
         yt_videos_update(yt, video["channel_id"], payload, parts="snippet,status")
     except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
+        raise ApplyError(ApplyOutcome.TOKEN_EXPIRED)
     except Exception as e:
         err_str = str(e)
         if "UPDATE_TITLE_NOT_ALLOWED_DURING_TEST_AND_COMPARE" in err_str:
@@ -401,12 +404,12 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
                 **before_patch,
                 **baseline_patch,
             }).eq("id", audit_id).execute()
-            raise HTTPException(409, "blocked_test_and_compare")
+            raise ApplyError(ApplyOutcome.TEST_AND_COMPARE)
         if "quotaExceeded" in err_str:
             # Leave audit as-is (pending) so it retries when quota resets.
-            raise HTTPException(429, "youtube_quota_exceeded")
+            raise ApplyError(ApplyOutcome.QUOTA_EXCEEDED)
         supabase().table("audits").update({"status": "failed", **before_patch, **baseline_patch}).eq("id", audit_id).execute()
-        raise HTTPException(500, f"YouTube update failed: {e}")
+        raise ApplyError(ApplyOutcome.FAILED, f"YouTube update failed: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
     # CIL §1.2/§1.3 — enter the measurement pipeline on measurement-enabled

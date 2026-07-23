@@ -4,13 +4,14 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel
 from app import quota
 from app.audits import audit_video, validate_audit, apply_audit_internal
+from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
@@ -357,13 +358,47 @@ def _resync_if_stale(ch: dict) -> bool:
         return False
 
 
+def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> None:
+    """Apply an audit and react to the typed ApplyError.outcome: idle on quota
+    exhaustion, pause on token expiry, record a failure otherwise. Replaces a switch
+    over the HTTPException detail STRING that YouTube's error text leaked into."""
+    global _yt_quota_exhausted_until
+    try:
+        apply_audit_internal(audit_row["id"])
+        _failure_counts[channel_id] = 0
+        log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
+        if not video.get("is_short"):
+            try:
+                embed_video(video["id"])
+                # Playlist allocation skipped — workflow under review
+                # join_pass(channel_id, video["id"])
+            except Exception as e:
+                log.warning("Embed failed for %s: %s", video["id"], e)
+    except ApplyError as e:
+        if e.outcome is ApplyOutcome.TEST_AND_COMPARE:
+            log.info("Skipping video %s: active Test & Compare experiment on YouTube", video["id"])
+        elif e.outcome is ApplyOutcome.QUOTA_EXCEEDED:
+            _yt_quota_exhausted_until = _next_yt_quota_reset()
+            log.warning(
+                "YouTube quota exhausted; autopilot dormant until %s",
+                _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
+            )
+        elif e.outcome is ApplyOutcome.TOKEN_EXPIRED:
+            log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
+            _pause(channel_id, "token_expired")
+        else:  # ApplyOutcome.FAILED
+            _record_failure(channel_id)
+    except Exception as e:
+        log.exception("Apply failed for %s: %s", audit_row["id"], e)
+        _record_failure(channel_id)
+
+
 def tick():
     """One pass of the autopilot loop. Processes at most one video and returns.
 
     Thin orchestrator: quota gate → pick channel → resync → shorts → (audit path:
     cap → pick video → audit → validate → apply). The steps live in helpers above
     and below; the failure-accounting rule is _record_failure()."""
-    global _yt_quota_exhausted_until
     try:
         if _quota_dormant():
             return
@@ -479,37 +514,8 @@ def tick():
         #     _touch_tick(channel_id)
         #     return
 
-        # 10. Apply
-        try:
-            apply_audit_internal(audit_row["id"])
-            _failure_counts[channel_id] = 0
-            log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
-            if not video.get("is_short"):
-                try:
-                    embed_video(video["id"])
-                    # Playlist allocation skipped — workflow under review
-                    # join_pass(channel_id, video["id"])
-                except Exception as e:
-                    log.warning("Embed failed for %s: %s", video["id"], e)
-        except HTTPException as e:
-            log.warning("Apply HTTPException for %s: %s", audit_row["id"], e.detail)
-            if e.detail == "blocked_test_and_compare":
-                log.info("Skipping video %s: active Test & Compare experiment on YouTube", video["id"])
-            elif e.detail == "youtube_quota_exceeded":
-                _yt_quota_exhausted_until = _next_yt_quota_reset()
-                log.warning(
-                    "YouTube quota exhausted; autopilot dormant until %s",
-                    _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
-                )
-            elif e.detail == "token_expired":
-                log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
-                _pause(channel_id, "token_expired")
-            else:
-                _record_failure(channel_id)
-        except Exception as e:
-            log.exception("Apply failed for %s: %s", audit_row["id"], e)
-            _record_failure(channel_id)
-
+        # 10. Apply and react to the typed outcome.
+        _apply_audit_and_handle(audit_row, video, channel_id)
         _touch_tick(channel_id)
 
     except Exception as e:

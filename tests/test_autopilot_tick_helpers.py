@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 
 import app.autopilot as ap
+from app.apply_outcome import ApplyError, ApplyOutcome
 
 
 def test_record_failure_pauses_only_at_threshold():
@@ -72,3 +73,48 @@ def test_resync_stops_tick_on_token_expiry():
          patch("app.autopilot._pause") as pause:
         assert ap._resync_if_stale(ch) is False            # token expiry → stop tick
         pause.assert_called_once_with("UC1", "token_expired")
+
+
+# ── _apply_audit_and_handle: react to the TYPED outcome (was a string switch) ──
+
+def test_apply_handle_quota_sets_dormant_window():
+    ap._yt_quota_exhausted_until = None
+    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.QUOTA_EXCEEDED)):
+        ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": False}, "UC1")
+    assert ap._yt_quota_exhausted_until is not None        # autopilot goes dormant
+    ap._yt_quota_exhausted_until = None
+
+
+def test_apply_handle_token_expired_pauses_channel():
+    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.TOKEN_EXPIRED)), \
+         patch("app.autopilot._pause") as pause:
+        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+    pause.assert_called_once_with("UC1", "token_expired")
+
+
+def test_apply_handle_failed_records_failure():
+    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.FAILED)), \
+         patch("app.autopilot._record_failure") as rec:
+        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+    rec.assert_called_once_with("UC1")
+
+
+def test_apply_handle_test_and_compare_has_no_side_effects():
+    ap._yt_quota_exhausted_until = None
+    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.TEST_AND_COMPARE)), \
+         patch("app.autopilot._pause") as pause, \
+         patch("app.autopilot._record_failure") as rec:
+        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+    pause.assert_not_called()
+    rec.assert_not_called()
+    assert ap._yt_quota_exhausted_until is None            # not treated as quota/failure
+
+
+def test_apply_handle_success_resets_failures_and_embeds():
+    ap._failure_counts["UC1"] = 2
+    with patch("app.autopilot.apply_audit_internal", return_value={"status": "applied"}), \
+         patch("app.autopilot.embed_video") as embed:
+        ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": False}, "UC1")
+    assert ap._failure_counts["UC1"] == 0
+    embed.assert_called_once_with("v")
+    ap._failure_counts.clear()
