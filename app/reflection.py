@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.db import supabase
+from app.channel_audits import audits_for_channel
 from app.openrouter import chat_json, chat_text
 from app.youtube_client import youtube_for_channel, yt_search_videos
 from app.audits import audit_video
@@ -27,27 +28,24 @@ def _build_perf_report(channel_id: str) -> dict | None:
 
     Returns None if fewer than _MIN_DATA_POINTS audits have velocity data.
     """
-    video_ids = [
-        v["id"] for v in (
-            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
-        )
-    ]
-    if not video_ids:
-        return None
-
+    # Applied audits for this channel (join-scoped — no 1000-row truncation).
     audits = (
-        supabase().table("audits")
-        .select("id,video_id,applied_at,suggested_title,title_before,"
-                "suggested_description,description_before,"
-                "suggested_tags,tags_before,"
-                "view_count_at_apply,ai_reasoning")
-        .in_("video_id", video_ids)
+        audits_for_channel(
+            channel_id,
+            "id,video_id,applied_at,suggested_title,title_before,"
+            "suggested_description,description_before,"
+            "suggested_tags,tags_before,"
+            "view_count_at_apply,ai_reasoning",
+        )
         .eq("status", "applied")
         .execute()
     ).data or []
 
     if not audits:
         return None
+
+    # Only the applied videos need view/publish data — derive ids from the audits.
+    video_ids = list({a["video_id"] for a in audits})
 
     vid_rows = (
         supabase().table("videos")
@@ -400,18 +398,9 @@ def _run_shadow_audits(channel_id: str, candidate_prompt: str, version_id: int) 
 
     Returns count of shadow audits created.
     """
-    video_ids = [
-        v["id"] for v in (
-            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
-        )
-    ]
-    if not video_ids:
-        return 0
-
+    # 10 most-recently-applied videos for this channel (join-scoped — no truncation).
     recent_applied = (
-        supabase().table("audits")
-        .select("video_id,applied_at")
-        .in_("video_id", video_ids)
+        audits_for_channel(channel_id, "video_id,applied_at")
         .eq("status", "applied")
         .order("applied_at", desc=True)
         .limit(10)

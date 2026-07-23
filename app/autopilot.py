@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.db import supabase
+from app.channel_audits import audits_for_channel
 from app import quota
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.sync import sync_channel, refresh_stats
@@ -80,17 +81,13 @@ def _today_start_iso() -> str:
 
 
 def _applies_today(channel_id: str) -> int:
-    # Applied audits today for this channel, via an embedded inner-join to videos.
-    # The old approach first pulled the channel's entire video-id list to scope the
-    # `.in_()` — which capped at Supabase's 1000-row page limit and thus UNDERCOUNTED
-    # the daily-cap gate for channels with >1000 videos (autopilot could exceed cap).
-    # The join scopes by channel directly, with no truncation and no all-ids egress.
+    # Applied audits today for this channel. Uses the channel-scoped accessor
+    # (join to videos) so the daily-cap gate is never undercounted by the old
+    # all-video-ids form's 1000-row truncation.
     res = (
-        supabase().table("audits")
-        .select("id,videos!inner(channel_id)")
+        audits_for_channel(channel_id, "id")
         .eq("status", "applied")
         .gte("applied_at", _today_start_iso())
-        .eq("videos.channel_id", channel_id)
         .execute()
     )
     return len(res.data or [])
@@ -519,15 +516,16 @@ def resume_autopilot(channel_id: str):
 
 @router.get("/channels/{channel_id}/autopilot/log")
 def autopilot_log(channel_id: str):
-    # Embedded inner-join to videos: the 50 latest audits for THIS channel, with
-    # the video title, in one query. The old approach pulled EVERY one of the
-    # channel's videos (id + title) on each 30s poll just to scope + label these
-    # ≤50 rows — heavy egress — and silently truncated at Supabase's 1000-row cap,
-    # so large channels' newer audits never showed. The join has neither problem.
+    # The 50 latest audits for THIS channel, with the video title, in one query
+    # via the channel-scoped accessor. Replaces an older form that pulled every
+    # one of the channel's videos on each 30s poll (heavy egress) and truncated
+    # at Supabase's 1000-row cap (large channels' newer audits never showed).
     audits = (
-        supabase().table("audits")
-        .select("id,video_id,status,applied_at,created_at,ai_reasoning,videos!inner(channel_id,title)")
-        .eq("videos.channel_id", channel_id)
+        audits_for_channel(
+            channel_id,
+            "id,video_id,status,applied_at,created_at,ai_reasoning",
+            video_columns="channel_id,title",
+        )
         .order("created_at", desc=True)
         .limit(50)
         .execute()

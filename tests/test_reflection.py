@@ -282,12 +282,15 @@ def test_run_shadow_audits_uses_candidate_prompt():
     ]
 
     with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.channel_audits.supabase") as mock_ca, \
          patch("app.reflection.audit_video") as mock_audit:
 
         def table_side(name):
             m = MagicMock()
             if name == "audits":
-                m.select.return_value.in_.return_value.eq.return_value \
+                # New shape via audits_for_channel(): the join .eq("videos.channel_id")
+                # then the caller's .eq("status","applied") -> select.eq.eq.order.limit
+                m.select.return_value.eq.return_value.eq.return_value \
                     .order.return_value.limit.return_value.execute.return_value.data = applied_audits
                 m.update.return_value.eq.return_value.execute.return_value = None
             elif name == "videos":
@@ -296,6 +299,9 @@ def test_run_shadow_audits_uses_candidate_prompt():
                 ]
             return m
         mock_sb.return_value.table.side_effect = table_side
+        # The audits query now runs through app.channel_audits.audits_for_channel,
+        # which calls its OWN module-global supabase() — point it at the same fake.
+        mock_ca.return_value.table.side_effect = table_side
         mock_audit.return_value = {"id": 99}
 
         from app.reflection import _run_shadow_audits

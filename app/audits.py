@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import supabase
+from app.channel_audits import audits_for_channel
 from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
@@ -465,25 +466,15 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
 
     APPLY_COST = 51
 
-    video_ids = [
-        v["id"] for v in (
-            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
-        )
-    ]
+    # Latest audit per video for this channel (join-scoped — no 1000-row
+    # truncation); only 'pending' ones are applied below.
+    q = audits_for_channel(
+        channel_id,
+        "id,video_id,status,created_at,suggested_title,suggested_description,suggested_tags",
+    )
     if body and body.video_ids:
-        requested = set(body.video_ids)
-        video_ids = [v for v in video_ids if v in requested]
-    if not video_ids:
-        return {"applied": 0, "skipped": 0, "failed": 0, "results": []}
-
-    # Latest audit per video — only consider 'pending' ones.
-    audits = (
-        supabase().table("audits")
-        .select("id,video_id,status,created_at,suggested_title,suggested_description,suggested_tags")
-        .in_("video_id", video_ids)
-        .order("created_at", desc=True)
-        .execute()
-    ).data or []
+        q = q.in_("video_id", list(body.video_ids))
+    audits = q.order("created_at", desc=True).execute().data or []
     seen: set[str] = set()
     pending: list[dict] = []
     for a in audits:
@@ -556,18 +547,9 @@ def reaudit_quarantined(channel_id: str):
     Creates a fresh pending audit row for each, replacing the quarantined one
     in the UI once the new audit is processed.
     """
-    video_ids = [
-        v["id"] for v in (
-            supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
-        )
-    ]
-    if not video_ids:
-        return {"reaudited": 0, "skipped": 0, "failed": 0, "results": []}
-
+    # Latest audit per video for this channel (join-scoped — no truncation).
     audits = (
-        supabase().table("audits")
-        .select("id,video_id,status,created_at")
-        .in_("video_id", video_ids)
+        audits_for_channel(channel_id, "id,video_id,status,created_at")
         .order("created_at", desc=True)
         .execute()
     ).data or []
