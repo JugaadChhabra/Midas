@@ -10,6 +10,24 @@ Usage: python -m scripts.backfill_nas_folder
 from app.db import supabase
 from app.shorts.nas_source import list_source_languages
 
+# The 11 NAS source folders are stable, so hardcode them as a fallback: the
+# backfill only needs the DB (reachable anywhere), not a live NAS listing, so
+# it can run off the office network. A live listing is preferred when the NAS
+# is reachable in case the set ever grows.
+KNOWN_LANGUAGES = [
+    "BANGLA", "BHOJPURI", "ENGLISH", "GUJARATI", "HARYANVI", "HINDI",
+    "MALAYALAM", "MARATHI", "PUNJABI", "RAJASTHANI", "TAMIL",
+]
+
+
+def folders_or_fallback() -> list[str]:
+    """Live NAS folder list when reachable, else the stable known set."""
+    try:
+        live = list_source_languages()
+    except Exception:
+        live = []
+    return live or KNOWN_LANGUAGES
+
 
 def derive_folder(name: str, folders: list[str]) -> str | None:
     upper = (name or "").upper()
@@ -18,7 +36,7 @@ def derive_folder(name: str, folders: list[str]) -> str | None:
 
 
 def main() -> int:
-    folders = list_source_languages()
+    folders = folders_or_fallback()
     chans = supabase().table("channels").select("id,name,nas_folder").execute().data or []
     for c in chans:
         if c.get("nas_folder"):
