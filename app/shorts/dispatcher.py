@@ -13,10 +13,11 @@ import sys
 
 from app.config import settings
 from app.db import supabase
+from app.shorts.status import CREATED, FAILED, TERMINAL_STATUSES
 
 log = logging.getLogger("midas.shorts.dispatcher")
 
-_TERMINAL = ("DONE", "FAILED")
+_TERMINAL = TERMINAL_STATUSES
 # job_id -> Popen for workers this dispatcher launched
 _running: dict[int, subprocess.Popen] = {}
 
@@ -31,7 +32,7 @@ def _next_created_id(sb) -> int | None:
     """Oldest CREATED job not already launched by this dispatcher, or None."""
     running_ids = list(_running.keys())
     q = (sb.table("shorts_jobs").select("id")
-         .eq("status", "CREATED").order("id", desc=False))
+         .eq("status", CREATED).order("id", desc=False))
     if running_ids:
         q = q.not_.in_("id", running_ids)
     rows = (q.limit(1).execute().data) or []
@@ -50,7 +51,7 @@ def dispatch_tick() -> None:
                .eq("id", job_id).single().execute().data) or {}
         if job.get("status") not in _TERMINAL:
             sb.table("shorts_jobs").update({
-                "status": "FAILED",
+                "status": FAILED,
                 "error_message": f"worker exited unexpectedly (rc={proc.returncode})",
             }).eq("id", job_id).execute()
             log.warning("shorts job %s: worker exited rc=%s (status=%s) -> FAILED",

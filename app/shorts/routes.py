@@ -8,6 +8,9 @@ from app.shorts.cutter.download import is_youtube_url
 from app.shorts.nas_source import (
     enqueue_language_jobs, list_source_languages, uncut_count,
 )
+from app.shorts.status import (
+    CLIP_FAILED, CLIP_PENDING, CLIP_UPLOADED, CLIP_UPLOADING, CREATED, FAILED,
+)
 from app.shorts.youtube_upload import upload_short
 
 log = logging.getLogger("midas.shorts.routes")
@@ -36,7 +39,7 @@ def create_job(body: CreateJob):
         "source_url":    body.source_url,
         "cut_mode":      body.cut_mode,
         "camera_motion": body.camera_motion,
-        "status":        "CREATED",
+        "status":        CREATED,
     }).execute().data
     job_id = inserted[0]["id"]
     log.info("Shorts job %d queued for %s", job_id, body.source_url)
@@ -90,7 +93,7 @@ def clear_failed_jobs(channel_id: str | None = None):
     """Delete FAILED shorts jobs (and their clips) so the list can start fresh.
     Scoped to one channel when channel_id is given, else all channels."""
     sb = supabase()
-    q = sb.table("shorts_jobs").select("id").eq("status", "FAILED")
+    q = sb.table("shorts_jobs").select("id").eq("status", FAILED)
     if channel_id:
         q = q.eq("channel_id", channel_id)
     ids = [r["id"] for r in (q.execute().data or [])]
@@ -119,22 +122,22 @@ def upload_clip(clip_id: int):
     clip = sb.table("shorts_clips").select("*").eq("id", clip_id).single().execute().data
     if not clip:
         raise HTTPException(404, "Clip not found")
-    if clip["upload_status"] not in ("PENDING", "FAILED"):
+    if clip["upload_status"] not in (CLIP_PENDING, CLIP_FAILED):
         raise HTTPException(409, f"Clip is {clip['upload_status']}, not uploadable")
     job = sb.table("shorts_jobs").select("channel_id").eq("id", clip["job_id"]).single().execute().data
     if not job:
         raise HTTPException(404, "Parent job not found")
-    sb.table("shorts_clips").update({"upload_status": "UPLOADING"}).eq("id", clip_id).execute()
+    sb.table("shorts_clips").update({"upload_status": CLIP_UPLOADING}).eq("id", clip_id).execute()
     try:
         video_id = upload_short(job["channel_id"], clip["local_path"],
                                 clip.get("title") or "Short", "", ["shorts"])
     except Exception as exc:
         sb.table("shorts_clips").update(
-            {"upload_status": "FAILED", "upload_error": f"{type(exc).__name__}: {exc}"[:1000]}
+            {"upload_status": CLIP_FAILED, "upload_error": f"{type(exc).__name__}: {exc}"[:1000]}
         ).eq("id", clip_id).execute()
         raise HTTPException(502, f"Upload failed: {exc}")
     sb.table("shorts_clips").update(
-        {"upload_status": "UPLOADED", "yt_video_id": video_id}
+        {"upload_status": CLIP_UPLOADED, "yt_video_id": video_id}
     ).eq("id", clip_id).execute()
     return {"clip_id": clip_id, "yt_video_id": video_id}
 
@@ -170,7 +173,7 @@ def make_short(video_id: str, body: MakeShort | None = None):
         "camera_motion":      body.camera_motion,
         "upload_cap":         None,       # manual button uploads all clips
         "autopilot_generated": False,
-        "status":             "CREATED",
+        "status":             CREATED,
     }).execute().data
     job_id = inserted[0]["id"]
     log.info("Shorts job %d queued for video %s", job_id, video_id)
