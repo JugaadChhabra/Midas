@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.db import supabase
-from app.channel_audits import audits_for_channel
+from app.channel_audits import audits_for_channel, fetch_all
 from app.openrouter import chat_json, chat_text
 from app.youtube_client import youtube_for_channel, yt_search_videos
 from app.audits import audit_video
@@ -28,8 +28,9 @@ def _build_perf_report(channel_id: str) -> dict | None:
 
     Returns None if fewer than _MIN_DATA_POINTS audits have velocity data.
     """
-    # Applied audits for this channel (join-scoped — no 1000-row truncation).
-    audits = (
+    # All applied audits for this channel (join-scoped, fully paged past the
+    # 1000-row cap — a perf report must see every applied video).
+    audits = fetch_all(
         audits_for_channel(
             channel_id,
             "id,video_id,applied_at,suggested_title,title_before,"
@@ -38,8 +39,7 @@ def _build_perf_report(channel_id: str) -> dict | None:
             "view_count_at_apply,ai_reasoning",
         )
         .eq("status", "applied")
-        .execute()
-    ).data or []
+    )
 
     if not audits:
         return None
@@ -47,13 +47,17 @@ def _build_perf_report(channel_id: str) -> dict | None:
     # Only the applied videos need view/publish data — derive ids from the audits.
     video_ids = list({a["video_id"] for a in audits})
 
-    vid_rows = (
-        supabase().table("videos")
-        .select("id,view_count,published_at")
-        .in_("id", video_ids)
-        .execute()
-    ).data or []
-    videos_by_id = {v["id"]: v for v in vid_rows}
+    # Chunk the id list: a large channel yields >1000 applied videos, which would
+    # both cap the response at 1000 rows and blow the URL length in one `.in_()`.
+    videos_by_id: dict[str, dict] = {}
+    for i in range(0, len(video_ids), 500):
+        for v in (
+            supabase().table("videos")
+            .select("id,view_count,published_at")
+            .in_("id", video_ids[i:i + 500])
+            .execute().data or []
+        ):
+            videos_by_id[v["id"]] = v
 
     now = datetime.now(timezone.utc)
     enriched = []

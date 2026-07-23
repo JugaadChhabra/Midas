@@ -35,3 +35,23 @@ def audits_for_channel(channel_id: str, columns: str, video_columns: str = "chan
         .select(f"{columns},videos!inner({video_columns})")
         .eq("videos.channel_id", channel_id)
     )
+
+
+def fetch_all(query, page_size: int = 1000) -> list:
+    """Execute a postgrest query paging past Supabase's server-side row cap.
+
+    Supabase caps any single response at ~1000 rows regardless of the requested
+    range, so a plain `.execute()` on a channel with >1000 matching audits
+    silently truncates. Callers that need EVERY matching row (e.g. latest-audit-
+    per-video dedup, or all applied audits for a perf report) must page. Bounded
+    reads (`.limit(n)`) don't need this.
+    """
+    rows: list = []
+    offset = 0
+    while True:
+        chunk = query.range(offset, offset + page_size - 1).execute().data or []
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            break
+        offset += page_size
+    return rows

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import supabase
-from app.channel_audits import audits_for_channel
+from app.channel_audits import audits_for_channel, fetch_all
 from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
@@ -474,7 +474,8 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
     )
     if body and body.video_ids:
         q = q.in_("video_id", list(body.video_ids))
-    audits = q.order("created_at", desc=True).execute().data or []
+    # Page past the 1000-row cap: we need EVERY audit to dedup latest-per-video.
+    audits = fetch_all(q.order("created_at", desc=True))
     seen: set[str] = set()
     pending: list[dict] = []
     for a in audits:
@@ -547,12 +548,12 @@ def reaudit_quarantined(channel_id: str):
     Creates a fresh pending audit row for each, replacing the quarantined one
     in the UI once the new audit is processed.
     """
-    # Latest audit per video for this channel (join-scoped — no truncation).
-    audits = (
+    # Latest audit per video for this channel (join-scoped, fully paged —
+    # need every audit to find each video's latest status).
+    audits = fetch_all(
         audits_for_channel(channel_id, "id,video_id,status,created_at")
         .order("created_at", desc=True)
-        .execute()
-    ).data or []
+    )
 
     # Latest audit per video
     latest: dict[str, dict] = {}
