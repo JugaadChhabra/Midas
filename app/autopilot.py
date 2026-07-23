@@ -277,87 +277,104 @@ def _touch_tick(channel_id: str):
     }).eq("id", channel_id).execute()
 
 
+def _record_failure(channel_id: str) -> None:
+    """Bump the channel's consecutive-failure counter and pause it once it hits the
+    limit. The pause-on-repeated-failures rule, in one place (was inline ×4)."""
+    _failure_counts[channel_id] += 1
+    if _failure_counts[channel_id] >= 3:
+        _pause(channel_id, "repeated_failures")
+
+
+def _quota_dormant() -> bool:
+    """True while YouTube's daily quota is known-exhausted (autopilot idles). Clears
+    the window and returns False once it has passed."""
+    global _yt_quota_exhausted_until
+    if _yt_quota_exhausted_until is None:
+        return False
+    if datetime.now(timezone.utc) < _yt_quota_exhausted_until:
+        log.info(
+            "Autopilot dormant: YouTube quota exhausted until %s",
+            _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
+        )
+        return True
+    _yt_quota_exhausted_until = None
+    log.info("YouTube quota window reset; resuming autopilot")
+    return False
+
+
+def _pick_next_channel() -> dict | None:
+    """The autopilot-enabled, non-paused channel that has waited longest since its
+    last tick (round-robin; never-ticked first). None if none are eligible."""
+    channels = (
+        supabase().table("channels")
+        .select("*")
+        .or_("autopilot_enabled.eq.true,autopilot_shorts_enabled.eq.true")
+        .is_("autopilot_paused_reason", "null")
+        .execute()
+    ).data or []
+    if not channels:
+        return None
+    # null last_tick_at first (never ticked → highest priority), then oldest tick
+    channels.sort(key=lambda c: (c.get("autopilot_last_tick_at") or ""))
+    return channels[0]
+
+
+def _resync_if_stale(ch: dict) -> bool:
+    """Resync the channel if its data is stale (>6h). Returns True if the tick should
+    proceed, False if it should stop (token expired, or sync failed)."""
+    channel_id = ch["id"]
+    last_synced = ch.get("last_synced_at")
+    needs_sync = True
+    if last_synced:
+        try:
+            dt = datetime.fromisoformat(last_synced.replace("Z", "+00:00"))
+            needs_sync = (datetime.now(timezone.utc) - dt) > timedelta(hours=6)
+        except ValueError:
+            pass
+    if not needs_sync:
+        return True
+    try:
+        if _needs_full_sync(ch):
+            # Full pass every FULL_SYNC_INTERVAL: rebuilds every snippet so edits to
+            # old titles/tags/privacy are picked up, and refreshes stats in the same
+            # call (no separate refresh_stats needed).
+            sync_channel(channel_id, full=True)
+        else:
+            # Incremental: only discovers genuinely new uploads (cheap). It no longer
+            # re-lists stored videos, so refresh their counts + privacy_status here to
+            # catch view drift and privacy flips between full passes.
+            sync_channel(channel_id)
+            refresh_stats(channel_id)
+        return True
+    except TokenExpiredError:
+        log.warning("OAuth token expired or revoked for %s during sync; pausing", channel_id)
+        _pause(channel_id, "token_expired")
+        return False
+    except Exception as e:
+        log.exception("Sync failed for %s: %s", channel_id, e)
+        _record_failure(channel_id)
+        _touch_tick(channel_id)
+        return False
+
+
 def tick():
-    """One pass of the autopilot loop. Processes at most one video and returns."""
+    """One pass of the autopilot loop. Processes at most one video and returns.
+
+    Thin orchestrator: quota gate → pick channel → resync → shorts → (audit path:
+    cap → pick video → audit → validate → apply). The steps live in helpers above
+    and below; the failure-accounting rule is _record_failure()."""
     global _yt_quota_exhausted_until
     try:
-        # 1. Quota gate — internal estimate (disabled: letting YouTube's quotaExceeded be the signal)
-        # if not quota.can_afford(APPLY_COST):
-        #     log.info("Autopilot deferred: quota remaining %d < %d", quota.units_remaining(), APPLY_COST)
-        #     return
-
-        # 1b. YouTube-confirmed quota exhaustion gate
-        if _yt_quota_exhausted_until is not None:
-            now = datetime.now(timezone.utc)
-            if now < _yt_quota_exhausted_until:
-                log.info(
-                    "Autopilot dormant: YouTube quota exhausted until %s",
-                    _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
-                )
-                return
-            _yt_quota_exhausted_until = None
-            log.info("YouTube quota window reset; resuming autopilot")
-
-        # 2. Pick next channel (round-robin by last_tick_at; null treated as oldest)
-        channels = (
-            supabase().table("channels")
-            .select("*")
-            .or_("autopilot_enabled.eq.true,autopilot_shorts_enabled.eq.true")
-            .is_("autopilot_paused_reason", "null")
-            .execute()
-        ).data or []
-        if not channels:
+        if _quota_dormant():
             return
-        # Sort: null last_tick_at first (never ticked → highest priority), then oldest tick
-        channels.sort(key=lambda c: (c.get("autopilot_last_tick_at") or ""))
-        ch = channels[0]
+
+        ch = _pick_next_channel()
+        if not ch:
+            return
         channel_id = ch["id"]
 
-        # 3. Resync if stale (>6h)
-        last_synced = ch.get("last_synced_at")
-        needs_sync = True
-        if last_synced:
-            try:
-                dt = datetime.fromisoformat(last_synced.replace("Z", "+00:00"))
-                needs_sync = (datetime.now(timezone.utc) - dt) > timedelta(hours=6)
-            except ValueError:
-                pass
-
-        if needs_sync:
-            # Estimate sync cost: 1 (channels.list) + ceil(known/50) for playlist pages + ceil(known/50) for video.list
-            # known_count = (
-            #     supabase().table("videos").select("id", count="exact").eq("channel_id", channel_id).execute()
-            # ).count or 0
-            # estimated = 1 + 2 * max(1, math.ceil((known_count or 50) / 50))
-            # if not quota.can_afford(estimated + APPLY_COST):
-            #     log.info("Autopilot skipping sync for %s: would not leave room for an apply", channel_id)
-            #     _touch_tick(channel_id)
-            #     return
-            try:
-                if _needs_full_sync(ch):
-                    # Full pass every FULL_SYNC_INTERVAL: rebuilds every snippet so
-                    # edits to old titles/tags/privacy are picked up, and refreshes
-                    # stats in the same call (no separate refresh_stats needed).
-                    sync_channel(channel_id, full=True)
-                else:
-                    # Incremental: only discovers genuinely new uploads (cheap).
-                    sync_channel(channel_id)
-                    # Incremental sync no longer re-lists already-stored videos, so
-                    # refresh their counts + privacy_status here (statistics+status,
-                    # 1 unit per 50). Catches view drift and privacy flips between
-                    # full passes.
-                    refresh_stats(channel_id)
-            except TokenExpiredError:
-                log.warning("OAuth token expired or revoked for %s during sync; pausing", channel_id)
-                _pause(channel_id, "token_expired")
-                return
-            except Exception as e:
-                log.exception("Sync failed for %s: %s", channel_id, e)
-                _failure_counts[channel_id] += 1
-                if _failure_counts[channel_id] >= 3:
-                    _pause(channel_id, "repeated_failures")
-                _touch_tick(channel_id)
-                return
+        if not _resync_if_stale(ch):
+            return
 
         # Shorts autopilot — independent of the metadata-audit path. Enqueues at
         # most one cut per tick, gated by active_job_count vs the concurrency cap.
@@ -423,9 +440,7 @@ def tick():
             return
         except Exception as e:
             log.exception("Audit failed for %s: %s", video["id"], e)
-            _failure_counts[channel_id] += 1
-            if _failure_counts[channel_id] >= 3:
-                _pause(channel_id, "repeated_failures")
+            _record_failure(channel_id)
             _touch_tick(channel_id)
             return
 
@@ -490,14 +505,10 @@ def tick():
                 log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
                 _pause(channel_id, "token_expired")
             else:
-                _failure_counts[channel_id] += 1
-                if _failure_counts[channel_id] >= 3:
-                    _pause(channel_id, "repeated_failures")
+                _record_failure(channel_id)
         except Exception as e:
             log.exception("Apply failed for %s: %s", audit_row["id"], e)
-            _failure_counts[channel_id] += 1
-            if _failure_counts[channel_id] >= 3:
-                _pause(channel_id, "repeated_failures")
+            _record_failure(channel_id)
 
         _touch_tick(channel_id)
 
