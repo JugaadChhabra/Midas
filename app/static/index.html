@@ -276,8 +276,6 @@ function renderPipeline(p) {
 function renderKpis(k) {
   $('kpis').innerHTML = `
     <div class="kpi"><div class="v">${k.channels}</div><div class="l">Channels</div></div>
-    <div class="kpi"><div class="v">${fmt(k.shorts_cut_total)}</div><div class="l">Shorts cut</div></div>
-    <div class="kpi"><div class="v">${fmt(k.shorts_uploaded_total)}</div><div class="l">Shorts uploaded</div></div>
     <div class="kpi"><div class="v">${fmt(k.applied_7d_total)}</div><div class="l">Applied · 7d</div></div>
     <div class="kpi"><div class="v ${k.delta_views_7d_total >= 0 ? 'pos':'neg'}">${signed(k.delta_views_7d_total)}</div><div class="l">Δ views · 7d (applied)</div></div>
   `;
