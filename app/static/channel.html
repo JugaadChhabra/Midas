@@ -211,6 +211,20 @@
         </label>
       </div>
 
+      <h4 style="margin:1.1rem 0 .25rem; padding-top:1rem; border-top:1px solid #8883">Shorts (NAS)</h4>
+      <p class="muted" style="margin-top:0">Cuts every video in this channel's NAS language folder into Shorts, saved back to the NAS. No upload.</p>
+      <div class="row" style="gap:.6rem; align-items:center; flex-wrap:wrap">
+        <label style="display:flex; flex-direction:column; gap:.2rem">
+          <span class="muted" style="font-size:.8rem">Language folder</span>
+          <select id="nas-folder"><option value="">— none —</option></select>
+        </label>
+        <span class="muted" id="nas-status" style="font-size:.85rem; align-self:flex-end; padding-bottom:.4rem"></span>
+      </div>
+      <label style="display:block; margin-top:.6rem"><input type="checkbox" id="nas-autocut" /> Auto-cut this folder</label>
+      <div style="margin-top:.6rem; display:flex; align-items:center; gap:.6rem">
+        <button class="btn" id="nas-cut-now">Cut now</button>
+        <span class="muted" id="nas-cut-msg" style="font-size:.8rem"></span>
+      </div>
       <div style="margin-top:1.1rem; display:flex; align-items:center; gap:.6rem">
         <button id="ap-save">Save autopilot settings</button>
         <span class="muted" style="font-size:.8rem">Saves metadata autopilot settings.</span>
@@ -486,7 +500,7 @@ function statusPill(s) {
 
 // ── Channel meta ──────────────────────────────────────────────────────
 let channelMeta = {};
-function applyChannel(all) {
+async function applyChannel(all) {
   const c = all.find(x => x.id === channelId) || {};
   channelMeta = c;
   $('title').textContent = c.name || channelId;
@@ -500,6 +514,8 @@ function applyChannel(all) {
   $('perf-link').onclick = (e) => { e.preventDefault(); switchTab('performance'); };
   // Surface the re-consent banner whenever the analytics scope hasn't been granted.
   $('reconsent-banner').hidden = !!c.analytics_authorized;
+  await nasLoadLanguages();
+  nasPopulate(c);
 }
 // Cached-first: paint the channel header/settings from the last /auth/channels
 // response instantly, then revalidate. Returns the fresh promise so callers can
@@ -619,6 +635,77 @@ $('ap-save').onclick = async () => {
     SWR.invalidate('/auth/channels'); // drop stale channel meta so the form can't repaint old caps
     await Promise.all([loadChannel(), loadAutopilotLog()]);
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
+};
+
+// ── Shorts (NAS) card ─────────────────────────────────────────────────
+let nasLangs = [];   // [{language, uncut}] from GET /shorts/languages
+function nasPopulate(c) {
+  $('nas-autocut').checked = !!c.autopilot_shorts_enabled;
+  const sel = $('nas-folder');
+  const cur = c.nas_folder || '';
+  sel.innerHTML = '<option value="">— none —</option>' +
+    nasLangs.map(l => `<option value="${escapeHtml(l.language)}"${l.language === cur ? ' selected' : ''}>${escapeHtml(l.language)}</option>`).join('');
+  nasRefreshStatus();
+}
+async function nasLoadLanguages() {
+  try { nasLangs = await fetch('/shorts/languages').then(r => r.json()); }
+  catch { nasLangs = []; }
+}
+async function nasRefreshStatus() {
+  const folder = $('nas-folder').value;
+  const lang = nasLangs.find(l => l.language === folder);
+  let cutting = 0;
+  try {
+    const jobs = await fetch(`/shorts/jobs?channel_id=${encodeURIComponent(channelId)}`).then(r => r.json());
+    const WORKING = ['CREATED','DOWNLOADING','ANALYSING','RENDERING','UPLOADING'];
+    cutting = jobs.filter(j => WORKING.includes(j.status)).length;
+  } catch {}
+  $('nas-status').textContent = folder
+    ? `${lang ? lang.uncut : 0} uncut · ${cutting} cutting`
+    : '';
+  $('nas-cut-now').disabled = !folder;
+}
+$('nas-folder').onchange = async () => {
+  const folder = $('nas-folder').value;
+  try {
+    const r = await fetch(`/auth/channels/${channelId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ nas_folder: folder }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Folder saved.', 'ok');
+    SWR.invalidate('/auth/channels');
+    nasRefreshStatus();
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
+};
+$('nas-autocut').onchange = async () => {
+  try {
+    const r = await fetch(`/auth/channels/${channelId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ autopilot_shorts_enabled: $('nas-autocut').checked }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Auto-cut ' + ($('nas-autocut').checked ? 'on' : 'off') + '.', 'ok');
+    SWR.invalidate('/auth/channels');
+  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); $('nas-autocut').checked = !$('nas-autocut').checked; }
+};
+$('nas-cut-now').onclick = async () => {
+  const folder = $('nas-folder').value;
+  if (!folder) return;
+  const btn = $('nas-cut-now'); btn.disabled = true;
+  $('nas-cut-msg').textContent = 'enqueuing…';
+  try {
+    const r = await fetch('/shorts/cut', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ language: folder }),
+    });
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.detail || 'failed');
+    $('nas-cut-msg').textContent = `queued ${out.enqueued} job(s)`;
+    toast(`Queued ${out.enqueued} cut job(s) for ${folder}.`, 'ok');
+    nasRefreshStatus();
+  } catch (e) { $('nas-cut-msg').textContent = ''; toast('Cut failed: ' + escapeHtml(String(e)), 'err'); }
+  finally { btn.disabled = false; }
 };
 
 $('lang-save').onclick = async () => {
