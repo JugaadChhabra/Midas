@@ -362,10 +362,13 @@ def test_check_auto_revert_triggers_on_regression():
 
 def test_cohort_median_lift_returns_none_insufficient():
     with patch("app.reflection.supabase") as mock_sb:
+        # fetch_all pages via .range().execute(); the query has two .eq() filters
+        # (prompt_version_id, status). Return no rows -> insufficient -> None.
         mock_sb.return_value.table.return_value.select.return_value \
-            .eq.return_value.execute.return_value.data = []
+            .eq.return_value.eq.return_value.range.return_value \
+            .execute.return_value.data = []
         from app.reflection import _cohort_median_lift
-        result = _cohort_median_lift(99, [])
+        result = _cohort_median_lift(99)
     assert result is None
 
 
