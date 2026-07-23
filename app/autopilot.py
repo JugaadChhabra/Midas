@@ -240,35 +240,33 @@ def _shorts_made_today(channel_id: str) -> int:
 
 
 def _run_shorts_action(ch: dict) -> None:
-    """Enqueue at most one autopilot shorts cut for this channel.
+    """Enqueue NAS shorts cuts for this channel's language folder.
 
-    No-op when a cut is already running (one-at-a-time), when today's autopilot
-    shorts count is at/over the channel cap, or when there is no eligible video.
+    No-op unless the channel has a nas_folder set. The shorts dispatcher
+    (throttled by SHORTS_MAX_CONCURRENT_JOBS) drains the queue; enqueue's own
+    in-flight dedup makes re-ticks idempotent, so we enqueue every uncut file
+    and let the cap pace the actual cutting.
     """
-    channel_id = ch["id"]
+    folder = ch.get("nas_folder")
+    if not folder:
+        return
     if active_job_count() >= settings.SHORTS_MAX_CONCURRENT_JOBS:
-        return  # queue + running already at capacity; try again next tick
-    cap = ch.get("autopilot_shorts_daily_cap") or 1
-    if _shorts_made_today(channel_id) >= cap:
+        return  # queue already full; a later tick tops it up
+    # Lazy import: keeps the NAS/cutter dependency out of module import time.
+    from app.shorts.nas_source import enqueue_language_jobs
+    try:
+        n = enqueue_language_jobs(
+            folder, channel_id=ch["id"], autopilot=True,
+            cut_mode=ch.get("shorts_cut_mode") or "highlights",
+            camera_motion=ch.get("shorts_camera_motion") or "calm",
+        )
+    except ValueError:
+        log.warning("Autopilot shorts: channel %s has unknown nas_folder %r",
+                    ch["id"], folder)
         return
-    video = _next_uncut_video_for_channel(channel_id)
-    if not video:
-        return
-    upload_cap = ch.get("autopilot_shorts_upload_cap") or 2
-    inserted = (
-        supabase().table("shorts_jobs").insert({
-            "channel_id":          channel_id,
-            "source_video_id":     video["id"],
-            "source_url":          f"https://www.youtube.com/watch?v={video['id']}",
-            "cut_mode":            ch.get("shorts_cut_mode") or "highlights",
-            "camera_motion":       ch.get("shorts_camera_motion") or "calm",
-            "upload_cap":          upload_cap,
-            "autopilot_generated": True,
-            "status":              "CREATED",
-        }).execute()
-    ).data
-    job_id = inserted[0]["id"]
-    log.info("Autopilot shorts: queued job %d for video %s (channel %s)", job_id, video["id"], channel_id)
+    if n:
+        log.info("Autopilot shorts: enqueued %d NAS job(s) for %s (folder %s)",
+                 n, ch["id"], folder)
 
 
 def _pause(channel_id: str, reason: str):

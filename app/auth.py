@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.db import supabase
+from app.shorts.nas_source import list_source_languages
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -111,7 +112,7 @@ def list_channels():
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
         "sync_shorts,analytics_authorized,playlist_health_enabled,"
         "autopilot_shorts_enabled,autopilot_shorts_daily_cap,autopilot_shorts_upload_cap,"
-        "shorts_cut_mode,shorts_camera_motion"
+        "shorts_cut_mode,shorts_camera_motion,nas_folder"
     ).execute()
     return res.data
 
@@ -127,6 +128,7 @@ class ChannelSettings(BaseModel):
     autopilot_shorts_upload_cap: int | None = None
     shorts_cut_mode: str | None = None
     shorts_camera_motion: str | None = None
+    nas_folder: str | None = None
 
 
 @router.patch("/channels/{channel_id}")
@@ -155,6 +157,11 @@ def update_channel(channel_id: str, body: ChannelSettings):
         patch["shorts_cut_mode"] = body.shorts_cut_mode
     if body.shorts_camera_motion in ("locked", "calm", "follow"):
         patch["shorts_camera_motion"] = body.shorts_camera_motion
+    if body.nas_folder is not None:
+        folder = body.nas_folder.strip().upper()
+        if folder and folder not in list_source_languages():
+            raise HTTPException(400, f"Unknown NAS folder: {folder}")
+        patch["nas_folder"] = folder or None
     if not patch:
         return {"ok": True, "noop": True}
     supabase().table("channels").update(patch).eq("id", channel_id).execute()
