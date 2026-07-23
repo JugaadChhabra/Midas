@@ -20,29 +20,53 @@ def _sb(recorder):
 
 def test_patch_persists_shorts_autopilot_settings():
     rec = []
-    body = {"autopilot_shorts_enabled": True, "autopilot_shorts_daily_cap": 3,
-            "autopilot_shorts_upload_cap": 2, "shorts_cut_mode": "coverage",
+    body = {"autopilot_shorts_enabled": True, "shorts_cut_mode": "coverage",
             "shorts_camera_motion": "follow"}
     with patch("app.auth.supabase", return_value=_sb(rec)):
         r = _client().patch("/auth/channels/UC1", json=body)
     assert r.status_code == 200
     p = rec[0]
     assert p["autopilot_shorts_enabled"] is True
-    assert p["autopilot_shorts_daily_cap"] == 3
-    assert p["autopilot_shorts_upload_cap"] == 2
     assert p["shorts_cut_mode"] == "coverage"
     assert p["shorts_camera_motion"] == "follow"
 
 
-def test_patch_clamps_and_rejects_bad_enums():
+def test_patch_rejects_bad_enums():
     rec = []
-    body = {"autopilot_shorts_daily_cap": 999, "autopilot_shorts_upload_cap": 0,
+    # A valid field so the patch is non-empty (else the endpoint no-ops without
+    # touching the DB); the bogus enums must be dropped from what gets written.
+    body = {"autopilot_shorts_enabled": True,
             "shorts_cut_mode": "bogus", "shorts_camera_motion": "bogus"}
     with patch("app.auth.supabase", return_value=_sb(rec)):
         r = _client().patch("/auth/channels/UC1", json=body)
     assert r.status_code == 200
     p = rec[0]
-    assert p["autopilot_shorts_daily_cap"] == 20      # clamped to max
-    assert p["autopilot_shorts_upload_cap"] == 1       # clamped to min
+    assert p["autopilot_shorts_enabled"] is True
     assert "shorts_cut_mode" not in p                  # invalid enum ignored
     assert "shorts_camera_motion" not in p
+
+
+def test_patch_sets_valid_nas_folder():
+    rec = []
+    with patch("app.auth.supabase", return_value=_sb(rec)), \
+         patch("app.auth.list_source_languages", return_value=["HINDI", "TAMIL"]):
+        r = _client().patch("/auth/channels/UC1", json={"nas_folder": "hindi"})
+    assert r.status_code == 200
+    assert rec[0]["nas_folder"] == "HINDI"          # uppercased
+
+
+def test_patch_rejects_unknown_nas_folder():
+    rec = []
+    with patch("app.auth.supabase", return_value=_sb(rec)), \
+         patch("app.auth.list_source_languages", return_value=["HINDI"]):
+        r = _client().patch("/auth/channels/UC1", json={"nas_folder": "KLINGON"})
+    assert r.status_code == 400
+
+
+def test_patch_clears_nas_folder_on_empty():
+    rec = []
+    with patch("app.auth.supabase", return_value=_sb(rec)), \
+         patch("app.auth.list_source_languages", return_value=["HINDI"]):
+        r = _client().patch("/auth/channels/UC1", json={"nas_folder": ""})
+    assert r.status_code == 200
+    assert rec[0]["nas_folder"] is None

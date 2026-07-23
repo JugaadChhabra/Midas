@@ -94,65 +94,36 @@ def test_next_uncut_skips_video_with_done_job():
     assert v is None
 
 
-def test_next_uncut_applies_duration_upper_bound():
-    """The autopicker query must filter duration_seconds below the 4-min cap so
-    compilations are never auto-cut."""
+def test_run_shorts_action_enqueues_from_nas_folder():
     import app.autopilot as ap
-    assert ap.MAX_SHORTS_SOURCE_SECONDS == 240
-    sb = MagicMock()
-    videos_tbl = MagicMock()
-    q = videos_tbl.select.return_value.eq.return_value.eq.return_value  # after the two .eq()
-    q.lt.return_value.order.return_value.execute.return_value.data = []
-    sb.table.side_effect = lambda name: videos_tbl if name == "videos" else MagicMock()
-    with patch("app.autopilot.supabase", return_value=sb):
-        ap._next_uncut_video_for_channel("UC1")
-    q.lt.assert_called_once_with("duration_seconds", 240)
+    ch = {"id": "UC1", "nas_folder": "HINDI", "shorts_cut_mode": "highlights",
+          "shorts_camera_motion": "calm"}
+    with patch.object(ap, "active_job_count", return_value=0), \
+         patch("app.shorts.nas_source.enqueue_language_jobs", return_value=3) as enq:
+        ap._run_shorts_action(ch)
+    enq.assert_called_once_with("HINDI", channel_id="UC1", autopilot=True,
+                                cut_mode="highlights", camera_motion="calm")
 
 
-def test_run_shorts_action_enqueues_when_eligible():
+def test_run_shorts_action_noop_without_folder():
     import app.autopilot as ap
-    rec = []
-    long_videos = [{"id": "vGood", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
-    sj = {"by_source": [], "today": []}
-    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, rec)), \
-         patch("app.autopilot.active_job_count", return_value=0):
-        ap._run_shorts_action(CH)
-    assert len(rec) == 1
-    job = rec[0]
-    assert job["source_video_id"] == "vGood"
-    assert job["autopilot_generated"] is True
-    assert job["upload_cap"] == 2
-    assert job["cut_mode"] == "highlights" and job["camera_motion"] == "calm"
-    assert job["status"] == "CREATED"
+    with patch("app.shorts.nas_source.enqueue_language_jobs") as enq:
+        ap._run_shorts_action({"id": "UC1", "nas_folder": None})
+    enq.assert_not_called()
 
 
 def test_run_shorts_action_noop_when_at_capacity():
     import app.autopilot as ap
-    rec = []
-    with patch("app.autopilot.supabase", return_value=_sb([], {"by_source": [], "today": []}, rec)), \
-         patch("app.autopilot.active_job_count", return_value=2), \
-         patch("app.autopilot.settings") as st:
-        st.SHORTS_MAX_CONCURRENT_JOBS = 2
-        ap._run_shorts_action(CH)
-    assert rec == []
+    ch = {"id": "UC1", "nas_folder": "HINDI"}
+    with patch.object(ap, "active_job_count", return_value=99), \
+         patch("app.shorts.nas_source.enqueue_language_jobs") as enq:
+        ap._run_shorts_action(ch)
+    enq.assert_not_called()
 
 
-def test_run_shorts_action_noop_over_daily_cap():
+def test_run_shorts_action_swallows_unknown_folder():
     import app.autopilot as ap
-    rec = []
-    long_videos = [{"id": "vGood", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
-    sj = {"by_source": [], "today": [{"id": 1}]}   # already 1 today, cap is 1
-    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, rec)), \
-         patch("app.autopilot.active_job_count", return_value=0):
-        ap._run_shorts_action(CH)
-    assert rec == []
-
-
-def test_run_shorts_action_noop_when_no_eligible_video():
-    import app.autopilot as ap
-    rec = []
-    sj = {"by_source": [], "today": []}
-    with patch("app.autopilot.supabase", return_value=_sb([], sj, rec)), \
-         patch("app.autopilot.active_job_count", return_value=0):
-        ap._run_shorts_action(CH)
-    assert rec == []
+    ch = {"id": "UC1", "nas_folder": "KLINGON"}
+    with patch.object(ap, "active_job_count", return_value=0), \
+         patch("app.shorts.nas_source.enqueue_language_jobs", side_effect=ValueError("nope")):
+        ap._run_shorts_action(ch)   # must not raise
