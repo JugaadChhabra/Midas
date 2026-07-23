@@ -4,101 +4,81 @@
 <meta charset="utf-8" />
 <title>Midas · Channel</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         max-width: 1180px; margin: 1.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
-  h1 { margin-bottom: .25rem; }
-  .sub { opacity: .7; margin-top: 0; }
-  /* Top nav */
-  .nav { display:flex; align-items:center; gap:.4rem; padding:.5rem 0 .9rem; margin-bottom:.5rem; border-bottom:1px solid #8884; }
-  .nav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:inherit; margin-right:.6rem; }
-  .nav a.navlink { text-decoration:none; color:inherit; padding:.3rem .75rem; border-radius:999px; font-size:.9rem; opacity:.7; }
-  .nav a.navlink:hover { background:#8882; opacity:1; }
-  .nav a.navlink.active { background:#6af2; color:#6af; opacity:1; font-weight:600; }
-  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
-  button, .btn { font: inherit; padding: .5rem .9rem; border-radius: 8px;
-                 border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
-  button:hover, .btn:hover { background: #8882; }
-  button:disabled { opacity: .5; cursor: progress; }
+  /* Page layout + widgets unique to the Channel page. Shared tokens and
+     components live in /static/theme.css; every rule here consumes those tokens
+     (no colour literals). The nav/btn/table/kpi overrides restore this page's
+     historical metrics (they pre-date the shared layer — converge in the redo). */
+  body { max-width: 1180px; margin: 1.5rem auto; padding: 0 1.25rem; }
+
+  .nav { margin-bottom:.5rem; }
+  button, .btn { padding:.5rem .9rem; }
+  button:disabled { opacity:.5; cursor:progress; }
   textarea, input[type=text], input[type=search], input[type=number], select {
-    font: inherit; padding: .45rem .55rem; border-radius: 8px;
-    border: 1px solid #8886; background: transparent; color: inherit; box-sizing: border-box;
+    font:inherit; padding:.45rem .55rem; border-radius:var(--radius-md);
+    border:1px solid var(--border-strong); background:transparent; color:inherit; box-sizing:border-box;
   }
-  textarea { width: 100%; padding: .75rem; }
-  table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
-  th, td { text-align: left; padding: .5rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
-  th { font-weight: 600; cursor: default; }
-  th.sortable { cursor: pointer; user-select: none; }
-  th.sortable:hover { color: #6af; }
-  code, pre { background: #8882; padding: 0 .3rem; border-radius: 4px; }
-  pre { padding: .75rem; overflow:auto; white-space: pre-wrap; }
-  .row { display:flex; gap:.5rem; flex-wrap: wrap; align-items:center; }
-  .pill { display:inline-block; padding: .15rem .55rem; border-radius: 999px; background:#8882; font-size:.78rem; }
+  textarea { width:100%; padding:.75rem; }
+  th, td { padding:.5rem .35rem; vertical-align:top; }
+  th { cursor:default; }
+  th.sortable { cursor:pointer; user-select:none; }
+  th.sortable:hover { color:var(--color-accent); }
+  pre { background:var(--surface-tint); padding:.75rem; border-radius:var(--radius-sm); overflow:auto; white-space:pre-wrap; }
+  .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+
   /* Shorts job/clip status pills */
-  .spill { display:inline-block; padding:.13rem .55rem; border-radius:999px; font-size:.76rem; font-weight:600; white-space:nowrap; }
-  .spill.work { background:#28a2; color:#6af; }
-  .spill.up   { background:#d802; color:#d80; }
-  .spill.done { background:#2a72; color:#2a7; }
-  .spill.fail { background:#c332; color:#c33; }
-  .spill.pend { background:#8882; opacity:.9; }
-  .shorts-src { color:#6af; text-decoration:none; font-size:.86rem; }
+  .spill { display:inline-block; padding:.13rem .55rem; border-radius:var(--radius-pill); font-size:.76rem; font-weight:600; white-space:nowrap; }
+  .spill.work { background:var(--color-pending-bg); color:var(--color-accent); }
+  .spill.up   { background:var(--color-warn-bg); color:var(--color-warn); }
+  .spill.done { background:var(--color-ok-bg); color:var(--color-ok); }
+  .spill.fail { background:var(--color-err-bg); color:var(--color-err); }
+  .spill.pend { background:var(--surface-tint); opacity:.9; }
+  .shorts-src { color:var(--color-accent); text-decoration:none; font-size:.86rem; }
   .shorts-src:hover { text-decoration:underline; }
   .shorts-src .vid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .shorts-reason { margin-top:.35rem; font-size:.8rem; }
-  .shorts-reason > summary { color:#c33; cursor:pointer; list-style:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .shorts-reason > summary { color:var(--color-err); cursor:pointer; list-style:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .shorts-reason > summary::-webkit-details-marker { display:none; }
   .shorts-reason > summary::before { content:"▸ "; opacity:.7; }
   .shorts-reason[open] > summary { white-space:normal; }
   .shorts-reason[open] > summary::before { content:"▾ "; }
-  .shorts-reason pre { margin:.35rem 0 0; font-size:.78rem; white-space:pre-wrap; word-break:break-word; color:#c33; }
+  .shorts-reason pre { margin:.35rem 0 0; font-size:.78rem; white-space:pre-wrap; word-break:break-word; color:var(--color-err); }
   .clip-line { display:flex; align-items:center; gap:.5rem; font-size:.86rem; padding:.15rem 0; }
   .clip-line .rank { opacity:.5; min-width:1.6rem; font-variant-numeric:tabular-nums; }
   .clip-line .ctitle { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .sev-high { background: #c33; color: white; }
-  .sev-medium { background: #d80; color: white; }
-  .sev-low { background: #888; color: white; }
-  .audit { margin-top: .75rem; border-left: 3px solid #6af; padding-left: .9rem; }
-  .prog { width: 160px; height: 6px; background: #8882; border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
-  .prog-bar { height: 100%; background: #6af; transition: width .5s; }
-  .muted { opacity: .65; }
-  .hidden { display: none; }
-  details > summary { cursor: pointer; }
+  .sev-high { background:var(--color-err); color:white; }
+  .sev-medium { background:var(--color-warn); color:white; }
+  .sev-low { background:var(--color-neutral); color:white; }
+  .audit { margin-top:.75rem; border-left:3px solid var(--color-accent); padding-left:.9rem; }
+  .prog { width:160px; height:6px; background:var(--surface-tint); border-radius:3px; overflow:hidden; margin-bottom:3px; }
+  .prog-bar { height:100%; background:var(--color-accent); transition:width .5s; }
+  .hidden { display:none; }
+  details > summary { cursor:pointer; }
+
   /* Tabs */
-  .tabs { display:flex; gap:.25rem; flex-wrap:wrap; border-bottom: 1px solid #8884; margin: 1rem 0 .5rem; }
-  .tab { padding:.55rem .9rem; border-bottom: 2px solid transparent; cursor:pointer; }
-  .tab.active { border-bottom-color: #6af; font-weight: 600; }
+  .tabs { display:flex; gap:.25rem; flex-wrap:wrap; border-bottom:1px solid var(--border); margin:1rem 0 .5rem; }
+  .tab { padding:.55rem .9rem; border-bottom:2px solid transparent; cursor:pointer; }
+  .tab.active { border-bottom-color:var(--color-accent); font-weight:600; }
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
-  /* KPI grid */
-  .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
-  .kpi { border:1px solid #8884; border-radius:10px; padding:.65rem .8rem; }
-  .kpi .v { font-size:1.25rem; font-weight:700; line-height:1.1; }
-  .kpi .l { font-size:.74rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
+
+  /* KPI grid — metric overrides for this page's historical sizing */
+  .kpi-grid { grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
+  .kpi { padding:.65rem .8rem; }
+  .kpi .v { font-size:1.25rem; }
+  .kpi .l { font-size:.74rem; }
+
   /* Diff highlighting */
-  .diff-add { background: #2a73; padding: 0 .15em; border-radius: 3px; }
-  .diff-del { background: #c333; padding: 0 .15em; border-radius: 3px; text-decoration: line-through; opacity: .8; }
-  /* Toast */
-  #toasts { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; display:flex; flex-direction: column; gap: .5rem; max-width: 360px; }
-  .toast { padding:.65rem .9rem; border-radius: 8px; border:1px solid #8886; background:#fffe; color:#000;
-           box-shadow: 0 4px 14px #0002; animation: tin .25s ease-out; }
-  @media (prefers-color-scheme: dark) { .toast { background:#222; color:#fff; } }
-  .toast.ok { border-color: #2a7; }
-  .toast.err { border-color: #c33; }
-  .toast.warn { border-color: #d80; }
-  @keyframes tin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-  /* In-page confirm dialog (replaces native confirm/alert) */
-  .modal-backdrop { position:fixed; inset:0; background:#0006; display:flex; align-items:center; justify-content:center; z-index:10000; }
-  .modal { background:#fff; color:#000; border-radius:10px; padding:1.1rem 1.25rem; max-width:440px; width:90%; box-shadow:0 10px 40px #0004; }
-  @media (prefers-color-scheme: dark) { .modal { background:#222; color:#fff; } }
-  .modal-msg { line-height:1.5; margin-bottom:1rem; white-space:pre-wrap; }
-  .modal-actions { display:flex; gap:.5rem; justify-content:flex-end; }
-  .pace-bar { display:inline-block; width:120px; height:8px; background:#8882; border-radius:4px; vertical-align:middle; overflow:hidden; }
-  .pace-bar > i { display:block; height:100%; background:#2a7; }
-  .vid-row.selected { background: #6af1; }
-  .filter-bar { display:flex; gap:.5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
+  .diff-add { background:var(--color-ok-border); padding:0 .15em; border-radius:3px; }
+  .diff-del { background:var(--color-err-border); padding:0 .15em; border-radius:3px; text-decoration:line-through; opacity:.8; }
+
+  .pace-bar { display:inline-block; width:120px; height:8px; background:var(--surface-tint); border-radius:var(--radius-sm); vertical-align:middle; overflow:hidden; }
+  .pace-bar > i { display:block; height:100%; background:var(--color-ok); }
+  .vid-row.selected { background:var(--color-accent-faint); }
+  .filter-bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin:.5rem 0; }
   /* The videos table is wide (12 cols); scroll it instead of overflowing the page on narrow screens. */
-  #videos { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #videos { overflow-x:auto; -webkit-overflow-scrolling:touch; }
 </style>
 </head>
 <body>
@@ -111,7 +91,7 @@
   <p class="sub" id="subtitle"></p>
 
   <div id="reconsent-banner" class="card" hidden
-       style="border-color:#d80; background:#d801">
+       style="border-color:var(--color-warn); background:var(--color-warn-faint)">
     <b>Reconnect for analytics.</b>
     <span class="muted">This channel was connected before the analytics scope was added. Outcome measurement (CTR, playlist sessions) is skipped until you re-consent.</span>
     <a class="btn" href="/auth/login" style="margin-left:.5rem">Reconnect Google account →</a>
@@ -211,7 +191,7 @@
         </label>
       </div>
 
-      <h4 style="margin:1.1rem 0 .25rem; padding-top:1rem; border-top:1px solid #8883">Shorts (NAS)</h4>
+      <h4 style="margin:1.1rem 0 .25rem; padding-top:1rem; border-top:1px solid var(--border-soft)">Shorts (NAS)</h4>
       <p class="muted" style="margin-top:0">Cuts every video in this channel's NAS language folder into Shorts, saved back to the NAS. No upload.</p>
       <div class="row" style="gap:.6rem; align-items:center; flex-wrap:wrap">
         <label style="display:flex; flex-direction:column; gap:.2rem">
@@ -374,7 +354,7 @@ function showMissingId(what) {
   if (nav) document.body.appendChild(nav);
   const err = document.createElement('div');
   err.className = 'card';
-  err.innerHTML = `<p style="color:#c33;margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
+  err.innerHTML = `<p style="color:var(--color-err);margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
   document.body.appendChild(err);
 }
 
@@ -474,27 +454,27 @@ if (initialTab) switchTab(initialTab);
 
 // ── Status taxonomy (single source of truth) ───────────────────────────
 const STATE_META = {
-  applied:     { bg:'#2a7', label:'Applied' },
-  pending:     { bg:'#28a', label:'Pending' },
-  quarantined: { bg:'#d80', label:'Bad output' },
-  failed:      { bg:'#c33', label:'Failed' },
-  rejected:    { bg:'#888', label:'Rejected' },
-  reverted:    { bg:'#888', label:'Reverted' },
-  approved:    { bg:'#28a', label:'Approved' },
-  none:        { bg:'#8884', label:'Not audited' },
+  applied:     { bg:'var(--color-ok)', label:'Applied' },
+  pending:     { bg:'var(--color-pending)', label:'Pending' },
+  quarantined: { bg:'var(--color-warn)', label:'Bad output' },
+  failed:      { bg:'var(--color-err)', label:'Failed' },
+  rejected:    { bg:'var(--color-neutral)', label:'Rejected' },
+  reverted:    { bg:'var(--color-neutral)', label:'Reverted' },
+  approved:    { bg:'var(--color-pending)', label:'Approved' },
+  none:        { bg:'var(--border)', label:'Not audited' },
   // shorts job statuses
-  CREATED:     { bg:'#28a', label:'Queued' },
-  DOWNLOADING: { bg:'#28a', label:'Downloading' },
-  ANALYSING:   { bg:'#28a', label:'Analysing' },
-  RENDERING:   { bg:'#28a', label:'Rendering' },
-  UPLOADING:   { bg:'#28a', label:'Uploading' },
-  DONE:        { bg:'#2a7', label:'Shorts done' },
-  FAILED:      { bg:'#c33', label:'Failed' },
-  PENDING:     { bg:'#8884', label:'Pending' },
-  UPLOADED:    { bg:'#2a7', label:'Uploaded' },
+  CREATED:     { bg:'var(--color-pending)', label:'Queued' },
+  DOWNLOADING: { bg:'var(--color-pending)', label:'Downloading' },
+  ANALYSING:   { bg:'var(--color-pending)', label:'Analysing' },
+  RENDERING:   { bg:'var(--color-pending)', label:'Rendering' },
+  UPLOADING:   { bg:'var(--color-pending)', label:'Uploading' },
+  DONE:        { bg:'var(--color-ok)', label:'Shorts done' },
+  FAILED:      { bg:'var(--color-err)', label:'Failed' },
+  PENDING:     { bg:'var(--border)', label:'Pending' },
+  UPLOADED:    { bg:'var(--color-ok)', label:'Uploaded' },
 };
 function statusPill(s) {
-  const m = STATE_META[s || 'none'] || { bg:'#888', label: s };
+  const m = STATE_META[s || 'none'] || { bg:'var(--color-neutral)', label: s };
   return `<span class="pill" style="background:${m.bg};${s ? 'color:white' : ''}">${m.label}</span>`;
 }
 
@@ -536,7 +516,7 @@ function renderOverview(j) {
       <div class="kpi"><div class="v">${fmt(c.applied_today || 0)}</div><div class="l">Applied today</div></div>
       <div class="kpi"><div class="v">${fmt(c.applied_7d || 0)}</div><div class="l">Applied · 7d</div></div>
       <div class="kpi"><div class="v">${fmt(c.applied_total || 0)}</div><div class="l">Applied · total</div></div>
-      <div class="kpi"><div class="v ${(c.delta_views_7d||0)>=0?'':'neg'}" style="color:${(c.delta_views_7d||0)>=0?'#2a7':'#c33'}">${(c.delta_views_7d>0?'+':'') + fmt(c.delta_views_7d || 0)}</div><div class="l">Δ views · 7d</div></div>
+      <div class="kpi"><div class="v ${(c.delta_views_7d||0)>=0?'':'neg'}" style="color:${(c.delta_views_7d||0)>=0?'var(--color-ok)':'var(--color-err)'}">${(c.delta_views_7d>0?'+':'') + fmt(c.delta_views_7d || 0)}</div><div class="l">Δ views · 7d</div></div>
     `;
 }
 // Shares the '/dashboard' cache key with the home page, so arriving here after
@@ -558,13 +538,13 @@ function renderAutopilotLog(j) {
     let pill;
     let resumeBtn = '';
     if (j.paused_reason === 'token_expired') {
-      pill = `<span class="pill" style="background:#c33;color:white">Paused · OAuth token expired</span>`;
+      pill = `<span class="pill" style="background:var(--color-err);color:white">Paused · OAuth token expired</span>`;
       resumeBtn = `<a href="/auth/login" style="margin-left:.5rem"><button>Reconnect Google account</button></a>`;
     } else if (j.paused_reason) {
-      pill = `<span class="pill" style="background:#c33;color:white">Paused · ${escapeHtml(j.paused_reason)}</span>`;
+      pill = `<span class="pill" style="background:var(--color-err);color:white">Paused · ${escapeHtml(j.paused_reason)}</span>`;
       resumeBtn = `<button onclick="resumeAutopilot()" style="margin-left:.5rem">Resume</button>`;
     } else if (j.enabled) {
-      pill = `<span class="pill" style="background:#2a7;color:white">Running</span>`;
+      pill = `<span class="pill" style="background:var(--color-ok);color:white">Running</span>`;
     } else {
       pill = `<span class="pill">Disabled</span>`;
     }
@@ -869,7 +849,7 @@ function renderVideos() {
       </td>
       <td>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="View latest audit">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</td>
       <td>${v.issues_count > 0
-            ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill" style="background:#d80;color:white">${v.issues_count}</span></a>`
+            ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill" style="background:var(--color-warn);color:white">${v.issues_count}</span></a>`
             : '<span class="muted">—</span>'}</td>
       <td>${v.audit_count || 0}</td>
       <td>${fmt(v.view_count)}</td>
@@ -1030,7 +1010,7 @@ async function viewAudit(videoId) {
     cell.innerHTML = renderAudit(arr[0]);
     cell.dataset.shown = videoId;
   } catch (e) {
-    cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Could not load audit: ${escapeHtml(String(e))}</div>`;
+    cell.innerHTML = `<div class="audit" style="border-color:var(--color-err);color:var(--color-err)">Could not load audit: ${escapeHtml(String(e))}</div>`;
   }
 }
 
@@ -1044,7 +1024,7 @@ async function audit(videoId) {
     await ensureVideoDetail(videoId);
     cell.innerHTML = renderAudit(a);
   } catch (e) {
-    cell.innerHTML = `<div class="audit" style="border-color:#c33;color:#c33">Audit failed: ${escapeHtml(String(e))}</div>`;
+    cell.innerHTML = `<div class="audit" style="border-color:var(--color-err);color:var(--color-err)">Audit failed: ${escapeHtml(String(e))}</div>`;
     toast('Audit failed: ' + escapeHtml(String(e)), 'err');
   }
 }
@@ -1112,7 +1092,7 @@ function renderAudit(a) {
   }
   const tSugThumb = (cmp.thumbnail || {}).suggested;
   if (tSugThumb) {
-    sections.push(`<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid #8884; border-radius:8px;">
+    sections.push(`<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid var(--border); border-radius:8px;">
       <div style="font-weight:600; margin-bottom:.3rem;">Thumbnail · feedback</div>
       <div class="muted" style="font-size:.85rem">${escapeHtml(tSugThumb)}</div>
       ${(cmp.thumbnail||{}).why_better ? `<div style="margin-top:.3rem"><span class="muted">Why better:</span> ${escapeHtml((cmp.thumbnail||{}).why_better)}</div>` : ''}
@@ -1125,7 +1105,7 @@ function renderAudit(a) {
     ${issues ? `<details open><summary><b>Issues (${(ifd.issues||[]).length})</b></summary><ul>${issues}</ul></details>` : ''}
     <div style="margin-top:.75rem;">
       ${applied
-        ? `<span class="pill" style="background:#2a7;color:white">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>
+        ? `<span class="pill" style="background:var(--color-ok);color:white">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>
            <button onclick="revertAudit(${a.id}, '${a.video_id}')" style="margin-left:.5rem" aria-label="Revert audit changes">Revert →</button>`
         : `<button onclick="applyAudit(${a.id}, '${a.video_id}')">Apply to YouTube →</button>
            <span class="muted" style="margin-left:.5rem">Pushes suggested title / description / tags to the live video.</span>`}
@@ -1134,9 +1114,9 @@ function renderAudit(a) {
 }
 
 function diffSection(label, body, changed, why) {
-  const tag = changed ? '<span class="pill" style="background:#28a;color:white;margin-left:.4rem">changed</span>'
+  const tag = changed ? '<span class="pill" style="background:var(--color-pending);color:white;margin-left:.4rem">changed</span>'
                       : '<span class="pill muted" style="margin-left:.4rem">unchanged</span>';
-  return `<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid #8884; border-radius:8px;">
+  return `<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid var(--border); border-radius:8px;">
     <div style="font-weight:600; margin-bottom:.3rem;">${label} ${tag}</div>
     <div>${body}</div>
     ${why ? `<div class="muted" style="margin-top:.4rem; font-size:.85rem">Why better: ${escapeHtml(why)}</div>` : ''}
@@ -1155,7 +1135,7 @@ async function applyAudit(auditId, videoId) {
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     if (j.status === 'dry_run') {
-      cell.innerHTML = prev + `<div class="audit" style="border-color:#d80;color:#d80"><b>DRY_RUN is on</b> — payload logged but not pushed.</div>`;
+      cell.innerHTML = prev + `<div class="audit" style="border-color:var(--color-warn);color:var(--color-warn)"><b>DRY_RUN is on</b> — payload logged but not pushed.</div>`;
       toast('DRY_RUN — not pushed.', 'warn');
     } else {
       toast('Applied ✓', 'ok');
@@ -1163,7 +1143,7 @@ async function applyAudit(auditId, videoId) {
       await loadVideos();
     }
   } catch (e) {
-    cell.innerHTML = prev + `<div class="audit" style="border-color:#c33;color:#c33">Apply failed: ${escapeHtml(String(e))}</div>`;
+    cell.innerHTML = prev + `<div class="audit" style="border-color:var(--color-err);color:var(--color-err)">Apply failed: ${escapeHtml(String(e))}</div>`;
     toast('Apply failed: ' + escapeHtml(String(e)), 'err');
   }
 }
@@ -1226,7 +1206,7 @@ $('apply-pending-btn').onclick = async () => {
     toast(`Applied ${j.applied}, skipped ${j.skipped}, failed ${j.failed}.`, j.failed ? 'warn' : 'ok');
     if (j.results && j.results.length) {
       const colorFor = o =>
-        o === 'applied' ? '#2a7' : o === 'dry_run' ? '#d80' : o === 'failed' ? '#c33' : o === 'quarantined' ? '#d80' : '#888';
+        o === 'applied' ? 'var(--color-ok)' : o === 'dry_run' ? 'var(--color-warn)' : o === 'failed' ? 'var(--color-err)' : o === 'quarantined' ? 'var(--color-warn)' : 'var(--color-neutral)';
       $('apply-pending-results').innerHTML =
         '<details><summary class="muted">Per-audit detail</summary><ul style="font-size:.85rem">' +
         j.results.map(r =>
@@ -1255,8 +1235,8 @@ function renderProposals() {
   }
   const rows = plProposals.map(p => {
     const badge = p.action === 'add'
-      ? `<span class="pill" style="background:#2a7;color:white">add</span>`
-      : `<span class="pill" style="background:#c33;color:white">remove</span>`;
+      ? `<span class="pill" style="background:var(--color-ok);color:white">add</span>`
+      : `<span class="pill" style="background:var(--color-err);color:white">remove</span>`;
     const sim = p.similarity != null ? (p.similarity * 100).toFixed(1) + '%' : '—';
     return `<tr>
       <td><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''}></td>
@@ -1269,7 +1249,7 @@ function renderProposals() {
   }).join('');
   $('pl-proposals').innerHTML =
     `<table style="width:100%;border-collapse:collapse">
-      <thead><tr style="text-align:left;border-bottom:1px solid #8882">
+      <thead><tr style="text-align:left;border-bottom:1px solid var(--surface-tint)">
         <th><input type="checkbox" id="pl-select-all"></th>
         <th>Action</th><th>Video</th><th>Playlist</th><th>Similarity</th><th>Source</th>
       </tr></thead>
@@ -1385,10 +1365,10 @@ $('pl-reconcile-btn').onclick = async () => {
 
 // ── Playlist health (Phase 1B — recommend-only) ───────────────────────────
 const PL_ACTION_BG = {
-  remove: '#c33',
-  revive: '#d80',
-  keep: '#2a7',
-  insufficient_data: '#888',
+  remove: 'var(--color-err)',
+  revive: 'var(--color-warn)',
+  keep: 'var(--color-ok)',
+  insufficient_data: 'var(--color-neutral)',
 };
 const PL_ACTION_LABEL = {
   remove: 'Recommend remove',
@@ -1397,7 +1377,7 @@ const PL_ACTION_LABEL = {
   insufficient_data: 'Not enough data',
 };
 function plActionPill(action) {
-  const bg = PL_ACTION_BG[action] || '#888';
+  const bg = PL_ACTION_BG[action] || 'var(--color-neutral)';
   const label = PL_ACTION_LABEL[action] || (action || '—');
   return `<span class="pill" style="background:${bg};color:white">${label}</span>`;
 }
@@ -1431,7 +1411,7 @@ function renderHealth(envelope) {
     const pctl = pctlRaw == null ? '—' : pctlRaw + '%';
     const startsField = r.rationale?.playlist_starts ?? r.rationale?.playlist_starts_in_window ?? '—';
     const small = r.rationale?.small_channel_note
-      ? ' <span class="pill" title="' + escapeHtml(r.rationale.small_channel_note) + '" style="background:#8884">small ch.</span>'
+      ? ' <span class="pill" title="' + escapeHtml(r.rationale.small_channel_note) + '" style="background:var(--border)">small ch.</span>'
       : '';
     return `<tr>
       <td>${plActionPill(r.action)}${small}</td>
@@ -1537,7 +1517,7 @@ function renderShadowComparisons(items) {
           <div>${escapeHtml(item.live_title || '(none)')}</div>
         </div>
         <div>
-          <div style="color:#6af; font-size:.72rem; margin-bottom:.2rem">Candidate</div>
+          <div style="color:var(--color-accent); font-size:.72rem; margin-bottom:.2rem">Candidate</div>
           <div style="font-weight:600">${escapeHtml(item.shadow_title || '(none)')}</div>
         </div>
       </div>
@@ -1551,11 +1531,11 @@ function renderReflectionHistory(versions) {
   if (!el || !list || !versions || versions.length === 0) return;
   el.classList.remove('hidden');
 
-  const statusColor = { live: '#2a7', shadow: '#6af', retired: '#888', retired_regression: '#c33' };
+  const statusColor = { live: 'var(--color-ok)', shadow: 'var(--color-accent)', retired: 'var(--color-neutral)', retired_regression: 'var(--color-err)' };
   list.innerHTML = versions.map(v => `
     <div class="card" style="padding:.45rem .7rem; margin:.4rem 0">
       <div class="row" style="justify-content:space-between; align-items:center">
-        <span class="pill" style="background:${statusColor[v.status] || '#888'}; color:white">${escapeHtml(v.status)}</span>
+        <span class="pill" style="background:${statusColor[v.status] || 'var(--color-neutral)'}; color:white">${escapeHtml(v.status)}</span>
         <span class="muted" style="font-size:.75rem">${v.created_at ? v.created_at.slice(0, 10) : ''}</span>
       </div>
       ${v.reflection_reasoning ? `<div class="muted" style="margin-top:.3rem">${escapeHtml(v.reflection_reasoning)}</div>` : ''}

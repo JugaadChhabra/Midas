@@ -4,81 +4,60 @@
 <meta charset="utf-8" />
 <title>Midas</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         max-width: 1100px; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
-  h1 { margin-bottom: .25rem; }
-  .sub { opacity: .7; margin-top: 0; }
-  /* Top nav */
-  .nav { display:flex; align-items:center; gap:.4rem; padding:.5rem 0 .9rem; margin-bottom:.75rem; border-bottom:1px solid #8884; }
-  .nav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:inherit; margin-right:.6rem; }
-  .nav a.navlink { text-decoration:none; color:inherit; padding:.3rem .75rem; border-radius:999px; font-size:.9rem; opacity:.7; }
-  .nav a.navlink:hover { background:#8882; opacity:1; }
-  .nav a.navlink.active { background:#6af2; color:#6af; opacity:1; font-weight:600; }
-  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
-  button, .btn { font: inherit; padding: .55rem 1rem; border-radius: 8px;
-                 border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; display: inline-block; }
-  button:hover, .btn:hover { background: #8882; }
-  table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
-  th, td { text-align: left; padding: .55rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: middle; }
-  th { font-weight: 600; }
-  code { background: #8882; padding: 0 .3rem; border-radius: 4px; }
-  .muted { opacity: .65; }
-  .pill { display:inline-block; padding: .15rem .55rem; border-radius: 999px; background:#8882; font-size:.78rem; }
-  .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:.75rem; }
-  .kpi { border:1px solid #8884; border-radius:10px; padding:.75rem .9rem; }
-  .kpi .v { font-size:1.4rem; font-weight:700; line-height:1.1; }
-  .kpi .l { font-size:.78rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
-  .pos { color:#2a7; font-weight:600; }
-  .neg { color:#c33; font-weight:600; }
-  .freshness-ok { color:#2a7; }
-  .freshness-stale { color:#d80; }
-  .freshness-old { color:#c33; }
-  .pace-bar { display:inline-block; width:80px; height:6px; background:#8882; border-radius:3px; vertical-align:middle; overflow:hidden; }
-  .pace-bar > i { display:block; height:100%; background:#2a7; }
+  /* Page layout + widgets unique to the dashboard. Shared tokens and components
+     live in /static/theme.css; every rule here consumes those tokens (no colour
+     literals) so the dashboard's look can't drift from the other pages. */
+  body { max-width: 1100px; margin: 2.5rem auto; padding: 0 1.25rem; }
+
+  .freshness-ok { color:var(--color-ok); }
+  .freshness-stale { color:var(--color-warn); }
+  .freshness-old { color:var(--color-err); }
+  .pace-bar { display:inline-block; width:80px; height:6px; background:var(--surface-tint); border-radius:3px; vertical-align:middle; overflow:hidden; }
+  .pace-bar > i { display:block; height:100%; background:var(--color-ok); }
 
   /* Health bar */
   .health-bar { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .health-pill { display:flex; align-items:center; gap:.5rem; border:1px solid #8883; border-radius:8px;
+  .health-pill { display:flex; align-items:center; gap:.5rem; border:1px solid var(--border-soft); border-radius:var(--radius-md);
                  padding:.5rem .8rem; font-size:.88rem; flex:1; min-width:150px; }
   .health-pill .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
   .health-pill .val { font-weight:700; }
-  .hp-ok  { border-color:#2a73; }
-  .hp-warn { border-color:#d803; }
-  .hp-err  { border-color:#c333; }
-  .dot-ok   { background:#2a7; }
-  .dot-warn { background:#d80; }
-  .dot-err  { background:#c33; }
+  .hp-ok  { border-color:var(--color-ok-border); }
+  .hp-warn { border-color:var(--color-warn-border); }
+  .hp-err  { border-color:var(--color-err-border); }
+  .dot-ok   { background:var(--color-ok); }
+  .dot-warn { background:var(--color-warn); }
+  .dot-err  { background:var(--color-err); }
 
   /* Pipeline stat row — a breakdown of Total, not a proportional funnel.
      Separate cards (not connected cells) so it doesn't imply a sequential flow. */
   .funnel { display:flex; gap:.5rem; flex-wrap:wrap; }
   .funnel-step { flex:1; min-width:118px; padding:.7rem .6rem; text-align:center;
-                 border:1px solid #8884; border-radius:8px;
+                 border:1px solid var(--border); border-radius:var(--radius-md);
                  display:flex; flex-direction:column; align-items:center; }
   .funnel-step .fn { font-size:1.35rem; font-weight:700; line-height:1.1; }
   .funnel-step .fl { font-size:.7rem; opacity:.55; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
   .funnel-step .fsub { font-size:.62rem; opacity:.4; margin-top:.15rem; }
-  .progress-track { background:#8882; border-radius:4px; height:5px; overflow:hidden; margin-top:.5rem; }
-  .progress-fill { height:100%; border-radius:4px; }
+  .progress-track { background:var(--surface-tint); border-radius:var(--radius-sm); height:5px; overflow:hidden; margin-top:.5rem; }
+  .progress-fill { height:100%; border-radius:var(--radius-sm); }
 
   /* Mini pipeline bar in table */
   .mini-prog { display:flex; align-items:center; gap:.35rem; }
-  .mini-track { width:48px; height:5px; background:#8882; border-radius:3px; overflow:hidden; }
-  .mini-fill  { height:100%; border-radius:3px; background:#6af; }
+  .mini-track { width:48px; height:5px; background:var(--surface-tint); border-radius:3px; overflow:hidden; }
+  .mini-fill  { height:100%; border-radius:3px; background:var(--color-accent); }
 
   /* Activity feed */
   .feed { display:flex; flex-direction:column; gap:.35rem; }
   .feed-item { display:flex; gap:.65rem; align-items:flex-start; font-size:.87rem;
-               padding:.5rem .7rem; border-radius:7px; border:1px solid #8882; }
+               padding:.5rem .7rem; border-radius:7px; border:1px solid var(--surface-tint); }
   .feed-item .fbody { flex:1; }
   .feed-item .ftime { font-size:.74rem; opacity:.45; flex-shrink:0; white-space:nowrap; }
-  .feed-status { display:inline-block; padding:.1rem .4rem; border-radius:999px; font-size:.72rem; font-weight:600; }
-  .fs-applied    { background:#2a72; color:#2a7; border:1px solid #2a73; }
-  .fs-pending    { background:#28a2; color:#6af; border:1px solid #28a3; }
-  .fs-quarantined { background:#d802; color:#d80; border:1px solid #d803; }
-  .fs-failed     { background:#c332; color:#c33; border:1px solid #c333; }
+  .feed-status { display:inline-block; padding:.1rem .4rem; border-radius:var(--radius-pill); font-size:.72rem; font-weight:600; }
+  .fs-applied    { background:var(--color-ok-bg); color:var(--color-ok); border:1px solid var(--color-ok-border); }
+  .fs-pending    { background:var(--color-pending-bg); color:var(--color-accent); border:1px solid var(--color-pending-border); }
+  .fs-quarantined { background:var(--color-warn-bg); color:var(--color-warn); border:1px solid var(--color-warn-border); }
+  .fs-failed     { background:var(--color-err-bg); color:var(--color-err); border:1px solid var(--color-err-border); }
 </style>
 </head>
 <body>
@@ -110,7 +89,7 @@
         <span id="progress-label">—</span>
         <span id="eta-label">—</span>
       </div>
-      <div class="progress-track"><div class="progress-fill" id="progress-fill" style="background:#6af;width:0%"></div></div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill" style="background:var(--color-accent);width:0%"></div></div>
     </div>
   </div>
 
@@ -154,8 +133,8 @@ function freshnessText(hours) {
   return Math.round(hours / 24) + 'd ago';
 }
 function autopilotPill(c) {
-  if (c.autopilot_paused_reason) return `<span class="pill" style="background:#c33;color:white">Paused</span>`;
-  if (c.autopilot_enabled) return `<span class="pill" style="background:#2a7;color:white">Running</span>`;
+  if (c.autopilot_paused_reason) return `<span class="pill" style="background:var(--color-err);color:white">Paused</span>`;
+  if (c.autopilot_enabled) return `<span class="pill" style="background:var(--color-ok);color:white">Running</span>`;
   return `<span class="pill">Off</span>`;
 }
 function pace(c) {
@@ -188,7 +167,7 @@ function loadDashboard() {
   SWR.swr('/dashboard', renderDashboard, {
     onError: () => {
       if (SWR.get('/dashboard') === undefined) {
-        $('channels').innerHTML = '<em style="color:#c33">Failed to load. Is Supabase configured?</em>';
+        $('channels').innerHTML = '<em style="color:var(--color-err)">Failed to load. Is Supabase configured?</em>';
       }
     },
   });
@@ -242,7 +221,7 @@ function renderPipeline(p) {
   // Audited. Ordered and sub-labelled to show that hierarchy rather than a flow.
   $('pipeline-funnel').innerHTML = `
     <div class="funnel-step">
-      <div class="fn" style="color:#aaa">${fmt(p.total)}</div>
+      <div class="fn" style="color:var(--text-faint)">${fmt(p.total)}</div>
       <div class="fl">Total videos</div>
     </div>
     <div class="funnel-step">
@@ -251,17 +230,17 @@ function renderPipeline(p) {
       <div class="fsub">of total</div>
     </div>
     <div class="funnel-step">
-      <div class="fn" style="color:#6af">${fmt(p.audited)}</div>
+      <div class="fn" style="color:var(--color-accent)">${fmt(p.audited)}</div>
       <div class="fl">Audited</div>
       <div class="fsub">of total</div>
     </div>
     <div class="funnel-step">
-      <div class="fn" style="color:#6af">${fmt(p.pending)}</div>
+      <div class="fn" style="color:var(--color-accent)">${fmt(p.pending)}</div>
       <div class="fl">Pending apply</div>
       <div class="fsub">of audited</div>
     </div>
     <div class="funnel-step">
-      <div class="fn" style="color:#2a7">${fmt(p.applied)}</div>
+      <div class="fn" style="color:var(--color-ok)">${fmt(p.applied)}</div>
       <div class="fl">Applied ✓</div>
       <div class="fsub">of audited</div>
     </div>`;
@@ -295,14 +274,14 @@ function renderChannels(list, pipeline) {
       const touchedPct = totalVids > 0 ? Math.min(100, Math.round(audited / totalVids * 100)) : 0;
       return `<tr>
         <td><b>${escapeHtml(c.name || c.id)}</b>
-            ${c.analytics_authorized ? '' : '<span class="pill" style="background:#d80;color:white;margin-left:.4rem" title="Reconnect for analytics — Loop 0 polling is skipped">Reconnect for analytics</span>'}</td>
+            ${c.analytics_authorized ? '' : '<span class="pill" style="background:var(--color-warn);color:white;margin-left:.4rem" title="Reconnect for analytics — Loop 0 polling is skipped">Reconnect for analytics</span>'}</td>
         <td class="muted">${escapeHtml(c.handle || '')}</td>
         <td>
           <div class="mini-prog" title="${audited} of ${totalVids} videos audited">
             <div class="mini-track"><div class="mini-fill" style="width:${touchedPct}%"></div></div>
             <span class="muted" style="font-size:.76rem">${touchedPct}%</span>
           </div>
-          ${c.pending_count > 0 ? `<span class="pill" style="background:#28a;color:white;margin-top:.2rem;display:inline-block">${c.pending_count} pending</span>` : ''}
+          ${c.pending_count > 0 ? `<span class="pill" style="background:var(--color-pending);color:white;margin-top:.2rem;display:inline-block">${c.pending_count} pending</span>` : ''}
         </td>
         <td>${c.applied_7d}</td>
         <td class="${c.delta_views_7d > 0 ? 'pos' : c.delta_views_7d < 0 ? 'neg' : 'muted'}">${signed(c.delta_views_7d)}</td>
@@ -348,7 +327,7 @@ function timeAgo(iso) {
 
 function renderQuotaBadge(q) {
   const remPct = q.remaining / Math.max(1, (q.limit - q.safety_buffer));
-  const color = remPct > 0.3 ? '#2a7' : remPct > 0.1 ? '#d80' : '#c33';
+  const color = remPct > 0.3 ? 'var(--color-ok)' : remPct > 0.1 ? 'var(--color-warn)' : 'var(--color-err)';
   const resetTxt = q.reset_in_seconds != null ? ` · resets in ${fmtResetTime(q.reset_in_seconds)}` : '';
   $('quota-badge').innerHTML =
     `<span style="display:inline-block;width:.6rem;height:.6rem;border-radius:50%;background:${color};margin-right:.4rem"></span>` +

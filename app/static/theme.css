@@ -1,0 +1,119 @@
+/* Midas — design tokens + shared components.
+ *
+ * Single source of truth for the visual language across index / performance /
+ * channel. Pure-refactor baseline: every value here reproduces the look the
+ * pages had when their CSS lived inline, so the extraction is pixel-identical.
+ * Values were taken from index.html (the reference page); where another page
+ * has drifted, that page keeps a small local override rather than changing here.
+ *
+ * Colours are semantic (named by role, not hue). Neutrals are alpha greys so a
+ * single value reads correctly on both light and dark backgrounds.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Semantic colours — solids */
+  --color-ok:      #2a7;
+  --color-warn:    #d80;
+  --color-err:     #c33;
+  --color-accent:  #6af;
+  --color-pending: #28a;
+
+  /* Semantic colours — tints (~13% background, ~20% border) */
+  --color-ok-bg:       #2a72;   --color-ok-border:      #2a73;
+  --color-warn-bg:     #d802;   --color-warn-border:    #d803;
+  --color-err-bg:      #c332;   --color-err-border:     #c333;
+  --color-accent-bg:   #6af2;
+  --color-pending-bg:  #28a2;   --color-pending-border: #28a3;
+
+  /* Neutrals — alpha greys (one value works light & dark) */
+  --surface-tint:  #8882;   /* pill / hover / track / code backgrounds */
+  --border:        #8884;   /* card, nav, kpi borders */
+  --border-soft:   #8883;   /* table rows, subtle dividers */
+  --border-strong: #8886;   /* buttons */
+  --btn-bg:        #fff1;
+  --text-faint:    #aaa;    /* de-emphasised figures */
+  --color-neutral: #888;    /* zero-delta / inactive text & chips */
+  --surface-faint: #8881;   /* zebra / diff-row backgrounds */
+  --color-err-faint: #c331; /* regression-row highlight */
+  --color-warn-faint: #d801;   /* reconnect-for-analytics banner */
+  --color-accent-faint: #6af1; /* selected table row */
+
+  /* Popover surfaces — opaque panels that sit over content (toast, modal).
+     Can't be alpha greys, so they carry explicit light/dark values (dark
+     override below). */
+  --panel-bg:  #fff;
+  --panel-fg:  #000;
+  --backdrop:  #0006;
+  --shadow-1:  0 4px 14px #0002;
+  --shadow-2:  0 10px 40px #0004;
+
+  /* Structure */
+  --radius:      10px;
+  --radius-md:    8px;
+  --radius-sm:    4px;
+  --radius-pill: 999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { --panel-bg: #222; --panel-fg: #fff; }
+}
+
+/* ── Base ───────────────────────────────────────────────────────────── */
+body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+       line-height: 1.5; }
+h1 { margin-bottom: .25rem; }
+.sub { opacity: .7; margin-top: 0; }
+.muted { opacity: .65; }
+
+/* ── Top nav ────────────────────────────────────────────────────────── */
+.nav { display:flex; align-items:center; gap:.4rem; padding:.5rem 0 .9rem; margin-bottom:.75rem; border-bottom:1px solid var(--border); }
+.nav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:inherit; margin-right:.6rem; }
+.nav .navlink { text-decoration:none; color:inherit; padding:.3rem .75rem; border-radius:var(--radius-pill); font-size:.9rem; opacity:.7; }
+.nav .navlink:hover { background:var(--surface-tint); opacity:1; }
+.nav .navlink.active { background:var(--color-accent-bg); color:var(--color-accent); opacity:1; font-weight:600; }
+
+/* ── Card ───────────────────────────────────────────────────────────── */
+.card { border:1px solid var(--border); border-radius:var(--radius); padding:1.1rem 1.25rem; margin:1rem 0; }
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+button, .btn { font:inherit; padding:.55rem 1rem; border-radius:var(--radius-md);
+               border:1px solid var(--border-strong); background:var(--btn-bg); cursor:pointer;
+               text-decoration:none; color:inherit; display:inline-block; }
+button:hover, .btn:hover { background:var(--surface-tint); }
+
+/* ── Table ──────────────────────────────────────────────────────────── */
+table { width:100%; border-collapse:collapse; margin-top:.5rem; }
+th, td { text-align:left; padding:.55rem .35rem; border-bottom:1px solid var(--border-soft); font-size:.92rem; vertical-align:middle; }
+th { font-weight:600; }
+
+code { background:var(--surface-tint); padding:0 .3rem; border-radius:var(--radius-sm); }
+
+/* ── Pill ───────────────────────────────────────────────────────────── */
+.pill { display:inline-block; padding:.15rem .55rem; border-radius:var(--radius-pill); background:var(--surface-tint); font-size:.78rem; }
+
+/* ── KPI grid ───────────────────────────────────────────────────────── */
+.kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.75rem; }
+.kpi { border:1px solid var(--border); border-radius:var(--radius); padding:.75rem .9rem; }
+.kpi .v { font-size:1.4rem; font-weight:700; line-height:1.1; }
+.kpi .l { font-size:.78rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
+
+/* ── Deltas ─────────────────────────────────────────────────────────── */
+.pos { color:var(--color-ok); font-weight:600; }
+.neg { color:var(--color-err); font-weight:600; }
+.neutral { color:var(--color-neutral); }
+
+/* ── Toasts ─────────────────────────────────────────────────────────── */
+#toasts { position:fixed; bottom:1rem; right:1rem; z-index:9999; display:flex; flex-direction:column; gap:.5rem; max-width:360px; }
+.toast { padding:.65rem .9rem; border-radius:var(--radius-md); border:1px solid var(--border-strong);
+         background:var(--panel-bg); color:var(--panel-fg); box-shadow:var(--shadow-1); animation:tin .25s ease-out; }
+.toast.ok { border-color:var(--color-ok); }
+.toast.err { border-color:var(--color-err); }
+.toast.warn { border-color:var(--color-warn); }
+@keyframes tin { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+
+/* ── Modal / in-page confirm ────────────────────────────────────────── */
+.modal-backdrop { position:fixed; inset:0; background:var(--backdrop); display:flex; align-items:center; justify-content:center; z-index:10000; }
+.modal { background:var(--panel-bg); color:var(--panel-fg); border-radius:var(--radius); padding:1.1rem 1.25rem; max-width:440px; width:90%; box-shadow:var(--shadow-2); }
+.modal-msg { line-height:1.5; margin-bottom:1rem; white-space:pre-wrap; }
+.modal-actions { display:flex; gap:.5rem; justify-content:flex-end; }

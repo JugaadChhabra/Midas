@@ -4,57 +4,48 @@
 <meta charset="utf-8" />
 <title>Midas · Performance</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         max-width: 1280px; margin: 1.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
-  h1 { margin-bottom: .25rem; }
-  .sub { opacity: .7; margin-top: 0; }
-  /* Top nav */
-  .nav { display:flex; align-items:center; gap:.4rem; padding:.5rem 0 .9rem; margin-bottom:.5rem; border-bottom:1px solid #8884; }
-  .nav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:inherit; margin-right:.6rem; }
-  .nav .navlink { text-decoration:none; color:inherit; padding:.3rem .75rem; border-radius:999px; font-size:.9rem; opacity:.7; }
-  .nav a.navlink:hover { background:#8882; opacity:1; }
-  .nav .navlink.active { background:#6af2; color:#6af; opacity:1; font-weight:600; }
-  .card { border: 1px solid #8884; border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
-  button, .btn { font: inherit; padding: .5rem .9rem; border-radius: 8px;
-                 border: 1px solid #8886; background: #fff1; cursor: pointer; text-decoration: none; color: inherit; }
-  button:hover, .btn:hover { background: #8882; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: .5rem .35rem; border-bottom: 1px solid #8883; font-size: .92rem; vertical-align: top; }
-  th { font-weight: 600; }
-  th.sortable { cursor: pointer; user-select: none; }
-  th.sortable:hover { color: #6af; }
-  .muted { opacity: .65; }
-  .pos { color: #2a7; font-weight: 600; }
-  .neg { color: #c33; font-weight: 600; }
-  .neutral { color: #888; }
-  .small { font-size: .8rem; }
-  .diff-row { background: #8881; }
-  pre { white-space: pre-wrap; background: #8881; padding: .6rem; border-radius: 6px; margin: .25rem 0; }
-  .pill { display:inline-block; padding: .15rem .55rem; border-radius: 999px; background:#8882; font-size:.78rem; margin: 1px; }
-  details > summary { cursor: pointer; }
-  input, select { font: inherit; padding: .4rem .55rem; border-radius: 6px; border: 1px solid #8886; background: transparent; color: inherit; box-sizing: border-box; }
-  .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
-  .kpi { border:1px solid #8884; border-radius:10px; padding:.65rem .8rem; }
-  .kpi .v { font-size:1.3rem; font-weight:700; line-height:1.1; }
-  .kpi .l { font-size:.74rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
-  .filter-bar { display:flex; gap:.5rem; flex-wrap: wrap; align-items: center; margin: .25rem 0; }
-  .regression-row td { background: #c331; }
+  /* Page layout + widgets unique to the Performance page. Shared tokens and
+     components live in /static/theme.css; every rule here consumes those tokens
+     (no colour literals). The nav/btn/table/pill/kpi block below restores this
+     page's historical metrics, which pre-date the shared layer — see the
+     dashboard design-system notes; these converge in the visual-redo pass. */
+  body { max-width: 1280px; margin: 1.5rem auto; padding: 0 1.25rem; }
+
+  .nav { margin-bottom:.5rem; }
+  button, .btn { padding:.5rem .9rem; }
+  th, td { padding:.5rem .35rem; vertical-align:top; }
+  th.sortable { cursor:pointer; user-select:none; }
+  th.sortable:hover { color:var(--color-accent); }
+  .pill { margin:1px; }
+  .kpi-grid { grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
+  .kpi { padding:.65rem .8rem; }
+  .kpi .v { font-size:1.3rem; }
+  .kpi .l { font-size:.74rem; }
+
+  .small { font-size:.8rem; }
+  .diff-row { background:var(--surface-faint); }
+  pre { white-space:pre-wrap; background:var(--surface-faint); padding:.6rem; border-radius:6px; margin:.25rem 0; }
+  details > summary { cursor:pointer; }
+  input, select { font:inherit; padding:.4rem .55rem; border-radius:6px; border:1px solid var(--border-strong); background:transparent; color:inherit; box-sizing:border-box; }
+  .filter-bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin:.25rem 0; }
+  .regression-row td { background:var(--color-err-faint); }
+
   /* Insights */
-  .insight-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap:.65rem; }
-  .insight-stat { border:1px solid #8884; border-radius:9px; padding:.7rem .85rem; }
+  .insight-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(155px, 1fr)); gap:.65rem; }
+  .insight-stat { border:1px solid var(--border); border-radius:9px; padding:.7rem .85rem; }
   .insight-stat .iv { font-size:1.5rem; font-weight:800; line-height:1.1; }
   .insight-stat .il { font-size:.76rem; opacity:.6; margin-top:.25rem; line-height:1.3; }
   .insight-stat .im { font-size:.67rem; opacity:.4; margin-top:.35rem; font-style:italic; }
 
   /* Velocity chart */
   .vel-chart { display:flex; flex-direction:column; gap:.5rem; }
-  .vel-row { display:grid; grid-template-columns: 160px 1fr 1fr 58px; gap:.45rem; align-items:center; font-size:.84rem; }
+  .vel-row { display:grid; grid-template-columns:160px 1fr 1fr 58px; gap:.45rem; align-items:center; font-size:.84rem; }
   .vel-header { font-size:.68rem; opacity:.4; text-transform:uppercase; letter-spacing:.05em; }
-  .bar-wrap { height:18px; background:#8882; border-radius:3px; overflow:hidden; position:relative; }
-  .bar-before { position:absolute; height:100%; background:#8886; border-radius:3px; }
-  .bar-after  { position:absolute; height:100%; background:#2a7; border-radius:3px; opacity:.85; }
+  .bar-wrap { height:18px; background:var(--surface-tint); border-radius:3px; overflow:hidden; position:relative; }
+  .bar-before { position:absolute; height:100%; background:var(--border-strong); border-radius:3px; }
+  .bar-after  { position:absolute; height:100%; background:var(--color-ok); border-radius:3px; opacity:.85; }
   .vel-delta { font-weight:700; text-align:right; }
 
   /* Outcome bar */
@@ -64,26 +55,12 @@
   .outcome-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:.3rem; vertical-align:middle; }
 
   /* Lever bar */
-  .lever-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:.6rem; }
-  .lever-card { border:1px solid #8884; border-radius:8px; padding:.65rem .8rem; }
+  .lever-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:.6rem; }
+  .lever-card { border:1px solid var(--border); border-radius:8px; padding:.65rem .8rem; }
   .lever-card .lh { font-weight:600; font-size:.9rem; margin-bottom:.4rem; }
   .lever-bar-row { display:flex; align-items:center; gap:.4rem; font-size:.8rem; margin-top:.3rem; }
-  .lever-track { flex:1; height:6px; background:#8882; border-radius:3px; overflow:hidden; }
+  .lever-track { flex:1; height:6px; background:var(--surface-tint); border-radius:3px; overflow:hidden; }
   .lever-fill { height:100%; border-radius:3px; }
-  #toasts { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; display:flex; flex-direction: column; gap: .5rem; max-width: 360px; }
-  .toast { padding:.65rem .9rem; border-radius: 8px; border:1px solid #8886; background:#fffe; color:#000;
-           box-shadow: 0 4px 14px #0002; animation: tin .25s ease-out; }
-  @media (prefers-color-scheme: dark) { .toast { background:#222; color:#fff; } }
-  .toast.ok { border-color: #2a7; }
-  .toast.err { border-color: #c33; }
-  .toast.warn { border-color: #d80; }
-  @keyframes tin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-  /* In-page confirm dialog (replaces native confirm) */
-  .modal-backdrop { position:fixed; inset:0; background:#0006; display:flex; align-items:center; justify-content:center; z-index:10000; }
-  .modal { background:#fff; color:#000; border-radius:10px; padding:1.1rem 1.25rem; max-width:440px; width:90%; box-shadow:0 10px 40px #0004; }
-  @media (prefers-color-scheme: dark) { .modal { background:#222; color:#fff; } }
-  .modal-msg { line-height:1.5; margin-bottom:1rem; white-space:pre-wrap; }
-  .modal-actions { display:flex; gap:.5rem; justify-content:flex-end; }
 </style>
 </head>
 <body>
@@ -195,7 +172,7 @@ function showMissingId(what) {
   if (nav) document.body.appendChild(nav);
   const err = document.createElement('div');
   err.className = 'card';
-  err.innerHTML = `<p style="color:#c33;margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
+  err.innerHTML = `<p style="color:var(--color-err);margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
   document.body.appendChild(err);
 }
 document.getElementById('channel-link').href = `/channel?id=${encodeURIComponent(channelId)}`;
@@ -243,16 +220,16 @@ const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : 'neutral';
 const pctTxt = (p) => p == null ? '—' : (p > 0 ? '+' : '') + p.toFixed(1) + '%';
 
 const STATE_META = {
-  applied: { bg:'#2a7', label:'Applied' },
-  pending: { bg:'#28a', label:'Pending' },
-  quarantined: { bg:'#d80', label:'Bad output' },
-  failed: { bg:'#c33', label:'Failed' },
-  rejected: { bg:'#888', label:'Rejected' },
-  reverted: { bg:'#888', label:'Reverted' },
-  approved: { bg:'#28a', label:'Approved' },
+  applied: { bg:'var(--color-ok)', label:'Applied' },
+  pending: { bg:'var(--color-pending)', label:'Pending' },
+  quarantined: { bg:'var(--color-warn)', label:'Bad output' },
+  failed: { bg:'var(--color-err)', label:'Failed' },
+  rejected: { bg:'var(--color-neutral)', label:'Rejected' },
+  reverted: { bg:'var(--color-neutral)', label:'Reverted' },
+  approved: { bg:'var(--color-pending)', label:'Approved' },
 };
 function statusPill(s) {
-  const m = STATE_META[s] || { bg:'#888', label: s };
+  const m = STATE_META[s] || { bg:'var(--color-neutral)', label: s };
   return `<span class="pill" style="background:${m.bg};color:white">${m.label}</span>`;
 }
 
@@ -299,7 +276,7 @@ function renderInsights() {
       <div class="im">views/day after ÷ views/day before − 1</div>
     </div>
     <div class="insight-stat">
-      <div class="iv" style="color:#6af">${s.win_rate != null ? s.win_rate + '%' : '—'}</div>
+      <div class="iv" style="color:var(--color-accent)">${s.win_rate != null ? s.win_rate + '%' : '—'}</div>
       <div class="il">Win rate — videos that accelerated (&gt;+10%)</div>
       <div class="im">${od.total ? `of ${od.total} videos with ≥7d data` : 'no data yet'}</div>
     </div>
@@ -334,7 +311,7 @@ function renderVelocityChart() {
         const bw = Math.max(2, Math.round((r.before_velocity / maxVel) * 100));
         const aw = Math.max(2, Math.round(((r.after_velocity || 0) / maxVel) * 100));
         const lift = r.velocity_lift_pct;
-        const liftColor = lift > 10 ? '#2a7' : lift < -10 ? '#c33' : '#888';
+        const liftColor = lift > 10 ? 'var(--color-ok)' : lift < -10 ? 'var(--color-err)' : 'var(--color-neutral)';
         const title = (r.title_now || r.video_id || '').substring(0, 40) + ((r.title_now || '').length > 40 ? '…' : '');
         return `<div class="vel-row">
           <div class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem" title="${escapeHtml(r.title_now || r.video_id)}">${escapeHtml(title)}</div>
@@ -345,8 +322,8 @@ function renderVelocityChart() {
       }).join('')}
     </div>
     <div class="muted" style="font-size:.74rem; display:flex; gap:1rem; margin-top:.6rem; flex-wrap:wrap;">
-      <span><span style="display:inline-block;width:10px;height:10px;background:#8886;border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>Before apply</span>
-      <span><span style="display:inline-block;width:10px;height:10px;background:#2a7;border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>After apply</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--border-strong);border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>Before apply</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-ok);border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>After apply</span>
       <span style="margin-left:auto">bars scaled to channel max · showing top 8 by lift</span>
     </div>`;
 }
@@ -363,14 +340,14 @@ function renderOutcomeDistribution() {
   const regPct = 100 - accPct - flatPct;
   $('outcome-dist').innerHTML = `
     <div class="outcome-bar">
-      <div class="outcome-seg" style="width:${accPct}%;background:#2a7;border-radius:6px 0 0 6px;"></div>
-      <div class="outcome-seg" style="width:${flatPct}%;background:#8884;"></div>
-      <div class="outcome-seg" style="width:${Math.max(0,regPct)}%;background:#c33;border-radius:0 6px 6px 0;"></div>
+      <div class="outcome-seg" style="width:${accPct}%;background:var(--color-ok);border-radius:6px 0 0 6px;"></div>
+      <div class="outcome-seg" style="width:${flatPct}%;background:var(--border);"></div>
+      <div class="outcome-seg" style="width:${Math.max(0,regPct)}%;background:var(--color-err);border-radius:0 6px 6px 0;"></div>
     </div>
     <div class="outcome-legend">
-      <span><span class="outcome-dot" style="background:#2a7"></span><b>${od.accelerated}</b> accelerated (${accPct}%) — velocity up &gt;10%</span>
-      <span><span class="outcome-dot" style="background:#8884"></span>${od.flat} flat (${flatPct}%) — within ±10%</span>
-      <span><span class="outcome-dot" style="background:#c33"></span>${od.regression} regressed (${regPct}%) — velocity down &gt;10%</span>
+      <span><span class="outcome-dot" style="background:var(--color-ok)"></span><b>${od.accelerated}</b> accelerated (${accPct}%) — velocity up &gt;10%</span>
+      <span><span class="outcome-dot" style="background:var(--border)"></span>${od.flat} flat (${flatPct}%) — within ±10%</span>
+      <span><span class="outcome-dot" style="background:var(--color-err)"></span>${od.regression} regressed (${regPct}%) — velocity down &gt;10%</span>
     </div>
     <p class="muted small" style="margin:.5rem 0 0">Regressions don't prove the audit caused the drop — algorithm changes, seasonality, or video age can lower velocity independently.</p>`;
 }
@@ -388,7 +365,7 @@ function renderLeverGrid() {
     const ch = c[l.key] || { n: 0, avg_velocity_lift: null };
     const un = l.unchKey ? (c[l.unchKey] || { n: 0, avg_velocity_lift: null }) : null;
     const lift = ch.avg_velocity_lift;
-    const liftColor = lift == null ? '#888' : lift > 0 ? '#2a7' : '#c33';
+    const liftColor = lift == null ? 'var(--color-neutral)' : lift > 0 ? 'var(--color-ok)' : 'var(--color-err)';
     const barW = lift != null ? Math.max(2, Math.round(Math.abs(lift) / maxLift * 100)) : 0;
     const unLift = un ? un.avg_velocity_lift : null;
     const unBarW = unLift != null ? Math.max(2, Math.round(Math.abs(unLift) / maxLift * 100)) : 0;
@@ -400,7 +377,7 @@ function renderLeverGrid() {
       </div>
       ${un ? `<div class="lever-bar-row" style="opacity:.55">
         <span style="min-width:3.5rem;font-size:.78rem">${unLift != null ? (unLift>0?'+':'')+unLift+'%' : '—'} unchanged</span>
-        <div class="lever-track"><div class="lever-fill" style="width:${unBarW}%;background:#8886"></div></div>
+        <div class="lever-track"><div class="lever-fill" style="width:${unBarW}%;background:var(--border-strong)"></div></div>
       </div>` : ''}
       <div class="muted" style="font-size:.72rem; margin-top:.3rem">n=${ch.n}${un ? ` changed · ${un.n} unchanged` : ''}</div>
     </div>`;
