@@ -96,9 +96,15 @@ def _aggregate_rpc() -> tuple[dict, int, int]:
 
 
 def _aggregate_legacy() -> tuple[dict, int, int]:
-    """Per-channel aggregates computed in-app by pulling the whole videos,
-    audits and shorts_clips tables (~2 MB egress). Retained as the correctness
-    oracle for the RPC path and as the fallback when DASHBOARD_USE_RPC is off."""
+    """Per-channel aggregates computed in-app by pulling the whole videos, audits
+    and shorts_clips tables (~2 MB egress).
+
+    NOT a maintained twin of the SQL — do not hand-sync counting-rule changes here.
+    It is kept ONLY as (a) the automatic fallback when the RPC errors and (b) the
+    correctness oracle that tests/test_dashboard_parity_live.py checks the RPC
+    against on live data. Once the RPC is validated against non-zero time-window
+    data (applied_today/7d/delta_views_7d), this can be deleted; until then the
+    parity test guards against drift."""
     now = _now()
     today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
     seven_d_ago = now - timedelta(days=7)
