@@ -72,8 +72,25 @@ def _all_channel_ids() -> list[str]:
     return [r["id"] for r in rows]
 
 
+def _run_per_channel(fn, label, channel_ids=None) -> None:
+    """Fan a per-channel job out over every channel, isolating failures.
+
+    Calls ``fn(channel_id)`` for each id (from ``_all_channel_ids()`` unless
+    ``channel_ids`` is supplied). ``fn`` is responsible for its own success
+    logging; a raised exception is caught and logged per channel as
+    ``"<label> failed for <id>: <err>"`` so one bad channel never kills the
+    loop — the shared shape behind the daily/weekly scheduler jobs.
+    """
+    ids = _all_channel_ids() if channel_ids is None else channel_ids
+    for channel_id in ids:
+        try:
+            fn(channel_id)
+        except Exception as e:
+            _main_log.exception("%s failed for %s: %s", label, channel_id, e)
+
+
 def _daily_reconcile():
-    for channel_id in _all_channel_ids():
+    def _one(channel_id):
         # Sync playlist inventory FIRST so any new playlists created in
         # YouTube Studio since yesterday have rows (with role / item_count /
         # last_synced_at populated) before reconcile_channel re-scores
@@ -100,23 +117,23 @@ def _daily_reconcile():
         except Exception as e:
             _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
 
+    _run_per_channel(_one, "Daily reconcile cycle")
+
 
 def _weekly_discovery():
-    for channel_id in _all_channel_ids():
-        try:
-            result = discover_playlists(channel_id)
-            _main_log.info("Weekly discovery %s: %s", channel_id, result)
-        except Exception as e:
-            _main_log.exception("Weekly discovery failed for %s: %s", channel_id, e)
+    def _one(channel_id):
+        result = discover_playlists(channel_id)
+        _main_log.info("Weekly discovery %s: %s", channel_id, result)
+
+    _run_per_channel(_one, "Weekly discovery")
 
 
 def _weekly_reflection():
-    for channel_id in _all_channel_ids():
-        try:
-            result = reflection_reflect(channel_id)
-            _main_log.info("Weekly reflection %s: %s", channel_id, result)
-        except Exception as e:
-            _main_log.exception("Weekly reflection failed for %s: %s", channel_id, e)
+    def _one(channel_id):
+        result = reflection_reflect(channel_id)
+        _main_log.info("Weekly reflection %s: %s", channel_id, result)
+
+    _run_per_channel(_one, "Weekly reflection")
 
 
 def _daily_playlist_health_score():
@@ -138,13 +155,12 @@ def _daily_playlist_health_score():
     if not rows:
         _main_log.info("playlist_health_score: no channels with playlist_health_enabled=true")
         return
-    for r in rows:
-        channel_id = r["id"]
-        try:
-            summary = playlist_health_score_channel(channel_id)
-            _main_log.info("Daily playlist_health_score %s: %s", channel_id, summary)
-        except Exception as e:
-            _main_log.exception("Daily playlist_health_score failed for %s: %s", channel_id, e)
+
+    def _one(channel_id):
+        summary = playlist_health_score_channel(channel_id)
+        _main_log.info("Daily playlist_health_score %s: %s", channel_id, summary)
+
+    _run_per_channel(_one, "Daily playlist_health_score", channel_ids=[r["id"] for r in rows])
 
 
 def _refresh_pot_provider():
