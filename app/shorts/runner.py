@@ -20,16 +20,27 @@ from app.config import settings
 from app.db import supabase
 from app.services.nas_service import nas_service
 from app.shorts.cutter.util import safe_name
+from app.shorts.status import (
+    ANALYSING,
+    CLIP_FAILED,
+    CLIP_PENDING,
+    CLIP_SAVED,
+    CLIP_UPLOADED,
+    CLIP_UPLOADING,
+    DONE,
+    DOWNLOADING,
+    FAILED,
+    IN_PROGRESS_STATUSES,
+    RENDERING,
+    UPLOADING,
+    WORKING_STATUSES,
+)
 from app.shorts.youtube_upload import upload_short
 
 log = logging.getLogger("midas.shorts.runner")
 
-WORKING_STATUSES = ("CREATED", "DOWNLOADING", "ANALYSING", "RENDERING", "UPLOADING")
-
-# The subset of WORKING_STATUSES a worker has actually started (excludes the
-# queued CREATED state). Only these are reaped on restart; CREATED jobs survive
-# to be re-dispatched.
-IN_PROGRESS_STATUSES = tuple(s for s in WORKING_STATUSES if s != "CREATED")
+# WORKING_STATUSES / IN_PROGRESS_STATUSES are re-exported from app.shorts.status
+# (their single owner) for callers that import them off this module.
 
 
 def _fetch_video(url: str, dest_dir: Path):
@@ -64,11 +75,11 @@ def run_shorts_job(job_id: int) -> None:
     job_dir = Path(settings.SHORTS_CACHE_DIR) / str(job_id)
     source = None
     try:
-        _set_job(job_id, status="DOWNLOADING", progress=5, progress_label="downloading video")
+        _set_job(job_id, status=DOWNLOADING, progress=5, progress_label="downloading video")
         source, title = _fetch_video(job["source_url"], job_dir / "src")
 
         def progress(stage: str, percent: int) -> None:
-            status = "RENDERING" if "render" in stage else "ANALYSING"
+            status = RENDERING if "render" in stage else ANALYSING
             _set_job(job_id, status=status, progress=percent, progress_label=stage)
 
         result = _cut_video(
@@ -84,7 +95,7 @@ def run_shorts_job(job_id: int) -> None:
         hold_ranks = set() if cap is None else {c["rank"] for c in ordered[cap:]}
 
         n_upload = len(clips) - len(hold_ranks)
-        _set_job(job_id, status="UPLOADING", progress=95,
+        _set_job(job_id, status=UPLOADING, progress=95,
                  progress_label=f"uploading {n_upload} of {len(clips)} clips to YouTube")
         all_ok = True
         for clip in ordered:
@@ -95,7 +106,7 @@ def run_shorts_job(job_id: int) -> None:
                 "description": "", "hashtags": ["shorts"],
                 "start_s": clip["start_s"], "end_s": clip["end_s"],
                 "local_path": clip["path"],
-                "upload_status": "PENDING" if held else "UPLOADING",
+                "upload_status": CLIP_PENDING if held else CLIP_UPLOADING,
             }).execute().data[0]
             if held:
                 continue
@@ -103,18 +114,18 @@ def run_shorts_job(job_id: int) -> None:
                 video_id = upload_short(job["channel_id"], clip["path"],
                                         clip_title, "", ["shorts"])
                 sb.table("shorts_clips").update(
-                    {"upload_status": "UPLOADED", "yt_video_id": video_id}
+                    {"upload_status": CLIP_UPLOADED, "yt_video_id": video_id}
                 ).eq("id", row["id"]).execute()
             except Exception as exc:
                 all_ok = False
                 log.exception("Job %s: upload failed for clip rank=%s", job_id, clip["rank"])
                 sb.table("shorts_clips").update(
-                    {"upload_status": "FAILED",
+                    {"upload_status": CLIP_FAILED,
                      "upload_error": f"{type(exc).__name__}: {exc}"[:1000]}
                 ).eq("id", row["id"]).execute()
 
         held_note = f" ({len(hold_ranks)} held for review)" if hold_ranks else ""
-        _set_job(job_id, status="DONE" if all_ok else "FAILED", progress=100,
+        _set_job(job_id, status=DONE if all_ok else FAILED, progress=100,
                  progress_label="done",
                  error_message=None if all_ok else "One or more clips failed to upload")
         _notify_macos("Midas Shorts",
@@ -123,7 +134,7 @@ def run_shorts_job(job_id: int) -> None:
                       + ("" if all_ok else " — some uploads FAILED"))
     except Exception as exc:
         log.exception("Job %s failed", job_id)
-        _set_job(job_id, status="FAILED", error_message=str(exc)[:1000])
+        _set_job(job_id, status=FAILED, error_message=str(exc)[:1000])
         _notify_macos("Midas Shorts", f"Job {job_id} failed: {exc}"[:120])
     finally:
         shutil.rmtree(job_dir / "src", ignore_errors=True)
@@ -140,13 +151,13 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
     filename = src_rel.rsplit("/", 1)[-1]
     dest_dir = f"{settings.NAS_DESTINATION_ROOT_PATH}/{language}"
     try:
-        _set_job(job_id, status="DOWNLOADING", progress=5, progress_label="fetching from NAS")
+        _set_job(job_id, status=DOWNLOADING, progress=5, progress_label="fetching from NAS")
         local_src = nas_service.copy_to_local(
             f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}", job_dir / "src" / filename)
         title = safe_name(Path(filename).stem)
 
         def progress(stage: str, percent: int) -> None:
-            status = "RENDERING" if "render" in stage else "ANALYSING"
+            status = RENDERING if "render" in stage else ANALYSING
             _set_job(job_id, status=status, progress=percent, progress_label=stage)
 
         result = _cut_video(
@@ -156,7 +167,7 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
         )
         clips = result["clips"]
 
-        _set_job(job_id, status="UPLOADING", progress=95,
+        _set_job(job_id, status=UPLOADING, progress=95,
                  progress_label=f"saving {len(clips)} clips to NAS")
         for clip in clips:
             clip_name = Path(clip["path"]).name
@@ -168,18 +179,18 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
                 "description": "", "hashtags": ["shorts"],
                 "start_s": clip["start_s"], "end_s": clip["end_s"],
                 "local_path": clip["path"], "nas_path": nas_path,
-                "upload_status": "SAVED",
+                "upload_status": CLIP_SAVED,
             }).execute()
 
         # Move the consumed source out of RHYMES so it is never re-cut.
         nas_service.move(f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}",
                          f"{dest_dir}/{filename}")
-        _set_job(job_id, status="DONE", progress=100, progress_label="done",
+        _set_job(job_id, status=DONE, progress=100, progress_label="done",
                  error_message=None)
         _notify_macos("Midas Shorts", f"Job {job_id}: {len(clips)} clips cut from {filename}")
     except Exception as exc:
         log.exception("NAS job %s failed", job_id)
-        _set_job(job_id, status="FAILED", error_message=str(exc)[:1000])
+        _set_job(job_id, status=FAILED, error_message=str(exc)[:1000])
         _notify_macos("Midas Shorts", f"Job {job_id} failed: {exc}"[:120])
     finally:
         shutil.rmtree(job_dir / "src", ignore_errors=True)
@@ -199,7 +210,7 @@ def reap_stuck_jobs() -> int:
     for row in stuck:
         _kill_pid_if_alive(row.get("worker_pid"))
         sb.table("shorts_jobs").update({
-            "status": "FAILED", "error_message": "server restarted mid-job",
+            "status": FAILED, "error_message": "server restarted mid-job",
         }).eq("id", row["id"]).execute()
     if stuck:
         log.warning("Reaped %d stuck shorts job(s) on startup", len(stuck))

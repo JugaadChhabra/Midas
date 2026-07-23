@@ -10,11 +10,11 @@ from collections import defaultdict
 from app.config import settings
 from app.db import supabase
 from app.services.nas_service import nas_service
+from app.shorts.status import CREATED, FAILED, WORKING_STATUSES
 
 log = logging.getLogger("midas.shorts.nas_source")
 
-# A job a worker has queued or is actively running (mirrors runner.WORKING_STATUSES).
-WORKING_STATUSES = ("CREATED", "DOWNLOADING", "ANALYSING", "RENDERING", "UPLOADING")
+# WORKING_STATUSES is owned by app.shorts.status; re-exported here for callers.
 # A source whose cut keeps failing is left in place (not moved), so without a cap
 # it would be re-enqueued forever. Same value/rationale as app/autopilot.py.
 MAX_SHORTS_RETRY_ATTEMPTS = 3
@@ -54,7 +54,7 @@ def uncut_source_paths(language: str) -> list[str]:
             continue
         if status in WORKING_STATUSES:
             in_flight.add(p)
-        elif status == "FAILED":
+        elif status == FAILED:
             failed[p] += 1
     return [p for p in paths
             if p not in in_flight and failed[p] < MAX_SHORTS_RETRY_ATTEMPTS]
@@ -86,7 +86,7 @@ def enqueue_language_jobs(language: str, *, channel_id: str | None = None,
             "cut_mode":            cut_mode,
             "camera_motion":       camera_motion,
             "autopilot_generated": autopilot,
-            "status":              "CREATED",
+            "status":              CREATED,
         }).execute()
     log.info("NAS enqueue: %d job(s) for language %s", len(todo), language)
     return len(todo)
