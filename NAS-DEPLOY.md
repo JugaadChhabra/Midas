@@ -29,6 +29,7 @@ NAS_USERNAME=<user>
 NAS_PASSWORD=<pass>
 NAS_DOMAIN=
 NAS_PORT=445
+NAS_AUTH_PROTOCOL=ntlm    # standalone NAS (raw IP, local user) can't do Kerberos; leave "ntlm". Only an AD-joined share needs "negotiate".
 NAS_SOURCE_ROOT_PATH=Animations/SHORTS CUTTER/RHYMES        # MUST directly contain the language subfolders
 NAS_DESTINATION_ROOT_PATH=Animations/SHORTS CUTTER/COMPLETED
 
@@ -107,6 +108,11 @@ Change these via the channel-page Shorts card, the channel API, or directly in t
   the NAS listing (e.g. `HINDI` set but no `HINDI/` folder). Create it or repoint.
 - **Configured but no jobs appear** → the running container is on a stale image
   (pre-NAS code) or can't reach the NAS. `docker compose pull` + re-check §4.
+- **`SMBAuthenticationError: ... Unable to negotiate common mechanism` / "No username
+  or password was specified"** even though the creds are right → the SMB client tried
+  Kerberos (the default `negotiate` mode) against a standalone NAS that has no KDC.
+  Ensure `NAS_AUTH_PROTOCOL=ntlm` (now the default). Confirm inside the container:
+  `docker compose exec midas python -c "import smbclient; smbclient.register_session('<server>', username='<u>', password='<p>', auth_protocol='ntlm'); print(smbclient.listdir(r'\\<server>\<share>'))"`
 - **`local` mode for dev/off-network:** set `NAS_MODE=local` and point
   `NAS_SOURCE_ROOT_PATH` at a local folder containing `PUNJABI/`, `BHOJPURI/`, … with
   a few `.mp4`s. No SMB needed.
