@@ -43,6 +43,13 @@ class Settings:
     SHORTS_MAX_CONCURRENT_JOBS = int(os.getenv("SHORTS_MAX_CONCURRENT_JOBS") or "2")
     SHORTS_DISPATCH_INTERVAL_SECONDS = int(os.getenv("SHORTS_DISPATCH_INTERVAL_SECONDS") or "5")
 
+    # Retired flow: cutting shorts from a downloaded YouTube URL (yt-dlp + bgutil
+    # PO tokens). Off by default — shorts now come from the NAS source only. The
+    # download code (app/shorts/cutter/download.py) is retained but gated by this
+    # flag; the image no longer ships yt-dlp/Deno/bgutil. To revive: set this
+    # true AND restore those deps in requirements*.txt / Dockerfile + rebuild.
+    SHORTS_YT_DOWNLOAD_ENABLED = (os.getenv("SHORTS_YT_DOWNLOAD_ENABLED", "false").lower() == "true")
+
     # Upper bound (seconds) on a source video's length for autopilot shorts.
     # Videos at/above this are never auto-cut. Kept just above the individual
     # rhyme uploads (~3–4 min) and below the long compilations, which are just
