@@ -34,17 +34,28 @@ class NASService:
         return self.local_root / self._rel(relative_path)
 
     def _connect(self) -> None:
-        if self.mode != "smb" or self._connected:
+        if self.mode != "smb":
             return
         import smbclient
-        kwargs = {"username": settings.NAS_USERNAME,
-                  "password": settings.NAS_PASSWORD,
-                  "port": settings.NAS_PORT,
-                  "auth_protocol": settings.NAS_AUTH_PROTOCOL}
+        username = settings.NAS_USERNAME
         domain = (settings.NAS_DOMAIN or "").strip()
         if domain:
-            kwargs["username"] = f"{domain}\\{settings.NAS_USERNAME}"
-        smbclient.register_session(self.server, **kwargs)
+            username = f"{domain}\\{settings.NAS_USERNAME}"
+        # Set PROCESS-WIDE defaults, not just this one session. A standalone NAS
+        # drops idle SMB sessions; when that happens smbclient silently opens a
+        # NEW session on the next op. Without these defaults that new session has
+        # no creds and falls back to negotiate/Kerberos — failing with "Unable to
+        # negotiate common mechanism" only AFTER an idle gap (works, then breaks).
+        # ClientConfig makes every auto-reconnect authenticate with NTLM + creds.
+        smbclient.ClientConfig(username=username,
+                               password=settings.NAS_PASSWORD,
+                               auth_protocol=settings.NAS_AUTH_PROTOCOL)
+        if self._connected:
+            return
+        smbclient.register_session(self.server, username=username,
+                                   password=settings.NAS_PASSWORD,
+                                   port=settings.NAS_PORT,
+                                   auth_protocol=settings.NAS_AUTH_PROTOCOL)
         self._connected = True
 
     # --- operations -----------------------------------------------------
