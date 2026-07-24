@@ -42,10 +42,6 @@ class Settings:
     # reproduces the old single-job behavior.
     SHORTS_MAX_CONCURRENT_JOBS = int(os.getenv("SHORTS_MAX_CONCURRENT_JOBS") or "2")
     SHORTS_DISPATCH_INTERVAL_SECONDS = int(os.getenv("SHORTS_DISPATCH_INTERVAL_SECONDS") or "5")
-    # Kill switch for launching queued shorts jobs. Set false to HOLD dispatch —
-    # finished workers are still reaped, but no new job is spawned. Use while
-    # redeploying workers so a stale instance can't keep failing jobs mid-fix.
-    SHORTS_DISPATCH_ENABLED = (os.getenv("SHORTS_DISPATCH_ENABLED", "true").lower() == "true")
 
     # Retired flow: cutting shorts from a downloaded YouTube URL (yt-dlp + bgutil
     # PO tokens). Off by default — shorts now come from the NAS source only. The

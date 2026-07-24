@@ -74,9 +74,7 @@ def dispatch_tick() -> None:
             log.warning("shorts job %s: worker exited rc=%s (status=%s) -> FAILED",
                         job_id, proc.returncode, job.get("status"))
 
-    # 2. Fill free slots with queued work — unless dispatch is held.
-    if not settings.SHORTS_DISPATCH_ENABLED:
-        return
+    # 2. Fill free slots with queued work.
     cap = settings.SHORTS_MAX_CONCURRENT_JOBS
     while len(_running) < cap:
         next_id = _claim_next(sb)
