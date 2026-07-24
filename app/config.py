@@ -131,6 +131,12 @@ class Settings:
     NAS_PASSWORD        = os.getenv("NAS_PASSWORD", "")
     NAS_DOMAIN          = os.getenv("NAS_DOMAIN", "")
     NAS_PORT            = int(os.getenv("NAS_PORT") or "445")
+    # SMB auth mechanism. Default "ntlm" because the standalone NAS (raw IP, local
+    # user, no domain/KDC) can't do Kerberos: the default "negotiate" path tries
+    # Kerberos first — since the image ships gssapi — and dies with "Unable to
+    # negotiate common mechanism" instead of falling back to NTLM. Set "negotiate"
+    # or "kerberos" only for an AD-joined share.
+    NAS_AUTH_PROTOCOL   = os.getenv("NAS_AUTH_PROTOCOL", "ntlm").lower()
     NAS_SOURCE_ROOT_PATH      = os.getenv("NAS_SOURCE_ROOT_PATH", "Animations/SHORTS CUTTER/RHYMES")
     NAS_DESTINATION_ROOT_PATH = os.getenv("NAS_DESTINATION_ROOT_PATH", "Animations/SHORTS CUTTER/COMPLETED")
     # local-mode root (mode="local"): a directory that stands in for the share.

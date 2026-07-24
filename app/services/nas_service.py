@@ -39,7 +39,8 @@ class NASService:
         import smbclient
         kwargs = {"username": settings.NAS_USERNAME,
                   "password": settings.NAS_PASSWORD,
-                  "port": settings.NAS_PORT}
+                  "port": settings.NAS_PORT,
+                  "auth_protocol": settings.NAS_AUTH_PROTOCOL}
         domain = (settings.NAS_DOMAIN or "").strip()
         if domain:
             kwargs["username"] = f"{domain}\\{settings.NAS_USERNAME}"
