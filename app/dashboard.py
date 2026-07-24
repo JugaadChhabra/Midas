@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from app.config import settings
 from app.db import supabase
 from app import quota as quota_mod
+from app.shorts.status import WORKING_STATUSES
 
 log = logging.getLogger("midas.dashboard")
 router = APIRouter(tags=["dashboard"])
@@ -355,6 +356,27 @@ def _compute_dashboard():
             "created_at": a.get("created_at"),
         })
 
+    # ── "Today / now" operational counts ──────────────────────────────────
+    # The home dashboard leads with these live figures. They are count-only
+    # queries (no row egress) computed here in the shared path so they hold
+    # under both the RPC and legacy aggregation paths, and each is guarded so a
+    # missing/empty table degrades to 0 rather than breaking the dashboard.
+    # "Today" is the UTC day, matching applied_today above.
+    today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+
+    def _count(table: str, apply) -> int:
+        try:
+            return apply(
+                supabase().table(table).select("id", count="exact")
+            ).limit(1).execute().count or 0
+        except Exception:
+            log.warning("dashboard count query failed for %s", table, exc_info=True)
+            return 0
+
+    audited_today = _count("audits", lambda q: q.gte("created_at", _iso(today_start)))
+    shorts_cut_today = _count("shorts_clips", lambda q: q.gte("created_at", _iso(today_start)))
+    jobs_running = _count("shorts_jobs", lambda q: q.in_("status", list(WORKING_STATUSES)))
+
     # ── KPIs ──────────────────────────────────────────────────────────────
     kpis = {
         "channels": len(channels),
@@ -365,6 +387,10 @@ def _compute_dashboard():
         "delta_views_7d_total": sum(s["delta_views_7d"] for s in stats.values()),
         "shorts_cut_total": shorts_cut_total,
         "shorts_uploaded_total": shorts_uploaded_total,
+        # Live "today / now" figures for the home hero tiles.
+        "audited_today": audited_today,
+        "shorts_cut_today": shorts_cut_today,
+        "jobs_running": jobs_running,
     }
 
     health = {

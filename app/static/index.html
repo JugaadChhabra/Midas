@@ -17,30 +17,16 @@
   .pace-bar { display:inline-block; width:80px; height:6px; background:var(--surface-tint); border-radius:3px; vertical-align:middle; overflow:hidden; }
   .pace-bar > i { display:block; height:100%; background:var(--color-ok); }
 
-  /* Health bar */
-  .health-bar { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .health-pill { display:flex; align-items:center; gap:.5rem; border:1px solid var(--border-soft); border-radius:var(--radius-md);
-                 padding:.5rem .8rem; font-size:.88rem; flex:1; min-width:150px; }
-  .health-pill .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-  .health-pill .val { font-weight:700; }
-  .hp-ok  { border-color:var(--color-ok-border); }
-  .hp-warn { border-color:var(--color-warn-border); }
-  .hp-err  { border-color:var(--color-err-border); }
-  .dot-ok   { background:var(--color-ok); }
-  .dot-warn { background:var(--color-warn); }
-  .dot-err  { background:var(--color-err); }
+  /* Hero — the live "today / now" figures; the dashboard's focal point. */
+  .hero { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:.9rem; margin:1.1rem 0; }
+  .hero-tile { border:1px solid var(--border); border-radius:var(--radius); padding:1.05rem 1.2rem; display:flex; flex-direction:column; }
+  .hero-tile .hv { font-size:2.4rem; font-weight:800; line-height:1; letter-spacing:-.02em; }
+  .hero-tile .hl { font-size:.78rem; font-weight:600; opacity:.7; text-transform:uppercase; letter-spacing:.05em; margin-top:.45rem; }
+  .hero-tile .hsub { font-size:.75rem; opacity:.55; margin-top:.3rem; }
 
-  /* Pipeline stat row — a breakdown of Total, not a proportional funnel.
-     Separate cards (not connected cells) so it doesn't imply a sequential flow. */
-  .funnel { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .funnel-step { flex:1; min-width:118px; padding:.7rem .6rem; text-align:center;
-                 border:1px solid var(--border); border-radius:var(--radius-md);
-                 display:flex; flex-direction:column; align-items:center; }
-  .funnel-step .fn { font-size:1.35rem; font-weight:700; line-height:1.1; }
-  .funnel-step .fl { font-size:.7rem; opacity:.55; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
-  .funnel-step .fsub { font-size:.62rem; opacity:.4; margin-top:.15rem; }
-  .progress-track { background:var(--surface-tint); border-radius:var(--radius-sm); height:5px; overflow:hidden; margin-top:.5rem; }
-  .progress-fill { height:100%; border-radius:var(--radius-sm); }
+  /* Attention banner — shown only when something needs the operator. */
+  .attention { border:1px solid var(--color-warn-border); background:var(--color-warn-bg); color:var(--color-warn);
+               border-radius:var(--radius); padding:.7rem 1rem; margin:1rem 0; font-size:.9rem; }
 
   /* Mini pipeline bar in table */
   .mini-prog { display:flex; align-items:center; gap:.35rem; }
@@ -64,34 +50,13 @@
       <h1 style="margin-bottom:.25rem">Midas</h1>
       <p class="sub">YouTube metadata audit + write-back. Autopilot ready.</p>
     </div>
-    <div id="quota-badge" aria-live="polite" class="muted" style="font-size:.85rem; text-align:right"></div>
   </div>
 
-  <!-- Health bar -->
-  <div class="card" style="padding:.75rem 1rem; margin-bottom:.5rem;">
-    <div class="health-bar" id="health-bar" aria-live="polite" role="status">Loading…</div>
-  </div>
+  <!-- Attention banner — only rendered when a channel needs the operator -->
+  <div id="attention" class="attention" role="alert" hidden></div>
 
-  <!-- Pipeline funnel -->
-  <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:.5rem; margin-bottom:.75rem;">
-      <h3 style="margin:0; font-size:.95rem;">Audit pipeline</h3>
-      <span id="pipeline-meta" class="muted" style="font-size:.8rem;"></span>
-    </div>
-    <div class="funnel" id="pipeline-funnel" aria-label="Audit pipeline breakdown">Loading…</div>
-    <div style="margin-top:.65rem;">
-      <div style="display:flex; justify-content:space-between; font-size:.76rem; opacity:.55; margin-bottom:.25rem;">
-        <span id="progress-label">—</span>
-        <span id="eta-label">—</span>
-      </div>
-      <div class="progress-track"><div class="progress-fill" id="progress-fill" style="background:var(--color-accent);width:0%"></div></div>
-    </div>
-  </div>
-
-  <!-- KPIs -->
-  <div class="card">
-    <div class="kpi-grid" id="kpis" aria-live="polite">Loading…</div>
-  </div>
+  <!-- Hero: live today / now figures — the focal point -->
+  <div class="hero" id="hero" aria-live="polite">Loading…</div>
 
   <!-- Channels -->
   <div class="card">
@@ -148,12 +113,10 @@ function fmtResetTime(seconds) {
 }
 
 function renderDashboard(j) {
-  renderHealthBar(j.health, j.quota, j.kpis);
-  renderPipeline(j.pipeline);
-  renderKpis(j.kpis);
+  renderHero(j);
+  renderAttention(j.health);
   renderChannels(j.channels, j.pipeline);
   renderActivityFeed(j.activity || []);
-  renderQuotaBadge(j.quota);
 }
 
 // Stale-while-revalidate: paint the last dashboard instantly, then refresh in
@@ -169,91 +132,54 @@ function loadDashboard() {
   });
 }
 
-function renderHealthBar(h, q, k) {
-  if (!h) { $('health-bar').innerHTML = ''; return; }
-  const apRunning = h.autopilot_running ?? 0;
-  const apTotal = h.autopilot_total ?? 0;
-  const apPaused = h.autopilot_paused ?? 0;
-  const apCls = apPaused > 0 ? 'hp-err' : (apTotal > 0 && apRunning === 0 ? 'hp-warn' : 'hp-ok');
-  const apDot = apPaused > 0 ? 'dot-err' : (apTotal > 0 && apRunning === 0 ? 'dot-warn' : 'dot-ok');
-  const apText = apPaused > 0
-    ? `${apPaused} paused`
-    : (apRunning === apTotal && apTotal > 0 ? `${apRunning}/${apTotal} running` : `${apRunning}/${apTotal} on`);
+// Absolute clock time (viewer's IST) when YouTube's daily quota resets, derived
+// from the seconds-until-reset the server sends. Lets the operator plan around
+// the midnight-Pacific reset in local terms.
+function quotaResetIST(seconds) {
+  if (seconds == null) return '';
+  const at = new Date(Date.now() + seconds * 1000);
+  return at.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST';
+}
 
-  const remPct = q.remaining / Math.max(1, q.limit - q.safety_buffer);
-  const qCls = remPct > 0.3 ? 'hp-ok' : remPct > 0.1 ? 'hp-warn' : 'hp-err';
-  const qDot = remPct > 0.3 ? 'dot-ok' : remPct > 0.1 ? 'dot-warn' : 'dot-err';
-  const qOver = q.remaining < 0;
-  const qVal = qOver ? `${fmt(-q.remaining)} over` : `${fmt(q.remaining)} left`;
-  const qLabel = `${qOver ? 'Over safe cap' : 'Quota left'} · resets in ${fmtResetTime(q.reset_in_seconds)}`;
-
-  const syncHours = h.worst_sync_hours;
-  const syncCls = syncHours == null ? 'hp-err' : (syncHours < 6 ? 'hp-ok' : syncHours < 24 ? 'hp-warn' : 'hp-err');
-  const syncDot = syncHours == null ? 'dot-err' : (syncHours < 6 ? 'dot-ok' : syncHours < 24 ? 'dot-warn' : 'dot-err');
-  const syncText = syncHours == null ? 'Never synced' : freshnessText(syncHours);
-
-  $('health-bar').innerHTML = `
-    <div class="health-pill ${apCls}">
-      <div class="dot ${apDot}"></div>
-      <div><div class="val">${escapeHtml(apText)}</div><div class="muted" style="font-size:.72rem">Autopilot</div></div>
+// The four live figures the dashboard leads with — each a "right now / today"
+// operational number. Cumulative totals live on each channel's Overview page.
+function renderHero(j) {
+  const q = j.quota || {}, k = j.kpis || {};
+  const remPct = q.remaining / Math.max(1, (q.limit - q.safety_buffer));
+  const qColor = remPct > 0.3 ? 'var(--color-ok)' : remPct > 0.1 ? 'var(--color-warn)' : 'var(--color-err)';
+  const qVal = q.remaining < 0 ? `${fmt(-q.remaining)} over` : fmt(q.remaining);
+  const jobs = k.jobs_running ?? 0;
+  $('hero').innerHTML = `
+    <div class="hero-tile">
+      <div class="hv" style="color:${qColor}">${qVal}</div>
+      <div class="hl">YouTube quota left</div>
+      <div class="hsub">resets in ${fmtResetTime(q.reset_in_seconds)} · ${quotaResetIST(q.reset_in_seconds)}</div>
     </div>
-    <div class="health-pill ${qCls}">
-      <div class="dot ${qDot}"></div>
-      <div><div class="val">${qVal}</div><div class="muted" style="font-size:.72rem">${qLabel}</div></div>
+    <div class="hero-tile">
+      <div class="hv">${fmt(k.shorts_cut_today)}</div>
+      <div class="hl">Shorts cut today</div>
     </div>
-    <div class="health-pill hp-ok">
-      <div class="dot dot-ok"></div>
-      <div><div class="val">${fmt(k.applied_today_total)} applied</div><div class="muted" style="font-size:.72rem">Today across all channels</div></div>
+    <div class="hero-tile">
+      <div class="hv">${fmt(k.audited_today)}</div>
+      <div class="hl">Videos audited today</div>
     </div>
-    <div class="health-pill ${syncCls}">
-      <div class="dot ${syncDot}"></div>
-      <div><div class="val">${escapeHtml(syncText)}</div><div class="muted" style="font-size:.72rem">Oldest channel sync</div></div>
+    <div class="hero-tile">
+      <div class="hv" style="color:${jobs > 0 ? 'var(--color-accent)' : 'inherit'}">${fmt(jobs)}</div>
+      <div class="hl">Jobs running now</div>
+      <div class="hsub">${jobs > 0 ? 'shorts cutting in progress' : 'idle'}</div>
     </div>`;
 }
 
-function renderPipeline(p) {
-  if (!p) { $('pipeline-funnel').innerHTML = ''; return; }
-  // Total splits into Audited + Not-yet-audited; Pending/Applied are subsets of
-  // Audited. Ordered and sub-labelled to show that hierarchy rather than a flow.
-  $('pipeline-funnel').innerHTML = `
-    <div class="funnel-step">
-      <div class="fn" style="color:var(--text-faint)">${fmt(p.total)}</div>
-      <div class="fl">Total videos</div>
-    </div>
-    <div class="funnel-step">
-      <div class="fn" style="opacity:.5">${fmt(p.not_audited)}</div>
-      <div class="fl">Not yet audited</div>
-      <div class="fsub">of total</div>
-    </div>
-    <div class="funnel-step">
-      <div class="fn" style="color:var(--color-accent)">${fmt(p.audited)}</div>
-      <div class="fl">Audited</div>
-      <div class="fsub">of total</div>
-    </div>
-    <div class="funnel-step">
-      <div class="fn" style="color:var(--color-accent)">${fmt(p.pending)}</div>
-      <div class="fl">Pending apply</div>
-      <div class="fsub">of audited</div>
-    </div>
-    <div class="funnel-step">
-      <div class="fn" style="color:var(--color-ok)">${fmt(p.applied)}</div>
-      <div class="fl">Applied ✓</div>
-      <div class="fsub">of audited</div>
-    </div>`;
-  $('progress-fill').style.width = (p.progress_pct ?? 0) + '%';
-  $('progress-label').textContent = `${p.progress_pct ?? 0}% audited · ${p.apply_pct_of_audited ?? 0}% of those applied`;
-  $('eta-label').textContent = p.eta_days != null
-    ? `At ${p.daily_rate}/day avg — backlog clears in ~${p.eta_days} days`
-    : p.not_audited === 0 ? 'All videos audited ✓' : '';
-  $('pipeline-meta').textContent = p.daily_rate > 0 ? `${p.daily_rate} applies/day (7d avg)` : '';
-}
-
-function renderKpis(k) {
-  $('kpis').innerHTML = `
-    <div class="kpi"><div class="v">${k.channels}</div><div class="l">Channels</div></div>
-    <div class="kpi"><div class="v">${fmt(k.applied_7d_total)}</div><div class="l">Applied · 7d</div></div>
-    <div class="kpi"><div class="v ${k.delta_views_7d_total >= 0 ? 'pos':'neg'}">${signed(k.delta_views_7d_total)}</div><div class="l">Δ views · 7d (applied)</div></div>
-  `;
+// Only surfaces when the operator needs to act — today, that's paused autopilot.
+function renderAttention(h) {
+  const el = $('attention');
+  const paused = (h && h.autopilot_paused) || 0;
+  if (paused > 0) {
+    el.innerHTML = `<b>${paused} channel${paused > 1 ? 's' : ''} paused</b> — autopilot has stopped. Open the channel to see why and resume.`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
 }
 
 function renderChannels(list, pipeline) {
@@ -315,16 +241,6 @@ function timeAgo(iso) {
     if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
     return Math.floor(diff / 86400) + 'd ago';
   } catch { return ''; }
-}
-
-function renderQuotaBadge(q) {
-  const remPct = q.remaining / Math.max(1, (q.limit - q.safety_buffer));
-  const color = remPct > 0.3 ? 'var(--color-ok)' : remPct > 0.1 ? 'var(--color-warn)' : 'var(--color-err)';
-  const resetTxt = q.reset_in_seconds != null ? ` · resets in ${fmtResetTime(q.reset_in_seconds)}` : '';
-  $('quota-badge').innerHTML =
-    `<span style="display:inline-block;width:.6rem;height:.6rem;border-radius:50%;background:${color};margin-right:.4rem"></span>` +
-    `Quota today: <b>${fmt(q.used_today)}</b> / ${fmt(q.limit)} ` +
-    `<span class="muted">(${q.remaining < 0 ? fmt(-q.remaining) + ' over cap' : fmt(q.remaining) + ' usable'}${resetTxt})</span>`;
 }
 
 loadDashboard();
