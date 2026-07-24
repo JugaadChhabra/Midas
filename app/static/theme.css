@@ -23,7 +23,7 @@
   --color-ok-bg:       #2a72;   --color-ok-border:      #2a73;
   --color-warn-bg:     #d802;   --color-warn-border:    #d803;
   --color-err-bg:      #c332;   --color-err-border:     #c333;
-  --color-accent-bg:   #6af2;
+  --color-accent-bg:   #6af2;   --color-accent-border:  #6af3;
   --color-pending-bg:  #28a2;   --color-pending-border: #28a3;
 
   /* Neutrals — alpha greys (one value works light & dark) */
@@ -91,6 +91,16 @@ code { background:var(--surface-tint); padding:0 .3rem; border-radius:var(--radi
 
 /* ── Pill ───────────────────────────────────────────────────────────── */
 .pill { display:inline-block; padding:.15rem .55rem; border-radius:var(--radius-pill); background:var(--surface-tint); font-size:.78rem; }
+
+/* Status pills — tint style (faint fill + semantic text + border). One role per
+   state; the status→role map lives in /static/status.js. Add a `.pill--*` to a
+   `.pill`. `.pill--sm` is the compact variant for dense lists (activity feed). */
+.pill--ok      { background:var(--color-ok-bg);      color:var(--color-ok);      border:1px solid var(--color-ok-border); }
+.pill--info    { background:var(--color-accent-bg);  color:var(--color-accent);  border:1px solid var(--color-accent-border); }
+.pill--warn    { background:var(--color-warn-bg);    color:var(--color-warn);    border:1px solid var(--color-warn-border); }
+.pill--err     { background:var(--color-err-bg);     color:var(--color-err);     border:1px solid var(--color-err-border); }
+.pill--neutral { background:var(--surface-tint);     color:var(--color-neutral); border:1px solid var(--border-soft); }
+.pill--sm      { padding:.1rem .4rem; font-size:.72rem; font-weight:600; }
 
 /* ── KPI grid ───────────────────────────────────────────────────────── */
 .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.75rem; }

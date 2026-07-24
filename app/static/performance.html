@@ -149,6 +149,7 @@
   <div id="rows" class="card" aria-live="polite">Loading…</div>
 
 <script src="/static/swr.js"></script>
+<script src="/static/status.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('channel_id');
@@ -175,12 +176,18 @@ function showMissingId(what) {
   err.innerHTML = `<p style="color:var(--color-err);margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
   document.body.appendChild(err);
 }
-document.getElementById('channel-link').href = `/channel?id=${encodeURIComponent(channelId)}`;
-// Label the middle crumb with the channel's name (non-fatal if it can't load).
-fetch('/auth/channels').then(r => r.json()).then(chs => {
-  const c = (chs || []).find(x => x.id === channelId);
-  if (c && c.name) document.getElementById('channel-link').textContent = c.name;
-}).catch(() => {});
+// In embed mode the breadcrumb (and its #channel-link) was removed above, so
+// guard the lookup — otherwise this throws and halts the whole script before
+// load() runs, leaving the page stuck on "Loading…".
+const channelLink = document.getElementById('channel-link');
+if (channelLink) {
+  channelLink.href = `/channel?id=${encodeURIComponent(channelId)}`;
+  // Label the middle crumb with the channel's name (non-fatal if it can't load).
+  fetch('/auth/channels').then(r => r.json()).then(chs => {
+    const c = (chs || []).find(x => x.id === channelId);
+    if (c && c.name) channelLink.textContent = c.name;
+  }).catch(() => {});
+}
 
 const $ = (id) => document.getElementById(id);
 function toast(msg, kind='ok', timeout=3500) {
@@ -219,19 +226,8 @@ const signed = (n) => (n > 0 ? '+' : '') + fmt(n ?? 0);
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : 'neutral';
 const pctTxt = (p) => p == null ? '—' : (p > 0 ? '+' : '') + p.toFixed(1) + '%';
 
-const STATE_META = {
-  applied: { bg:'var(--color-ok)', label:'Applied' },
-  pending: { bg:'var(--color-pending)', label:'Pending' },
-  quarantined: { bg:'var(--color-warn)', label:'Bad output' },
-  failed: { bg:'var(--color-err)', label:'Failed' },
-  rejected: { bg:'var(--color-neutral)', label:'Rejected' },
-  reverted: { bg:'var(--color-neutral)', label:'Reverted' },
-  approved: { bg:'var(--color-pending)', label:'Approved' },
-};
-function statusPill(s) {
-  const m = STATE_META[s] || { bg:'var(--color-neutral)', label: s };
-  return `<span class="pill" style="background:${m.bg};color:white">${m.label}</span>`;
-}
+// Status pills come from the shared canonical map — see /static/status.js
+// (global statusPill / AUDIT_STATUS / SHORTS_STATUS).
 
 let rowsData = [];
 let summary = null;

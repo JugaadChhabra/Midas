@@ -27,13 +27,6 @@
   pre { background:var(--surface-tint); padding:.75rem; border-radius:var(--radius-sm); overflow:auto; white-space:pre-wrap; }
   .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
 
-  /* Shorts job/clip status pills */
-  .spill { display:inline-block; padding:.13rem .55rem; border-radius:var(--radius-pill); font-size:.76rem; font-weight:600; white-space:nowrap; }
-  .spill.work { background:var(--color-pending-bg); color:var(--color-accent); }
-  .spill.up   { background:var(--color-warn-bg); color:var(--color-warn); }
-  .spill.done { background:var(--color-ok-bg); color:var(--color-ok); }
-  .spill.fail { background:var(--color-err-bg); color:var(--color-err); }
-  .spill.pend { background:var(--surface-tint); opacity:.9; }
   .shorts-src { color:var(--color-accent); text-decoration:none; font-size:.86rem; }
   .shorts-src:hover { text-decoration:underline; }
   .shorts-src .vid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -343,6 +336,7 @@
   <div id="toasts" aria-live="assertive" role="alert"></div>
 
 <script src="/static/swr.js"></script>
+<script src="/static/status.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('id');
@@ -453,30 +447,8 @@ const initialTab = location.hash.slice(1);
 if (initialTab) switchTab(initialTab);
 
 // ── Status taxonomy (single source of truth) ───────────────────────────
-const STATE_META = {
-  applied:     { bg:'var(--color-ok)', label:'Applied' },
-  pending:     { bg:'var(--color-pending)', label:'Pending' },
-  quarantined: { bg:'var(--color-warn)', label:'Bad output' },
-  failed:      { bg:'var(--color-err)', label:'Failed' },
-  rejected:    { bg:'var(--color-neutral)', label:'Rejected' },
-  reverted:    { bg:'var(--color-neutral)', label:'Reverted' },
-  approved:    { bg:'var(--color-pending)', label:'Approved' },
-  none:        { bg:'var(--border)', label:'Not audited' },
-  // shorts job statuses
-  CREATED:     { bg:'var(--color-pending)', label:'Queued' },
-  DOWNLOADING: { bg:'var(--color-pending)', label:'Downloading' },
-  ANALYSING:   { bg:'var(--color-pending)', label:'Analysing' },
-  RENDERING:   { bg:'var(--color-pending)', label:'Rendering' },
-  UPLOADING:   { bg:'var(--color-pending)', label:'Uploading' },
-  DONE:        { bg:'var(--color-ok)', label:'Shorts done' },
-  FAILED:      { bg:'var(--color-err)', label:'Failed' },
-  PENDING:     { bg:'var(--border)', label:'Pending' },
-  UPLOADED:    { bg:'var(--color-ok)', label:'Uploaded' },
-};
-function statusPill(s) {
-  const m = STATE_META[s || 'none'] || { bg:'var(--color-neutral)', label: s };
-  return `<span class="pill" style="background:${m.bg};${s ? 'color:white' : ''}">${m.label}</span>`;
-}
+// Status pills (audit + shorts) come from the shared canonical map — see
+// /static/status.js (global statusPill / AUDIT_STATUS / SHORTS_STATUS).
 
 // ── Channel meta ──────────────────────────────────────────────────────
 let channelMeta = {};
@@ -538,13 +510,13 @@ function renderAutopilotLog(j) {
     let pill;
     let resumeBtn = '';
     if (j.paused_reason === 'token_expired') {
-      pill = `<span class="pill" style="background:var(--color-err);color:white">Paused · OAuth token expired</span>`;
+      pill = `<span class="pill pill--err">Paused · OAuth token expired</span>`;
       resumeBtn = `<a href="/auth/login" style="margin-left:.5rem"><button>Reconnect Google account</button></a>`;
     } else if (j.paused_reason) {
-      pill = `<span class="pill" style="background:var(--color-err);color:white">Paused · ${escapeHtml(j.paused_reason)}</span>`;
+      pill = `<span class="pill pill--err">Paused · ${escapeHtml(j.paused_reason)}</span>`;
       resumeBtn = `<button onclick="resumeAutopilot()" style="margin-left:.5rem">Resume</button>`;
     } else if (j.enabled) {
-      pill = `<span class="pill" style="background:var(--color-ok);color:white">Running</span>`;
+      pill = `<span class="pill pill--ok">Running</span>`;
     } else {
       pill = `<span class="pill">Disabled</span>`;
     }
@@ -849,7 +821,7 @@ function renderVideos() {
       </td>
       <td>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="View latest audit">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</td>
       <td>${v.issues_count > 0
-            ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill" style="background:var(--color-warn);color:white">${v.issues_count}</span></a>`
+            ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill pill--warn">${v.issues_count}</span></a>`
             : '<span class="muted">—</span>'}</td>
       <td>${v.audit_count || 0}</td>
       <td>${fmt(v.view_count)}</td>
@@ -1105,7 +1077,7 @@ function renderAudit(a) {
     ${issues ? `<details open><summary><b>Issues (${(ifd.issues||[]).length})</b></summary><ul>${issues}</ul></details>` : ''}
     <div style="margin-top:.75rem;">
       ${applied
-        ? `<span class="pill" style="background:var(--color-ok);color:white">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>
+        ? `<span class="pill pill--ok">Applied ${a.applied_at ? '· ' + a.applied_at.slice(0,16).replace('T',' ') : ''}</span>
            <button onclick="revertAudit(${a.id}, '${a.video_id}')" style="margin-left:.5rem" aria-label="Revert audit changes">Revert →</button>`
         : `<button onclick="applyAudit(${a.id}, '${a.video_id}')">Apply to YouTube →</button>
            <span class="muted" style="margin-left:.5rem">Pushes suggested title / description / tags to the live video.</span>`}
@@ -1114,7 +1086,7 @@ function renderAudit(a) {
 }
 
 function diffSection(label, body, changed, why) {
-  const tag = changed ? '<span class="pill" style="background:var(--color-pending);color:white;margin-left:.4rem">changed</span>'
+  const tag = changed ? '<span class="pill pill--info" style="margin-left:.4rem">changed</span>'
                       : '<span class="pill muted" style="margin-left:.4rem">unchanged</span>';
   return `<div style="margin:.6rem 0; padding:.55rem .8rem; border:1px solid var(--border); border-radius:8px;">
     <div style="font-weight:600; margin-bottom:.3rem;">${label} ${tag}</div>
@@ -1235,8 +1207,8 @@ function renderProposals() {
   }
   const rows = plProposals.map(p => {
     const badge = p.action === 'add'
-      ? `<span class="pill" style="background:var(--color-ok);color:white">add</span>`
-      : `<span class="pill" style="background:var(--color-err);color:white">remove</span>`;
+      ? `<span class="pill pill--ok">add</span>`
+      : `<span class="pill pill--err">remove</span>`;
     const sim = p.similarity != null ? (p.similarity * 100).toFixed(1) + '%' : '—';
     return `<tr>
       <td><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''}></td>
@@ -1364,11 +1336,11 @@ $('pl-reconcile-btn').onclick = async () => {
 };
 
 // ── Playlist health (Phase 1B — recommend-only) ───────────────────────────
-const PL_ACTION_BG = {
-  remove: 'var(--color-err)',
-  revive: 'var(--color-warn)',
-  keep: 'var(--color-ok)',
-  insufficient_data: 'var(--color-neutral)',
+const PL_ACTION_CLS = {
+  remove: 'pill--err',
+  revive: 'pill--warn',
+  keep: 'pill--ok',
+  insufficient_data: 'pill--neutral',
 };
 const PL_ACTION_LABEL = {
   remove: 'Recommend remove',
@@ -1377,9 +1349,9 @@ const PL_ACTION_LABEL = {
   insufficient_data: 'Not enough data',
 };
 function plActionPill(action) {
-  const bg = PL_ACTION_BG[action] || 'var(--color-neutral)';
+  const cls = PL_ACTION_CLS[action] || 'pill--neutral';
   const label = PL_ACTION_LABEL[action] || (action || '—');
-  return `<span class="pill" style="background:${bg};color:white">${label}</span>`;
+  return `<span class="pill ${cls}">${label}</span>`;
 }
 
 function renderHealth(envelope) {
@@ -1531,11 +1503,11 @@ function renderReflectionHistory(versions) {
   if (!el || !list || !versions || versions.length === 0) return;
   el.classList.remove('hidden');
 
-  const statusColor = { live: 'var(--color-ok)', shadow: 'var(--color-accent)', retired: 'var(--color-neutral)', retired_regression: 'var(--color-err)' };
+  const statusCls = { live: 'pill--ok', shadow: 'pill--info', retired: 'pill--neutral', retired_regression: 'pill--err' };
   list.innerHTML = versions.map(v => `
     <div class="card" style="padding:.45rem .7rem; margin:.4rem 0">
       <div class="row" style="justify-content:space-between; align-items:center">
-        <span class="pill" style="background:${statusColor[v.status] || 'var(--color-neutral)'}; color:white">${escapeHtml(v.status)}</span>
+        <span class="pill ${statusCls[v.status] || 'pill--neutral'}">${escapeHtml(v.status)}</span>
         <span class="muted" style="font-size:.75rem">${v.created_at ? v.created_at.slice(0, 10) : ''}</span>
       </div>
       ${v.reflection_reasoning ? `<div class="muted" style="margin-top:.3rem">${escapeHtml(v.reflection_reasoning)}</div>` : ''}
