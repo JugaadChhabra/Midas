@@ -199,7 +199,18 @@ def _download_once(options: dict, url: str, dest_dir: Path) -> tuple[Path, str]:
 
 
 def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
-    """Download `url` into dest_dir at native quality. Returns (path, safe title)."""
+    """Download `url` into dest_dir at native quality. Returns (path, safe title).
+
+    HARD DISABLED: the YouTube-URL download flow is retired — shorts come from the
+    NAS source only. The implementation below is kept for reference but must never
+    run, so we refuse here before importing yt-dlp or touching the network. This
+    holds regardless of SHORTS_YT_DOWNLOAD_ENABLED or any caller; flipping that
+    flag no longer revives downloads — restore this function's body to do that.
+    """
+    raise CutterError(
+        "YouTube-URL shorts download is retired and disabled; shorts are cut from "
+        "the NAS source only."
+    )
     try:
         import yt_dlp
     except ImportError as exc:
