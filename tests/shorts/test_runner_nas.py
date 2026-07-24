@@ -55,9 +55,10 @@ def test_nas_job_cuts_pushes_clips_and_moves_source(tmp_path):
     up.assert_not_called()                                     # no YouTube upload
     nas.copy_from_local.assert_called_once()                   # clip pushed to NAS
     _, kwargs_or_args = nas.copy_from_local.call_args
-    nas.move.assert_called_once_with("RHYMES/HINDI/song.mp4", "COMPLETED/HINDI/song.mp4")
+    # Source and clips land together in a per-video folder: COMPLETED/<lang>/<video-name>/.
+    nas.move.assert_called_once_with("RHYMES/HINDI/song.mp4", "COMPLETED/HINDI/song/song.mp4")
     clip_inserts = [f for (tbl, op, f) in recorder if tbl == "shorts_clips" and op == "insert"]
-    assert clip_inserts and clip_inserts[0]["nas_path"] == "COMPLETED/HINDI/c1.mp4"
+    assert clip_inserts and clip_inserts[0]["nas_path"] == "COMPLETED/HINDI/song/c1.mp4"
     assert clip_inserts[0]["upload_status"] == "SAVED"
     assert any(op == "update" and f.get("status") == "DONE" for (_, op, f) in recorder)
 
