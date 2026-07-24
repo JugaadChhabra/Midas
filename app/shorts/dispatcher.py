@@ -13,7 +13,7 @@ import sys
 
 from app.config import settings
 from app.db import supabase
-from app.shorts.status import CREATED, FAILED, TERMINAL_STATUSES
+from app.shorts.status import CREATED, DOWNLOADING, FAILED, TERMINAL_STATUSES
 
 log = logging.getLogger("midas.shorts.dispatcher")
 
@@ -28,15 +28,32 @@ def _spawn(job_id: int) -> subprocess.Popen:
     return subprocess.Popen([sys.executable, "-m", "app.shorts.worker", str(job_id)])
 
 
-def _next_created_id(sb) -> int | None:
-    """Oldest CREATED job not already launched by this dispatcher, or None."""
+def _claim_next(sb) -> int | None:
+    """Atomically claim the oldest CREATED job this dispatcher hasn't launched.
+
+    The claim is a conditional flip CREATED -> DOWNLOADING that only lands while
+    the row is still CREATED. If another dispatcher (e.g. a not-yet-retired
+    instance during a rolling redeploy) grabbed it first, the update returns no
+    row and we move to the next job. This closes the double-spawn race that the
+    in-memory ``_running`` set alone cannot cover once more than one dispatcher
+    is briefly live — the failure mode that let a stale worker fail NAS jobs
+    it had raced a healthy worker for.
+    """
     running_ids = list(_running.keys())
-    q = (sb.table("shorts_jobs").select("id")
-         .eq("status", CREATED).order("id", desc=False))
-    if running_ids:
-        q = q.not_.in_("id", running_ids)
-    rows = (q.limit(1).execute().data) or []
-    return rows[0]["id"] if rows else None
+    while True:
+        q = (sb.table("shorts_jobs").select("id")
+             .eq("status", CREATED).order("id", desc=False))
+        if running_ids:
+            q = q.not_.in_("id", running_ids)
+        rows = (q.limit(1).execute().data) or []
+        if not rows:
+            return None
+        jid = rows[0]["id"]
+        won = (sb.table("shorts_jobs").update({"status": DOWNLOADING})
+               .eq("id", jid).eq("status", CREATED).execute().data)
+        if won:
+            return jid
+        # Lost the race — the row is no longer CREATED, so the next pass skips it.
 
 
 def dispatch_tick() -> None:
@@ -57,12 +74,21 @@ def dispatch_tick() -> None:
             log.warning("shorts job %s: worker exited rc=%s (status=%s) -> FAILED",
                         job_id, proc.returncode, job.get("status"))
 
-    # 2. Fill free slots with queued work.
+    # 2. Fill free slots with queued work — unless dispatch is held.
+    if not settings.SHORTS_DISPATCH_ENABLED:
+        return
     cap = settings.SHORTS_MAX_CONCURRENT_JOBS
     while len(_running) < cap:
-        next_id = _next_created_id(sb)
+        next_id = _claim_next(sb)
         if next_id is None:
             break
-        _running[next_id] = _spawn(next_id)
+        try:
+            _running[next_id] = _spawn(next_id)
+        except Exception:
+            # Spawn failed after we claimed the row — release it back to CREATED
+            # so it is retried next tick rather than stranded in DOWNLOADING.
+            log.exception("shorts dispatch: spawn failed for job %s; releasing claim", next_id)
+            sb.table("shorts_jobs").update({"status": CREATED}).eq("id", next_id).execute()
+            break
         log.info("shorts dispatch: launched worker for job %s (%d/%d slots)",
                  next_id, len(_running), cap)
