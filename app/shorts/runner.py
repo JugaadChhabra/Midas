@@ -149,14 +149,17 @@ def run_shorts_job(job_id: int) -> None:
 
 
 def _run_nas_shorts_job(job_id: int, job: dict) -> None:
-    """Cut a NAS-sourced video: copy from NAS, cut, push clips + move the source
-    into COMPLETED/<language>/. No YouTube upload."""
+    """Cut a NAS-sourced video: copy from NAS, cut, then push the clips and move
+    the source together into COMPLETED/<language>/<video-name>/. No YouTube upload."""
     sb = supabase()
     job_dir = Path(settings.SHORTS_CACHE_DIR) / str(job_id)
     language = job["language"]
     src_rel = job["source_nas_path"]                 # e.g. "HINDI/song.mp4"
     filename = src_rel.rsplit("/", 1)[-1]
-    dest_dir = f"{settings.NAS_DESTINATION_ROOT_PATH}/{language}"
+    # Each finished video gets its own folder holding both the source and its
+    # shorts: COMPLETED/<language>/<video-name>/. Created on demand by the NAS
+    # service's copy_from_local / move (both makedirs their parent).
+    dest_dir = f"{settings.NAS_DESTINATION_ROOT_PATH}/{language}/{Path(filename).stem}"
     try:
         _set_job(job_id, status=DOWNLOADING, progress=5, progress_label="fetching from NAS")
         local_src = nas_service.copy_to_local(
