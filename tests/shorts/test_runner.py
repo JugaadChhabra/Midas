@@ -76,6 +76,25 @@ def test_run_shorts_job_marks_failed_on_error(tmp_path):
     assert "boom" in job_updates[-1]["error_message"]
 
 
+def test_run_shorts_job_youtube_download_disabled_fails(tmp_path):
+    # Retired flow: a source_url (non-NAS) job must fail fast without downloading
+    # when SHORTS_YT_DOWNLOAD_ENABLED is off (the default).
+    recorder = []
+    with patch("app.shorts.runner.supabase", return_value=_fake_sb(JOB, recorder)), \
+         patch("app.shorts.runner._fetch_video") as fetch, \
+         patch("app.shorts.runner._notify_macos"), \
+         patch("app.shorts.runner.settings") as settings:
+        settings.SHORTS_YT_DOWNLOAD_ENABLED = False
+        settings.SHORTS_CACHE_DIR = str(tmp_path / "cache")
+        from app.shorts.runner import run_shorts_job
+        run_shorts_job(5)
+
+    fetch.assert_not_called()
+    job_updates = [f for t, op, f in recorder if t == "shorts_jobs" and op == "update"]
+    assert job_updates and job_updates[-1]["status"] == "FAILED"
+    assert "retired" in job_updates[-1]["error_message"].lower()
+
+
 def test_run_shorts_job_upload_cap_uploads_top_n(tmp_path):
     recorder = []
     job = {"id": 5, "channel_id": "UC123", "source_url": "https://youtu.be/dQw4w9WgXcQ",

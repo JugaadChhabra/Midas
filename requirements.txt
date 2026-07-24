@@ -10,11 +10,10 @@ itsdangerous==2.2.0
 json-repair==0.30.2
 apscheduler==3.10.4
 youtube-transcript-api>=0.6.2
-# Pinned to an exact, verified-good version — NOT a floor. yt-dlp ships bad
-# releases (2026.7.4 broke YouTube extraction on the box: "video not available"
-# even with a valid PO token), so we never auto-upgrade to "newest". Bump this
-# only after confirming a newer version actually downloads on the box, via PR.
-# 2026.6.9 is the version running on the dev Mac that has never hit the error.
-yt-dlp==2026.6.9
+# yt-dlp powered the RETIRED YouTube-URL shorts download flow. Disabled with that
+# flow (SHORTS_YT_DOWNLOAD_ENABLED); shorts now come from the NAS source. To revive:
+# uncomment (2026.6.9 is the exact verified-good pin — NOT a floor; newer releases
+# have broken YouTube extraction), and restore Deno + bgutil in the image.
+# yt-dlp==2026.6.9
 pytest==8.3.4
 smbprotocol

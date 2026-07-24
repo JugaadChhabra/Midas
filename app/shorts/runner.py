@@ -72,6 +72,13 @@ def run_shorts_job(job_id: int) -> None:
         return
     if job.get("source_nas_path"):
         return _run_nas_shorts_job(job_id, job)
+    # Retired flow: everything below downloads a YouTube URL via yt-dlp. Gated off
+    # by default; the image no longer ships yt-dlp. Re-enable via SHORTS_YT_DOWNLOAD_ENABLED.
+    if not settings.SHORTS_YT_DOWNLOAD_ENABLED:
+        log.warning("run_shorts_job %s: YouTube-URL download flow is disabled", job_id)
+        _set_job(job_id, status=FAILED,
+                 error_message="YouTube-URL shorts download is retired; use the NAS source.")
+        return
     job_dir = Path(settings.SHORTS_CACHE_DIR) / str(job_id)
     source = None
     try:

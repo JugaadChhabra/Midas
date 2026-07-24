@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
 from app.shorts.nas_source import (
@@ -27,6 +28,10 @@ class CreateJob(BaseModel):
 
 @router.post("/jobs")
 def create_job(body: CreateJob):
+    # Retired flow: cutting from a downloaded YouTube URL. Shorts now come from
+    # the NAS source (see enqueue_language_jobs). Re-enable via SHORTS_YT_DOWNLOAD_ENABLED.
+    if not settings.SHORTS_YT_DOWNLOAD_ENABLED:
+        raise HTTPException(410, "YouTube-URL shorts are retired; cut from the NAS source instead.")
     sb = supabase()
     chan = sb.table("channels").select("id").eq("id", body.channel_id).single().execute().data
     if not chan:
