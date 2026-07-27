@@ -34,6 +34,7 @@ from app.analytics_client import (
     yt_analytics_video_report,
     yt_analytics_video_traffic_source_playlist,
 )
+from app.config import settings
 from app.db import supabase
 from app.youtube_client import TokenExpiredError
 
@@ -41,6 +42,37 @@ log = logging.getLogger("midas.metrics_poll")
 
 # Weekly trailing window (CIL §0.3: "v1 cadence: weekly windows").
 WINDOW_DAYS = 7
+
+# Tier 2: audits in these statuses mark a video as "under active measurement" —
+# the only videos the sensor polls when METRICS_POLL_MEASURED_ONLY is on.
+ACTIVE_MEASUREMENT_STATUSES = ("awaiting_window", "measuring")
+
+# PostgREST caps the URL length of an in_() list; the measured set is small today
+# (hundreds) but chunk defensively so growth can never overflow the query.
+_ID_CHUNK = 150
+
+
+def _measured_video_ids() -> set[str]:
+    """Video IDs with an audit in an active measurement window (the Tier-2 poll
+    set). Paged past Supabase's 1000-row cap. Empty set => poll nothing, which is
+    the whole point: on a quiet day the sensor makes zero Analytics calls."""
+    ids: set[str] = set()
+    offset = 0
+    PAGE = 1000
+    while True:
+        page = (
+            supabase().table("audits")
+            .select("video_id")
+            .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
+            .range(offset, offset + PAGE - 1)
+            .execute()
+            .data or []
+        )
+        ids.update(r["video_id"] for r in page if r.get("video_id"))
+        if len(page) < PAGE:
+            break
+        offset += PAGE
+    return ids
 
 # Gap 6 REOPENED 2026-07-02: the first live tier-2 run proved
 # `insightTrafficSourceDetail` is NOT supported for
@@ -147,13 +179,62 @@ def _upsert_traffic_source_rows(
     return len(payload)
 
 
-def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool) -> dict:
+def _fetch_channel_videos(channel_id: str, measured_video_ids: set[str] | None) -> list[dict]:
+    """Return [{id, privacy_status}] for the videos this channel should poll.
+
+    `measured_video_ids is None` => wide net (legacy): every synced video, paged
+    past Supabase's 1000-row cap. Otherwise (Tier 2): only this channel's videos
+    that are in the measured set, fetched in bounded id-chunks so the in_() URL
+    can't overflow. An empty set short-circuits to no query at all.
+    """
+    if measured_video_ids is None:
+        videos: list[dict] = []
+        offset = 0
+        PAGE = 1000
+        while True:
+            page = (
+                supabase().table("videos")
+                .select("id,privacy_status")
+                .eq("channel_id", channel_id)
+                .range(offset, offset + PAGE - 1)
+                .execute()
+                .data or []
+            )
+            videos.extend(page)
+            if len(page) < PAGE:
+                break
+            offset += PAGE
+        return videos
+
+    ids = list(measured_video_ids)
+    if not ids:
+        return []
+    videos = []
+    for i in range(0, len(ids), _ID_CHUNK):
+        page = (
+            supabase().table("videos")
+            .select("id,privacy_status")
+            .eq("channel_id", channel_id)
+            .in_("id", ids[i:i + _ID_CHUNK])
+            .execute()
+            .data or []
+        )
+        videos.extend(page)
+    return videos
+
+
+def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool,
+                  measured_video_ids: set[str] | None = None) -> dict:
     """Pull one channel's video + playlist windows. Returns counts for logging.
 
     `tier_2`: if True, also pulls the playlist-source breakdown per video
     (Phase 1B Step B — only useful when health scoring consumes it). Caller
     should set this from `channels.playlist_health_enabled` so disabled
     channels skip the extra API calls entirely.
+
+    `measured_video_ids`: None restores the legacy wide net (every public video);
+    a set restricts the video poll to the Tier-2 measured set (see poll_metrics).
+    Playlist polling is unaffected either way.
     """
     if tier_2 and not TIER2_TRAFFIC_SOURCE_SUPPORTED:
         log.warning(
@@ -164,24 +245,7 @@ def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool) -> dic
         tier_2 = False
     analytics = analytics_for_channel(channel_id)
 
-    # Page past Supabase's 1000-row default cap so channels with >1000 synced
-    # videos don't silently miss the tail (same pattern as dashboard.py).
-    videos: list[dict] = []
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
-            supabase().table("videos")
-            .select("id,privacy_status")
-            .eq("channel_id", channel_id)
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        videos.extend(page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    videos = _fetch_channel_videos(channel_id, measured_video_ids)
     # Loop 1 only judges public videos (consistent with audits.py); skip the rest.
     public_video_ids = [
         v["id"] for v in videos
@@ -318,12 +382,24 @@ def poll_metrics() -> None:
         log.info("metrics_poll: no channels with analytics_authorized=true; nothing to do")
         return
 
+    # Tier 2: resolve the measured set ONCE for the whole pass (it's keyed by
+    # video, not channel). None => legacy wide net for every channel.
+    measured_video_ids: set[str] | None = None
+    if settings.METRICS_POLL_MEASURED_ONLY:
+        measured_video_ids = _measured_video_ids()
+        log.info("metrics_poll: measured-only mode — %d video(s) under active measurement",
+                 len(measured_video_ids))
+        if not measured_video_ids:
+            log.info("metrics_poll: no videos under active measurement; skipping video poll "
+                     "(playlists still polled)")
+
     for ch in channels:
         cid = ch["id"]
         try:
             counts = _poll_channel(
                 cid, start, end,
                 tier_2=bool(ch.get("playlist_health_enabled")),
+                measured_video_ids=measured_video_ids,
             )
             log.info("metrics_poll %s: %s", cid, counts)
         except AnalyticsNotAuthorizedError:

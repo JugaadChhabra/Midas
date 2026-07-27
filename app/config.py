@@ -117,6 +117,15 @@ class Settings:
     # window still hasn't completed after this many extra days, give up and
     # classify neutral ("can't tell") rather than waiting forever.
     MEASUREMENT_COVERAGE_GRACE_DAYS = int(os.getenv("MEASUREMENT_COVERAGE_GRACE_DAYS") or "14")
+    # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
+    # report for EVERY public video (~39k/day → one units=0 quota_log row + one
+    # video_metrics upsert each, and reporting_poll then backfilled every row).
+    # Nothing consumes those weekly sensor rows yet — Loop 1 measures off
+    # video_reach_daily. When true (default) the sensor polls ONLY videos under an
+    # active measurement window (audits.measurement_status in awaiting_window/
+    # measuring), collapsing the daily set ~87×. Set false to restore the wide net
+    # without a deploy (e.g. if a future loop wants longitudinal watch-time history).
+    METRICS_POLL_MEASURED_ONLY = os.getenv("METRICS_POLL_MEASURED_ONLY", "true").lower() == "true"
     # Strategy stamp for Loop 3 attribution (seeded in the Loop 1 migration).
     STRATEGY_VERSION = os.getenv("STRATEGY_VERSION") or "2026.07-baseline-v1"
 
