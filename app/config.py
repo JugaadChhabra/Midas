@@ -83,6 +83,15 @@ class Settings:
     PLAYLIST_JOIN_LOW     = float(os.getenv("PLAYLIST_JOIN_LOW")     or "0.55")  # haiku band lower bound
     PLAYLIST_LEAVE        = float(os.getenv("PLAYLIST_LEAVE")        or "0.60")  # haiku-confirmed removal
     PLAYLIST_MUTATION_CAP = int(os.getenv("PLAYLIST_MUTATION_CAP")   or "20")    # max add+remove per reconcile
+    # When true, join_pass/reconcile score videos against playlist centroids via
+    # the Postgres playlist_video_sims() RPC (returns floats) instead of pulling
+    # every pooled embedding — a vector(3072), ~39 KB/row — into the app. The
+    # daily reconcile's embedding egress is the biggest recurring Supabase egress
+    # source. Defaults OFF: ship the migration + code inert, run the live parity
+    # test (tests/test_playlist_sims_parity_live.py) to confirm the RPC matches
+    # the in-app centroid math, THEN flip this on. Falls back to the in-app path
+    # automatically if the RPC errors (e.g. an unmigrated env), like DASHBOARD_USE_RPC.
+    PLAYLIST_SIMS_USE_RPC = os.getenv("PLAYLIST_SIMS_USE_RPC", "false").lower() == "true"
 
     # Phase 1B — Playlist health scoring (recommend-only).
     # PO §Config table defaults; PHASE_1B_PLAN.md §5.5 for justification.

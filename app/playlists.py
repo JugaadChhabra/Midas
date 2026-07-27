@@ -101,6 +101,114 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
     return dot / (mag_a * mag_b)
 
 
+# ── Centroid similarity (pgvector RPC, with in-app fallback) ───────────────────
+# join_pass / reconcile_channel score videos against playlist centroids. The
+# in-app path below (_get_embedding + _centroid + _cosine_sim) pulls pooled
+# embeddings — vector(3072), ~39 KB/row — into the app; the daily reconcile does
+# this per channel and is the biggest recurring Supabase egress source. When
+# PLAYLIST_SIMS_USE_RPC is on, the identical math runs in Postgres via
+# playlist_video_sims() and only floats come back. Both paths are kept: the
+# in-app one is the correctness oracle (see the live parity test) and the
+# automatic fallback if the RPC errors.
+
+def _has_pooled_embedding(video_id: str) -> bool:
+    """Cheap existence check (no vector egress) — replaces _get_embedding's
+    null-check on the RPC path."""
+    row = (
+        supabase().table("video_embeddings")
+        .select("id")
+        .eq("video_id", video_id)
+        .eq("chunk_index", "pooled")
+        .eq("model_version", EMBED_MODEL)
+        .limit(1)
+        .execute()
+    ).data
+    return bool(row)
+
+
+def _rpc_playlist_sims(channel_id: str, video_id: str | None) -> list[dict]:
+    resp = supabase().rpc("playlist_video_sims", {
+        "p_channel_id": channel_id,
+        "p_model_version": EMBED_MODEL,
+        "p_video_id": video_id,
+    }).execute()
+    return resp.data or []
+
+
+def _sims_for_video(channel_id: str, video_id: str,
+                    playlists: list[dict]) -> dict[str, float] | None:
+    """{playlist_id: sim} for one video vs each playlist's current-member centroid.
+
+    Returns None iff the video has no pooled embedding (caller warns and skips).
+    Playlists with no embedded members simply don't appear in the dict.
+    """
+    if settings.PLAYLIST_SIMS_USE_RPC:
+        try:
+            rows = _rpc_playlist_sims(channel_id, video_id)
+            if not _has_pooled_embedding(video_id):
+                return None
+            return {r["playlist_id"]: r["sim"] for r in rows}
+        except Exception:
+            log.warning("playlist_video_sims RPC failed; falling back to in-app centroids",
+                        exc_info=True)
+
+    emb = _get_embedding(video_id)
+    if emb is None:
+        return None
+    out: dict[str, float] = {}
+    for pl in playlists:
+        current = _current_members(pl["id"])
+        if video_id in current:
+            continue  # never scored against a centroid that includes itself
+        centroid = _centroid(list(current.keys()))
+        if centroid is None:
+            continue
+        out[pl["id"]] = _cosine_sim(emb, centroid)
+    return out
+
+
+def _sims_matrix(channel_id: str, playlists: list[dict],
+                 video_ids: list[str]) -> tuple[dict[tuple[str, str], float], set[str]]:
+    """({(playlist_id, video_id): sim}, {playlist_ids_with_centroid}).
+
+    One frozen snapshot of every embedded channel video scored against every
+    playlist centroid — the reconcile_channel workhorse.
+    """
+    if settings.PLAYLIST_SIMS_USE_RPC:
+        try:
+            rows = _rpc_playlist_sims(channel_id, None)
+            sims = {(r["playlist_id"], r["video_id"]): r["sim"] for r in rows}
+            centroid_pids = {r["playlist_id"] for r in rows}
+            return sims, centroid_pids
+        except Exception:
+            log.warning("playlist_video_sims RPC failed; falling back to in-app centroids",
+                        exc_info=True)
+
+    emb_rows = (
+        supabase().table("video_embeddings")
+        .select("video_id,embedding")
+        .in_("video_id", video_ids)
+        .eq("chunk_index", "pooled")
+        .eq("model_version", EMBED_MODEL)
+        .execute()
+    ).data or []
+    all_emb = {r["video_id"]: _parse_embedding(r["embedding"]) for r in emb_rows}
+    sims: dict[tuple[str, str], float] = {}
+    centroid_pids: set[str] = set()
+    for pl in playlists:
+        members = _current_members(pl["id"])
+        centroid = _centroid(list(members.keys()))
+        if centroid is None:
+            continue
+        centroid_pids.add(pl["id"])
+        for vid in video_ids:
+            e = all_emb.get(vid)
+            if e is None:
+                continue
+            sims[(pl["id"], vid)] = _cosine_sim(e, centroid)
+    return sims, centroid_pids
+
+
 def _member_titles(video_ids: list[str], limit: int = 5) -> list[str]:
     if not video_ids:
         return []
@@ -199,11 +307,6 @@ def join_pass(channel_id: str, video_id: str) -> int:
         log.info("[DRY_RUN] join_pass skipped for video %s", video_id)
         return 0
 
-    video_embedding = _get_embedding(video_id)
-    if video_embedding is None:
-        log.warning("join_pass: no embedding for video %s, skipping", video_id)
-        return 0
-
     playlists = (
         supabase().table("playlists")
         .select("id,title,description")
@@ -212,6 +315,12 @@ def join_pass(channel_id: str, video_id: str) -> int:
     ).data or []
 
     if not playlists:
+        return 0
+
+    # sim per playlist (pgvector RPC or in-app centroids). None => no embedding.
+    sims = _sims_for_video(channel_id, video_id, playlists)
+    if sims is None:
+        log.warning("join_pass: no embedding for video %s, skipping", video_id)
         return 0
 
     yt = youtube_for_channel(channel_id)
@@ -224,12 +333,10 @@ def join_pass(channel_id: str, video_id: str) -> int:
         if video_id in current:
             continue  # already in this playlist
 
-        centroid = _centroid(list(current.keys()))
-        if centroid is None:
-            # Empty playlist — skip for join_pass; discovery handles empty clusters
+        sim = sims.get(playlist_id)
+        if sim is None:
+            # Empty playlist / no embedded members — discovery handles empty clusters
             continue
-
-        sim = _cosine_sim(video_embedding, centroid)
 
         if sim < settings.PLAYLIST_JOIN_LOW:
             continue
@@ -292,24 +399,16 @@ def reconcile_channel(channel_id: str) -> dict:
 
     video_ids = [v["id"] for v in videos]
 
-    # Preload all embeddings for this channel in one query
-    emb_rows = (
-        supabase().table("video_embeddings")
-        .select("video_id,embedding")
-        .in_("video_id", video_ids)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .execute()
-    ).data or []
-    all_embeddings: dict[str, list[float]] = {r["video_id"]: _parse_embedding(r["embedding"]) for r in emb_rows}
+    # One frozen snapshot: sim of every embedded video to every playlist centroid
+    # (pgvector RPC or in-app centroids). Freezing here prevents cascade effects.
+    sims, centroid_pids = _sims_matrix(channel_id, playlists, video_ids)
 
-    # Freeze state: snapshot current members + centroids for all playlists
-    frozen: dict[str, dict] = {}  # playlist_id → {members: {vid: item_id}, centroid: list|None}
+    # Freeze membership too — needed for the in-playlist test and item_ids on removal.
+    frozen: dict[str, dict] = {}  # playlist_id → {members: {vid: item_id}, has_centroid: bool}
     for playlist in playlists:
-        members = _current_members(playlist["id"])
         frozen[playlist["id"]] = {
-            "members": members,
-            "centroid": _centroid(list(members.keys())),
+            "members": _current_members(playlist["id"]),
+            "has_centroid": playlist["id"] in centroid_pids,
         }
 
     yt = youtube_for_channel(channel_id)
@@ -320,10 +419,9 @@ def reconcile_channel(channel_id: str) -> dict:
     for playlist in playlists:
         playlist_id = playlist["id"]
         state = frozen[playlist_id]
-        centroid = state["centroid"]
         current = state["members"]
 
-        if centroid is None:
+        if not state["has_centroid"]:
             continue
 
         for video_id in video_ids:
@@ -331,11 +429,10 @@ def reconcile_channel(channel_id: str) -> dict:
                 skipped_cap = True
                 break
 
-            emb = all_embeddings.get(video_id)
-            if emb is None:
-                continue
+            sim = sims.get((playlist_id, video_id))
+            if sim is None:
+                continue  # video has no pooled embedding — skip (matches emb-None)
 
-            sim = _cosine_sim(emb, centroid)
             in_playlist = video_id in current
 
             if in_playlist and sim < settings.PLAYLIST_LEAVE:
