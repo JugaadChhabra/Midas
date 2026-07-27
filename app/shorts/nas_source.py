@@ -19,6 +19,26 @@ log = logging.getLogger("midas.shorts.nas_source")
 # it would be re-enqueued forever. Same value/rationale as app/autopilot.py.
 MAX_SHORTS_RETRY_ATTEMPTS = 3
 
+# Not every FAILED row means the *source* is bad. Infrastructure failures — a
+# mid-job redeploy (reap_stuck_jobs), a NAS transport hiccup, or the (now-fixed)
+# split-brain stale-worker bug — say nothing about whether the file is cuttable,
+# yet each one used to burn a retry. Three such blips permanently blacklisted a
+# perfectly good source (the incident that silenced whole channels). These
+# markers classify a FAILED row as transient so it does NOT count toward the cap;
+# the file is retried on the next tick instead of being poisoned forever. Matched
+# case-insensitively as a substring of shorts_jobs.error_message.
+TRANSIENT_FAILURE_MARKERS = (
+    "server restarted mid-job",         # reap_stuck_jobs on redeploy (runner.py)
+    'unsupported url scheme: "nas"',    # legacy split-brain stale worker (fixed)
+    "nas transport:",                   # NAS copy/move I/O failure (runner.py)
+)
+
+
+def _is_transient_failure(error_message: str | None) -> bool:
+    """True when a FAILED row reflects infrastructure noise, not a bad source."""
+    msg = (error_message or "").lower()
+    return any(marker in msg for marker in TRANSIENT_FAILURE_MARKERS)
+
 
 def list_source_languages() -> list[str]:
     """Language subfolders under the source root."""
@@ -43,7 +63,7 @@ def uncut_source_paths(language: str) -> list[str]:
     if not paths:
         return []
     rows = (supabase().table("shorts_jobs")
-            .select("source_nas_path,status")
+            .select("source_nas_path,status,error_message")
             .in_("source_nas_path", paths).execute().data) or []
     in_flight: set[str] = set()
     failed: dict[str, int] = defaultdict(int)
@@ -54,7 +74,9 @@ def uncut_source_paths(language: str) -> list[str]:
             continue
         if status in WORKING_STATUSES:
             in_flight.add(p)
-        elif status == FAILED:
+        elif status == FAILED and not _is_transient_failure(r.get("error_message")):
+            # Transient/infra failures don't count toward the cap (see markers above)
+            # so a NAS blip or redeploy never permanently blacklists a good file.
             failed[p] += 1
     return [p for p in paths
             if p not in in_flight and failed[p] < MAX_SHORTS_RETRY_ATTEMPTS]

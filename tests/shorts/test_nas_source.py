@@ -47,6 +47,36 @@ def test_enqueue_skips_in_flight_and_capped_files():
     assert all(r["status"] == "CREATED" and r["language"] == "HINDI" for r in recorder)
 
 
+def test_transient_failures_do_not_count_toward_cap():
+    """A file that only ever failed on infra noise (redeploy reap, NAS transport,
+    the fixed split-brain bug) must NOT be blacklisted, even past the cap."""
+    from app.shorts import nas_source
+    files = ["good.mp4", "bad.mp4"]
+    existing = [
+        # good.mp4: 3 transient failures -> still eligible (auto-recovers)
+        {"source_nas_path": "HINDI/good.mp4", "status": "FAILED",
+         "error_message": 'Unable to handle request: Unsupported url scheme: "nas"'},
+        {"source_nas_path": "HINDI/good.mp4", "status": "FAILED",
+         "error_message": "server restarted mid-job"},
+        {"source_nas_path": "HINDI/good.mp4", "status": "FAILED",
+         "error_message": "NAS transport: copy_to_local failed: connection reset"},
+        # bad.mp4: 3 genuine cut failures -> stays blacklisted
+        {"source_nas_path": "HINDI/bad.mp4", "status": "FAILED",
+         "error_message": "Could not download/load the multilingual lyrics model"},
+        {"source_nas_path": "HINDI/bad.mp4", "status": "FAILED",
+         "error_message": "Could not download/load the multilingual lyrics model"},
+        {"source_nas_path": "HINDI/bad.mp4", "status": "FAILED",
+         "error_message": "Could not download/load the multilingual lyrics model"},
+    ]
+    recorder = []
+    with patch.object(nas_source, "list_source_languages", return_value=["HINDI"]), \
+         patch.object(nas_source.nas_service, "list_video_files", return_value=files), \
+         patch.object(nas_source, "supabase", return_value=_sb_with_jobs(existing, recorder)):
+        n = nas_source.enqueue_language_jobs("HINDI")
+    assert n == 1
+    assert [r["source_nas_path"] for r in recorder] == ["HINDI/good.mp4"]
+
+
 def test_enqueue_respects_limit():
     from app.shorts import nas_source
     recorder = []

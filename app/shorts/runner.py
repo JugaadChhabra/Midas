@@ -57,6 +57,17 @@ def _set_job(job_id: int, **fields) -> None:
     supabase().table("shorts_jobs").update(fields).eq("id", job_id).execute()
 
 
+def _nas_step(label: str, fn, *args, **kwargs):
+    """Run a NAS I/O op, re-tagging any failure with a stable 'NAS transport:'
+    prefix. nas_source._is_transient_failure treats that prefix as infrastructure
+    noise, so a transport blip (idle-SMB drop, reset, timeout) does not burn a
+    retry and permanently blacklist an otherwise-cuttable source file."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        raise RuntimeError(f"NAS transport: {label} failed: {exc}") from exc
+
+
 def active_job_count() -> int:
     """Number of shorts jobs in flight (queued CREATED + actively running)."""
     rows = (supabase().table("shorts_jobs").select("id")
@@ -162,7 +173,8 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
     dest_dir = f"{settings.NAS_DESTINATION_ROOT_PATH}/{language}/{Path(filename).stem}"
     try:
         _set_job(job_id, status=DOWNLOADING, progress=5, progress_label="fetching from NAS")
-        local_src = nas_service.copy_to_local(
+        local_src = _nas_step(
+            "copy_to_local", nas_service.copy_to_local,
             f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}", job_dir / "src" / filename)
         title = safe_name(Path(filename).stem)
 
@@ -182,7 +194,8 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
         for clip in clips:
             clip_name = Path(clip["path"]).name
             nas_path = f"{dest_dir}/{clip_name}"
-            nas_service.copy_from_local(Path(clip["path"]), nas_path)
+            _nas_step("copy_from_local", nas_service.copy_from_local,
+                      Path(clip["path"]), nas_path)
             sb.table("shorts_clips").insert({
                 "job_id": job_id, "rank": clip["rank"],
                 "title": f"{title.replace('_', ' ')} — Part {clip['rank']}"[:100],
@@ -193,8 +206,9 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
             }).execute()
 
         # Move the consumed source out of RHYMES so it is never re-cut.
-        nas_service.move(f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}",
-                         f"{dest_dir}/{filename}")
+        _nas_step("move", nas_service.move,
+                  f"{settings.NAS_SOURCE_ROOT_PATH}/{src_rel}",
+                  f"{dest_dir}/{filename}")
         _set_job(job_id, status=DONE, progress=100, progress_label="done",
                  error_message=None)
         _notify_macos("Midas Shorts", f"Job {job_id}: {len(clips)} clips cut from {filename}")
