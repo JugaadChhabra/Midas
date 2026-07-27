@@ -139,6 +139,17 @@ class Settings:
     # window still hasn't completed after this many extra days, give up and
     # classify neutral ("can't tell") rather than waiting forever.
     MEASUREMENT_COVERAGE_GRACE_DAYS = int(os.getenv("MEASUREMENT_COVERAGE_GRACE_DAYS") or "14")
+    # reporting_poll ingests daily reach CSVs into video_reach_daily and backfills
+    # video_metrics.impressions/ctr. BOTH are consumed only by app/measurement.py,
+    # which only runs on measurement_enabled channels. Ingesting reach for the
+    # other channels was pure write-only waste — video_reach_daily's runaway
+    # growth (~35k rows/day) and the main free-tier DB-size pressure. When true
+    # (default) reporting_poll skips channels that aren't measurement_enabled.
+    # Flip off to restore reach ingestion for every analytics_authorized channel.
+    # NOTE: enabling measurement on a fresh channel means its reach starts
+    # accruing that day — allow ~1 pre-change window (MEASUREMENT_WINDOW_DAYS) of
+    # warmup before its first measurements are reliable.
+    REPORTING_MEASURED_CHANNELS_ONLY = os.getenv("REPORTING_MEASURED_CHANNELS_ONLY", "true").lower() == "true"
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

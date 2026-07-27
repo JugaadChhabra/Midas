@@ -35,6 +35,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from app.analytics_client import AnalyticsNotAuthorizedError
+from app.config import settings
 from app.db import supabase
 from app.reporting_client import (
     download_report_csv,
@@ -315,16 +316,21 @@ def _poll_channel(channel_id: str) -> dict:
 
 
 def poll_reporting() -> None:
-    """APScheduler entry point. One pass over all re-consented channels."""
-    channels = (
-        supabase().table("channels")
-        .select("id")
-        .eq("analytics_authorized", True)
-        .execute()
-        .data or []
-    )
+    """APScheduler entry point. One pass over re-consented channels.
+
+    By default (REPORTING_MEASURED_CHANNELS_ONLY) only measurement_enabled
+    channels are polled: reach + the impressions/ctr backfill are consumed only
+    by measurement, so ingesting them for other channels just bloated
+    video_reach_daily. Flip the flag off to poll every analytics_authorized
+    channel again.
+    """
+    q = supabase().table("channels").select("id").eq("analytics_authorized", True)
+    if settings.REPORTING_MEASURED_CHANNELS_ONLY:
+        q = q.eq("measurement_enabled", True)
+    channels = q.execute().data or []
     if not channels:
-        log.info("reporting_poll: no channels with analytics_authorized=true; nothing to do")
+        log.info("reporting_poll: no channels to poll "
+                 "(measured-only=%s); nothing to do", settings.REPORTING_MEASURED_CHANNELS_ONLY)
         return
 
     for ch in channels:
