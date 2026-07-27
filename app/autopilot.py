@@ -99,16 +99,26 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
 
     Walks newest → oldest so freshly uploaded videos are optimized first.
     """
-    # Only the columns the picker filters on and the caller reads (id for the
-    # audit call, is_short for the post-apply embed gate, privacy_status for the
-    # eligibility filter). `videos` is a wide table (description/tags/snippet/…)
-    # and this runs every autopilot tick, so select("*") here egressed KBs per row
-    # for nothing — audit_video() re-fetches the full row by id when it needs it.
+    # Fast path: compute the pick in Postgres (next_audit_candidate) and get ONE
+    # row back instead of the whole videos + audits lists. This was the dominant
+    # Supabase egress source — hundreds of KB per tick on big channels. Falls back
+    # to the in-app scan below if disabled or if the RPC errors.
+    if settings.AUTOPILOT_PICKER_USE_RPC:
+        try:
+            rows = supabase().rpc("next_audit_candidate", {"p_channel_id": channel_id}).execute().data or []
+            return rows[0] if rows else None
+        except Exception:
+            log.warning("next_audit_candidate RPC failed; falling back to in-app picker", exc_info=True)
+
+    # In-app oracle / fallback. `videos` is a wide table (description/tags/snippet/…)
+    # so we select only the 3 columns the picker filters on and the caller reads.
+    # The id tie-break makes the pick deterministic and matches the RPC's ordering.
     candidates = (
         supabase().table("videos")
         .select("id,is_short,privacy_status")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
+        .order("id")
         .execute()
     ).data or []
 

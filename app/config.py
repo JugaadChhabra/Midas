@@ -36,6 +36,13 @@ class Settings:
     YT_DAILY_QUOTA = int(os.getenv("YT_DAILY_QUOTA") or "10000")
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
+    # When true, the autopilot picks the next video to audit via the
+    # next_audit_candidate() RPC (returns ONE row) instead of pulling the
+    # channel's whole videos + audits lists into the app every tick — the
+    # dominant Supabase egress source. Defaults OFF: ship the migration + code
+    # inert, run the live parity test, then flip on. Auto-falls back to the
+    # in-app picker if the RPC errors (e.g. an unmigrated env).
+    AUTOPILOT_PICKER_USE_RPC = os.getenv("AUTOPILOT_PICKER_USE_RPC", "false").lower() == "true"
 
     # Shorts job queue: how many cutter jobs run concurrently, and how often
     # the dispatcher polls for CREATED jobs / reaps finished workers. Cap 1
