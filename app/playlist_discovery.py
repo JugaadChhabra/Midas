@@ -9,7 +9,7 @@ import math
 from app.config import settings
 from app.db import supabase
 from app.openrouter import chat_json, EMBED_MODEL
-from app.playlists import _current_members, _cosine_sim, _record_assignment
+from app.playlists import _current_members, _cosine_sim, _parse_embedding, _record_assignment
 from app.youtube_client import youtube_for_channel, yt_playlists_insert, yt_playlist_items_insert
 
 log = logging.getLogger("midas.playlist_discovery")
@@ -51,10 +51,14 @@ def _cluster_orphans(
     A video joins an existing cluster if its mean similarity to all current
     cluster members exceeds CLUSTER_SIM_THRESHOLD. Otherwise it starts a new cluster.
     Clusters smaller than MIN_CLUSTER_SIZE are discarded.
+
+    Orphans are processed in sorted(video_id) order so the greedy outcome is
+    deterministic (was implicit DB order) and matches the discover_orphan_clusters
+    RPC — see the live parity test.
     """
     clusters: list[list[str]] = []
 
-    for vid in orphan_ids:
+    for vid in sorted(orphan_ids):
         emb = embeddings.get(vid)
         if emb is None:
             continue
@@ -77,6 +81,50 @@ def _cluster_orphans(
             clusters.append([vid])
 
     return [c for c in clusters if len(c) >= MIN_CLUSTER_SIZE]
+
+
+def _rpc_cluster_orphans(channel_id: str, orphan_ids: list[str]) -> list[list[str]]:
+    """Cluster orphans in Postgres (discover_orphan_clusters). Returns clusters as
+    lists of video_ids, ordered by cluster_id — no embedding egress."""
+    resp = supabase().rpc("discover_orphan_clusters", {
+        "p_channel_id": channel_id,
+        "p_model_version": EMBED_MODEL,
+        "p_orphan_ids": orphan_ids,
+        "p_sim_threshold": CLUSTER_SIM_THRESHOLD,
+        "p_min_cluster_size": MIN_CLUSTER_SIZE,
+    }).execute()
+    grouped: dict[int, list[str]] = {}
+    for r in (resp.data or []):
+        grouped.setdefault(r["cluster_id"], []).append(r["video_id"])
+    return [grouped[k] for k in sorted(grouped)]
+
+
+def _cluster_orphans_inapp(channel_id: str, orphan_ids: list[str]) -> list[list[str]]:
+    """In-app oracle / fallback: pull the orphans' pooled embeddings and greedily
+    cluster in Python. (Pulls only orphan_ids — the old path pulled every video.)"""
+    emb_rows = (
+        supabase().table("video_embeddings")
+        .select("video_id,embedding")
+        .in_("video_id", orphan_ids)
+        .eq("chunk_index", "pooled")
+        .eq("model_version", EMBED_MODEL)
+        .execute()
+    ).data or []
+    embeddings = {r["video_id"]: _parse_embedding(r["embedding"]) for r in emb_rows}
+    embeddable = [v for v in orphan_ids if v in embeddings]
+    return _cluster_orphans(embeddable, embeddings)
+
+
+def _cluster_orphans_for_channel(channel_id: str, orphan_ids: list[str]) -> list[list[str]]:
+    """Dispatch to the pgvector RPC (default off) or the in-app path, with an
+    automatic fallback if the RPC errors (e.g. an unmigrated env)."""
+    if settings.PLAYLIST_DISCOVERY_USE_RPC:
+        try:
+            return _rpc_cluster_orphans(channel_id, orphan_ids)
+        except Exception:
+            log.warning("discover_orphan_clusters RPC failed; falling back to in-app clustering",
+                        exc_info=True)
+    return _cluster_orphans_inapp(channel_id, orphan_ids)
 
 
 def _propose_playlist(video_ids: list[str]) -> dict | None:
@@ -124,25 +172,14 @@ def discover_playlists(channel_id: str) -> dict:
     if not all_video_ids:
         return {"clusters_found": 0, "playlists_created": 0}
 
-    # Load embeddings once
-    emb_rows = (
-        supabase().table("video_embeddings")
-        .select("video_id,embedding")
-        .in_("video_id", all_video_ids)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .execute()
-    ).data or []
-    embeddings: dict[str, list[float]] = {r["video_id"]: r["embedding"] for r in emb_rows}
-
     orphans = _orphan_video_ids(channel_id, all_video_ids)
-    orphans = [v for v in orphans if v in embeddings]  # only embeddable orphans
-
     if not orphans:
         log.info("discover_playlists(%s): no orphan videos", channel_id)
         return {"clusters_found": 0, "playlists_created": 0}
 
-    clusters = _cluster_orphans(orphans, embeddings)
+    # Cluster orphans (pgvector RPC or in-app greedy). The RPC keeps the 39 KB/row
+    # embeddings in Postgres; only cluster labels come back.
+    clusters = _cluster_orphans_for_channel(channel_id, orphans)
     log.info("discover_playlists(%s): %d orphans → %d clusters", channel_id, len(orphans), len(clusters))
 
     if not clusters:

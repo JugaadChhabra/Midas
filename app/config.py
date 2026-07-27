@@ -92,6 +92,12 @@ class Settings:
     # the in-app centroid math, THEN flip this on. Falls back to the in-app path
     # automatically if the RPC errors (e.g. an unmigrated env), like DASHBOARD_USE_RPC.
     PLAYLIST_SIMS_USE_RPC = os.getenv("PLAYLIST_SIMS_USE_RPC", "false").lower() == "true"
+    # Same idea for the WEEKLY discovery pass (Tier 3′ RPC 2): cluster orphan
+    # videos via the Postgres discover_orphan_clusters() RPC (returns labels)
+    # instead of pulling every orphan's pooled embedding into the app. Independent
+    # flag so it can be validated + enabled separately from PLAYLIST_SIMS_USE_RPC.
+    # Defaults OFF; falls back to the in-app greedy clustering if the RPC errors.
+    PLAYLIST_DISCOVERY_USE_RPC = os.getenv("PLAYLIST_DISCOVERY_USE_RPC", "false").lower() == "true"
 
     # Phase 1B — Playlist health scoring (recommend-only).
     # PO §Config table defaults; PHASE_1B_PLAN.md §5.5 for justification.
