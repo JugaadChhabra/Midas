@@ -119,17 +119,26 @@ def analytics_for_channel(channel_id: str):
 
 # ── Internal helpers ──────────────────────────────────────────────────────
 
-def _log_quota(channel_id: str | None, operation: str, success: bool):
-    """Telemetry-only log; Analytics API quota is a separate pool from Data API.
+def _log_quota(channel_id: str | None, operation: str, success: bool, units: int = 0):
+    """Log a quota_log row for a metered call. NO-OP for units<=0.
 
-    units=0 so dashboards/aggregations don't double-count against the 10k budget
-    while still surfacing call volume in quota_log.
+    Analytics API quota is a separate pool from the Data API 10k/day budget, so
+    every call here is unmetered (units=0). We used to still insert a zero-unit
+    telemetry row per call "for visibility", but that was ~97% of all quota_log
+    writes (one per video per daily metrics_poll) — the table's runaway growth on
+    the free tier — and every reader already filters `units > 0`
+    (quota.units_used_today, the dashboard sparkline; see PHASE_0_GAPS.md Gap 8,
+    where these zero rows also crowded real Data API rows out of the 1000-row
+    window). So we simply don't write them. The `units` param stays for any
+    future *metered* analytics call, which would log normally.
     """
+    if units <= 0:
+        return  # unmetered telemetry — intentionally not persisted (see docstring)
     try:
         supabase().table("quota_log").insert({
             "channel_id": channel_id,
             "operation": operation,
-            "units": 0,
+            "units": units,
             "success": success,
         }).execute()
     except Exception:

@@ -92,13 +92,22 @@ def reporting_for_channel(channel_id: str) -> ReportingHandle:
 
 # ── Internal helpers ──────────────────────────────────────────────────────
 
-def _log_quota(channel_id: str | None, operation: str, success: bool):
-    """Telemetry-only; Reporting API quota is a separate pool from Data API."""
+def _log_quota(channel_id: str | None, operation: str, success: bool, units: int = 0):
+    """Log a quota_log row for a metered call. NO-OP for units<=0.
+
+    Reporting API quota is a separate pool from the Data API budget, so calls
+    here are unmetered (units=0). Matching analytics_client._log_quota, we no
+    longer persist zero-unit telemetry rows — every quota_log reader filters
+    `units > 0`, so these rows only bloated the table. The `units` param stays
+    for any future metered call.
+    """
+    if units <= 0:
+        return  # unmetered telemetry — intentionally not persisted
     try:
         supabase().table("quota_log").insert({
             "channel_id": channel_id,
             "operation": operation,
-            "units": 0,
+            "units": units,
             "success": success,
         }).execute()
     except Exception:
