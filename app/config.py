@@ -31,7 +31,9 @@ class Settings:
     REFLECTION_MODEL = os.getenv("REFLECTION_MODEL") or "anthropic/claude-sonnet-4-6"
 
     SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret-change-me")
-    DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+    # Defaults to false: audits are APPLIED to YouTube live unless DRY_RUN=true is
+    # set explicitly in the env. Set DRY_RUN=true to preview without pushing.
+    DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
     YT_DAILY_QUOTA = int(os.getenv("YT_DAILY_QUOTA") or "10000")
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
