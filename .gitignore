@@ -238,3 +238,7 @@ tools/bgutil-pot/
 .DS_Store
 # YOLO weights (auto-downloaded by ultralytics on first cut)
 *.pt
+
+# mattpocock/skills per-repo config (local-only, not tracked)
+/CLAUDE.md
+/docs/agents/
