@@ -43,6 +43,11 @@ class Settings:
     # inert, run the live parity test, then flip on. Auto-falls back to the
     # in-app picker if the RPC errors (e.g. an unmigrated env).
     AUTOPILOT_PICKER_USE_RPC = os.getenv("AUTOPILOT_PICKER_USE_RPC", "false").lower() == "true"
+    # Minutes after which a 'repeated_failures' autopilot pause auto-clears so the
+    # channel is retried (it re-pauses if it fails 3 more times). Only this
+    # transient reason expires — token_expired / unsafe_model stay latched until a
+    # human reconnects / fixes config. Set to 0 to disable auto-unpause entirely.
+    AUTOPILOT_PAUSE_COOLDOWN_MINUTES = int(os.getenv("AUTOPILOT_PAUSE_COOLDOWN_MINUTES") or "60")
 
     # Shorts job queue: how many cutter jobs run concurrently, and how often
     # the dispatcher polls for CREATED jobs / reaps finished workers. Cap 1

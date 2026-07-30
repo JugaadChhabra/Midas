@@ -279,7 +279,38 @@ def _run_shorts_action(ch: dict) -> None:
 
 def _pause(channel_id: str, reason: str):
     log.warning("Pausing autopilot for %s: %s", channel_id, reason)
-    supabase().table("channels").update({"autopilot_paused_reason": reason}).eq("id", channel_id).execute()
+    supabase().table("channels").update({
+        "autopilot_paused_reason": reason,
+        "autopilot_paused_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", channel_id).execute()
+
+
+# Only 'repeated_failures' auto-expires after the cooldown — it reflects a
+# transient burst that may have cleared. token_expired / unsafe_model need
+# explicit human action (reconnect Google / fix the model config), so they stay
+# latched until an operator resumes.
+_AUTO_EXPIRE_REASONS = ("repeated_failures",)
+
+
+def _clear_expired_pauses() -> None:
+    """Auto-unpause channels whose transient pause has outlived the cooldown.
+
+    Called at the top of the channel picker. A cleared channel gets a fresh
+    failure budget; if it fails 3 more times it simply re-pauses — cooldown-based
+    backoff instead of a permanent latch that needs a human."""
+    cooldown = settings.AUTOPILOT_PAUSE_COOLDOWN_MINUTES
+    if cooldown <= 0:
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=cooldown)).isoformat()
+    for reason in _AUTO_EXPIRE_REASONS:
+        cleared = (supabase().table("channels")
+                   .update({"autopilot_paused_reason": None, "autopilot_paused_at": None})
+                   .eq("autopilot_paused_reason", reason)
+                   .lt("autopilot_paused_at", cutoff)
+                   .execute().data) or []
+        for c in cleared:
+            _failure_counts[c["id"]] = 0
+            log.info("Auto-unpaused %s: '%s' cooldown (%dm) elapsed", c["id"], reason, cooldown)
 
 
 def _touch_tick(channel_id: str):
@@ -313,21 +344,35 @@ def _quota_dormant() -> bool:
     return False
 
 
+def _channel_has_work(c: dict) -> bool:
+    """True if the channel can run at least one path this tick. The pause is
+    path-specific: it gates the metadata-audit path only. Shorts (NAS cutting)
+    are decoupled — they run whenever autopilot_shorts_enabled, regardless of an
+    audit-side pause, so an audit blip never silences a full NAS folder."""
+    audit_ok = c.get("autopilot_enabled") and not c.get("autopilot_paused_reason")
+    shorts_ok = c.get("autopilot_shorts_enabled")
+    return bool(audit_ok or shorts_ok)
+
+
 def _pick_next_channel() -> dict | None:
-    """The autopilot-enabled, non-paused channel that has waited longest since its
-    last tick (round-robin; never-ticked first). None if none are eligible."""
+    """The eligible channel that has waited longest since its last tick
+    (round-robin; never-ticked first). None if none are eligible.
+
+    Auto-clears expired transient pauses first so a recovered channel rejoins
+    the rotation without a manual Resume."""
+    _clear_expired_pauses()
     channels = (
         supabase().table("channels")
         .select("*")
         .or_("autopilot_enabled.eq.true,autopilot_shorts_enabled.eq.true")
-        .is_("autopilot_paused_reason", "null")
         .execute()
     ).data or []
-    if not channels:
+    eligible = [c for c in channels if _channel_has_work(c)]
+    if not eligible:
         return None
     # null last_tick_at first (never ticked → highest priority), then oldest tick
-    channels.sort(key=lambda c: (c.get("autopilot_last_tick_at") or ""))
-    return channels[0]
+    eligible.sort(key=lambda c: (c.get("autopilot_last_tick_at") or ""))
+    return eligible[0]
 
 
 def _resync_if_stale(ch: dict) -> bool:
@@ -406,9 +451,9 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> No
 def tick():
     """One pass of the autopilot loop. Processes at most one video and returns.
 
-    Thin orchestrator: quota gate → pick channel → resync → shorts → (audit path:
-    cap → pick video → audit → validate → apply). The steps live in helpers above
-    and below; the failure-accounting rule is _record_failure()."""
+    Thin orchestrator: quota gate → pick channel → shorts → (audit path: pause
+    gate → resync → cap → pick video → audit → validate → apply). The steps live
+    in helpers above and below; the failure-accounting rule is _record_failure()."""
     try:
         if _quota_dormant():
             return
@@ -418,21 +463,25 @@ def tick():
             return
         channel_id = ch["id"]
 
-        if not _resync_if_stale(ch):
-            return
-
-        # Shorts autopilot — independent of the metadata-audit path. Enqueues at
-        # most one cut per tick, gated by active_job_count vs the concurrency cap.
+        # Shorts autopilot — fully decoupled from the metadata-audit path. It runs
+        # before (and regardless of) the audit pause/resync gating: NAS cutting
+        # needs no YouTube token or freshly-synced video stats, so an audit-side
+        # pause or a stale-sync must never silence it. Enqueues at most one cut per
+        # tick, gated by active_job_count vs the concurrency cap.
         if ch.get("autopilot_shorts_enabled"):
             try:
                 _run_shorts_action(ch)
             except Exception as e:
                 log.exception("Shorts autopilot failed for %s: %s", channel_id, e)
 
-        # The metadata-audit path (daily cap → pick → audit → apply) runs only for
-        # channels with metadata autopilot enabled. Shorts-only channels stop here.
-        if not ch.get("autopilot_enabled"):
+        # The metadata-audit path runs only for channels with metadata autopilot
+        # enabled AND not audit-paused. (A channel can be picked purely for shorts
+        # while audit-paused, so the pause is re-checked here, not just at pick.)
+        if not ch.get("autopilot_enabled") or ch.get("autopilot_paused_reason"):
             _touch_tick(channel_id)
+            return
+
+        if not _resync_if_stale(ch):
             return
 
         # 4. Daily cap check
@@ -536,7 +585,9 @@ def tick():
 
 @router.post("/channels/{channel_id}/autopilot/resume")
 def resume_autopilot(channel_id: str):
-    supabase().table("channels").update({"autopilot_paused_reason": None}).eq("id", channel_id).execute()
+    supabase().table("channels").update({
+        "autopilot_paused_reason": None, "autopilot_paused_at": None,
+    }).eq("id", channel_id).execute()
     _failure_counts[channel_id] = 0
     return {"ok": True}
 

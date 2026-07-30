@@ -100,7 +100,9 @@ def callback(request: Request, code: str | None = None, error: str | None = None
         .data or {}
     ).get("autopilot_paused_reason")
     if existing_pause == "token_expired":
-        supabase().table("channels").update({"autopilot_paused_reason": None}).eq("id", channel_id).execute()
+        supabase().table("channels").update({
+            "autopilot_paused_reason": None, "autopilot_paused_at": None,
+        }).eq("id", channel_id).execute()
 
     return RedirectResponse(f"/channel?id={channel_id}")
 

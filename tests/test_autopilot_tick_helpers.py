@@ -36,16 +36,18 @@ def test_quota_dormant_transitions():
 
 def _channels_returning(rows):
     sb = MagicMock()
-    sb.table.return_value.select.return_value.or_.return_value.is_.return_value \
-        .execute.return_value.data = rows
+    t = sb.table.return_value
+    t.select.return_value.or_.return_value.execute.return_value.data = rows
+    # _clear_expired_pauses() update(...).eq(...).lt(...).execute() -> nothing expired
+    t.update.return_value.eq.return_value.lt.return_value.execute.return_value.data = []
     return sb
 
 
 def test_pick_next_channel_never_ticked_first_then_oldest():
     sb = _channels_returning([
-        {"id": "B", "autopilot_last_tick_at": "2026-01-02T00:00:00Z"},
-        {"id": "A", "autopilot_last_tick_at": None},        # never ticked → highest priority
-        {"id": "C", "autopilot_last_tick_at": "2026-01-01T00:00:00Z"},
+        {"id": "B", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-02T00:00:00Z"},
+        {"id": "A", "autopilot_enabled": True, "autopilot_last_tick_at": None},   # never ticked → highest priority
+        {"id": "C", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-01T00:00:00Z"},
     ])
     with patch("app.autopilot.supabase", return_value=sb):
         assert ap._pick_next_channel()["id"] == "A"
