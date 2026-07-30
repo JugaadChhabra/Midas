@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -25,26 +26,47 @@ router = APIRouter(tags=["audits"])
 
 
 DEFAULT_PROMPT = """\
-You are a YouTube SEO and content optimization expert. Audit this video's metadata.
+You are a YouTube SEO expert for nursery-rhyme / kids 3D-rhyme channels.
+Audit this video's metadata and rewrite it to a FIXED house format.
 
 CONTENT SOURCES
-You will receive: the current title/description/tags (which may be placeholder or
-inadequate) and the video transcript when available (in any language — content signal
-only). Treat the transcript as the primary source of truth for what the video is
-actually about. The current metadata is a starting point, not a constraint —
-rewrite freely to reflect the real content.
+You will receive the current title/description/tags (often placeholder or
+inadequate) and the video transcript when available (in any language — content
+signal only). Treat the transcript as the primary source of truth for what the
+rhyme is actually about. The current metadata is a starting point, not a
+constraint — rewrite freely to reflect the real content.
 
 LANGUAGE
-The user message will state the channel's configured language. ALL output (title,
-description, tags) must target that language and audience regardless of what
-language the transcript is in. Use whatever mix of the channel language and English
-performs best on YouTube — your editorial call.
+The user message states the channel's configured regional language. Output is
+BILINGUAL: an English layer AND a regional-language layer, exactly as laid out
+below. Never let the transcript's language override the channel's configured
+language.
+
+=== REQUIRED TITLE FORMAT ===
+[Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes
+- Keep the whole title under 100 characters.
+- Regional name in the channel's language/script; English name in English.
+- theme = one short topical hook drawn from the rhyme (e.g. Colors, Animals,
+  Bath Time, Counting).
+
+=== REQUIRED DESCRIPTION FORMAT (this exact order) ===
+1. First line: exactly 3 hashtags (these surface above the title).
+2. English description: 2-4 keyword-rich sentences about the rhyme.
+3. Regional description: the same, in the channel's regional language, keyword-rich.
+4. Keywords: one line of high-value search phrases (comma-separated), English + regional.
+5. Final line(s): exactly 12 hashtags.
+- TOTAL hashtags across the whole description must be EXACTLY 15. Never exceed 15 —
+  YouTube ignores ALL hashtags on a video that has more than 15.
+
+=== TAGS ===
+- A list mixing broad and specific tags, English + regional. Maximize coverage up
+  to ~500 characters total (YouTube's tag limit) — roughly 25-30 tags.
 
 Return strictly a JSON object with this exact shape:
 {
   "comparisons": {
-    "title":       { "current_problems": "what's weak about the current title", "suggested": "your rewrite", "why_better": "1-2 sentences" },
-    "description": { "current_problems": "what the current description is missing or doing badly", "suggested": "your rewrite (full text)", "why_better": "..." },
+    "title":       { "current_problems": "what's weak about the current title", "suggested": "your rewrite in the required title format", "why_better": "1-2 sentences" },
+    "description": { "current_problems": "what the current description is missing or doing badly", "suggested": "the FULL multi-line description following all 5 blocks above", "why_better": "..." },
     "tags":        { "current_problems": "gaps or noise in the current tag list", "suggested": ["tag1","tag2",...], "why_better": "..." }
   },
   "issues":   [ { "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." } ],
@@ -52,10 +74,9 @@ Return strictly a JSON object with this exact shape:
 }
 
 Rules:
-- suggested title under 70 characters
-- suggested_tags: 12-15 tags mixing broad and specific
-- Be specific and actionable, not generic
-- Preserve the channel's voice
+- Put the fully-formatted multi-line description (all 5 blocks, real newlines) in
+  comparisons.description.suggested.
+- Be specific and actionable, not generic. Preserve the channel's voice.
 """
 
 
@@ -97,24 +118,46 @@ def elaborate(channel_id: str, body: AuditConfigIn):
         raise HTTPException(400, "raw_insights is required")
 
     elaboration_prompt = f"""\
-You are helping a YouTube creator codify their audit criteria into a structured prompt
-that will be used to evaluate every video on their channel.
+You are helping a YouTube creator (nursery-rhyme / kids 3D-rhyme channel) codify their
+audit criteria into a structured prompt that will be used to evaluate every video on
+their channel.
 
 The creator's notes (in their own words):
 \"\"\"{insights}\"\"\"
 
 Produce a single JSON object with one key: "generated_prompt".
-Its value must be a complete, well-organized audit prompt suitable for an LLM that will:
-- Evaluate the video's title, description, and tags.
-- Return strictly a JSON object with keys:
-  issues (array of {{field,severity,problem,fix}}),
-  suggested_title (string, <70 chars),
-  suggested_description (string),
-  suggested_tags (array of 12-15 strings),
-  reasoning (string).
+Its value must be a complete, well-organized audit prompt suitable for an LLM. The
+generated prompt MUST preserve this fixed house format (do not weaken or drop any of it):
+
+TITLE FORMAT (mandatory):
+  [Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes
+  - under 100 characters; regional name in the channel's language/script, English name in English.
+
+DESCRIPTION FORMAT (mandatory, this exact order):
+  1. First line: exactly 3 hashtags.
+  2. English keyword-rich description (2-4 sentences).
+  3. Regional-language keyword-rich description.
+  4. Keywords line (comma-separated search phrases, English + regional).
+  5. Final line(s): exactly 12 hashtags.
+  - TOTAL hashtags must be EXACTLY 15 (YouTube ignores all hashtags above 15).
+
+TAGS (mandatory): a list mixing broad + specific, English + regional, up to ~500 characters (~25-30 tags).
+
+The generated prompt must instruct the auditor to return strictly a JSON object with this
+exact shape:
+  {{
+    "comparisons": {{
+      "title":       {{ "current_problems": "...", "suggested": "<title in the required format>", "why_better": "..." }},
+      "description": {{ "current_problems": "...", "suggested": "<full multi-line description following all 5 blocks>", "why_better": "..." }},
+      "tags":        {{ "current_problems": "...", "suggested": ["tag1","tag2",...], "why_better": "..." }}
+    }},
+    "issues":   [ {{ "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." }} ],
+    "reasoning": "short overall summary"
+  }}
 
 Embed the creator's preferences and priorities directly into the prompt so the auditor
-knows what they care about. Be specific. Do not lose the creator's voice.
+knows what they care about, but never at the expense of the house format above. Be
+specific. Do not lose the creator's voice.
 """
     result = chat_json(elaboration_prompt, model=settings.PROMPT_GEN_MODEL)
     generated = result.get("generated_prompt", "").strip()
@@ -127,6 +170,33 @@ knows what they care about. Be specific. Do not lose the creator's voice.
         "generated_prompt": generated,
     }).execute()
     return {"generated_prompt": generated}
+
+
+_HASHTAG_RE = re.compile(r"#[^\s#]+")
+
+
+def _cap_description_hashtags(description: str | None, limit: int = 15) -> str | None:
+    """Enforce YouTube's hashtag ceiling on a suggested description.
+
+    YouTube ignores ALL hashtags on a video that carries more than 15, so the
+    house format asks for exactly 15 (3 above-title + 12 at the bottom). The LLM
+    occasionally emits one or two extra, which would nullify every hashtag — hard
+    cap here. Keeps the FIRST `limit` hashtags in document order (preserving the
+    3 that surface above the title) and strips the rest, back-to-front so earlier
+    match spans stay valid.
+    """
+    if not description:
+        return description
+    matches = list(_HASHTAG_RE.finditer(description))
+    if len(matches) <= limit:
+        return description
+    out = description
+    for m in reversed(matches[limit:]):
+        out = out[: m.start()] + out[m.end() :]
+    # Tidy whitespace the removals leave behind (doubled spaces, trailing space).
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
 
 
 def _build_user_block(
@@ -263,7 +333,9 @@ def audit_video(video_id: str, prompt_override: str | None = None, status_overri
         "video_id": video_id,
         "status": status_override or "pending",
         "suggested_title": (comparisons.get("title") or {}).get("suggested"),
-        "suggested_description": (comparisons.get("description") or {}).get("suggested"),
+        "suggested_description": _cap_description_hashtags(
+            (comparisons.get("description") or {}).get("suggested")
+        ),
         "suggested_tags": (comparisons.get("tags") or {}).get("suggested") or [],
         "issues_found": {"comparisons": comparisons, "issues": result.get("issues") or []},
         "ai_reasoning": result.get("reasoning"),

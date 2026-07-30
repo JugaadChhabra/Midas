@@ -336,16 +336,39 @@ def _run_reflection(
     reflection_mode = cfg.get("reflection_mode") or "shadow"
 
     system = (
-        "You are a YouTube content optimisation expert improving an AI audit system. "
-        "Analyse the performance data and competitive signals, then write an improved audit prompt."
+        "You are a YouTube content optimisation expert improving an AI audit system "
+        "for a nursery-rhyme / kids 3D-rhyme channel. "
+        "Analyse the performance data and competitive signals, then write an improved audit prompt. "
+        "You may tune wording, emphasis, keyword strategy, and priorities, but you MUST preserve "
+        "the fixed house metadata format below verbatim — never weaken, reorder, or drop any of it."
+    )
+    # Hard invariant: the candidate prompt must keep producing this exact house
+    # format (title template, ordered description skeleton, ≤15 hashtags, ~500-char
+    # tags) and the nested `comparisons` JSON shape audit_video() parses. Reflection
+    # optimises within these rails, it does not get to redesign the output.
+    house_format = (
+        "NON-NEGOTIABLE HOUSE FORMAT (the improved prompt MUST keep all of this):\n"
+        "TITLE: [Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes "
+        "(under 100 chars; regional name in the channel's script, English name in English).\n"
+        "DESCRIPTION (this exact order): (1) exactly 3 hashtags on the first line; "
+        "(2) English keyword-rich description; (3) regional-language keyword-rich description; "
+        "(4) a Keywords line of comma-separated search phrases (English + regional); "
+        "(5) exactly 12 hashtags on the final line(s). TOTAL hashtags must be EXACTLY 15 — "
+        "YouTube ignores all hashtags above 15.\n"
+        "TAGS: broad + specific, English + regional, up to ~500 characters (~25-30 tags).\n"
+        "OUTPUT SCHEMA: strictly a JSON object with keys comparisons "
+        "(title/description/tags, each with current_problems/suggested/why_better; "
+        "description.suggested holds the full multi-line description; tags.suggested is a list), "
+        "issues (array of {field,severity,problem,fix}), and reasoning."
     )
     user = (
         f"{_format_perf_report(perf_report)}\n\n"
         f"{competitive_ctx}\n\n"
         f"CURRENT YOUTUBE PLATFORM GUIDANCE:\n{platform_guidance}\n\n"
+        f"{house_format}\n\n"
         f"CURRENT AUDIT PROMPT:\n{current_prompt}\n\n"
         "Based on all of the above, diagnose why the current prompt underperforms and write "
-        "an improved version. Return JSON:\n"
+        "an improved version that still enforces the HOUSE FORMAT above exactly. Return JSON:\n"
         '{"reflection": "2-3 sentence diagnosis", "changes": ["change1", "change2"], '
         '"candidate_prompt": "full improved prompt text"}'
     )
