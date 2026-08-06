@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from googleapiclient.errors import HttpError
 
 from app.db import supabase
+from app.rows import all_rows, rows_for_ids
 from app.youtube_client import (
     TokenExpiredError,
     youtube_for_channel,
@@ -106,8 +107,8 @@ def sync_channel(channel_id: str, full: bool = False):
     # changes for a video, so we reuse the stored value and only probe genuinely
     # new ids (see is_actually_short) — an incremental sync also uses these ids
     # to stop paginating early once it reaches known videos.
-    existing_rows = (
-        supabase().table("videos").select("id,is_short").eq("channel_id", channel_id).execute().data or []
+    existing_rows = all_rows(
+        supabase().table("videos").select("id,is_short").eq("channel_id", channel_id)
     )
     existing_is_short: dict[str, bool | None] = {r["id"]: r.get("is_short") for r in existing_rows}
     known_ids: set[str] = set(existing_is_short) if not full else set()
@@ -281,8 +282,8 @@ def refresh_stats(channel_id: str):
     video on the channel. Cheap: 1 quota unit per 50 videos, and no playlist
     walk. Run this on a routine cadence to keep stats fresh and catch privacy
     flips between full syncs."""
-    vids = (
-        supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
+    vids = all_rows(
+        supabase().table("videos").select("id").eq("channel_id", channel_id)
     )
     target_ids = [v["id"] for v in vids]
     if not target_ids:
@@ -298,15 +299,18 @@ def refresh_stats(channel_id: str):
 def refresh_applied_stats(channel_id: str):
     """Refresh stats only for videos with applied audits. Cheap: 1 quota unit per 50 videos."""
     # Find video ids in this channel that have an applied audit
-    vids = (
-        supabase().table("videos").select("id").eq("channel_id", channel_id).execute().data or []
+    vids = all_rows(
+        supabase().table("videos").select("id").eq("channel_id", channel_id)
     )
     channel_video_ids = {v["id"] for v in vids}
     if not channel_video_ids:
         return {"refreshed": 0}
-    applied = (
-        supabase().table("audits").select("video_id").eq("status", "applied")
-        .in_("video_id", list(channel_video_ids)).execute().data or []
+    applied = rows_for_ids(
+        lambda chunk: (
+            supabase().table("audits").select("video_id")
+            .eq("status", "applied").in_("video_id", chunk)
+        ),
+        channel_video_ids,
     )
     target_ids = list({a["video_id"] for a in applied})
     if not target_ids:
@@ -326,14 +330,13 @@ def list_videos(channel_id: str):
     # single video's audit diff — shipping them for the whole list made this
     # query ~8x slower (≈2.0s → ≈0.24s without them on a 1000-row channel). The
     # UI lazy-loads them per-video via GET /videos/{video_id} on expand.
-    videos = (
+    videos = all_rows(
         supabase().table("videos")
         .select("id,title,view_count,like_count,comment_count,"
                 "published_at,thumbnail_url,privacy_status,last_fetched_at,is_short")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
-        .execute()
-    ).data or []
+    )
 
     if not videos:
         return []
@@ -344,13 +347,15 @@ def list_videos(channel_id: str):
     # - issues_count (from latest audit's issues_found.issues)
     # - ai_reasoning_short (latest)
     video_ids = [v["id"] for v in videos]
-    audits = (
-        supabase().table("audits")
-        .select("id,video_id,status,applied_at,created_at,issues_found,ai_reasoning")
-        .in_("video_id", video_ids)
-        .order("created_at", desc=True)
-        .execute()
-    ).data or []
+    audits = rows_for_ids(
+        lambda chunk: (
+            supabase().table("audits")
+            .select("id,video_id,status,applied_at,created_at,issues_found,ai_reasoning")
+            .in_("video_id", chunk)
+            .order("created_at", desc=True)
+        ),
+        video_ids,
+    )
     latest: dict[str, dict] = {}
     counts: dict[str, int] = {}
     for a in audits:

@@ -19,9 +19,9 @@ def test_list_videos_includes_shorts_fields():
     def table(name):
         t = MagicMock()
         if name == "videos":
-            t.select.return_value.eq.return_value.order.return_value.execute.return_value.data = videos
+            t.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value.data = videos
         if name == "audits":
-            t.select.return_value.in_.return_value.order.return_value.execute.return_value.data = []
+            t.select.return_value.in_.return_value.order.return_value.range.return_value.execute.return_value.data = []
         if name == "shorts_jobs":
             # list_videos now filters shorts_jobs by channel_id (indexed) rather
             # than by a large .in_(source_video_id) list — see app/sync.py.

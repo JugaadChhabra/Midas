@@ -36,6 +36,7 @@ from app.analytics_client import (
 )
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows
 from app.status_vocab import ACTIVE_MEASUREMENT_STATUSES
 from app.youtube_client import TokenExpiredError
 
@@ -59,29 +60,18 @@ _ID_CHUNK = 150
 # past it in PAGE-sized steps. Module-level on purpose: this was twice a
 # function-local, which left _poll_channel's playlist loop reading an unbound
 # name and crashing the sensor before it wrote a single row.
-PAGE = 1000
 
 
 def _measured_video_ids() -> set[str]:
     """Video IDs with an audit in an active measurement window (the Tier-2 poll
     set). Paged past Supabase's 1000-row cap. Empty set => poll nothing, which is
     the whole point: on a quiet day the sensor makes zero Analytics calls."""
-    ids: set[str] = set()
-    offset = 0
-    while True:
-        page = (
-            supabase().table("audits")
-            .select("video_id")
-            .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        ids.update(r["video_id"] for r in page if r.get("video_id"))
-        if len(page) < PAGE:
-            break
-        offset += PAGE
-    return ids
+    rows = all_rows(
+        supabase().table("audits")
+        .select("video_id")
+        .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
+    )
+    return {r["video_id"] for r in rows if r.get("video_id")}
 
 # Gap 6 REOPENED 2026-07-02: the first live tier-2 run proved
 # `insightTrafficSourceDetail` is NOT supported for
@@ -197,21 +187,11 @@ def _fetch_channel_videos(channel_id: str, measured_video_ids: set[str] | None) 
     can't overflow. An empty set short-circuits to no query at all.
     """
     if measured_video_ids is None:
-        videos: list[dict] = []
-        offset = 0
-        while True:
-            page = (
+        videos = all_rows(
                 supabase().table("videos")
                 .select("id,privacy_status")
                 .eq("channel_id", channel_id)
-                .range(offset, offset + PAGE - 1)
-                .execute()
-                .data or []
-            )
-            videos.extend(page)
-            if len(page) < PAGE:
-                break
-            offset += PAGE
+        )
         return videos
 
     ids = list(measured_video_ids)
@@ -262,21 +242,11 @@ def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool,
 
     # Same pagination pattern as videos for consistency, even though >1000
     # playlists per channel is theoretical today.
-    playlists: list[dict] = []
-    offset = 0
-    while True:
-        page = (
+    playlists = all_rows(
             supabase().table("playlists")
             .select("id")
             .eq("channel_id", channel_id)
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        playlists.extend(page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    )
 
     log.info(
         "metrics_poll %s: %d public videos, %d playlists",

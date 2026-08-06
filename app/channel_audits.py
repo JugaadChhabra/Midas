@@ -12,6 +12,7 @@ separate all-video-ids round-trip. Callers keep full control of columns, status
 filters, ordering and limits by chaining onto the returned query.
 """
 from app.db import supabase
+from app.rows import all_rows
 
 
 def audits_for_channel(channel_id: str, columns: str, video_columns: str = "channel_id"):
@@ -38,20 +39,9 @@ def audits_for_channel(channel_id: str, columns: str, video_columns: str = "chan
 
 
 def fetch_all(query, page_size: int = 1000) -> list:
-    """Execute a postgrest query paging past Supabase's server-side row cap.
+    """Deprecated alias for `app.rows.all_rows` — import that instead.
 
-    Supabase caps any single response at ~1000 rows regardless of the requested
-    range, so a plain `.execute()` on a channel with >1000 matching audits
-    silently truncates. Callers that need EVERY matching row (e.g. latest-audit-
-    per-video dedup, or all applied audits for a perf report) must page. Bounded
-    reads (`.limit(n)`) don't need this.
+    Kept because several modules and tests already import it from here. The
+    paging itself lives in app/rows.py so there is one implementation.
     """
-    rows: list = []
-    offset = 0
-    while True:
-        chunk = query.range(offset, offset + page_size - 1).execute().data or []
-        rows.extend(chunk)
-        if len(chunk) < page_size:
-            break
-        offset += page_size
-    return rows
+    return all_rows(query, page_size)

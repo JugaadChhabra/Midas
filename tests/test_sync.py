@@ -33,7 +33,7 @@ def _fake_supabase(known_ids, recorder):
             t.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {}
             t.update.return_value.eq.return_value.execute.return_value = MagicMock()
         elif name == "videos":
-            t.select.return_value.eq.return_value.execute.return_value.data = [
+            t.select.return_value.eq.return_value.range.return_value.execute.return_value.data = [
                 {"id": i} for i in known_ids
             ]
 
@@ -185,7 +185,7 @@ def test_full_sync_stamps_last_full_synced_at():
                     return m
                 t.update.side_effect = _update
             elif name == "videos":
-                t.select.return_value.eq.return_value.execute.return_value.data = []
+                t.select.return_value.eq.return_value.range.return_value.execute.return_value.data = []
                 t.upsert.return_value.execute.return_value = MagicMock()
                 t.update.return_value.in_.return_value.execute.return_value = MagicMock()
             return t
@@ -291,7 +291,7 @@ def test_sync_reuses_stored_is_short_and_probes_only_new_videos():
                 t.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {}
                 t.update.return_value.eq.return_value.execute.return_value = MagicMock()
             elif name == "videos":
-                t.select.return_value.eq.return_value.execute.return_value.data = [
+                t.select.return_value.eq.return_value.range.return_value.execute.return_value.data = [
                     {"id": "known1", "is_short": True},
                 ]
                 t.upsert.side_effect = lambda rows: recorder["upserts"].append(rows) or MagicMock()

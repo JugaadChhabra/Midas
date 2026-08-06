@@ -12,6 +12,7 @@ from fastapi import APIRouter
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows, all_rows_parallel
 from app import quota as quota_mod
 from app.shorts.status import WORKING_STATUSES
 
@@ -115,24 +116,9 @@ def _aggregate_legacy() -> tuple[dict, int, int]:
     # then fetch the remaining pages CONCURRENTLY: Supabase clients are
     # per-thread (see app/db.py), so each worker gets its own hardened client.
     VIDEO_COLS = "id,channel_id,view_count,privacy_status,is_short"
-    first_page = (
-        supabase().table("videos").select(VIDEO_COLS, count="exact")
-        .range(0, 999).execute()
+    videos = all_rows_parallel(
+        lambda **kw: supabase().table("videos").select(VIDEO_COLS, **kw)
     )
-    videos: list[dict] = list(first_page.data or [])
-    total_video_rows = first_page.count if first_page.count is not None else len(videos)
-    if total_video_rows > 1000:
-        offsets = list(range(1000, total_video_rows, 1000))
-
-        def _fetch_video_page(off: int) -> list[dict]:
-            return (
-                supabase().table("videos").select(VIDEO_COLS)
-                .range(off, off + 999).execute()
-            ).data or []
-
-        with ThreadPoolExecutor(max_workers=min(5, len(offsets))) as ex:
-            for page in ex.map(_fetch_video_page, offsets):
-                videos.extend(page)
 
     video_to_channel: dict[str, str] = {v["id"]: v["channel_id"] for v in videos}
     # Only public (or legacy null privacy_status) videos are auditable.
@@ -162,21 +148,11 @@ def _aggregate_legacy() -> tuple[dict, int, int]:
 
     # ALL audit records, newest first, paginated over the whole (small) table;
     # latest-per-video is derived in Python.
-    audits_state: list[dict] = []
-    ROW_PAGE = 1000
-    aud_offset = 0
-    while True:
-        page = (
-            supabase().table("audits")
-            .select("id,video_id,status,applied_at,created_at,view_count_at_apply")
-            .order("created_at", desc=True)
-            .range(aud_offset, aud_offset + ROW_PAGE - 1)
-            .execute()
-        ).data or []
-        audits_state.extend(page)
-        if len(page) < ROW_PAGE:
-            break
-        aud_offset += ROW_PAGE
+    audits_state = all_rows(
+        supabase().table("audits")
+        .select("id,video_id,status,applied_at,created_at,view_count_at_apply")
+        .order("created_at", desc=True)
+    )
 
     latest_per_video: dict[str, dict] = {}
     for a in audits_state:
@@ -218,19 +194,9 @@ def _aggregate_legacy() -> tuple[dict, int, int]:
             s["delta_views_7d"] += cur_views.get(a["video_id"], 0) - base
 
     # Shorts totals (paginated; table can exceed the 1000-row cap).
-    shorts_clips: list[dict] = []
-    clip_offset = 0
-    while True:
-        page = (
-            supabase().table("shorts_clips")
-            .select("upload_status")
-            .range(clip_offset, clip_offset + 999)
-            .execute()
-        ).data or []
-        shorts_clips.extend(page)
-        if len(page) < 1000:
-            break
-        clip_offset += 1000
+    shorts_clips = all_rows(
+        supabase().table("shorts_clips").select("upload_status")
+    )
     cut_total = len(shorts_clips)
     uploaded_total = sum(1 for c in shorts_clips if c.get("upload_status") == "UPLOADED")
 

@@ -37,6 +37,7 @@ from datetime import date, datetime, timedelta, timezone
 from app.analytics_client import AnalyticsNotAuthorizedError
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows
 from app.reporting_client import (
     download_report_csv,
     ensure_reach_job,
@@ -59,25 +60,12 @@ _BACKFILL_LOOKBACK_DAYS = 90
 
 def _ledger_state(channel_id: str) -> tuple[set[str], set[str]]:
     """One paginated ledger read → (ingested report ids, covered data-days)."""
-    ids: set[str] = set()
-    dates: set[str] = set()
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
-            supabase().table("reporting_reports_ingested")
-            .select("report_id,data_date")
-            .eq("channel_id", channel_id)
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        ids.update(r["report_id"] for r in page)
-        dates.update(r["data_date"] for r in page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
-    return ids, dates
+    rows = all_rows(
+        supabase().table("reporting_reports_ingested")
+        .select("report_id,data_date")
+        .eq("channel_id", channel_id)
+    )
+    return ({r["report_id"] for r in rows}, {r["data_date"] for r in rows})
 
 
 def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
@@ -177,24 +165,13 @@ def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
     cutoff = (today_utc - timedelta(days=_BACKFILL_LOOKBACK_DAYS)).isoformat()
 
     # Candidate rows: recent windows still missing impressions.
-    rows: list[dict] = []
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
-            supabase().table("video_metrics")
-            .select("id,video_id,window_start,window_end")
-            .eq("channel_id", channel_id)
-            .is_("impressions", "null")
-            .gte("window_end", cutoff)
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        rows.extend(page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    rows = all_rows(
+        supabase().table("video_metrics")
+        .select("id,video_id,window_start,window_end")
+        .eq("channel_id", channel_id)
+        .is_("impressions", "null")
+        .gte("window_end", cutoff)
+    )
     if not rows:
         return {"windows_checked": 0, "rows_filled": 0}
 
@@ -223,23 +200,13 @@ def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
             continue
 
         # Pull the window's daily reach rows for this channel (paginated).
-        daily: list[dict] = []
-        offset = 0
-        while True:
-            page = (
-                supabase().table("video_reach_daily")
-                .select("video_id,impressions,ctr")
-                .eq("channel_id", channel_id)
-                .gte("date", w_start)
-                .lte("date", w_end)
-                .range(offset, offset + PAGE - 1)
-                .execute()
-                .data or []
-            )
-            daily.extend(page)
-            if len(page) < PAGE:
-                break
-            offset += PAGE
+        daily = all_rows(
+            supabase().table("video_reach_daily")
+            .select("video_id,impressions,ctr")
+            .eq("channel_id", channel_id)
+            .gte("date", w_start)
+            .lte("date", w_end)
+        )
 
         agg: dict[str, dict] = {}
         for d in daily:

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows
 from app.embeddings import bootstrap_embeddings
 from app.openrouter import EMBED_MODEL
 from app.playlists import reconcile_channel, _record_assignment
@@ -245,28 +246,20 @@ def playlist_status(channel_id: str):
     playlist_ids = [p["id"] for p in playlists]
     if playlist_ids:
         seen_pairs: set[tuple] = set()
-        ROW_PAGE = 1000
-        offset = 0
-        while True:
-            page = (
-                supabase().table("playlist_assignments")
-                .select("playlist_id,video_id,action,decided_at")
-                .in_("playlist_id", playlist_ids)
-                .order("decided_at", desc=True)
-                .order("id", desc=True)
-                .range(offset, offset + ROW_PAGE - 1)
-                .execute()
-            ).data or []
-            for row in page:
-                key = (row["playlist_id"], row["video_id"])
-                if key in seen_pairs:
-                    continue
-                seen_pairs.add(key)
-                if row["action"] == "added":
-                    in_playlist.add(row["video_id"])
-            if len(page) < ROW_PAGE:
-                break
-            offset += ROW_PAGE
+        rows = all_rows(
+            supabase().table("playlist_assignments")
+            .select("playlist_id,video_id,action,decided_at")
+            .in_("playlist_id", playlist_ids)
+            .order("decided_at", desc=True)
+            .order("id", desc=True)
+        )
+        for row in rows:
+            key = (row["playlist_id"], row["video_id"])
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            if row["action"] == "added":
+                in_playlist.add(row["video_id"])
 
     return {
         "total_videos": total_videos,

@@ -46,6 +46,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows, rows_for_ids
 from app.status_vocab import (
     ACTIVE_MEASUREMENT_STATUSES,
     MEASURED_STATUSES,
@@ -100,24 +101,13 @@ def _reach_aggregate(video_id: str, start: str, end: str) -> tuple[int, float | 
     Missing days are REAL zeros here — callers only invoke this on
     coverage-certified windows. ctr None on zero impressions (no signal).
     """
-    rows: list[dict] = []
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
+    rows = all_rows(
             supabase().table("video_reach_daily")
             .select("impressions,ctr")
             .eq("video_id", video_id)
             .gte("date", start)
             .lte("date", end)
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        rows.extend(page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    )
     impressions = sum(r["impressions"] for r in rows)
     clicks = sum(r["impressions"] * r["ctr"] for r in rows)
     return impressions, (clicks / impressions) if impressions > 0 else None
@@ -258,11 +248,7 @@ def eval_measurements() -> dict:
     channel's measurement_enabled flag was flipped off afterwards — the flag
     gates ENTRY (at apply), not evaluation of in-flight measurements.
     """
-    audits: list[dict] = []
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
+    audits = all_rows(
             supabase().table("audits")
             .select("id,video_id,applied_at,measurement_started_at,measurement_status")
             .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
@@ -273,14 +259,7 @@ def eval_measurements() -> dict:
             # measurement state; this filter is the belt to that suspender.
             .eq("status", AuditStatus.APPLIED)
             .order("id")
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        audits.extend(page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    )
     if not audits:
         log.info("measurement_eval: nothing in flight")
         return {"evaluated": 0}
@@ -348,45 +327,30 @@ def get_measurement(audit_id: int):
 def channel_outcomes(channel_id: str):
     """Win/neutral/regression rollup — Loop 2's input and the ops surface
     where human-gated regressions show up for review."""
-    video_ids: list[str] = []
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
+    video_ids = [
+        v["id"] for v in all_rows(
             supabase().table("videos")
             .select("id")
             .eq("channel_id", channel_id)
             .order("id")
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
         )
-        video_ids.extend(v["id"] for v in page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    ]
     if not video_ids:
         return {"channel_id": channel_id, "counts": {}, "pending_review": [], "recent": []}
 
-    rows: list[dict] = []
-    for i in range(0, len(video_ids), 100):
-        offset = 0
-        while True:
-            page = (
-                supabase().table("audits")
-                .select("id,video_id,applied_at,measurement_status,outcome_decision,"
-                        "measurement_result,strategy_version")
-                .in_("video_id", video_ids[i : i + 100])
-                .neq("measurement_status", MeasurementStatus.NOT_APPLICABLE)
-                .order("id")
-                .range(offset, offset + PAGE - 1)
-                .execute()
-                .data or []
-            )
-            rows.extend(page)
-            if len(page) < PAGE:
-                break
-            offset += PAGE
+    # One video has many audits, so each id-chunk is paged too — rows_for_ids
+    # does both.
+    rows = rows_for_ids(
+        lambda chunk: (
+            supabase().table("audits")
+            .select("id,video_id,applied_at,measurement_status,outcome_decision,"
+                    "measurement_result,strategy_version")
+            .in_("video_id", chunk)
+            .neq("measurement_status", MeasurementStatus.NOT_APPLICABLE)
+            .order("id")
+        ),
+        video_ids,
+    )
 
     counts: dict[str, int] = {}
     for r in rows:

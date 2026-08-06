@@ -32,6 +32,7 @@ from typing import Any
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows
 
 log = logging.getLogger("midas.playlist_health")
 
@@ -139,22 +140,11 @@ def score_channel(channel_id: str) -> dict[str, Any]:
     # Pull every playlist on the channel (paginate past Supabase 1000-row cap
     # for symmetry with metrics_poll, even though hitting that cap on
     # playlists is hypothetical today).
-    playlists: list[dict] = []
-    offset = 0
-    PAGE = 1000
-    while True:
-        page = (
+    playlists = all_rows(
             supabase().table("playlists")
             .select("id,title")
             .eq("channel_id", channel_id)
-            .range(offset, offset + PAGE - 1)
-            .execute()
-            .data or []
-        )
-        playlists.extend(page)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
+    )
 
     if not playlists:
         log.info("playlist_health %s: no playlists", channel_id)
@@ -191,7 +181,6 @@ def score_channel(channel_id: str) -> dict[str, Any]:
     # insufficient_data with no signal that it was a query truncation, not a
     # real data gap.
     METRIC_ID_CHUNK = 100
-    METRIC_ROW_PAGE = 1000
     metric_rows: list[dict] = []
     for chunk_start in range(0, len(playlist_ids), METRIC_ID_CHUNK):
         id_chunk = playlist_ids[chunk_start:chunk_start + METRIC_ID_CHUNK]
