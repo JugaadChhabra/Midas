@@ -86,10 +86,10 @@
     <details style="margin-top:1rem;">
       <summary style="cursor:pointer; font-size:.82rem; opacity:.6;">How these are measured</summary>
       <p style="font-size:.8rem; opacity:.65; margin:.5rem 0 0; line-height:1.55;">
-        <b>Before velocity</b> = total views at apply ÷ days from publish → apply.<br>
-        <b>After velocity</b> = views gained since apply ÷ days since apply.<br>
-        <b>Velocity lift</b> = (after − before) ÷ before × 100. Only computed for videos with ≥7 days post-apply data.<br>
-        This controls for organic growth — a video already trending will show a "before" rate; the question is whether the rate <em>changed</em>.
+        <b>CTR before</b> = clicks ÷ impressions over the window <em>ending</em> just before the change.<br>
+        <b>CTR after</b> = the same ratio over an equal-length window <em>starting</em> just after it.<br>
+        <b>CTR change</b> = (after − before) ÷ before × 100, judged once the post window closes.<br>
+        Click-through rate is used rather than views because view counts decay steeply after upload: any before/after on raw views reports a large drop for every video regardless of what changed. CTR is a ratio over matched windows, so it is not distorted by that decay.
       </p>
     </details>
   </div>
@@ -97,8 +97,8 @@
   <!-- Velocity before/after chart -->
   <div class="card" id="velocity-card">
     <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:.5rem; margin-bottom:.75rem;">
-      <h3 style="margin:0; font-size:.95rem;">Views/day — before vs after apply</h3>
-      <span class="muted small">top videos by velocity lift · ≥7d post-apply</span>
+      <h3 style="margin:0; font-size:.95rem;">Click-through rate — before vs after apply</h3>
+      <span class="muted small">top videos by CTR change · measured windows only</span>
     </div>
     <div id="velocity-chart" aria-live="polite" aria-label="Velocity before/after chart"><span class="muted small">Loading…</span></div>
   </div>
@@ -142,7 +142,7 @@
   <!-- Lever breakdown -->
   <div class="card">
     <h3 style="margin-top:0; font-size:.95rem;">Which change moves the needle?</h3>
-    <p class="muted small">Avg velocity lift by what changed. Correlation only — videos with more room to improve may be over-represented.</p>
+    <p class="muted small">Avg measured CTR change by what changed. Correlation only — videos with more room to improve may be over-represented.</p>
     <div class="lever-grid" id="lever-grid" aria-live="polite">—</div>
   </div>
 
@@ -264,17 +264,17 @@ function renderInsights() {
   const s = summary || {};
   const od = s.outcome_distribution || {};
   const lever = s.best_lever ? s.best_lever.charAt(0).toUpperCase() + s.best_lever.slice(1) : '—';
-  const leverLift = s.best_lever_lift != null ? `+${s.best_lever_lift.toFixed(0)}% velocity lift` : '';
+  const leverLift = s.best_lever_ctr_delta_pct != null ? `+${s.best_lever_ctr_delta_pct.toFixed(0)}% CTR` : '';
   $('insight-stats').innerHTML = `
     <div class="insight-stat">
-      <div class="iv pos">${s.median_velocity_lift != null ? (s.median_velocity_lift > 0 ? '+' : '') + s.median_velocity_lift + '%' : '—'}</div>
-      <div class="il">Median velocity lift after apply</div>
-      <div class="im">views/day after ÷ views/day before − 1</div>
+      <div class="iv pos">${s.median_ctr_delta_pct != null ? (s.median_ctr_delta_pct > 0 ? '+' : '') + s.median_ctr_delta_pct + '%' : '—'}</div>
+      <div class="il">Median CTR change after apply</div>
+      <div class="im">${s.measured_count ? `across ${s.measured_count} measured audits` : 'awaiting measured outcomes'}</div>
     </div>
     <div class="insight-stat">
       <div class="iv" style="color:var(--color-accent)">${s.win_rate != null ? s.win_rate + '%' : '—'}</div>
-      <div class="il">Win rate — videos that accelerated (&gt;+10%)</div>
-      <div class="im">${od.total ? `of ${od.total} videos with ≥7d data` : 'no data yet'}</div>
+      <div class="il">Win rate — CTR verdict of "win"</div>
+      <div class="im">${od.total ? `of ${od.total} measured audits` : 'no measured outcomes yet'}</div>
     </div>
     <div class="insight-stat">
       <div class="iv pos">${escapeHtml(lever)}</div>
@@ -283,30 +283,30 @@ function renderInsights() {
     </div>
     <div class="insight-stat">
       <div class="iv ${(s.regression_count||0) > 0 ? 'neg' : ''}">${fmt(s.regression_count)}</div>
-      <div class="il">Regressions (velocity &lt;50% of baseline)</div>
+      <div class="il">Regressions (measured CTR drop)</div>
       <div class="im">investigate on Performance table below</div>
     </div>`;
 }
 
 function renderVelocityChart() {
   const qualifying = rowsData
-    .filter(r => r.velocity_lift_pct != null && r.before_velocity > 0)
-    .sort((a, b) => b.velocity_lift_pct - a.velocity_lift_pct)
+    .filter(r => r.ctr_delta_pct != null && r.ctr_before_pct > 0)
+    .sort((a, b) => b.ctr_delta_pct - a.ctr_delta_pct)
     .slice(0, 8);
   if (!qualifying.length) {
-    $('velocity-chart').innerHTML = '<em class="muted small">No videos with ≥7 days post-apply data yet.</em>';
+    $('velocity-chart').innerHTML = '<em class="muted small">No measured CTR outcomes yet — a verdict lands once the post-change window closes.</em>';
     return;
   }
-  const maxVel = Math.max(1, ...qualifying.map(r => Math.max(r.before_velocity || 0, r.after_velocity || 0)));
+  const maxVel = Math.max(0.01, ...qualifying.map(r => Math.max(r.ctr_before_pct || 0, r.ctr_after_pct || 0)));
   $('velocity-chart').innerHTML = `
     <div class="vel-chart">
       <div class="vel-row vel-header">
-        <span>Video</span><span>Before (views/day)</span><span>After (views/day)</span><span>Lift</span>
+        <span>Video</span><span>CTR before</span><span>CTR after</span><span>Change</span>
       </div>
       ${qualifying.map(r => {
-        const bw = Math.max(2, Math.round((r.before_velocity / maxVel) * 100));
-        const aw = Math.max(2, Math.round(((r.after_velocity || 0) / maxVel) * 100));
-        const lift = r.velocity_lift_pct;
+        const bw = Math.max(2, Math.round((r.ctr_before_pct / maxVel) * 100));
+        const aw = Math.max(2, Math.round(((r.ctr_after_pct || 0) / maxVel) * 100));
+        const lift = r.ctr_delta_pct;
         const liftColor = lift > 10 ? 'var(--color-ok)' : lift < -10 ? 'var(--color-err)' : 'var(--color-neutral)';
         const title = (r.title_now || r.video_id || '').substring(0, 40) + ((r.title_now || '').length > 40 ? '…' : '');
         return `<div class="vel-row">
@@ -320,7 +320,7 @@ function renderVelocityChart() {
     <div class="muted" style="font-size:.74rem; display:flex; gap:1rem; margin-top:.6rem; flex-wrap:wrap;">
       <span><span style="display:inline-block;width:10px;height:10px;background:var(--border-strong);border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>Before apply</span>
       <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-ok);border-radius:2px;vertical-align:middle;margin-right:.3rem"></span>After apply</span>
-      <span style="margin-left:auto">bars scaled to channel max · showing top 8 by lift</span>
+      <span style="margin-left:auto">bars scaled to channel max · showing top 8 by CTR change</span>
     </div>`;
 }
 
@@ -328,11 +328,11 @@ function renderOutcomeDistribution() {
   const od = (summary || {}).outcome_distribution || {};
   const total = od.total || 0;
   if (!total) {
-    $('outcome-dist').innerHTML = '<em class="muted small">No data yet — need applied audits with ≥7 days post-apply.</em>';
+    $('outcome-dist').innerHTML = '<em class="muted small">No measured outcomes yet — a verdict lands once the post-change CTR window closes.</em>';
     return;
   }
-  const accPct = Math.round((od.accelerated || 0) / total * 100);
-  const flatPct = Math.round((od.flat || 0) / total * 100);
+  const accPct = Math.round((od.win || 0) / total * 100);
+  const flatPct = Math.round((od.neutral || 0) / total * 100);
   const regPct = 100 - accPct - flatPct;
   $('outcome-dist').innerHTML = `
     <div class="outcome-bar">
@@ -341,11 +341,11 @@ function renderOutcomeDistribution() {
       <div class="outcome-seg" style="width:${Math.max(0,regPct)}%;background:var(--color-err);border-radius:0 6px 6px 0;"></div>
     </div>
     <div class="outcome-legend">
-      <span><span class="outcome-dot" style="background:var(--color-ok)"></span><b>${od.accelerated}</b> accelerated (${accPct}%) — velocity up &gt;10%</span>
-      <span><span class="outcome-dot" style="background:var(--border)"></span>${od.flat} flat (${flatPct}%) — within ±10%</span>
-      <span><span class="outcome-dot" style="background:var(--color-err)"></span>${od.regression} regressed (${regPct}%) — velocity down &gt;10%</span>
+      <span><span class="outcome-dot" style="background:var(--color-ok)"></span><b>${od.win}</b> won (${accPct}%) — CTR up past threshold</span>
+      <span><span class="outcome-dot" style="background:var(--border)"></span>${od.neutral} neutral (${flatPct}%) — within the noise band</span>
+      <span><span class="outcome-dot" style="background:var(--color-err)"></span>${od.regression} regressed (${regPct}%) — CTR down past threshold</span>
     </div>
-    <p class="muted small" style="margin:.5rem 0 0">Regressions don't prove the audit caused the drop — algorithm changes, seasonality, or video age can lower velocity independently.</p>`;
+    <p class="muted small" style="margin:.5rem 0 0">Regressions don't prove the audit caused the drop — algorithm changes and seasonality move CTR independently. Audits with no verdict yet are excluded rather than counted as neutral.</p>`;
 }
 
 function renderLeverGrid() {
@@ -356,14 +356,14 @@ function renderLeverGrid() {
     { key: 'tags_changed',        unchKey: 'tags_unchanged',        label: 'Tags rewritten',        emoji: '🏷️' },
     { key: 'all_changed',         unchKey: null,                    label: 'All 3 changed',         emoji: '🎯' },
   ];
-  const maxLift = Math.max(1, ...levers.map(l => Math.abs((c[l.key] || {}).avg_velocity_lift || 0)));
+  const maxLift = Math.max(1, ...levers.map(l => Math.abs((c[l.key] || {}).avg_ctr_delta_pct || 0)));
   $('lever-grid').innerHTML = levers.map(l => {
-    const ch = c[l.key] || { n: 0, avg_velocity_lift: null };
-    const un = l.unchKey ? (c[l.unchKey] || { n: 0, avg_velocity_lift: null }) : null;
-    const lift = ch.avg_velocity_lift;
+    const ch = c[l.key] || { n: 0, avg_ctr_delta_pct: null };
+    const un = l.unchKey ? (c[l.unchKey] || { n: 0, avg_ctr_delta_pct: null }) : null;
+    const lift = ch.avg_ctr_delta_pct;
     const liftColor = lift == null ? 'var(--color-neutral)' : lift > 0 ? 'var(--color-ok)' : 'var(--color-err)';
     const barW = lift != null ? Math.max(2, Math.round(Math.abs(lift) / maxLift * 100)) : 0;
-    const unLift = un ? un.avg_velocity_lift : null;
+    const unLift = un ? un.avg_ctr_delta_pct : null;
     const unBarW = unLift != null ? Math.max(2, Math.round(Math.abs(unLift) / maxLift * 100)) : 0;
     return `<div class="lever-card">
       <div class="lh">${l.emoji} ${l.label}</div>
@@ -403,7 +403,7 @@ function passesFilters(r) {
     const hay = ((r.title_now || '') + ' ' + (r.title_before || '') + ' ' + r.video_id).toLowerCase();
     if (!hay.includes(q)) return false;
   }
-  if ($('only-regressions').checked && !r.regression) return false;
+  if ($('only-regressions').checked && r.measurement_status !== 'regression') return false;
   return true;
 }
 
@@ -443,13 +443,13 @@ function render() {
     <tbody>
     ${sorted.map((r, i) => {
       const titleChanged = r.title_changed;
-      return `<tr class="${r.regression ? 'regression-row' : ''}">
+      return `<tr class="${r.measurement_status === 'regression' ? 'regression-row' : ''}">
         <td>${r.thumbnail_url ? `<img src="${r.thumbnail_url}" width="88" style="border-radius:6px"/>` : ''}</td>
         <td>
           <div style="font-weight:600">${escapeHtml(r.title_now)}</div>
           ${titleChanged ? `<div class="small muted">was: ${escapeHtml(r.title_before)}</div>` : '<div class="small muted">title unchanged</div>'}
           <div class="small muted"><code>${r.video_id}</code> · ${r.applied_at ? 'applied ' + r.applied_at.slice(0,16).replace('T',' ') : 'created ' + (r.created_at||'').slice(0,16).replace('T',' ')}</div>
-          ${r.regression ? '<div class="small neg">⚠ Regression detected (post-apply velocity &lt;50% of baseline)</div>' : ''}
+          ${r.measurement_status === 'regression' ? `<div class="small neg">⚠ Measured CTR regression${r.ctr_delta_pct != null ? ` (${r.ctr_delta_pct}%)` : ''}</div>` : ''}
         </td>
         <td>${statusPill(r.status)}</td>
         <td>${r.days_since_apply ?? '—'}</td>
