@@ -48,6 +48,41 @@ def _looks_like_token_failure(message: str) -> bool:
     return any(sig in m for sig in TOKENLESS_FAILURE_SIGNATURES)
 
 
+# How many times to re-extract after a mid-download 403. Measured ~50% failure
+# per attempt on an affected video, so 4 attempts leaves roughly a 6% residual.
+MEDIA_403_ATTEMPTS = 4
+
+
+def _looks_like_transient_media_403(message: str) -> bool:
+    """True for 'HTTP Error 403: Forbidden' raised while transferring the media.
+
+    YouTube intermittently rejects a follow-up ranged request for a googlevideo
+    URL, so a download dies partway through even though extraction succeeded and
+    the PO token was valid. yt-dlp never retries this itself: its HTTP downloader
+    re-raises any 4xx and only converts 5xx into a RetryDownload (downloader/
+    http.py), because recovering needs *fresh* media URLs rather than a re-request
+    of the expired one. Re-extracting is exactly what a retry here does.
+    """
+    m = (message or "").lower()
+    return "403" in m and "forbidden" in m
+
+
+def _download_with_403_retry(options: dict, url: str, dest_dir: Path) -> tuple[Path, str]:
+    """_download_once, retrying transient mid-download 403s with fresh URLs."""
+    import yt_dlp
+
+    for attempt in range(1, MEDIA_403_ATTEMPTS + 1):
+        try:
+            return _download_once(options, url, dest_dir)
+        except yt_dlp.utils.DownloadError as exc:
+            if attempt >= MEDIA_403_ATTEMPTS or not _looks_like_transient_media_403(str(exc)):
+                raise
+            # A new extract_info() mints a fresh set of media URLs; the partial
+            # .part file is resumed against them.
+            time.sleep(min(2 ** attempt, 8))
+    raise AssertionError("unreachable")  # loop either returns or raises
+
+
 def _provider_mint_token(base_url: str, timeout: float = 30.0, bypass_cache: bool = False) -> str:
     """Ask the bgutil sidecar to actually mint a PO token. Returns a non-empty
     token or raises CutterError. This proves the provider *works* — not merely
@@ -121,9 +156,9 @@ def ytdlp_options() -> dict:
         "max_filesize": MAX_DOWNLOAD_BYTES,
         # YouTube requires a JS runtime to solve the "n" signature challenge, or it
         # returns no formats ("video not available") even with a valid PO token.
-        # yt-dlp's EJS solver only accepts Deno here (it reports node as
-        # "unsupported"); the Docker image installs Deno (Dockerfile), and the dev
-        # Mac has it on PATH. deno is listed first so it's preferred.
+        # Either runtime works — deno is listed first as the preferred one, but a
+        # node-only machine downloads fine (verified 2026-08-04 on the dev Mac,
+        # which has no deno). A container needs at least one of the two installed.
         "js_runtimes": {"deno": {"path": None}, "node": {"path": None}},
         "remote_components": ["ejs:github"],
         "extractor_args": {"youtube": {"player_client": ["mweb", "default"]}},
@@ -201,16 +236,11 @@ def _download_once(options: dict, url: str, dest_dir: Path) -> tuple[Path, str]:
 def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
     """Download `url` into dest_dir at native quality. Returns (path, safe title).
 
-    HARD DISABLED: the YouTube-URL download flow is retired — shorts come from the
-    NAS source only. The implementation below is kept for reference but must never
-    run, so we refuse here before importing yt-dlp or touching the network. This
-    holds regardless of SHORTS_YT_DOWNLOAD_ENABLED or any caller; flipping that
-    flag no longer revives downloads — restore this function's body to do that.
+    Gated by SHORTS_YT_DOWNLOAD_ENABLED at every call site (runner, routes,
+    autoshorts) — production shorts still come from the NAS source. This function
+    itself no longer refuses: it was hard-disabled while the flow was retired, and
+    is live again for the AutoShorts URL demo.
     """
-    raise CutterError(
-        "YouTube-URL shorts download is retired and disabled; shorts are cut from "
-        "the NAS source only."
-    )
     try:
         import yt_dlp
     except ImportError as exc:
@@ -222,7 +252,7 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
         _ensure_pot_provider_ready(http_base)
     options["outtmpl"] = str(dest_dir / "source_%(id)s.%(ext)s")
     try:
-        return _download_once(options, url, dest_dir)
+        return _download_with_403_retry(options, url, dest_dir)
     except yt_dlp.utils.DownloadError as exc:
         msg = str(exc)
         # A token-less fallback makes YouTube wrongly report a live video as
@@ -247,7 +277,7 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
                         f"Restart the bgutil-provider sidecar. ({mint_exc})"
                     ) from exc
                 try:
-                    return _download_once(options, url, dest_dir)
+                    return _download_with_403_retry(options, url, dest_dir)
                 except yt_dlp.utils.DownloadError as exc2:
                     raise CutterError(
                         "Download still failed after refreshing the PO-token provider. "
@@ -260,11 +290,17 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
                 # refresh-and-retry. Previously this path had NO retry, so the
                 # first transient token-less blip failed the whole job.
                 try:
-                    return _download_once(options, url, dest_dir)
+                    return _download_with_403_retry(options, url, dest_dir)
                 except yt_dlp.utils.DownloadError as exc2:
                     raise CutterError(
                         "Download failed twice with a token-less error. If the video plays "
                         "in a browser, the local PO-token script isn't minting a valid token "
                         f"— check that node and the bgutil script work. ({exc2})"
                     ) from exc2
+        if _looks_like_transient_media_403(msg):
+            raise CutterError(
+                f"YouTube refused the video data ({MEDIA_403_ATTEMPTS} attempts, all 403). "
+                "This is a transient CDN rejection, not a missing video — the same link "
+                "usually works if you submit it again."
+            ) from exc
         raise CutterError(f"Could not download this video link: {exc}") from exc

@@ -1,6 +1,8 @@
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.config import settings
@@ -119,6 +121,28 @@ def get_job(job_id: int):
         raise HTTPException(404, "Job not found")
     clips = sb.table("shorts_clips").select("*").eq("job_id", job_id).order("rank").execute().data or []
     return {"job": job, "clips": clips}
+
+
+@router.get("/clips/{clip_id}/file")
+def clip_file(clip_id: int, download: bool = False):
+    """Stream a cut clip off local disk, for in-page playback and download.
+
+    `download=1` sets an attachment filename; the default serves inline so a
+    <video> element can play it. Only paths inside SHORTS_CACHE_DIR are served:
+    local_path is a DB value, so resolving it and checking containment keeps a
+    bad/stale row from turning this into an arbitrary-file read.
+    """
+    sb = supabase()
+    clip = (sb.table("shorts_clips").select("local_path,title")
+            .eq("id", clip_id).single().execute().data)
+    if not clip or not clip.get("local_path"):
+        raise HTTPException(404, "Clip has no local file")
+    cache_root = Path(settings.SHORTS_CACHE_DIR).resolve()
+    path = Path(clip["local_path"]).resolve()
+    if not path.is_relative_to(cache_root) or not path.is_file():
+        raise HTTPException(404, "Clip file not found")
+    return FileResponse(path, media_type="video/mp4",
+                        filename=path.name if download else None)
 
 
 @router.post("/clips/{clip_id}/upload")

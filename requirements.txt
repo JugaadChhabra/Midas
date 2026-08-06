@@ -10,10 +10,12 @@ itsdangerous==2.2.0
 json-repair==0.30.2
 apscheduler==3.10.4
 youtube-transcript-api>=0.6.2
-# yt-dlp powered the RETIRED YouTube-URL shorts download flow. Disabled with that
-# flow (SHORTS_YT_DOWNLOAD_ENABLED); shorts now come from the NAS source. To revive:
-# uncomment (2026.6.9 is the exact verified-good pin — NOT a floor; newer releases
-# have broken YouTube extraction), and restore Deno + bgutil in the image.
-# yt-dlp==2026.6.9
+# yt-dlp powers the YouTube-URL shorts download flow (SHORTS_YT_DOWNLOAD_ENABLED),
+# used by the AutoShorts demo page; production shorts still come from the NAS source.
+# 2026.07.04 is an exact verified-good pin — NOT a floor; releases regularly break
+# YouTube extraction, so only move this after a real download is re-verified
+# (2026.6.9 was the previously verified version). The Docker image still omits
+# Deno + bgutil, so the flow is local-only until those are restored there.
+yt-dlp==2026.07.04
 pytest==8.3.4
 smbprotocol

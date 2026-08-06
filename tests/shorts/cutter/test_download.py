@@ -262,3 +262,78 @@ def test_fetch_video_script_mode_raises_after_second_token_failure(monkeypatch):
          patch("pathlib.Path.mkdir"):
         with pytest.raises(CutterError, match="token-less error"):
             dl.fetch_video("https://youtu.be/x", dest)
+
+
+# --- transient mid-download 403 ------------------------------------------------
+# YouTube intermittently 403s a follow-up ranged request for a googlevideo URL,
+# so extraction succeeds and the transfer dies partway. yt-dlp re-raises 4xx
+# instead of retrying (only 5xx becomes a RetryDownload), so recovery has to
+# happen here: re-extract for fresh media URLs and try again.
+
+_403 = "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+
+
+def test_403_is_recognised_as_transient_but_token_errors_are_not():
+    from app.shorts.cutter.download import _looks_like_transient_media_403
+
+    assert _looks_like_transient_media_403(_403)
+    assert not _looks_like_transient_media_403(
+        "ERROR: [youtube] x: This video is not available")
+    assert not _looks_like_transient_media_403("ERROR: HTTP Error 404: Not Found")
+
+
+def test_fetch_video_retries_through_a_transient_403(monkeypatch):
+    yt_dlp = pytest.importorskip("yt_dlp")
+    from app.shorts.cutter import download as dl
+
+    good = (Path("/tmp/vid.mkv"), "Title")
+    attempts = {"n": 0}
+
+    def _dl_once(options, url, dest_dir):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise yt_dlp.utils.DownloadError(_403)
+        return good
+
+    monkeypatch.delenv("BGUTIL_POT_HTTP_BASE_URL", raising=False)
+    with patch.object(dl, "_download_once", side_effect=_dl_once), \
+         patch.object(dl.time, "sleep"), patch("pathlib.Path.mkdir"):
+        assert dl.fetch_video("https://youtu.be/x", Path("/tmp/x")) == good
+    assert attempts["n"] == 3          # two 403s ridden out, third attempt served
+
+
+def test_fetch_video_gives_up_after_the_403_attempt_budget(monkeypatch):
+    yt_dlp = pytest.importorskip("yt_dlp")
+    from app.shorts.cutter import download as dl
+
+    attempts = {"n": 0}
+
+    def _dl_once(options, url, dest_dir):
+        attempts["n"] += 1
+        raise yt_dlp.utils.DownloadError(_403)
+
+    monkeypatch.delenv("BGUTIL_POT_HTTP_BASE_URL", raising=False)
+    with patch.object(dl, "_download_once", side_effect=_dl_once), \
+         patch.object(dl.time, "sleep"), patch("pathlib.Path.mkdir"):
+        # The message must not read as a missing video — it's a CDN rejection.
+        with pytest.raises(CutterError, match="transient CDN rejection"):
+            dl.fetch_video("https://youtu.be/x", Path("/tmp/x"))
+    assert attempts["n"] == dl.MEDIA_403_ATTEMPTS
+
+
+def test_a_non_403_download_error_is_not_retried(monkeypatch):
+    yt_dlp = pytest.importorskip("yt_dlp")
+    from app.shorts.cutter import download as dl
+
+    attempts = {"n": 0}
+
+    def _dl_once(options, url, dest_dir):
+        attempts["n"] += 1
+        raise yt_dlp.utils.DownloadError("ERROR: Private video. Sign in if you've been granted access")
+
+    monkeypatch.delenv("BGUTIL_POT_HTTP_BASE_URL", raising=False)
+    with patch.object(dl, "_download_once", side_effect=_dl_once), \
+         patch.object(dl.time, "sleep"), patch("pathlib.Path.mkdir"):
+        with pytest.raises(CutterError, match="Could not download"):
+            dl.fetch_video("https://youtu.be/x", Path("/tmp/x"))
+    assert attempts["n"] == 1          # a genuinely dead video fails fast

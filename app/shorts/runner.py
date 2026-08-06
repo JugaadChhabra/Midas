@@ -113,8 +113,11 @@ def run_shorts_job(job_id: int) -> None:
         hold_ranks = set() if cap is None else {c["rank"] for c in ordered[cap:]}
 
         n_upload = len(clips) - len(hold_ranks)
+        # cap=0 holds every clip: the job cuts and keeps the files, publishing
+        # nothing (how the AutoShorts demo runs). Don't claim to be uploading.
         _set_job(job_id, status=UPLOADING, progress=95,
-                 progress_label=f"uploading {n_upload} of {len(clips)} clips to YouTube")
+                 progress_label=(f"saving {len(clips)} clips" if not n_upload else
+                                 f"uploading {n_upload} of {len(clips)} clips to YouTube"))
         all_ok = True
         for clip in ordered:
             clip_title = f"{title.replace('_', ' ')} — Part {clip['rank']}"[:100]

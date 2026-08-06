@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AutoShorts</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<style>
+  /* Standalone demo page. Consumes the shared tokens in /static/theme.css (no
+     colour literals) so it reads as part of Midas, but carries no nav and no
+     settings — one input, one button, the clips. */
+  body { max-width: 940px; margin: 0 auto; padding: 4rem 1.25rem 5rem;
+         display: flex; flex-direction: column; min-height: 100vh; }
+
+  .mark { font-size: 2.6rem; font-weight: 800; letter-spacing: -.045em; line-height: 1; }
+  .mark em { font-style: normal; color: var(--color-accent); }
+  .tagline { opacity: .55; font-size: .95rem; margin-top: .6rem; }
+
+  .composer { display: flex; gap: .6rem; margin-top: 2.2rem; }
+  .composer input { flex: 1; font: inherit; padding: .7rem .9rem;
+                    border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+                    background: transparent; color: inherit; min-width: 0; }
+  .composer input:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; border-color: transparent; }
+  .composer button { font-weight: 600; white-space: nowrap; }
+  .composer button:disabled { opacity: .5; cursor: default; }
+
+  .note { font-size: .85rem; margin-top: .7rem; min-height: 1.2em; }
+  .note.err { color: var(--color-err); }
+
+  /* Progress — replaced by the clip grid once the job finishes. */
+  .progress { margin-top: 2.4rem; }
+  .progress-head { display: flex; justify-content: space-between; align-items: baseline;
+                   font-size: .88rem; margin-bottom: .5rem; }
+  .progress-stage { font-weight: 600; text-transform: capitalize; }
+  .progress-pct { opacity: .5; font-variant-numeric: tabular-nums; }
+  .track { height: 6px; border-radius: 3px; background: var(--surface-tint); overflow: hidden; }
+  .fill { height: 100%; background: var(--color-accent); border-radius: 3px;
+          transition: width .4s ease; }
+  .failed { border: 1px solid var(--color-err-border); background: var(--color-err-bg);
+            color: var(--color-err); border-radius: var(--radius); padding: .8rem 1rem;
+            font-size: .9rem; margin-top: 2.4rem; }
+
+  /* Clips */
+  .clips-head { margin-top: 2.8rem; font-size: .8rem; font-weight: 600; opacity: .55;
+                text-transform: uppercase; letter-spacing: .06em; }
+  .clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+           gap: 1.1rem; margin-top: .9rem; }
+  .clip { display: flex; flex-direction: column; gap: .5rem; }
+  .clip video { width: 100%; aspect-ratio: 9 / 16; border-radius: var(--radius);
+                background: var(--surface-tint); border: 1px solid var(--border);
+                display: block; }
+  .clip-meta { display: flex; justify-content: space-between; align-items: center;
+               font-size: .8rem; gap: .5rem; }
+  .clip-meta .len { opacity: .5; font-variant-numeric: tabular-nums; }
+  .clip-meta a { color: var(--color-accent); text-decoration: none; font-weight: 600; }
+  .clip-meta a:hover { text-decoration: underline; }
+
+  footer { margin-top: auto; padding-top: 3rem; font-size: .78rem; opacity: .4; }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="mark">Auto<em>Shorts</em></div>
+    <div class="tagline">Paste a YouTube link. Get vertical shorts cut from it.</div>
+  </header>
+
+  <form class="composer" id="composer">
+    <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+           placeholder="https://www.youtube.com/watch?v=…" aria-label="YouTube video link" />
+    <button type="submit" id="go">Make Shorts</button>
+  </form>
+  <div class="note" id="note"></div>
+
+  <section class="progress" id="progress" hidden>
+    <div class="progress-head">
+      <span class="progress-stage" id="stage">queued</span>
+      <span class="progress-pct" id="pct">0%</span>
+    </div>
+    <div class="track"><div class="fill" id="fill" style="width:0%"></div></div>
+  </section>
+
+  <div class="failed" id="failed" hidden></div>
+
+  <h2 class="clips-head" id="clipsHead" hidden>Clips</h2>
+  <div class="clips" id="clips"></div>
+
+  <footer>AutoShorts · clips are cut locally and never published automatically.</footer>
+
+<script>
+// Single-job page: submit a URL, poll the job until it settles, render clips.
+const $ = (id) => document.getElementById(id);
+const TERMINAL = { DONE: 1, FAILED: 1 };
+let timer = null;
+
+function setNote(text, isError) {
+  $("note").textContent = text || "";
+  $("note").classList.toggle("err", !!isError);
+}
+
+function reset() {
+  clearInterval(timer);
+  setNote("");
+  $("failed").hidden = true;
+  $("clips").innerHTML = "";
+  $("clipsHead").hidden = true;
+  $("progress").hidden = true;
+  $("fill").style.width = "0%";
+}
+
+$("composer").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = $("url").value.trim();
+  if (!url) return;
+  reset();
+  $("go").disabled = true;
+  $("go").textContent = "Working…";
+  try {
+    const res = await fetch("/autoshorts/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Could not start the job.");
+    $("progress").hidden = false;
+    poll(data.job_id);
+  } catch (err) {
+    setNote(err.message, true);
+    releaseButton();
+  }
+});
+
+function releaseButton() {
+  $("go").disabled = false;
+  $("go").textContent = "Make Shorts";
+}
+
+function poll(jobId) {
+  const tick = async () => {
+    let payload;
+    try {
+      const res = await fetch(`/shorts/jobs/${jobId}`);
+      if (!res.ok) return;              // transient — keep polling
+      payload = await res.json();
+    } catch { return; }                  // server restart / blip — keep polling
+
+    const job = payload.job || {};
+    const pct = job.progress || 0;
+    $("fill").style.width = pct + "%";
+    $("pct").textContent = pct + "%";
+    $("stage").textContent = job.progress_label || String(job.status || "").toLowerCase();
+
+    if (!TERMINAL[job.status]) return;
+    clearInterval(timer);
+    releaseButton();
+    if (job.status === "FAILED") {
+      $("progress").hidden = true;
+      $("failed").hidden = false;
+      $("failed").textContent = job.error_message || "The job failed.";
+      return;
+    }
+    $("progress").hidden = true;
+    renderClips(payload.clips || []);
+  };
+  tick();
+  timer = setInterval(tick, 2000);
+}
+
+function renderClips(clips) {
+  if (!clips.length) {
+    setNote("That video finished, but nothing scored well enough to cut.", false);
+    return;
+  }
+  $("clipsHead").hidden = false;
+  $("clips").innerHTML = clips.map((c) => {
+    const src = `/shorts/clips/${c.id}/file`;
+    const secs = Math.max(0, Math.round((c.end_s || 0) - (c.start_s || 0)));
+    return `<div class="clip">
+      <video src="${src}" controls preload="metadata" playsinline></video>
+      <div class="clip-meta">
+        <span class="len">${secs}s</span>
+        <a href="${src}?download=1" download>Download</a>
+      </div>
+    </div>`;
+  }).join("");
+}
+</script>
+</body>
+</html>

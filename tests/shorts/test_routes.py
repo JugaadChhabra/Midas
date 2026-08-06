@@ -20,14 +20,19 @@ def _sb_with_channel(found=True):
 BODY = {"channel_id": "UC123", "source_url": "https://youtu.be/dQw4w9WgXcQ"}
 
 
+def _flag(value):
+    # The YouTube-URL submit path is gated on SHORTS_YT_DOWNLOAD_ENABLED. Both
+    # states are patched explicitly: the ambient .env decides the real default,
+    # so asserting on it would make these tests environment-dependent.
+    return patch("app.shorts.routes.settings.SHORTS_YT_DOWNLOAD_ENABLED", value)
+
+
 def _enabled():
-    # The YouTube-URL submit path is retired and gated off by default; enable it
-    # for the tests that exercise the (retained) validation/enqueue behavior.
-    return patch("app.shorts.routes.settings.SHORTS_YT_DOWNLOAD_ENABLED", True)
+    return _flag(True)
 
 
-def test_create_job_disabled_by_default_returns_410():
-    with patch("app.shorts.routes.supabase", return_value=_sb_with_channel()):
+def test_create_job_returns_410_when_flag_off():
+    with _flag(False), patch("app.shorts.routes.supabase", return_value=_sb_with_channel()):
         r = _client().post("/shorts/jobs", json=BODY)
     assert r.status_code == 410
 

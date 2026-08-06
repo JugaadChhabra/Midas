@@ -88,3 +88,39 @@ def test_reap_leaves_done_job_alone():
         d.dispatch_tick()
     assert 8 not in d._running
     sb.table.return_value.update.assert_not_called()  # DONE is terminal, untouched
+
+
+# --- capability-scoped claiming -------------------------------------------------
+# A NAS-only instance sharing this Supabase must not claim URL jobs it can only
+# fail; doing so denies them to a download-capable instance (observed on
+# 2026-08-04: the Linux deployment failed every AutoShorts job with
+# "download is retired" while the Mac that could run them sat idle).
+
+def _claim_probe(sb):
+    """Return the query object the dispatcher builds, to inspect its filters."""
+    return sb.table.return_value.select.return_value.eq.return_value.order.return_value
+
+
+def test_nas_only_instance_skips_url_jobs():
+    d = _reset()
+    sb = MagicMock()
+    _created_query(sb, [])
+    with patch("app.shorts.dispatcher.supabase", return_value=sb), \
+         patch("app.shorts.dispatcher.settings") as st:
+        st.SHORTS_MAX_CONCURRENT_JOBS = 1
+        st.SHORTS_YT_DOWNLOAD_ENABLED = False
+        d.dispatch_tick()
+    # It restricted the claim to NAS-sourced rows.
+    _claim_probe(sb).not_.is_.assert_called_with("source_nas_path", "null")
+
+
+def test_download_capable_instance_claims_everything():
+    d = _reset()
+    sb = MagicMock()
+    _created_query(sb, [])
+    with patch("app.shorts.dispatcher.supabase", return_value=sb), \
+         patch("app.shorts.dispatcher.settings") as st:
+        st.SHORTS_MAX_CONCURRENT_JOBS = 1
+        st.SHORTS_YT_DOWNLOAD_ENABLED = True
+        d.dispatch_tick()
+    assert not _claim_probe(sb).not_.is_.called

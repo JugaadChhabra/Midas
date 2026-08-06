@@ -43,6 +43,14 @@ def _claim_next(sb) -> int | None:
     while True:
         q = (sb.table("shorts_jobs").select("id")
              .eq("status", CREATED).order("id", desc=False))
+        if not settings.SHORTS_YT_DOWNLOAD_ENABLED:
+            # Only claim work this instance can actually execute. Without the
+            # download flow, a URL job (source_url, no source_nas_path) can only
+            # be failed — and claiming it denies it to an instance that COULD run
+            # it. That is not hypothetical: a NAS-only deployment sharing this
+            # Supabase will otherwise win the race against a download-capable one
+            # and fail every URL job with "download is retired".
+            q = q.not_.is_("source_nas_path", "null")
         if running_ids:
             q = q.not_.in_("id", running_ids)
         rows = (q.limit(1).execute().data) or []
