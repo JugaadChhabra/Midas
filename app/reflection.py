@@ -18,75 +18,67 @@ _WIN_RATE_THRESHOLD = 65.0
 _REGRESSION_THRESHOLD = 3
 _MIN_DATA_POINTS = 10
 _REFLECT_COOLDOWN_DAYS = 7
-_VELOCITY_WINDOW_DAYS = 7  # minimum post-apply days to count a data point
+
+# Loop 1 verdicts that count as evidence. `not_applicable` is excluded on
+# purpose: it means the audit was never measured (dormant pre-window, missing
+# timestamp), not that it performed neutrally. Mirrors measurement._TERMINAL
+# minus that distinction.
+MEASURED_STATUSES = ("win", "neutral", "regression")
 
 
 # ── Performance report ────────────────────────────────────────────────────────
 
 def _build_perf_report(channel_id: str) -> dict | None:
-    """Build structured performance report from applied audits.
+    """Build a structured performance report from MEASURED CTR outcomes.
 
-    Returns None if fewer than _MIN_DATA_POINTS audits have velocity data.
+    Reads Loop 1's verdicts (audits.measurement_status + measurement_result),
+    never raw view counts. `not_applicable` rows are excluded: they were never
+    measured, so they carry no evidence either way. Returns None if fewer than
+    _MIN_DATA_POINTS audits have a verdict — the prompt loop must not run on a
+    signal too thin to trust.
+
+    Why not view velocity (what this used to do): it compared a video's
+    LIFETIME average views/day against its post-apply rate. View curves decay,
+    so the baseline is systematically inflated — measured across 439 audits
+    with a real pre-apply window it was too high in 100% of cases, median 25.8x,
+    scoring an audit that changed nothing at -96%. Correcting the baseline is
+    not sufficient either: any before/after on raw views is dominated by decay,
+    which is why this needs CTR over the symmetric windows measurement.py
+    already builds.
     """
-    # All applied audits for this channel (join-scoped, fully paged past the
-    # 1000-row cap — a perf report must see every applied video).
     audits = fetch_all(
         audits_for_channel(
             channel_id,
             "id,video_id,applied_at,suggested_title,title_before,"
             "suggested_description,description_before,"
             "suggested_tags,tags_before,"
-            "view_count_at_apply,ai_reasoning",
+            "measurement_status,measurement_result,ai_reasoning",
         )
-        .eq("status", "applied")
+        .in_("measurement_status", list(MEASURED_STATUSES))
     )
-
     if not audits:
         return None
-
-    # Only the applied videos need view/publish data — derive ids from the audits.
-    video_ids = list({a["video_id"] for a in audits})
-
-    # Chunk the id list: a large channel yields >1000 applied videos, which would
-    # both cap the response at 1000 rows and blow the URL length in one `.in_()`.
-    videos_by_id: dict[str, dict] = {}
-    for i in range(0, len(video_ids), 500):
-        for v in (
-            supabase().table("videos")
-            .select("id,view_count,published_at")
-            .in_("id", video_ids[i:i + 500])
-            .execute().data or []
-        ):
-            videos_by_id[v["id"]] = v
 
     now = datetime.now(timezone.utc)
     enriched = []
 
     for a in audits:
-        v = videos_by_id.get(a["video_id"])
-        if not v:
+        status = a.get("measurement_status")
+        if status not in MEASURED_STATUSES:
             continue
-        view_at = a.get("view_count_at_apply") or 0
-        view_now = v.get("view_count") or 0
-        if not a.get("applied_at") or not v.get("published_at") or view_at <= 0:
-            continue
+        applied_at = a.get("applied_at")
         try:
-            ap = datetime.fromisoformat(a["applied_at"].replace("Z", "+00:00"))
-            pub = datetime.fromisoformat(v["published_at"].replace("Z", "+00:00"))
+            ap = datetime.fromisoformat((applied_at or "").replace("Z", "+00:00"))
         except ValueError:
             continue
-        days_since = (now - ap).total_seconds() / 86400.0
-        if days_since < _VELOCITY_WINDOW_DAYS:
-            continue
-        age_at_apply = max(1.0, (ap - pub).total_seconds() / 86400.0)
-        before_v = view_at / age_at_apply
-        after_v = (view_now - view_at) / max(1.0, days_since)
-        if before_v <= 0:
-            continue
-        velocity_lift_pct = ((after_v - before_v) / before_v) * 100.0
+        # `neutral` can legitimately carry no delta (pre_ctr was 0, or post
+        # impressions were under the floor). It is still a measured verdict, so
+        # it counts toward the win rate — it just can't contribute to the median.
+        delta = (a.get("measurement_result") or {}).get("ctr_delta_relative")
         enriched.append({
             "audit_id": a["id"],
-            "velocity_lift_pct": velocity_lift_pct,
+            "measurement_status": status,
+            "ctr_delta_pct": (delta * 100.0) if delta is not None else None,
             "title_before": a.get("title_before"),
             "title_after": a.get("suggested_title"),
             "title_changed": (a.get("title_before") or "") != (a.get("suggested_title") or ""),
@@ -99,32 +91,35 @@ def _build_perf_report(channel_id: str) -> dict | None:
     if len(enriched) < _MIN_DATA_POINTS:
         return None
 
-    win_rate = round(
-        sum(1 for r in enriched if r["velocity_lift_pct"] > 10) / len(enriched) * 100, 1
-    )
+    wins = sum(1 for r in enriched if r["measurement_status"] == "win")
+    win_rate = round(wins / len(enriched) * 100, 1)
     regression_count = sum(
-        1 for r in enriched if r["is_recent"] and r["velocity_lift_pct"] < -10
+        1 for r in enriched if r["is_recent"] and r["measurement_status"] == "regression"
     )
-    lifts = sorted(r["velocity_lift_pct"] for r in enriched)
-    median_lift = statistics.median(lifts)
+
+    deltas = [r["ctr_delta_pct"] for r in enriched if r["ctr_delta_pct"] is not None]
+    median_delta = round(statistics.median(deltas), 1) if deltas else None
 
     def _lever_avg(key: str) -> float | None:
-        sub = [r["velocity_lift_pct"] for r in enriched if r[key]]
+        sub = [r["ctr_delta_pct"] for r in enriched
+               if r[key] and r["ctr_delta_pct"] is not None]
         return round(sum(sub) / len(sub), 1) if sub else None
 
-    by_lift = sorted(enriched, key=lambda r: r["velocity_lift_pct"])
+    # Rank on the delta; verdict-only rows (no delta) sort to the middle so they
+    # never masquerade as the best or worst example shown to the LLM.
+    ranked = sorted(enriched, key=lambda r: (r["ctr_delta_pct"] is None, r["ctr_delta_pct"] or 0.0))
     return {
         "count": len(enriched),
         "win_rate": win_rate,
         "regression_count": regression_count,
-        "median_velocity_lift": round(median_lift, 1),
+        "median_ctr_delta_pct": median_delta,
         "levers": {
             "title": _lever_avg("title_changed"),
             "description": _lever_avg("desc_changed"),
             "tags": _lever_avg("tags_changed"),
         },
-        "worst_audits": by_lift[:2],
-        "best_audits": by_lift[-2:],
+        "worst_audits": ranked[:2],
+        "best_audits": ranked[-2:],
     }
 
 
@@ -146,9 +141,14 @@ def _should_reflect(channel_id: str) -> tuple[bool, str]:
         if (datetime.now(timezone.utc) - last_dt) < timedelta(days=_REFLECT_COOLDOWN_DAYS):
             return False, "reflected_recently"
 
+    # The ONLY signal the prompt loop may act on is measured CTR. No verdicts
+    # (or too few) means no reflection — a prompt rewrite is expensive and
+    # self-reinforcing, so it must never fire on an unmeasured guess. This
+    # channel's history is the cautionary case: a broken velocity metric
+    # reported a 0.4% win rate every week and drove four prompt versions.
     report = _build_perf_report(channel_id)
     if report is None:
-        return False, "insufficient_data"
+        return False, "no_measured_outcomes"
 
     if report["win_rate"] > _WIN_RATE_THRESHOLD and report["regression_count"] <= _REGRESSION_THRESHOLD - 1:
         return False, "performing_well"
@@ -289,14 +289,22 @@ def _get_platform_guidance(niche_description: str) -> str:
 
 # ── Reflection LLM call ───────────────────────────────────────────────────────
 
+def _fmt_delta(a: dict) -> str:
+    """CTR delta for one audit, or its verdict when the delta is undefined."""
+    d = a.get("ctr_delta_pct")
+    return f"{round(d, 1)}%" if d is not None else f"{a.get('measurement_status')} (no delta)"
+
+
 def _format_perf_report(report: dict) -> str:
+    median = report.get("median_ctr_delta_pct")
     lines = [
-        f"CHANNEL PERFORMANCE REPORT:",
-        f"- Audits with velocity data: {report['count']}",
-        f"- Win rate (velocity lift >10%): {report['win_rate']}%",
+        f"CHANNEL PERFORMANCE REPORT (measured click-through rate, "
+        f"pre vs post change over matched windows):",
+        f"- Audits with a measured CTR verdict: {report['count']}",
+        f"- Win rate (CTR verdict = win): {report['win_rate']}%",
         f"- Regression count (last 14 days): {report['regression_count']}",
-        f"- Median velocity lift: {report['median_velocity_lift']}%",
-        f"- Lever performance:",
+        f"- Median CTR change: {median if median is not None else 'n/a'}%",
+        f"- Lever performance (mean CTR change where the field was rewritten):",
         f"    title: {report['levers'].get('title')}%",
         f"    description: {report['levers'].get('description')}%",
         f"    tags: {report['levers'].get('tags')}%",
@@ -306,7 +314,7 @@ def _format_perf_report(report: dict) -> str:
         for a in report["worst_audits"]:
             lines.append(f'  Before: "{a.get("title_before", "")}"')
             lines.append(f'  After:  "{a.get("title_after", "")}"')
-            lines.append(f'  Velocity lift: {round(a["velocity_lift_pct"], 1)}%')
+            lines.append(f'  CTR change: {_fmt_delta(a)}')
             if a.get("ai_reasoning"):
                 lines.append(f'  LLM reasoning: {(a["ai_reasoning"] or "")[:200]}')
     if report.get("best_audits"):
@@ -314,7 +322,7 @@ def _format_perf_report(report: dict) -> str:
         for a in report["best_audits"]:
             lines.append(f'  Before: "{a.get("title_before", "")}"')
             lines.append(f'  After:  "{a.get("title_after", "")}"')
-            lines.append(f'  Velocity lift: {round(a["velocity_lift_pct"], 1)}%')
+            lines.append(f'  CTR change: {_fmt_delta(a)}')
     return "\n".join(lines)
 
 
@@ -485,64 +493,38 @@ def _run_shadow_audits(channel_id: str, candidate_prompt: str, version_id: int) 
 
 # ── Auto-revert cohort comparison ─────────────────────────────────────────────
 
-def _cohort_median_lift(version_id: int) -> float | None:
-    """Compute median velocity_lift_pct for audits generated by a specific prompt
-    version. Returns None if fewer than _MIN_DATA_POINTS audits have sufficient
-    post-apply data.
+def _cohort_median_ctr_delta(version_id: int) -> float | None:
+    """Median measured CTR change (%) across audits generated by a prompt version.
+
+    Returns None if fewer than _MIN_DATA_POINTS audits in the cohort carry a
+    usable delta — auto-revert must never retire a prompt on thin evidence.
 
     Audits are scoped by prompt_version_id (already channel-specific), so no
-    channel video-id list is needed — the old `channel_video_ids` arg only fed a
-    redundant truthiness guard and forced a truncating all-video-ids pull upstream.
+    channel video-id list is needed. No video join either: the verdict lives on
+    the audit row, which is the point of measuring CTR rather than views.
     """
-    # Version-scoped applied audits, fully paged past the 1000-row cap.
+    # Version-scoped measured audits, fully paged past the 1000-row cap.
     audits = fetch_all(
         supabase().table("audits")
-        .select("video_id,applied_at,view_count_at_apply")
+        .select("id,measurement_status,measurement_result")
         .eq("prompt_version_id", version_id)
         .eq("status", "applied")
+        .in_("measurement_status", list(MEASURED_STATUSES))
     )
     if not audits:
         return None
 
-    # Chunk the video fetch: a heavily-used version can exceed 1000 applied videos
-    # (>1000 ids in one .in_() caps the response and blows the URL length).
-    video_ids = list({a["video_id"] for a in audits})
-    videos_by_id: dict[str, dict] = {}
-    for i in range(0, len(video_ids), 500):
-        for v in (
-            supabase().table("videos")
-            .select("id,view_count,published_at")
-            .in_("id", video_ids[i:i + 500])
-            .execute().data or []
-        ):
-            videos_by_id[v["id"]] = v
-
-    now = datetime.now(timezone.utc)
-    lifts = []
+    deltas = []
     for a in audits:
-        v = videos_by_id.get(a["video_id"])
-        if not v or not a.get("applied_at") or not v.get("published_at"):
+        if a.get("measurement_status") not in MEASURED_STATUSES:
             continue
-        view_at = a.get("view_count_at_apply") or 0
-        if view_at <= 0:
-            continue
-        try:
-            ap = datetime.fromisoformat(a["applied_at"].replace("Z", "+00:00"))
-            pub = datetime.fromisoformat(v["published_at"].replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        days_since = (now - ap).total_seconds() / 86400.0
-        if days_since < _VELOCITY_WINDOW_DAYS:
-            continue
-        age_at_apply = max(1.0, (ap - pub).total_seconds() / 86400.0)
-        before_v = view_at / age_at_apply
-        after_v = (v.get("view_count", 0) - view_at) / max(1.0, days_since)
-        if before_v > 0:
-            lifts.append(((after_v - before_v) / before_v) * 100.0)
+        delta = (a.get("measurement_result") or {}).get("ctr_delta_relative")
+        if delta is not None:
+            deltas.append(delta * 100.0)
 
-    if len(lifts) < _MIN_DATA_POINTS:
+    if len(deltas) < _MIN_DATA_POINTS:
         return None
-    return statistics.median(lifts)
+    return statistics.median(deltas)
 
 
 def _check_auto_revert(channel_id: str) -> None:
@@ -568,12 +550,13 @@ def _check_auto_revert(channel_id: str) -> None:
     if (datetime.now(timezone.utc) - promoted_dt) < timedelta(days=21):
         return
 
-    new_median = _cohort_median_lift(live["id"])
-    old_median = _cohort_median_lift(live["parent_version_id"])
+    new_median = _cohort_median_ctr_delta(live["id"])
+    old_median = _cohort_median_ctr_delta(live["parent_version_id"])
 
     if new_median is None or old_median is None:
-        return  # insufficient data in one or both cohorts
+        return  # insufficient measured data in one or both cohorts
 
+    # 10 percentage points of relative CTR change between cohorts.
     regression = (old_median - new_median) > 10.0
     if not regression:
         log.info(

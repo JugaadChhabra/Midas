@@ -388,7 +388,7 @@ def audit_video(
         # CIL §3.1: stamp every audit with the strategy that produced it so
         # measured outcomes stay attributable when Loop 3 arrives. Same reason
         # for prompt_version_id — stamped here, at the single insert site, so no
-        # caller can forget it (_cohort_median_lift silently ignores NULLs).
+        # caller can forget it (_cohort_median_ctr_delta silently ignores NULLs).
         "strategy_version": settings.STRATEGY_VERSION,
         "prompt_version_id": prompt_version_id,
     }

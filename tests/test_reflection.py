@@ -102,14 +102,14 @@ def _make_perf_report(win_rate=70.0, regression_count=0, count=15):
         "count": count,
         "win_rate": win_rate,
         "regression_count": regression_count,
-        "median_velocity_lift": 12.0,
+        "median_ctr_delta_pct": 12.0,
         "levers": {"title": 15.0, "description": 8.0, "tags": 20.0},
         "worst_audits": [],
         "best_audits": [],
     }
 
 
-def test_should_reflect_skips_insufficient_data():
+def test_should_reflect_skips_without_measured_outcomes():
     with patch("app.reflection.supabase") as mock_sb, \
          patch("app.reflection._build_perf_report", return_value=None):
         mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
@@ -117,7 +117,7 @@ def test_should_reflect_skips_insufficient_data():
         from app.reflection import _should_reflect
         should, reason = _should_reflect("ch1")
     assert should is False
-    assert reason == "insufficient_data"
+    assert reason == "no_measured_outcomes"
 
 
 def test_should_reflect_skips_high_win_rate():
@@ -234,7 +234,7 @@ def test_get_platform_guidance_returns_text():
 
 def test_run_reflection_stores_candidate_prompt():
     perf_report = _make_perf_report(win_rate=40.0)
-    perf_report["worst_audits"] = [{"title_before": "old", "title_after": "new", "velocity_lift_pct": -30.0, "ai_reasoning": "test"}]
+    perf_report["worst_audits"] = [{"title_before": "old", "title_after": "new", "ctr_delta_pct": -30.0, "measurement_status": "regression", "ai_reasoning": "test"}]
     perf_report["best_audits"] = []
 
     mock_reflection_result = {
@@ -329,7 +329,7 @@ def test_check_auto_revert_triggers_on_regression():
     revert_calls = []
 
     with patch("app.reflection.supabase") as mock_sb, \
-         patch("app.reflection._cohort_median_lift") as mock_lift:
+         patch("app.reflection._cohort_median_ctr_delta") as mock_lift:
         mock_lift.side_effect = lambda version_id, *args: 20.0 if version_id == old_version_id else -5.0
 
         def table_side(name):
@@ -360,15 +360,16 @@ def test_check_auto_revert_triggers_on_regression():
     mock_sb.return_value.table.assert_any_call("prompt_versions")
 
 
-def test_cohort_median_lift_returns_none_insufficient():
+def test_cohort_median_ctr_delta_returns_none_insufficient():
     with patch("app.reflection.supabase") as mock_sb:
         # fetch_all pages via .range().execute(); the query has two .eq() filters
-        # (prompt_version_id, status). Return no rows -> insufficient -> None.
+        # (prompt_version_id, status) then .in_(measurement_status). No rows ->
+        # insufficient -> None.
         mock_sb.return_value.table.return_value.select.return_value \
-            .eq.return_value.eq.return_value.range.return_value \
+            .eq.return_value.eq.return_value.in_.return_value.range.return_value \
             .execute.return_value.data = []
-        from app.reflection import _cohort_median_lift
-        result = _cohort_median_lift(99)
+        from app.reflection import _cohort_median_ctr_delta
+        result = _cohort_median_ctr_delta(99)
     assert result is None
 
 

@@ -5,7 +5,7 @@ Two defects motivated this:
 1. The stamp was a post-hoc UPDATE in the *callers* — autopilot and
    reflection._run_shadow_audits each had their own copy — so audits from
    run_audit / run_bulk_audit / reaudit_quarantined were never stamped at
-   all, and _cohort_median_lift silently ignores NULLs.
+   all, and _cohort_median_ctr_delta silently ignores NULLs.
 
 2. The caller stamped the live version unconditionally, without checking
    whether that version's prompt was the one actually used. audit_video
