@@ -9,7 +9,8 @@ import math
 from app.config import settings
 from app.db import supabase
 from app.openrouter import chat_json, EMBED_MODEL
-from app.playlists import _current_members, _cosine_sim, _parse_embedding, _record_assignment
+from app.embeddings import pooled_embeddings
+from app.playlists import _current_members, _cosine_sim, _record_assignment
 from app.youtube_client import youtube_for_channel, yt_playlists_insert, yt_playlist_items_insert
 
 log = logging.getLogger("midas.playlist_discovery")
@@ -102,15 +103,7 @@ def _rpc_cluster_orphans(channel_id: str, orphan_ids: list[str]) -> list[list[st
 def _cluster_orphans_inapp(channel_id: str, orphan_ids: list[str]) -> list[list[str]]:
     """In-app oracle / fallback: pull the orphans' pooled embeddings and greedily
     cluster in Python. (Pulls only orphan_ids — the old path pulled every video.)"""
-    emb_rows = (
-        supabase().table("video_embeddings")
-        .select("video_id,embedding")
-        .in_("video_id", orphan_ids)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .execute()
-    ).data or []
-    embeddings = {r["video_id"]: _parse_embedding(r["embedding"]) for r in emb_rows}
+    embeddings = pooled_embeddings(orphan_ids)
     embeddable = [v for v in orphan_ids if v in embeddings]
     return _cluster_orphans(embeddable, embeddings)
 

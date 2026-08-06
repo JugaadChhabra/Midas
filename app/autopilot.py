@@ -437,7 +437,9 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> No
         log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
         if not video.get("is_short"):
             try:
-                embed_video(video["id"])
+                # force=True: the apply above just rewrote the title, so the
+                # stored vector is stale by construction.
+                embed_video(video["id"], force=True)
                 # Playlist allocation skipped — workflow under review
                 # join_pass(channel_id, video["id"])
             except Exception as e:

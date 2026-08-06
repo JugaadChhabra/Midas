@@ -9,6 +9,12 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.db import supabase
+from app.embeddings import (
+    has_pooled_embedding,
+    parse_vector,
+    pooled_embedding,
+    pooled_embeddings,
+)
 from app.openrouter import chat_json, EMBED_MODEL
 from app.youtube_client import (
     youtube_for_channel,
@@ -49,24 +55,9 @@ def _current_members(playlist_id: str) -> dict[str, str | None]:
     }
 
 
-def _parse_embedding(raw) -> list[float]:
-    """Supabase returns pgvector columns as a string '[0.1,0.2,...]' — parse to list[float]."""
-    if isinstance(raw, str):
-        return [float(x) for x in raw.strip("[]").split(",")]
-    return [float(x) for x in raw]
-
-
-def _get_embedding(video_id: str) -> list[float] | None:
-    row = (
-        supabase().table("video_embeddings")
-        .select("embedding")
-        .eq("video_id", video_id)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .single()
-        .execute()
-    ).data
-    return _parse_embedding(row["embedding"]) if row else None
+#: Back-compat aliases — the storage details now live in app/embeddings.py.
+_parse_embedding = parse_vector
+_get_embedding = pooled_embedding
 
 
 def _centroid(video_ids: list[str]) -> list[float] | None:
@@ -74,19 +65,10 @@ def _centroid(video_ids: list[str]) -> list[float] | None:
     if not video_ids:
         return None
 
-    rows = (
-        supabase().table("video_embeddings")
-        .select("embedding")
-        .in_("video_id", video_ids)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .execute()
-    ).data or []
-
-    if not rows:
+    vectors = list(pooled_embeddings(video_ids).values())
+    if not vectors:
         return None
 
-    vectors = [_parse_embedding(r["embedding"]) for r in rows]
     dim = len(vectors[0])
     mean = [sum(v[i] for v in vectors) / len(vectors) for i in range(dim)]
     return mean
@@ -111,19 +93,9 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
 # in-app one is the correctness oracle (see the live parity test) and the
 # automatic fallback if the RPC errors.
 
-def _has_pooled_embedding(video_id: str) -> bool:
-    """Cheap existence check (no vector egress) — replaces _get_embedding's
-    null-check on the RPC path."""
-    row = (
-        supabase().table("video_embeddings")
-        .select("id")
-        .eq("video_id", video_id)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .limit(1)
-        .execute()
-    ).data
-    return bool(row)
+#: Cheap existence check (no vector egress) — replaces _get_embedding's
+#: null-check on the RPC path.
+_has_pooled_embedding = has_pooled_embedding
 
 
 def _rpc_playlist_sims(channel_id: str, video_id: str | None) -> list[dict]:
@@ -184,15 +156,7 @@ def _sims_matrix(channel_id: str, playlists: list[dict],
             log.warning("playlist_video_sims RPC failed; falling back to in-app centroids",
                         exc_info=True)
 
-    emb_rows = (
-        supabase().table("video_embeddings")
-        .select("video_id,embedding")
-        .in_("video_id", video_ids)
-        .eq("chunk_index", "pooled")
-        .eq("model_version", EMBED_MODEL)
-        .execute()
-    ).data or []
-    all_emb = {r["video_id"]: _parse_embedding(r["embedding"]) for r in emb_rows}
+    all_emb = pooled_embeddings(video_ids)
     sims: dict[tuple[str, str], float] = {}
     centroid_pids: set[str] = set()
     for pl in playlists:

@@ -68,12 +68,11 @@ def test_sims_matrix_rpc_builds_pair_keyed_dict_and_centroid_set():
 def test_sims_matrix_fallback_matches_inapp_math():
     """Flag off => in-app centroids; only embedded videos get a sim, only
     playlists with a centroid appear."""
-    emb_rows = [{"video_id": "v1", "embedding": "[1,0]"}]  # v2 has no embedding
-    sb = MagicMock()
-    sb.table.return_value.select.return_value.in_.return_value.eq.return_value.eq.return_value.execute.return_value.data = emb_rows
+    # v2 has no embedding. The read goes through app.embeddings now, so patch
+    # the interface rather than reaching into the query shape.
     with patch.object(playlists.settings, "PLAYLIST_SIMS_USE_RPC", False), \
-         patch.object(playlists, "supabase", return_value=sb), \
-         patch.object(playlists, "_parse_embedding", side_effect=lambda r: [1.0, 0.0]), \
+         patch.object(playlists, "supabase", return_value=MagicMock()), \
+         patch.object(playlists, "pooled_embeddings", return_value={"v1": [1.0, 0.0]}), \
          patch.object(playlists, "_current_members", return_value={"v1": "item1"}), \
          patch.object(playlists, "_centroid", side_effect=lambda ids: [1.0, 0.0] if ids else None), \
          patch.object(playlists, "_cosine_sim", return_value=0.5):

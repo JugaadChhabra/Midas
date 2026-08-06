@@ -118,5 +118,7 @@ def test_apply_handle_success_resets_failures_and_embeds():
          patch("app.autopilot.embed_video") as embed:
         ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": False}, "UC1")
     assert ap._failure_counts["UC1"] == 0
-    embed.assert_called_once_with("v")
+    # force=True: the apply just rewrote the title, so the stored vector is
+    # stale by construction and the default short-circuit would keep it.
+    embed.assert_called_once_with("v", force=True)
     ap._failure_counts.clear()

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
-from app.embeddings import bootstrap_embeddings
+from app.embeddings import bootstrap_embeddings, embedded_video_ids
 from app.openrouter import EMBED_MODEL
 from app.playlists import reconcile_channel, _record_assignment
 from app.playlists_sync import sync_playlists
@@ -208,16 +208,7 @@ def playlist_status(channel_id: str):
 
     embedded = 0
     if video_ids:
-        embedded = len(
-            (
-                supabase().table("video_embeddings")
-                .select("video_id")
-                .in_("video_id", video_ids)
-                .eq("chunk_index", "pooled")
-                .eq("model_version", EMBED_MODEL)
-                .execute()
-            ).data or []
-        )
+        embedded = len(embedded_video_ids(video_ids))
 
     playlists = (
         supabase().table("playlists")
