@@ -36,6 +36,7 @@ from app.analytics_client import (
 )
 from app.config import settings
 from app.db import supabase
+from app.status_vocab import ACTIVE_MEASUREMENT_STATUSES
 from app.youtube_client import TokenExpiredError
 
 log = logging.getLogger("midas.metrics_poll")
@@ -45,7 +46,10 @@ WINDOW_DAYS = 7
 
 # Tier 2: audits in these statuses mark a video as "under active measurement" —
 # the only videos the sensor polls when METRICS_POLL_MEASURED_ONLY is on.
-ACTIVE_MEASUREMENT_STATUSES = ("awaiting_window", "measuring")
+# Re-exported, not redefined: the sensor is not the owner of the lifecycle
+# vocabulary (app/status_vocab.py is). Kept importable from here because
+# autopilot and the live parity test already import it from this module.
+ACTIVE_MEASUREMENT_STATUSES = ACTIVE_MEASUREMENT_STATUSES
 
 # PostgREST caps the URL length of an in_() list; the measured set is small today
 # (hundreds) but chunk defensively so growth can never overflow the query.

@@ -9,6 +9,13 @@ from app.channel_audits import audits_for_channel, fetch_all
 from app.openrouter import chat_json, chat_text
 from app.youtube_client import youtube_for_channel, yt_search_videos
 from app.audits import audit_video
+from app.status_vocab import (
+    AuditStatus,
+    MEASURED_STATUSES,
+    PromptVersionStatus,
+    PROMOTING_REFLECTION_MODES,
+    ReflectionMode,
+)
 
 log = logging.getLogger("midas.reflection")
 
@@ -21,9 +28,7 @@ _REFLECT_COOLDOWN_DAYS = 7
 
 # Loop 1 verdicts that count as evidence. `not_applicable` is excluded on
 # purpose: it means the audit was never measured (dormant pre-window, missing
-# timestamp), not that it performed neutrally. Mirrors measurement._TERMINAL
-# minus that distinction.
-MEASURED_STATUSES = ("win", "neutral", "regression")
+# timestamp), not that it performed neutrally.
 
 
 # ── Performance report ────────────────────────────────────────────────────────
@@ -340,11 +345,11 @@ def _promote_version(channel_id: str, version_id: int, prompt_text: str) -> None
     now_iso = datetime.now(timezone.utc).isoformat()
 
     supabase().table("prompt_versions").update(
-        {"status": "retired", "retired_at": now_iso}
-    ).eq("channel_id", channel_id).eq("status", "live").execute()
+        {"status": PromptVersionStatus.RETIRED, "retired_at": now_iso}
+    ).eq("channel_id", channel_id).eq("status", PromptVersionStatus.LIVE).execute()
 
     supabase().table("prompt_versions").update(
-        {"status": "live", "promoted_at": now_iso}
+        {"status": PromptVersionStatus.LIVE, "promoted_at": now_iso}
     ).eq("id", version_id).execute()
 
     supabase().table("audit_configs").update(
@@ -367,7 +372,7 @@ def _run_reflection(
     ).data or []
     cfg = cfg_rows[0] if cfg_rows else {}
     current_prompt = cfg.get("generated_prompt") or ""
-    reflection_mode = cfg.get("reflection_mode") or "shadow"
+    reflection_mode = cfg.get("reflection_mode") or ReflectionMode.SHADOW
 
     system = (
         "You are a YouTube content optimisation expert improving an AI audit system "
@@ -423,7 +428,7 @@ def _run_reflection(
         supabase().table("prompt_versions")
         .select("id")
         .eq("channel_id", channel_id)
-        .eq("status", "live")
+        .eq("status", PromptVersionStatus.LIVE)
         .order("created_at", desc=True)
         .limit(1)
         .execute()
@@ -435,7 +440,7 @@ def _run_reflection(
     row = {
         "channel_id": channel_id,
         "prompt_text": candidate_prompt,
-        "status": "shadow",
+        "status": PromptVersionStatus.SHADOW,
         "reflection_reasoning": result.get("reflection", ""),
         "performance_snapshot": perf_report,
         "parent_version_id": parent_id,
@@ -446,7 +451,7 @@ def _run_reflection(
 
     # `live` and `auto` both mean "use this prompt now" — they differ only in
     # who asked (a human toggling the mode vs the weekly cycle).
-    if reflection_mode in ("live", "auto") and version_id:
+    if reflection_mode in PROMOTING_REFLECTION_MODES and version_id:
         _promote_version(channel_id, version_id, candidate_prompt)
         log.info("%s mode: promoted candidate %s to live for %s",
                  reflection_mode, version_id, channel_id)
@@ -464,7 +469,7 @@ def _run_shadow_audits(channel_id: str, candidate_prompt: str, version_id: int) 
     # 10 most-recently-applied videos for this channel (join-scoped — no truncation).
     recent_applied = (
         audits_for_channel(channel_id, "video_id,applied_at")
-        .eq("status", "applied")
+        .eq("status", AuditStatus.APPLIED)
         .order("applied_at", desc=True)
         .limit(10)
         .execute()
@@ -480,7 +485,7 @@ def _run_shadow_audits(channel_id: str, candidate_prompt: str, version_id: int) 
             audit_video(
                 vid,
                 prompt_override=candidate_prompt,
-                status_override="shadow_pending",
+                status_override=AuditStatus.SHADOW_PENDING,
                 prompt_version_id=version_id,  # the candidate, not the live version
             )
             count += 1
@@ -508,7 +513,7 @@ def _cohort_median_ctr_delta(version_id: int) -> float | None:
         supabase().table("audits")
         .select("id,measurement_status,measurement_result")
         .eq("prompt_version_id", version_id)
-        .eq("status", "applied")
+        .eq("status", AuditStatus.APPLIED)
         .in_("measurement_status", list(MEASURED_STATUSES))
     )
     if not audits:
@@ -533,7 +538,7 @@ def _check_auto_revert(channel_id: str) -> None:
         supabase().table("prompt_versions")
         .select("id,parent_version_id,created_at")
         .eq("channel_id", channel_id)
-        .eq("status", "live")
+        .eq("status", PromptVersionStatus.LIVE)
         .order("created_at", desc=True)
         .limit(1)
         .execute()
@@ -584,11 +589,11 @@ def _check_auto_revert(channel_id: str) -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
 
     supabase().table("prompt_versions").update(
-        {"status": "retired_regression", "retired_at": now_iso}
+        {"status": PromptVersionStatus.RETIRED_REGRESSION, "retired_at": now_iso}
     ).eq("id", live["id"]).execute()
 
     supabase().table("prompt_versions").update(
-        {"status": "live", "promoted_at": now_iso}
+        {"status": PromptVersionStatus.LIVE, "promoted_at": now_iso}
     ).eq("id", live["parent_version_id"]).execute()
 
     supabase().table("audit_configs").update(
@@ -711,10 +716,10 @@ def reflect(channel_id: str) -> dict:
         .eq("channel_id", channel_id)
         .execute()
     ).data or []
-    mode = (cfg_rows[0].get("reflection_mode") if cfg_rows else None) or "shadow"
+    mode = (cfg_rows[0].get("reflection_mode") if cfg_rows else None) or ReflectionMode.SHADOW
 
     shadow_count = 0
-    if mode == "shadow":
+    if mode == ReflectionMode.SHADOW:
         version_row = (
             supabase().table("prompt_versions")
             .select("prompt_text")
@@ -769,7 +774,7 @@ def promote_version(channel_id: str, version_id: int):
     ).data
     if not version:
         raise HTTPException(404, "Version not found")
-    if version["status"] != "shadow":
+    if version["status"] != PromptVersionStatus.SHADOW:
         raise HTTPException(400, f"Cannot promote version with status={version['status']}")
 
     _promote_version(channel_id, version_id, version["prompt_text"])
@@ -791,7 +796,7 @@ def shadow_comparison(channel_id: str):
     shadow_audits = (
         supabase().table("audits")
         .select("id,video_id,suggested_title,suggested_description,suggested_tags,prompt_version_id,created_at")
-        .eq("status", "shadow_pending")
+        .eq("status", AuditStatus.SHADOW_PENDING)
         .execute()
     ).data or []
 
@@ -804,7 +809,7 @@ def shadow_comparison(channel_id: str):
         supabase().table("audits")
         .select("video_id,suggested_title,suggested_description,suggested_tags,created_at")
         .in_("video_id", video_ids)
-        .eq("status", "applied")
+        .eq("status", AuditStatus.APPLIED)
         .order("created_at", desc=True)
         .execute()
     ).data or []

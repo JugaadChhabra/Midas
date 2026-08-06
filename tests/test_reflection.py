@@ -314,11 +314,14 @@ def test_run_shadow_audits_uses_candidate_prompt():
 
 
 def test_autopilot_skip_statuses_include_shadow_pending():
-    """shadow_pending must be in the skip set so autopilot never applies shadow audits."""
-    from app.autopilot import _next_video_for_channel
-    import inspect
-    src = inspect.getsource(_next_video_for_channel)
-    assert "shadow_pending" in src
+    """shadow_pending must be in the skip set so autopilot never applies shadow audits.
+
+    Asserts the vocabulary itself rather than grepping the source: the picker
+    now reads AUDIT_PICKER_SKIP_STATUSES, and the SQL mirror of that set is
+    pinned separately by tests/test_status_vocab.py.
+    """
+    from app.status_vocab import AUDIT_PICKER_SKIP_STATUSES, AuditStatus
+    assert AuditStatus.SHADOW_PENDING in AUDIT_PICKER_SKIP_STATUSES
 
 
 def test_check_auto_revert_triggers_on_regression():

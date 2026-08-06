@@ -15,6 +15,13 @@ from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
+from app.metrics_poll import ACTIVE_MEASUREMENT_STATUSES
+from app.status_vocab import (
+    AUDIT_PICKER_SKIP_STATUSES,
+    AUTO_EXPIRE_PAUSE_REASONS,
+    AuditStatus,
+    PausedReason,
+)
 from app.shorts.runner import active_job_count
 
 log = logging.getLogger("midas.autopilot")
@@ -87,7 +94,7 @@ def _applies_today(channel_id: str) -> int:
     # all-video-ids form's 1000-row truncation.
     res = (
         audits_for_channel(channel_id, "id")
-        .eq("status", "applied")
+        .eq("status", AuditStatus.APPLIED)
         .gte("applied_at", _today_start_iso())
         .execute()
     )
@@ -131,20 +138,26 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     candidate_ids = [v["id"] for v in candidates]
     audits = (
         supabase().table("audits")
-        .select("video_id,status,created_at")
+        .select("video_id,status,created_at,measurement_status")
         .in_("video_id", candidate_ids)
         .order("created_at", desc=True)
         .execute()
     ).data or []
-    # Latest audit per video
-    latest: dict[str, str] = {}
+    # Latest audit per video (keep the whole row — we filter on two columns).
+    latest: dict[str, dict] = {}
     for a in audits:
         if a["video_id"] not in latest:
-            latest[a["video_id"]] = a["status"]
+            latest[a["video_id"]] = a
 
     # Retry only if last audit was 'failed' or video was never audited.
-    skip_statuses = {"applied", "pending", "quarantined", "blocked_test_and_compare", "shadow_pending"}
-    blocked_ids = {vid for vid, st in latest.items() if st in skip_statuses}
+    skip_statuses = AUDIT_PICKER_SKIP_STATUSES
+    # Also exclude videos mid-measurement (CIL §1.7): re-auditing would change
+    # the packaging under an in-flight CTR experiment and confound the verdict.
+    blocked_ids = {
+        vid for vid, a in latest.items()
+        if a["status"] in skip_statuses
+        or a.get("measurement_status") in ACTIVE_MEASUREMENT_STATUSES
+    }
 
     for v in candidates:
         if v["id"] in blocked_ids:
@@ -289,7 +302,7 @@ def _pause(channel_id: str, reason: str):
 # transient burst that may have cleared. token_expired / unsafe_model need
 # explicit human action (reconnect Google / fix the model config), so they stay
 # latched until an operator resumes.
-_AUTO_EXPIRE_REASONS = ("repeated_failures",)
+_AUTO_EXPIRE_REASONS = AUTO_EXPIRE_PAUSE_REASONS
 
 
 def _clear_expired_pauses() -> None:
@@ -324,7 +337,7 @@ def _record_failure(channel_id: str) -> None:
     limit. The pause-on-repeated-failures rule, in one place (was inline ×4)."""
     _failure_counts[channel_id] += 1
     if _failure_counts[channel_id] >= 3:
-        _pause(channel_id, "repeated_failures")
+        _pause(channel_id, PausedReason.REPEATED_FAILURES)
 
 
 def _quota_dormant() -> bool:
@@ -404,7 +417,7 @@ def _resync_if_stale(ch: dict) -> bool:
         return True
     except TokenExpiredError:
         log.warning("OAuth token expired or revoked for %s during sync; pausing", channel_id)
-        _pause(channel_id, "token_expired")
+        _pause(channel_id, PausedReason.TOKEN_EXPIRED)
         return False
     except Exception as e:
         log.exception("Sync failed for %s: %s", channel_id, e)
@@ -440,7 +453,7 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> No
             )
         elif e.outcome is ApplyOutcome.TOKEN_EXPIRED:
             log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
-            _pause(channel_id, "token_expired")
+            _pause(channel_id, PausedReason.TOKEN_EXPIRED)
         else:  # ApplyOutcome.FAILED
             _record_failure(channel_id)
     except Exception as e:
@@ -501,7 +514,7 @@ def tick():
 
         # 6. Model safety gate
         if _is_unsafe_model(settings.AUDIT_MODEL):
-            _pause(channel_id, "unsafe_model")
+            _pause(channel_id, PausedReason.UNSAFE_MODEL)
             return
 
         # 7. Run audit
@@ -509,7 +522,7 @@ def tick():
             audit_row = audit_video(video["id"])
         except TokenExpiredError:
             log.warning("OAuth token expired or revoked for %s during audit; pausing", channel_id)
-            _pause(channel_id, "token_expired")
+            _pause(channel_id, PausedReason.TOKEN_EXPIRED)
             return
         except httpx.TimeoutException as e:
             vid = video["id"]
@@ -523,7 +536,7 @@ def tick():
                 try:
                     supabase().table("audits").insert({
                         "video_id": vid,
-                        "status": "failed",
+                        "status": AuditStatus.FAILED,
                         "ai_reasoning": f"[autopilot] repeated read timeouts from OpenRouter",
                     }).execute()
                 except Exception:
@@ -545,7 +558,7 @@ def tick():
         if not ok:
             log.warning("Quarantining audit %s: %s", audit_row.get("id"), reason)
             supabase().table("audits").update({
-                "status": "quarantined",
+                "status": AuditStatus.QUARANTINED,
                 "ai_reasoning": (audit_row.get("ai_reasoning") or "") + f"\n[autopilot] quarantined: {reason}",
             }).eq("id", audit_row["id"]).execute()
             _touch_tick(channel_id)

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.db import supabase
+from app.status_vocab import PausedReason
 from app.shorts.nas_source import list_source_languages
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -99,7 +100,7 @@ def callback(request: Request, code: str | None = None, error: str | None = None
         .execute()
         .data or {}
     ).get("autopilot_paused_reason")
-    if existing_pause == "token_expired":
+    if existing_pause == PausedReason.TOKEN_EXPIRED:
         supabase().table("channels").update({
             "autopilot_paused_reason": None, "autopilot_paused_at": None,
         }).eq("id", channel_id).execute()

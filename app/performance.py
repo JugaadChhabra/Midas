@@ -7,12 +7,12 @@ from fastapi.responses import StreamingResponse
 
 from app.channel_audits import audits_for_channel, fetch_all
 from app.db import supabase
+from app.status_vocab import MEASURED_STATUSES, AuditStatus
 
 router = APIRouter(tags=["performance"])
 
-# Loop 1 verdicts that count as evidence (mirrors reflection.MEASURED_STATUSES).
-# `not_applicable` means the audit was never measured, not that it was neutral.
-MEASURED_STATUSES = ("win", "neutral", "regression")
+# Loop 1 verdicts that count as evidence. `not_applicable` means the audit was
+# never measured, not that it was neutral.
 
 
 def _parse_iso(s: str | None) -> datetime | None:

@@ -9,6 +9,12 @@ from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.audit_suggestion import AuditSuggestion
+from app.status_vocab import (
+    ACTIVE_MEASUREMENT_STATUSES,
+    AuditStatus,
+    MeasurementStatus,
+    OutcomeDecision,
+)
 from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
@@ -348,7 +354,7 @@ def audit_video(
         log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
     row = {
         "video_id": video_id,
-        "status": status_override or "pending",
+        "status": status_override or AuditStatus.PENDING,
         **suggestion.to_audit_row(),
         "transcript_available": transcript is not None,
         "transcript_lang": transcript_lang,
@@ -403,7 +409,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     audit = supabase().table("audits").select("*").eq("id", audit_id).single().execute().data
     if not audit:
         raise HTTPException(404, "Audit not found")
-    if audit["status"] == "applied":
+    if audit["status"] == AuditStatus.APPLIED:
         raise HTTPException(400, "Audit already applied")
 
     video = supabase().table("videos").select("*").eq("id", audit["video_id"]).single().execute().data
@@ -490,7 +496,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         err_str = str(e)
         if "UPDATE_TITLE_NOT_ALLOWED_DURING_TEST_AND_COMPARE" in err_str:
             supabase().table("audits").update({
-                "status": "blocked_test_and_compare",
+                "status": AuditStatus.BLOCKED_TEST_AND_COMPARE,
                 **before_patch,
                 **baseline_patch,
             }).eq("id", audit_id).execute()
@@ -498,7 +504,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         if "quotaExceeded" in err_str:
             # Leave audit as-is (pending) so it retries when quota resets.
             raise ApplyError(ApplyOutcome.QUOTA_EXCEEDED)
-        supabase().table("audits").update({"status": "failed", **before_patch, **baseline_patch}).eq("id", audit_id).execute()
+        supabase().table("audits").update({"status": AuditStatus.FAILED, **before_patch, **baseline_patch}).eq("id", audit_id).execute()
         raise ApplyError(ApplyOutcome.FAILED, f"YouTube update failed: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
@@ -510,11 +516,11 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     measurement_patch: dict = {}
     if (channel or {}).get("measurement_enabled"):
         measurement_patch = {
-            "measurement_status": "awaiting_window",
+            "measurement_status": MeasurementStatus.AWAITING_WINDOW,
             "measurement_started_at": now,
         }
     supabase().table("audits").update({
-        "status": "applied",
+        "status": AuditStatus.APPLIED,
         "applied_at": now,
         **before_patch,
         **baseline_patch,
@@ -527,7 +533,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         "last_fetched_at": now,
     }).eq("id", video["id"]).execute()
 
-    return {"status": "applied", "payload": payload}
+    return {"status": AuditStatus.APPLIED, "payload": payload}
 
 
 @router.post("/audits/{audit_id}/apply")
@@ -575,7 +581,7 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
         if a["video_id"] in seen:
             continue
         seen.add(a["video_id"])
-        if a["status"] == "pending":
+        if a["status"] == AuditStatus.PENDING:
             pending.append(a)
 
     results: list[dict] = []
@@ -593,7 +599,7 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
         ok, reason = validate_audit(a)
         if not ok:
             supabase().table("audits").update({
-                "status": "quarantined",
+                "status": AuditStatus.QUARANTINED,
                 "ai_reasoning": (a.get("ai_reasoning") or "") + f"\n[bulk-apply] quarantined: {reason}",
             }).eq("id", a["id"]).execute()
             results.append({
@@ -654,7 +660,7 @@ def reaudit_quarantined(channel_id: str):
         if a["video_id"] not in latest:
             latest[a["video_id"]] = a
 
-    quarantined_ids = [vid for vid, a in latest.items() if a["status"] == "quarantined"]
+    quarantined_ids = [vid for vid, a in latest.items() if a["status"] == AuditStatus.QUARANTINED]
 
     results: list[dict] = []
     reaudited = skipped = failed = 0
@@ -729,7 +735,7 @@ def revert_audit(audit_id: int):
     audit = supabase().table("audits").select("*").eq("id", audit_id).single().execute().data
     if not audit:
         raise HTTPException(404, "Audit not found")
-    if audit.get("status") != "applied":
+    if audit.get("status") != AuditStatus.APPLIED:
         raise HTTPException(400, "Only applied audits can be reverted")
     if audit.get("title_before") is None and audit.get("description_before") is None:
         raise HTTPException(400, "No before-state stored for this audit")
@@ -757,7 +763,7 @@ def revert_audit(audit_id: int):
     if settings.DRY_RUN:
         log.warning("[DRY_RUN] would revert video %s with %s", video["id"], payload)
         supabase().table("audits").update(
-            {"status": "reverted", "outcome_decision": "reverted"}
+            {"status": AuditStatus.REVERTED, "outcome_decision": OutcomeDecision.REVERTED}
         ).eq("id", audit_id).execute()
         return {"status": "dry_run", "payload": payload}
 
@@ -770,13 +776,13 @@ def revert_audit(audit_id: int):
     now = datetime.now(timezone.utc).isoformat()
     # Loop 1: record the human decision. A regression verdict reverted by an
     # operator is the exact signal Loop 2's playbook distiller feeds on.
-    revert_patch: dict = {"status": "reverted", "outcome_decision": "reverted"}
-    if audit.get("measurement_status") in ("awaiting_window", "measuring"):
+    revert_patch: dict = {"status": AuditStatus.REVERTED, "outcome_decision": OutcomeDecision.REVERTED}
+    if audit.get("measurement_status") in ACTIVE_MEASUREMENT_STATUSES:
         # Reverted BEFORE a verdict: the post window would now measure
         # post-revert metadata, so no verdict is derivable. Park it out of
         # the eval query (which also filters status='applied' as a second
         # guard) instead of leaving it in-flight forever.
-        revert_patch["measurement_status"] = "not_applicable"
+        revert_patch["measurement_status"] = MeasurementStatus.NOT_APPLICABLE
         revert_patch["measurement_result"] = {
             "rationale": "reverted by operator before the measurement window closed"
         }
@@ -787,7 +793,7 @@ def revert_audit(audit_id: int):
         "tags": snippet["tags"],
         "last_fetched_at": now,
     }).eq("id", video["id"]).execute()
-    return {"status": "reverted"}
+    return {"status": AuditStatus.REVERTED}
 
 
 @router.get("/quota-cost-preview")

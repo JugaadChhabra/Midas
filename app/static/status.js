@@ -12,15 +12,20 @@
  * mapping lives here so it's canonical the moment one is.
  */
 (function (global) {
+  // Must cover every value in app/status_vocab.py's AuditStatus — anything
+  // missing falls through to a grey pill showing the raw string. Pinned by
+  // tests/test_status_vocab.py.
   const AUDIT_STATUS = {
-    applied:     { cls: 'pill--ok',      label: 'Applied' },
-    pending:     { cls: 'pill--info',    label: 'Pending' },
-    approved:    { cls: 'pill--info',    label: 'Approved' },
-    quarantined: { cls: 'pill--warn',    label: 'Bad output' },
-    failed:      { cls: 'pill--err',     label: 'Failed' },
-    rejected:    { cls: 'pill--neutral', label: 'Rejected' },
-    reverted:    { cls: 'pill--neutral', label: 'Reverted' },
-    none:        { cls: 'pill--neutral', label: 'Not audited' },
+    applied:                  { cls: 'pill--ok',      label: 'Applied' },
+    pending:                  { cls: 'pill--info',    label: 'Pending' },
+    approved:                 { cls: 'pill--info',    label: 'Approved' },
+    shadow_pending:           { cls: 'pill--info',    label: 'Shadow' },
+    quarantined:              { cls: 'pill--warn',    label: 'Bad output' },
+    blocked_test_and_compare: { cls: 'pill--warn',    label: 'Blocked · A/B test' },
+    failed:                   { cls: 'pill--err',     label: 'Failed' },
+    rejected:                 { cls: 'pill--neutral', label: 'Rejected' },
+    reverted:                 { cls: 'pill--neutral', label: 'Reverted' },
+    none:                     { cls: 'pill--neutral', label: 'Not audited' },
   };
 
   const SHORTS_STATUS = {

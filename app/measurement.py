@@ -46,6 +46,13 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.db import supabase
+from app.status_vocab import (
+    ACTIVE_MEASUREMENT_STATUSES,
+    MEASURED_STATUSES,
+    AuditStatus,
+    MeasurementStatus,
+    OutcomeDecision,
+)
 # Same-package reuse of the reporting poll's ledger reader: coverage
 # certification must use the identical definition of "covered data-day"
 # that the backfill uses, or the two pipelines could disagree.
@@ -55,7 +62,7 @@ log = logging.getLogger("midas.measurement")
 
 router = APIRouter()
 
-_TERMINAL = ("win", "neutral", "regression")
+_TERMINAL = MEASURED_STATUSES
 
 
 # ── Window math ───────────────────────────────────────────────────────────
@@ -125,13 +132,13 @@ def _classify(pre_ctr: float | None, post_ctr: float | None) -> tuple[str, float
         # relative delta is undefined, and a single stray post-change click
         # should not mint a "win" that Loop 2 would then learn from.
         # Neutral — genuinely can't tell.
-        return "neutral", None
+        return MeasurementStatus.NEUTRAL, None
     delta = ((post_ctr or 0.0) - pre_ctr) / pre_ctr
     if delta >= settings.CTR_WIN_THRESHOLD:
-        return "win", delta
+        return MeasurementStatus.WIN, delta
     if delta <= settings.CTR_REGRESSION_THRESHOLD:
-        return "regression", delta
-    return "neutral", delta
+        return MeasurementStatus.REGRESSION, delta
+    return MeasurementStatus.NEUTRAL, delta
 
 
 def _write_baseline(*, video_id: str, channel_id: str, pre: tuple[str, str],
@@ -166,9 +173,9 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str
         # awaiting_window without a timestamp — data bug; park it as
         # not_applicable (NOT neutral: neutral is a measured outcome and
         # feeds Loop 2's counts; this was never measured).
-        _finalize(audit["id"], "not_applicable", "none",
+        _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
                   {"rationale": "no applied_at/measurement_started_at timestamp; cannot window"})
-        return "not_applicable"
+        return MeasurementStatus.NOT_APPLICABLE
 
     pre, post = _windows(applied)
     post_end = date.fromisoformat(post[1])
@@ -186,11 +193,11 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str
                 "pre_window": pre, "post_window": post,
             })
             return "neutral"
-        if audit["measurement_status"] != "measuring":
+        if audit["measurement_status"] != MeasurementStatus.MEASURING:
             supabase().table("audits").update(
-                {"measurement_status": "measuring"}
+                {"measurement_status": MeasurementStatus.MEASURING}
             ).eq("id", audit["id"]).execute()
-        return "measuring"
+        return MeasurementStatus.MEASURING
 
     pre_imp, pre_ctr = _reach_aggregate(audit["video_id"], *pre)
     post_imp, post_ctr = _reach_aggregate(audit["video_id"], *post)
@@ -213,27 +220,27 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str
 
     if pre_imp < settings.MIN_IMPRESSIONS:
         result["rationale"] = f"dormant pre-change ({pre_imp} impressions < {settings.MIN_IMPRESSIONS} floor)"
-        _finalize(audit["id"], "not_applicable", "none", result)
-        return "not_applicable"
+        _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, result)
+        return MeasurementStatus.NOT_APPLICABLE
     if post_imp < settings.MIN_IMPRESSIONS:
         result["rationale"] = f"insufficient post-change impressions ({post_imp} < {settings.MIN_IMPRESSIONS})"
-        _finalize(audit["id"], "neutral", "kept", result)
-        return "neutral"
+        _finalize(audit["id"], MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
+        return MeasurementStatus.NEUTRAL
 
     status, delta = _classify(pre_ctr, post_ctr)
     result["ctr_delta_relative"] = delta
-    if status == "win":
+    if status == MeasurementStatus.WIN:
         result["rationale"] = "CTR up beyond win threshold"
-        _finalize(audit["id"], "win", "kept", result)
-    elif status == "neutral":
+        _finalize(audit["id"], MeasurementStatus.WIN, OutcomeDecision.KEPT, result)
+    elif status == MeasurementStatus.NEUTRAL:
         result["rationale"] = "CTR within noise band"
-        _finalize(audit["id"], "neutral", "kept", result)
+        _finalize(audit["id"], MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
     else:
         result["rationale"] = "CTR down beyond regression threshold"
         # Human-gated: AUTO_REVERT_ON_REGRESSION defaults false and this
         # slice does not implement auto-revert at all — the verdict is
         # surfaced for an operator to POST /audits/{id}/revert.
-        _finalize(audit["id"], "regression", "none", result)
+        _finalize(audit["id"], MeasurementStatus.REGRESSION, OutcomeDecision.NONE, result)
         log.warning(
             "REGRESSION verdict: audit %s video %s ctr %.4f → %.4f (Δ %.1f%%) — awaiting human review",
             audit["id"], audit["video_id"], pre_ctr or 0.0, post_ctr or 0.0,
@@ -258,13 +265,13 @@ def eval_measurements() -> dict:
         page = (
             supabase().table("audits")
             .select("id,video_id,applied_at,measurement_started_at,measurement_status")
-            .in_("measurement_status", ["awaiting_window", "measuring"])
+            .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
             # Only still-applied audits: a human revert mid-window takes the
             # video off the new metadata, so the post window would measure
             # post-REVERT exposure — and _finalize would clobber the
             # operator's outcome_decision='reverted'. revert_audit parks the
             # measurement state; this filter is the belt to that suspender.
-            .eq("status", "applied")
+            .eq("status", AuditStatus.APPLIED)
             .order("id")
             .range(offset, offset + PAGE - 1)
             .execute()
@@ -299,9 +306,9 @@ def eval_measurements() -> dict:
         try:
             video = videos.get(audit["video_id"])
             if not video:
-                _finalize(audit["id"], "not_applicable", "none",
+                _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
                           {"rationale": "video row no longer exists"})
-                counts["not_applicable"] = counts.get("not_applicable", 0) + 1
+                counts[MeasurementStatus.NOT_APPLICABLE] = counts.get(MeasurementStatus.NOT_APPLICABLE, 0) + 1
                 continue
             cid = video["channel_id"]
             if cid not in coverage:
@@ -370,7 +377,7 @@ def channel_outcomes(channel_id: str):
                 .select("id,video_id,applied_at,measurement_status,outcome_decision,"
                         "measurement_result,strategy_version")
                 .in_("video_id", video_ids[i : i + 100])
-                .neq("measurement_status", "not_applicable")
+                .neq("measurement_status", MeasurementStatus.NOT_APPLICABLE)
                 .order("id")
                 .range(offset, offset + PAGE - 1)
                 .execute()
@@ -389,7 +396,8 @@ def channel_outcomes(channel_id: str):
     terminal.sort(key=lambda r: (r.get("applied_at") or ""), reverse=True)
     pending_review = [
         r for r in terminal
-        if r["measurement_status"] == "regression" and r["outcome_decision"] == "none"
+        if r["measurement_status"] == MeasurementStatus.REGRESSION
+        and r["outcome_decision"] == OutcomeDecision.NONE
     ]
     return {
         "channel_id": channel_id,
