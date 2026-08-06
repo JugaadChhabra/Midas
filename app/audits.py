@@ -284,8 +284,41 @@ def _ensure_strategy_row() -> None:
         log.warning("could not ensure audit_strategies row %s: %s", settings.STRATEGY_VERSION, e)
 
 
-def audit_video(video_id: str, prompt_override: str | None = None, status_override: str | None = None) -> dict:
-    """Run a content-aware audit and insert a pending audit row."""
+def _live_prompt_version_id(channel_id: str) -> int | None:
+    """The prompt_versions row currently marked live for a channel, if any.
+
+    Best-effort: prompt attribution is telemetry, so a lookup failure must not
+    fail the audit itself.
+    """
+    try:
+        rows = (
+            supabase().table("prompt_versions")
+            .select("id")
+            .eq("channel_id", channel_id)
+            .eq("status", "live")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        return rows[0]["id"] if rows else None
+    except Exception as e:
+        log.warning("Could not resolve live prompt version for %s: %s", channel_id, e)
+        return None
+
+
+def audit_video(
+    video_id: str,
+    prompt_override: str | None = None,
+    status_override: str | None = None,
+    prompt_version_id: int | None = None,
+) -> dict:
+    """Run a content-aware audit and insert a pending audit row.
+
+    `prompt_version_id` attributes the audit to a specific prompt_versions row —
+    pass it when supplying `prompt_override` (shadow audits use the candidate's
+    version). Left None with no override, the channel's live version is resolved
+    here, so every caller gets attribution without stamping it themselves.
+    """
     _ensure_strategy_row()
     v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
     if not v:
@@ -298,12 +331,23 @@ def audit_video(video_id: str, prompt_override: str | None = None, status_overri
 
     cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
     cfg_row = cfg[0] if cfg else {}
+    # `used_generated` gates prompt attribution below: prompt_version_id must
+    # name the prompt that ACTUALLY ran. An empty generated_prompt silently
+    # falls back to DEFAULT_PROMPT, and stamping the live version there labels
+    # the audit with a prompt the model never saw.
+    used_generated = False
     if prompt_override:
         audit_prompt = prompt_override
     elif v.get("is_short") and cfg_row.get("shorts_prompt"):
         audit_prompt = cfg_row["shorts_prompt"]
+    elif cfg_row.get("generated_prompt"):
+        audit_prompt = cfg_row["generated_prompt"]
+        used_generated = True
     else:
-        audit_prompt = cfg_row.get("generated_prompt") or DEFAULT_PROMPT
+        audit_prompt = DEFAULT_PROMPT
+
+    if prompt_version_id is None and used_generated:
+        prompt_version_id = _live_prompt_version_id(v["channel_id"])
 
     channel = supabase().table("channels").select("default_language").eq(
         "id", v["channel_id"]
@@ -342,8 +386,11 @@ def audit_video(video_id: str, prompt_override: str | None = None, status_overri
         "transcript_available": transcript is not None,
         "transcript_lang": transcript_lang,
         # CIL §3.1: stamp every audit with the strategy that produced it so
-        # measured outcomes stay attributable when Loop 3 arrives.
+        # measured outcomes stay attributable when Loop 3 arrives. Same reason
+        # for prompt_version_id — stamped here, at the single insert site, so no
+        # caller can forget it (_cohort_median_lift silently ignores NULLs).
         "strategy_version": settings.STRATEGY_VERSION,
+        "prompt_version_id": prompt_version_id,
     }
     inserted = supabase().table("audits").insert(row).execute()
     return inserted.data[0] if inserted.data else row

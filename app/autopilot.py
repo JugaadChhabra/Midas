@@ -538,23 +538,7 @@ def tick():
             _touch_tick(channel_id)
             return
 
-        # Stamp which prompt version generated this audit
-        try:
-            live_ver = (
-                supabase().table("prompt_versions")
-                .select("id")
-                .eq("channel_id", channel_id)
-                .eq("status", "live")
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            ).data
-            if live_ver and audit_row.get("id"):
-                supabase().table("audits").update(
-                    {"prompt_version_id": live_ver[0]["id"]}
-                ).eq("id", audit_row["id"]).execute()
-        except Exception as e:
-            log.warning("Failed to stamp prompt_version_id for audit %s: %s", audit_row.get("id"), e)
+        # (Prompt-version attribution is stamped by audit_video at the insert.)
 
         # 8. Validate
         ok, reason = validate_audit(audit_row)

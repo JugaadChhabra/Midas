@@ -469,16 +469,12 @@ def _run_shadow_audits(channel_id: str, candidate_prompt: str, version_id: int) 
     for row in recent_applied:
         vid = row["video_id"]
         try:
-            result = audit_video(
+            audit_video(
                 vid,
                 prompt_override=candidate_prompt,
                 status_override="shadow_pending",
+                prompt_version_id=version_id,  # the candidate, not the live version
             )
-            # Tag shadow audit with the version that generated it
-            if result and result.get("id"):
-                supabase().table("audits").update(
-                    {"prompt_version_id": version_id}
-                ).eq("id", result["id"]).execute()
             count += 1
         except Exception as e:
             log.warning("Shadow audit failed for %s: %s", vid, e)
