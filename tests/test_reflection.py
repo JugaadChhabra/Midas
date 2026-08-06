@@ -472,3 +472,106 @@ def test_tune_thresholds_respects_upper_bound():
         result = tune_thresholds("ch1")
 
     assert result["new_join_high"] <= 0.85
+
+
+# ---------------------------------------------------------------------------
+# Promotion: a candidate is only "live" when the version row, the retirement of
+# the previous live row, and audit_configs.generated_prompt all move together.
+#
+# Regression guard: `status` was written as
+#   reflection_mode if reflection_mode in ("shadow", "live") else "shadow"
+# so `auto` fell through to "shadow" while the prompt text WAS promoted — and
+# autopilot stamps audits.prompt_version_id from the row marked live, so every
+# audit from the new prompt was attributed to the old version and auto-revert
+# could never see the new one. `live` mode had the mirror bug: the row said
+# live but generated_prompt was never written, so the prompt never took effect.
+# ---------------------------------------------------------------------------
+
+def _reflection_table_side(mode, recorder, current_live_id=None):
+    def table_side(name):
+        m = MagicMock()
+        if name == "audit_configs":
+            m.select.return_value.eq.return_value.execute.return_value.data = [
+                {"generated_prompt": "OLD PROMPT", "reflection_mode": mode}
+            ]
+
+            def cfg_update(payload):
+                recorder.append(("audit_configs.update", payload))
+                return MagicMock()
+
+            m.update.side_effect = cfg_update
+        elif name == "prompt_versions":
+            def capture_insert(row):
+                recorder.append(("prompt_versions.insert", row))
+                inner = MagicMock()
+                inner.execute.return_value.data = [{"id": 42, **row}]
+                return inner
+
+            m.insert.side_effect = capture_insert
+            m.select.return_value.eq.return_value.eq.return_value \
+                .order.return_value.limit.return_value.execute.return_value.data = (
+                    [{"id": current_live_id}] if current_live_id else []
+                )
+
+            def pv_update(payload):
+                recorder.append(("prompt_versions.update", payload))
+                return MagicMock()
+
+            m.update.side_effect = pv_update
+        return m
+
+    return table_side
+
+
+def _run_reflection_in_mode(mode, current_live_id=None):
+    perf_report = _make_perf_report(win_rate=40.0)
+    perf_report["worst_audits"] = []
+    perf_report["best_audits"] = []
+    result = {
+        "reflection": "r",
+        "changes": ["c"],
+        "candidate_prompt": "NEW PROMPT",
+    }
+    recorder: list[tuple[str, dict]] = []
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.chat_json", return_value=result):
+        mock_sb.return_value.table.side_effect = _reflection_table_side(
+            mode, recorder, current_live_id
+        )
+        from app.reflection import _run_reflection
+        version_id = _run_reflection("ch1", perf_report, "ctx", "guidance")
+    return version_id, recorder
+
+
+def test_auto_mode_marks_the_new_version_live():
+    version_id, recorder = _run_reflection_in_mode("auto", current_live_id=7)
+    assert version_id == 42
+
+    statuses = [p["status"] for k, p in recorder if k == "prompt_versions.update"]
+    assert "live" in statuses, "auto mode must mark the promoted version live"
+    assert "retired" in statuses, "auto mode must retire the previously live version"
+    assert statuses.index("retired") < statuses.index("live")  # retire before promote
+
+    cfg = [p for k, p in recorder if k == "audit_configs.update"]
+    assert cfg == [{"generated_prompt": "NEW PROMPT"}]
+
+
+def test_live_mode_writes_the_prompt_it_marks_live():
+    version_id, recorder = _run_reflection_in_mode("live", current_live_id=7)
+    assert version_id == 42
+
+    statuses = [p["status"] for k, p in recorder if k == "prompt_versions.update"]
+    assert "live" in statuses
+    cfg = [p for k, p in recorder if k == "audit_configs.update"]
+    assert cfg == [{"generated_prompt": "NEW PROMPT"}], \
+        "live mode marked a version live without applying its prompt"
+
+
+def test_shadow_mode_promotes_nothing():
+    version_id, recorder = _run_reflection_in_mode("shadow", current_live_id=7)
+    assert version_id == 42
+
+    inserted = [p for k, p in recorder if k == "prompt_versions.insert"]
+    assert inserted[0]["status"] == "shadow"
+    assert not [p for k, p in recorder if k == "prompt_versions.update"]
+    assert not [p for k, p in recorder if k == "audit_configs.update"]

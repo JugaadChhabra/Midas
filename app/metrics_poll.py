@@ -51,6 +51,12 @@ ACTIVE_MEASUREMENT_STATUSES = ("awaiting_window", "measuring")
 # (hundreds) but chunk defensively so growth can never overflow the query.
 _ID_CHUNK = 150
 
+# Supabase truncates every response at 1000 rows; each paged read below walks
+# past it in PAGE-sized steps. Module-level on purpose: this was twice a
+# function-local, which left _poll_channel's playlist loop reading an unbound
+# name and crashing the sensor before it wrote a single row.
+PAGE = 1000
+
 
 def _measured_video_ids() -> set[str]:
     """Video IDs with an audit in an active measurement window (the Tier-2 poll
@@ -58,7 +64,6 @@ def _measured_video_ids() -> set[str]:
     the whole point: on a quiet day the sensor makes zero Analytics calls."""
     ids: set[str] = set()
     offset = 0
-    PAGE = 1000
     while True:
         page = (
             supabase().table("audits")
@@ -190,7 +195,6 @@ def _fetch_channel_videos(channel_id: str, measured_video_ids: set[str] | None) 
     if measured_video_ids is None:
         videos: list[dict] = []
         offset = 0
-        PAGE = 1000
         while True:
             page = (
                 supabase().table("videos")

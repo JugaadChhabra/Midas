@@ -318,6 +318,32 @@ def _format_perf_report(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _promote_version(channel_id: str, version_id: int, prompt_text: str) -> None:
+    """Make `version_id` the channel's live prompt.
+
+    Three writes that must always move together: retire whatever is currently
+    live, mark this version live, and put its text where audit_video() reads it
+    (`audit_configs.generated_prompt`). Splitting them desynchronises prompt
+    attribution — autopilot stamps `audits.prompt_version_id` from the row
+    marked live (autopilot.py:548), so a promoted prompt whose row still says
+    `shadow` gets every one of its audits credited to the *previous* version,
+    and _check_auto_revert (which reads status='live') never sees it.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    supabase().table("prompt_versions").update(
+        {"status": "retired", "retired_at": now_iso}
+    ).eq("channel_id", channel_id).eq("status", "live").execute()
+
+    supabase().table("prompt_versions").update(
+        {"status": "live", "promoted_at": now_iso}
+    ).eq("id", version_id).execute()
+
+    supabase().table("audit_configs").update(
+        {"generated_prompt": prompt_text}
+    ).eq("channel_id", channel_id).execute()
+
+
 def _run_reflection(
     channel_id: str,
     perf_report: dict,
@@ -396,10 +422,12 @@ def _run_reflection(
     ).data or []
     parent_id = live_rows[0]["id"] if live_rows else None
 
+    # Always land the candidate as `shadow`; promotion is a separate, explicit
+    # step so the version row and the prompt text can never disagree.
     row = {
         "channel_id": channel_id,
         "prompt_text": candidate_prompt,
-        "status": reflection_mode if reflection_mode in ("shadow", "live") else "shadow",
+        "status": "shadow",
         "reflection_reasoning": result.get("reflection", ""),
         "performance_snapshot": perf_report,
         "parent_version_id": parent_id,
@@ -408,12 +436,12 @@ def _run_reflection(
     version_id = (inserted.data[0] if inserted.data else {}).get("id")
     log.info("Stored prompt candidate %s for %s (status=%s)", version_id, channel_id, row["status"])
 
-    # If auto mode: go live immediately
-    if reflection_mode == "auto" and version_id:
-        supabase().table("audit_configs").update(
-            {"generated_prompt": candidate_prompt}
-        ).eq("channel_id", channel_id).execute()
-        log.info("Auto mode: promoted candidate %s to live for %s", version_id, channel_id)
+    # `live` and `auto` both mean "use this prompt now" — they differ only in
+    # who asked (a human toggling the mode vs the weekly cycle).
+    if reflection_mode in ("live", "auto") and version_id:
+        _promote_version(channel_id, version_id, candidate_prompt)
+        log.info("%s mode: promoted candidate %s to live for %s",
+                 reflection_mode, version_id, channel_id)
 
     return version_id
 
@@ -765,20 +793,7 @@ def promote_version(channel_id: str, version_id: int):
     if version["status"] != "shadow":
         raise HTTPException(400, f"Cannot promote version with status={version['status']}")
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    # Retire any currently live version
-    supabase().table("prompt_versions").update(
-        {"status": "retired", "retired_at": now_iso}
-    ).eq("channel_id", channel_id).eq("status", "live").execute()
-
-    supabase().table("prompt_versions").update(
-        {"status": "live", "promoted_at": now_iso}
-    ).eq("id", version_id).execute()
-
-    supabase().table("audit_configs").update(
-        {"generated_prompt": version["prompt_text"]}
-    ).eq("channel_id", channel_id).execute()
+    _promote_version(channel_id, version_id, version["prompt_text"])
 
     log.info("Manually promoted prompt version %s for channel %s", version_id, channel_id)
     return {"ok": True, "promoted_version_id": version_id}
