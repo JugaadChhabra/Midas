@@ -58,8 +58,17 @@ _UPSERT_CHUNK = 500
 _BACKFILL_LOOKBACK_DAYS = 90
 
 
-def _ledger_state(channel_id: str) -> tuple[set[str], set[str]]:
-    """One paginated ledger read → (ingested report ids, covered data-days)."""
+def coverage_for_channel(channel_id: str) -> tuple[set[str], set[str]]:
+    """One paginated ledger read → (ingested report ids, covered data-days).
+
+    "Covered" means a reach report was ingested for that data-day; it says
+    nothing about whether impressions were non-trivial (measurement.py applies
+    the MIN_IMPRESSIONS floor per-video, later).
+
+    Public because measurement.py needs it. It used to reach in for the private
+    `_ledger_state`, which is the right coupling — coverage must be defined once
+    — expressed through the wrong seam.
+    """
     rows = all_rows(
         supabase().table("reporting_reports_ingested")
         .select("report_id,data_date")
@@ -148,7 +157,13 @@ def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
     return len(payload)
 
 
-def _window_days(start: str, end: str) -> list[str]:
+def days_between(start: str, end: str) -> list[str]:
+    """Inclusive list of ISO calendar days in [start, end].
+
+    Public because measurement.py must walk a window exactly the way the reach
+    backfill does — two different walks would disagree about which data-days a
+    window needs, and therefore about whether it is observable yet.
+    """
     s, e = date.fromisoformat(start), date.fromisoformat(end)
     return [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
 
@@ -184,7 +199,7 @@ def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
     filled = 0
     skipped_windows = 0
     for (w_start, w_end), members in windows.items():
-        days = _window_days(w_start, w_end)
+        days = days_between(w_start, w_end)
         missing = [d for d in days if d not in covered]
         if missing:
             # Not fully covered yet; retried next run. Logged (rather than
@@ -247,7 +262,7 @@ def _poll_channel(channel_id: str) -> dict:
         return {"job": None, "reports_new": 0, "rows_ingested": 0}
 
     reports = list_reports(handle, channel_id, job_id)
-    seen, covered = _ledger_state(channel_id)
+    seen, covered = coverage_for_channel(channel_id)
     new = [r for r in reports if r["id"] not in seen]
     # Oldest data-day first, so coverage grows contiguously and a mid-run
     # crash leaves the older (more backfill-relevant) days ingested.
@@ -311,3 +326,8 @@ def poll_reporting() -> None:
             log.warning("reporting_poll %s: OAuth token expired; skipping until re-consent", cid)
         except Exception as e:
             log.exception("reporting_poll %s crashed: %s", cid, e)
+
+
+#: Back-compat aliases for the previous private names.
+_ledger_state = coverage_for_channel
+_window_days = days_between

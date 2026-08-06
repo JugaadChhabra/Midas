@@ -1,0 +1,224 @@
+"""Loop 1's judge, tested through pure functions.
+
+measurement.py is 405 lines containing the six policy decisions that turn an
+applied audit into win / neutral / regression — and it had ZERO tests, because
+those policies were interleaved with four Supabase round-trips inside one
+function body. Four of its helpers were already pure and still untested.
+
+The decision is now two pure stages with the I/O pushed to the edges:
+
+    plan_measurement(audit, today, covered)  -- what to do before reading reach
+    judge_reach(...)                         -- the verdict, given the numbers
+
+so every branch below runs with no mocks at all.
+"""
+from datetime import date
+from unittest.mock import patch
+
+import pytest
+
+from app import measurement as m
+from app.status_vocab import MeasurementStatus, OutcomeDecision
+
+APPLIED = date(2026, 6, 1)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_thresholds():
+    """Pin the policy knobs so these tests describe behaviour, not config."""
+    with patch.object(m.settings, "MEASUREMENT_WINDOW_DAYS", 21), \
+         patch.object(m.settings, "MIN_IMPRESSIONS", 500), \
+         patch.object(m.settings, "CTR_WIN_THRESHOLD", 0.10), \
+         patch.object(m.settings, "CTR_REGRESSION_THRESHOLD", -0.10), \
+         patch.object(m.settings, "MEASUREMENT_COVERAGE_GRACE_DAYS", 14):
+        yield
+
+
+def _audit(**kw):
+    return {"id": 1, "video_id": "v1", "applied_at": "2026-06-01T12:00:00+00:00",
+            "measurement_status": MeasurementStatus.AWAITING_WINDOW, **kw}
+
+
+def _covered(pre, post):
+    return set(m.days_between(*pre)) | set(m.days_between(*post))
+
+
+# ── window math ───────────────────────────────────────────────────────────
+
+def test_windows_exclude_the_apply_day_and_its_neighbours():
+    """Reach data-days roll over on Pacific while `applied` is a UTC date, so
+    the adjacent days can contain mixed pre/post exposure."""
+    pre, post = m._windows(APPLIED)
+    assert pre[1] == "2026-05-30"      # apply day - 2
+    assert post[0] == "2026-06-03"     # apply day + 2
+    for w in (pre, post):
+        assert APPLIED.isoformat() not in m.days_between(*w)
+
+
+def test_both_windows_are_full_length():
+    """Shifted outward, not shortened — otherwise pre/post aren't comparable."""
+    pre, post = m._windows(APPLIED)
+    assert len(m.days_between(*pre)) == 21
+    assert len(m.days_between(*post)) == 21
+
+
+def test_days_between_is_inclusive():
+    assert m.days_between("2026-01-01", "2026-01-03") == \
+        ["2026-01-01", "2026-01-02", "2026-01-03"]
+    assert m.days_between("2026-01-01", "2026-01-01") == ["2026-01-01"]
+
+
+def test_apply_date_prefers_applied_at_then_falls_back():
+    assert m._apply_date({"applied_at": "2026-06-01T00:00:00Z"}) == APPLIED
+    assert m._apply_date({"measurement_started_at": "2026-06-01T00:00:00Z"}) == APPLIED
+    assert m._apply_date({}) is None
+
+
+# ── classify ──────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("pre,post,status", [
+    (0.04, 0.05, MeasurementStatus.WIN),          # +25%
+    (0.04, 0.042, MeasurementStatus.NEUTRAL),     # +5%
+    (0.04, 0.039, MeasurementStatus.NEUTRAL),     # -2.5%
+    (0.04, 0.02, MeasurementStatus.REGRESSION),   # -50%
+])
+def test_classify_thresholds(pre, post, status):
+    assert m._classify(pre, post)[0] == status
+
+
+def test_thresholds_are_inclusive_at_the_boundary():
+    """A delta landing exactly on the threshold counts.
+
+    Uses exactly-representable values: with realistic CTRs like 0.04 -> 0.044
+    the delta computes to 0.09999999999999991, so the "boundary" would be
+    fictional and the test would be asserting float noise.
+    """
+    with patch.object(m.settings, "CTR_WIN_THRESHOLD", 0.5), \
+         patch.object(m.settings, "CTR_REGRESSION_THRESHOLD", -0.5):
+        assert (3.0 - 2.0) / 2.0 == 0.5          # exact
+        assert m._classify(2.0, 3.0)[0] == MeasurementStatus.WIN
+        assert (1.0 - 2.0) / 2.0 == -0.5         # exact
+        assert m._classify(2.0, 1.0)[0] == MeasurementStatus.REGRESSION
+
+
+def test_zero_pre_ctr_is_neutral_not_a_win():
+    """A single stray post-change click must not mint a win Loop 2 learns from."""
+    for pre in (None, 0.0):
+        status, delta = m._classify(pre, 0.05)
+        assert status == MeasurementStatus.NEUTRAL
+        assert delta is None
+
+
+def test_missing_post_ctr_counts_as_zero():
+    status, delta = m._classify(0.04, None)
+    assert status == MeasurementStatus.REGRESSION
+    assert delta == pytest.approx(-1.0)
+
+
+# ── plan_measurement: the pre-reach policies ──────────────────────────────
+
+def test_no_timestamp_is_parked_as_not_applicable():
+    """not_applicable, NOT neutral — neutral is a measured outcome that feeds
+    Loop 2's counts; this was never measured."""
+    p = m.plan_measurement(_audit(applied_at=None), date(2026, 7, 1), set())
+    assert p.action == m.FINALIZE
+    assert p.status == MeasurementStatus.NOT_APPLICABLE
+    assert p.outcome == OutcomeDecision.NONE
+
+
+def test_open_window_is_held_unchanged():
+    p = m.plan_measurement(_audit(), date(2026, 6, 10), set())
+    assert p.action == m.HOLD
+    assert p.status == MeasurementStatus.AWAITING_WINDOW
+
+
+def test_closed_window_with_full_coverage_proceeds_to_measure():
+    pre, post = m._windows(APPLIED)
+    p = m.plan_measurement(_audit(), date(2026, 7, 1), _covered(pre, post))
+    assert p.action == m.MEASURE
+    assert (p.pre, p.post) == (pre, post)
+
+
+def test_missing_coverage_within_grace_waits_as_measuring():
+    """'measuring' means window closed, reach CSVs not in yet — they arrive
+    1-6 days late."""
+    pre, post = m._windows(APPLIED)
+    covered = _covered(pre, post) - {post[1]}
+    p = m.plan_measurement(_audit(), date(2026, 7, 1), covered)
+    assert p.action == m.MARK_MEASURING
+
+
+def test_missing_coverage_past_grace_gives_up_as_neutral():
+    pre, post = m._windows(APPLIED)
+    covered = _covered(pre, post) - {post[1]}
+    # post_end is 2026-06-23; grace is 14 days
+    p = m.plan_measurement(_audit(), date(2026, 7, 20), covered)
+    assert p.action == m.FINALIZE
+    assert p.status == MeasurementStatus.NEUTRAL
+    assert p.outcome == OutcomeDecision.KEPT
+    assert "grace" in p.result["rationale"]
+    assert p.result["missing_days"]
+
+
+def test_grace_boundary_is_not_off_by_one():
+    pre, post = m._windows(APPLIED)
+    covered = _covered(pre, post) - {post[1]}
+    post_end = date.fromisoformat(post[1])
+    from datetime import timedelta
+    assert m.plan_measurement(_audit(), post_end + timedelta(days=14), covered).action \
+        == m.MARK_MEASURING          # still inside grace
+    assert m.plan_measurement(_audit(), post_end + timedelta(days=15), covered).action \
+        == m.FINALIZE                # grace expired
+
+
+# ── judge_reach: the post-reach policies ──────────────────────────────────
+
+def _judge(pre_imp, pre_ctr, post_imp, post_ctr):
+    pre, post = m._windows(APPLIED)
+    return m.judge_reach(pre=pre, post=post, pre_imp=pre_imp, pre_ctr=pre_ctr,
+                         post_imp=post_imp, post_ctr=post_ctr)
+
+
+def test_dormant_pre_window_is_not_applicable():
+    """Metadata can't create demand — the 'don't bother' rule."""
+    v = _judge(100, 0.04, 5000, 0.06)
+    assert v.status == MeasurementStatus.NOT_APPLICABLE
+    assert v.outcome == OutcomeDecision.NONE
+    assert "dormant" in v.result["rationale"]
+
+
+def test_thin_post_window_is_neutral_not_a_penalty():
+    v = _judge(5000, 0.04, 100, 0.01)
+    assert v.status == MeasurementStatus.NEUTRAL
+    assert v.outcome == OutcomeDecision.KEPT
+    assert "insufficient post-change" in v.result["rationale"]
+
+
+def test_a_win_is_kept():
+    v = _judge(5000, 0.04, 5000, 0.06)
+    assert (v.status, v.outcome) == (MeasurementStatus.WIN, OutcomeDecision.KEPT)
+    assert v.result["ctr_delta_relative"] == pytest.approx(0.5)
+
+
+def test_a_regression_is_not_auto_acted_on():
+    """AUTO_REVERT_ON_REGRESSION is off: the verdict is surfaced for a human."""
+    v = _judge(5000, 0.04, 5000, 0.02)
+    assert v.status == MeasurementStatus.REGRESSION
+    assert v.outcome == OutcomeDecision.NONE
+
+
+def test_result_records_the_thresholds_it_judged_against():
+    """Otherwise a later threshold change silently reinterprets old verdicts."""
+    v = _judge(5000, 0.04, 5000, 0.06)
+    assert v.result["min_impressions"] == 500
+    assert v.result["win_threshold"] == 0.10
+    assert v.result["regression_threshold"] == -0.10
+    assert v.result["attribution"] == "bundle"
+    assert v.result["pre_window"]["impressions"] == 5000
+
+
+def test_the_dormant_check_precedes_the_thin_post_check():
+    """Both floors fail here; dormant must win, since not_applicable and
+    neutral mean different things to Loop 2."""
+    v = _judge(100, 0.04, 100, 0.04)
+    assert v.status == MeasurementStatus.NOT_APPLICABLE

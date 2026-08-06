@@ -40,6 +40,7 @@ Impressions floors (CIL §0.5 / §1.2 / §1.3):
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -54,10 +55,10 @@ from app.status_vocab import (
     MeasurementStatus,
     OutcomeDecision,
 )
-# Same-package reuse of the reporting poll's ledger reader: coverage
-# certification must use the identical definition of "covered data-day"
-# that the backfill uses, or the two pipelines could disagree.
-from app.reporting_poll import _ledger_state
+# Coverage certification must use the identical definition of "covered
+# data-day" — and the identical window walk — that the reach backfill uses, or
+# the two pipelines disagree about whether a window is observable yet.
+from app.reporting_poll import coverage_for_channel, days_between as _reporting_days_between
 
 log = logging.getLogger("midas.measurement")
 
@@ -89,9 +90,10 @@ def _windows(applied: date) -> tuple[tuple[str, str], tuple[str, str]]:
     return pre, post
 
 
-def _days_between(start: str, end: str) -> list[str]:
-    s, e = date.fromisoformat(start), date.fromisoformat(end)
-    return [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
+#: Inclusive list of ISO days in a window. Imported rather than redefined:
+#: reporting_poll's backfill must walk windows identically or the two pipelines
+#: disagree about which data-days a window needs.
+days_between = _reporting_days_between
 
 
 def _reach_aggregate(video_id: str, start: str, end: str) -> tuple[int, float | None]:
@@ -156,45 +158,80 @@ def _finalize(audit_id: int, status: str, outcome: str, result: dict) -> None:
     }).eq("id", audit_id).execute()
 
 
-def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str:
-    """Evaluate one audit. Returns the (possibly unchanged) measurement_status."""
+# ── The decision, as two pure stages ──────────────────────────────────────
+#
+# Everything below decides; nothing reads or writes. _eval_audit is the shell
+# that carries data between them. Splitting here is what makes the six policies
+# testable: they used to sit between four Supabase round-trips in one body.
+
+#: plan_measurement actions.
+HOLD = "hold"                      # window still open — leave the row alone
+MARK_MEASURING = "mark_measuring"  # window closed, reach CSVs not in yet
+FINALIZE = "finalize"              # terminal, decided without reading reach
+MEASURE = "measure"                # go read the reach windows, then judge
+
+
+@dataclass(frozen=True)
+class Plan:
+    """What to do with an audit *before* any reach data is read."""
+
+    action: str
+    status: str | None = None
+    outcome: str | None = None
+    result: dict = field(default_factory=dict)
+    pre: tuple[str, str] | None = None
+    post: tuple[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """A terminal measurement outcome and the evidence behind it."""
+
+    status: str
+    outcome: str
+    result: dict
+
+
+def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
+    """Decide an audit's next state from its timestamps and coverage alone."""
     applied = _apply_date(audit)
     if applied is None:
         # awaiting_window without a timestamp — data bug; park it as
         # not_applicable (NOT neutral: neutral is a measured outcome and
         # feeds Loop 2's counts; this was never measured).
-        _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
-                  {"rationale": "no applied_at/measurement_started_at timestamp; cannot window"})
-        return MeasurementStatus.NOT_APPLICABLE
+        return Plan(
+            FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
+            {"rationale": "no applied_at/measurement_started_at timestamp; cannot window"},
+        )
 
     pre, post = _windows(applied)
     post_end = date.fromisoformat(post[1])
-
     if today <= post_end:
-        return audit["measurement_status"]  # window still open
+        return Plan(HOLD, audit["measurement_status"])
 
-    need = _days_between(*pre) + _days_between(*post)
+    need = days_between(*pre) + days_between(*post)
     missing = [d for d in need if d not in covered]
     if missing:
         if today > post_end + timedelta(days=settings.MEASUREMENT_COVERAGE_GRACE_DAYS):
-            _finalize(audit["id"], "neutral", "kept", {
+            return Plan(FINALIZE, MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, {
                 "rationale": "reach coverage never completed within grace period",
                 "missing_days": missing[:14],
                 "pre_window": pre, "post_window": post,
             })
-            return "neutral"
-        if audit["measurement_status"] != MeasurementStatus.MEASURING:
-            supabase().table("audits").update(
-                {"measurement_status": MeasurementStatus.MEASURING}
-            ).eq("id", audit["id"]).execute()
-        return MeasurementStatus.MEASURING
+        return Plan(MARK_MEASURING, MeasurementStatus.MEASURING)
 
-    pre_imp, pre_ctr = _reach_aggregate(audit["video_id"], *pre)
-    post_imp, post_ctr = _reach_aggregate(audit["video_id"], *post)
+    return Plan(MEASURE, pre=pre, post=post)
 
+
+def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
+                pre_imp: int, pre_ctr: float | None,
+                post_imp: int, post_ctr: float | None) -> Verdict:
+    """Turn a measured window pair into a terminal verdict."""
     result = {
         "pre_window": {"start": pre[0], "end": pre[1], "impressions": pre_imp, "ctr": pre_ctr},
         "post_window": {"start": post[0], "end": post[1], "impressions": post_imp, "ctr": post_ctr},
+        # Recorded so a later threshold change can't silently reinterpret an
+        # old verdict.
         "min_impressions": settings.MIN_IMPRESSIONS,
         "win_threshold": settings.CTR_WIN_THRESHOLD,
         "regression_threshold": settings.CTR_REGRESSION_THRESHOLD,
@@ -205,38 +242,68 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str
         "attribution": "bundle",
     }
 
-    _write_baseline(video_id=audit["video_id"], channel_id=video["channel_id"],
-                    pre=pre, impressions=pre_imp, ctr=pre_ctr)
-
+    # Dormant is checked first and deliberately: not_applicable and neutral
+    # mean different things to Loop 2, and a dormant video fails both floors.
     if pre_imp < settings.MIN_IMPRESSIONS:
         result["rationale"] = f"dormant pre-change ({pre_imp} impressions < {settings.MIN_IMPRESSIONS} floor)"
-        _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, result)
-        return MeasurementStatus.NOT_APPLICABLE
+        return Verdict(MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, result)
     if post_imp < settings.MIN_IMPRESSIONS:
         result["rationale"] = f"insufficient post-change impressions ({post_imp} < {settings.MIN_IMPRESSIONS})"
-        _finalize(audit["id"], MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
-        return MeasurementStatus.NEUTRAL
+        return Verdict(MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
 
     status, delta = _classify(pre_ctr, post_ctr)
     result["ctr_delta_relative"] = delta
     if status == MeasurementStatus.WIN:
         result["rationale"] = "CTR up beyond win threshold"
-        _finalize(audit["id"], MeasurementStatus.WIN, OutcomeDecision.KEPT, result)
-    elif status == MeasurementStatus.NEUTRAL:
+        return Verdict(status, OutcomeDecision.KEPT, result)
+    if status == MeasurementStatus.NEUTRAL:
         result["rationale"] = "CTR within noise band"
-        _finalize(audit["id"], MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
-    else:
-        result["rationale"] = "CTR down beyond regression threshold"
-        # Human-gated: AUTO_REVERT_ON_REGRESSION defaults false and this
-        # slice does not implement auto-revert at all — the verdict is
-        # surfaced for an operator to POST /audits/{id}/revert.
-        _finalize(audit["id"], MeasurementStatus.REGRESSION, OutcomeDecision.NONE, result)
+        return Verdict(status, OutcomeDecision.KEPT, result)
+    result["rationale"] = "CTR down beyond regression threshold"
+    # Human-gated: AUTO_REVERT_ON_REGRESSION defaults false and this slice does
+    # not implement auto-revert at all — the verdict is surfaced for an operator
+    # to POST /audits/{id}/revert.
+    return Verdict(status, OutcomeDecision.NONE, result)
+
+
+def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str:
+    """Evaluate one audit. Returns the (possibly unchanged) measurement_status.
+
+    Plumbing only: decide, fetch what the decision asked for, decide again,
+    persist. The policies live in plan_measurement and judge_reach.
+    """
+    plan = plan_measurement(audit, today, covered)
+
+    if plan.action == HOLD:
+        return plan.status
+    if plan.action == FINALIZE:
+        _finalize(audit["id"], plan.status, plan.outcome, plan.result)
+        return plan.status
+    if plan.action == MARK_MEASURING:
+        if audit["measurement_status"] != MeasurementStatus.MEASURING:
+            supabase().table("audits").update(
+                {"measurement_status": MeasurementStatus.MEASURING}
+            ).eq("id", audit["id"]).execute()
+        return MeasurementStatus.MEASURING
+
+    pre_imp, pre_ctr = _reach_aggregate(audit["video_id"], *plan.pre)
+    post_imp, post_ctr = _reach_aggregate(audit["video_id"], *plan.post)
+
+    _write_baseline(video_id=audit["video_id"], channel_id=video["channel_id"],
+                    pre=plan.pre, impressions=pre_imp, ctr=pre_ctr)
+
+    verdict = judge_reach(pre=plan.pre, post=plan.post,
+                          pre_imp=pre_imp, pre_ctr=pre_ctr,
+                          post_imp=post_imp, post_ctr=post_ctr)
+    _finalize(audit["id"], verdict.status, verdict.outcome, verdict.result)
+
+    if verdict.status == MeasurementStatus.REGRESSION:
         log.warning(
             "REGRESSION verdict: audit %s video %s ctr %.4f → %.4f (Δ %.1f%%) — awaiting human review",
             audit["id"], audit["video_id"], pre_ctr or 0.0, post_ctr or 0.0,
-            (delta or 0.0) * 100,
+            (verdict.result.get("ctr_delta_relative") or 0.0) * 100,
         )
-    return status
+    return verdict.status
 
 
 # ── Job entry point ───────────────────────────────────────────────────────
@@ -291,7 +358,7 @@ def eval_measurements() -> dict:
                 continue
             cid = video["channel_id"]
             if cid not in coverage:
-                _, coverage[cid] = _ledger_state(cid)
+                _, coverage[cid] = coverage_for_channel(cid)
             status = _eval_audit(audit, video, coverage[cid], today)
             counts[status] = counts.get(status, 0) + 1
         except Exception as e:
