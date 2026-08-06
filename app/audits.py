@@ -8,6 +8,7 @@ from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
 from app.apply_outcome import ApplyError, ApplyOutcome
+from app.audit_suggestion import AuditSuggestion
 from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
@@ -172,31 +173,6 @@ specific. Do not lose the creator's voice.
     return {"generated_prompt": generated}
 
 
-_HASHTAG_RE = re.compile(r"#[^\s#]+")
-
-
-def _cap_description_hashtags(description: str | None, limit: int = 15) -> str | None:
-    """Enforce YouTube's hashtag ceiling on a suggested description.
-
-    YouTube ignores ALL hashtags on a video that carries more than 15, so the
-    house format asks for exactly 15 (3 above-title + 12 at the bottom). The LLM
-    occasionally emits one or two extra, which would nullify every hashtag — hard
-    cap here. Keeps the FIRST `limit` hashtags in document order (preserving the
-    3 that surface above the title) and strips the rest, back-to-front so earlier
-    match spans stay valid.
-    """
-    if not description:
-        return description
-    matches = list(_HASHTAG_RE.finditer(description))
-    if len(matches) <= limit:
-        return description
-    out = description
-    for m in reversed(matches[limit:]):
-        out = out[: m.start()] + out[m.end() :]
-    # Tidy whitespace the removals leave behind (doubled spaces, trailing space).
-    out = re.sub(r"[ \t]+\n", "\n", out)
-    out = re.sub(r"[ \t]{2,}", " ", out)
-    return out.strip()
 
 
 def _build_user_block(
@@ -364,25 +340,16 @@ def audit_video(
     )
     result = chat_json(user, system=audit_prompt)
 
-    if isinstance(result, list):
-        # Some models occasionally return a bare JSON array (usually the issues list)
-        # instead of the documented object shape. Recover gracefully.
-        log.warning("Audit for %s returned a list; coercing to object shape", video_id)
-        result = {"issues": result, "comparisons": {}}
-    comparisons = result.get("comparisons") or {}
-    if isinstance(comparisons, list):
-        # Models sometimes emit comparisons as [{field, ...}, ...] instead of a keyed object.
-        comparisons = {(c.get("field") or "").lower(): c for c in comparisons if isinstance(c, dict)}
+    # Decode + normalise (incl. the hashtag cap) behind one constructor. An
+    # invalid suggestion still builds and still gets persisted — the apply path
+    # quarantines it, and reaudit_quarantined reprocesses it later.
+    suggestion = AuditSuggestion.from_llm(result)
+    if not suggestion.is_valid:
+        log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
     row = {
         "video_id": video_id,
         "status": status_override or "pending",
-        "suggested_title": (comparisons.get("title") or {}).get("suggested"),
-        "suggested_description": _cap_description_hashtags(
-            (comparisons.get("description") or {}).get("suggested")
-        ),
-        "suggested_tags": (comparisons.get("tags") or {}).get("suggested") or [],
-        "issues_found": {"comparisons": comparisons, "issues": result.get("issues") or []},
-        "ai_reasoning": result.get("reasoning"),
+        **suggestion.to_audit_row(),
         "transcript_available": transcript is not None,
         "transcript_lang": transcript_lang,
         # CIL §3.1: stamp every audit with the strategy that produced it so
@@ -397,21 +364,14 @@ def audit_video(
 
 
 def validate_audit(audit: dict) -> tuple[bool, str | None]:
-    """Return (ok, reason). Used before autopilot apply to refuse junk output."""
-    title = (audit.get("suggested_title") or "").strip()
-    if not title or len(title) > 100:
-        return False, "title empty or >100 chars"
-    desc = audit.get("suggested_description") or ""
-    if not desc or len(desc) > 5000:
-        return False, "description empty or >5000 chars"
-    tags = audit.get("suggested_tags") or []
-    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
-        return False, "tags not a list of strings"
-    if len(tags) > 30:
-        return False, ">30 tags"
-    if sum(len(t) for t in tags) > 500:
-        return False, "tags total chars >500"
-    return True, None
+    """Return (ok, reason). Used before autopilot apply to refuse junk output.
+
+    The ceilings live on AuditSuggestion; this rebuilds one from the persisted
+    row and asks it, so the check can't drift from the one applied at generate
+    time.
+    """
+    reason = AuditSuggestion.from_audit_row(audit).rejection()
+    return reason is None, reason
 
 
 @router.post("/videos/{video_id}/audit")
@@ -460,9 +420,20 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         "tags_before": video.get("tags") or [],
     }
 
-    new_title = (body and body.title) or audit.get("suggested_title") or video.get("title")
-    new_description = (body and body.description) or audit.get("suggested_description") or video.get("description")
-    new_tags = (body.tags if body and body.tags is not None else audit.get("suggested_tags")) or []
+    # Route the merged values back through AuditSuggestion so a caller-supplied
+    # override is normalised exactly like a generated one. This path used to
+    # bypass the hashtag cap entirely and send >15 hashtags to YouTube, which
+    # then ignores all of them.
+    applied = AuditSuggestion.from_fields(
+        title=(body and body.title) or audit.get("suggested_title") or video.get("title"),
+        description=(
+            (body and body.description)
+            or audit.get("suggested_description")
+            or video.get("description")
+        ),
+        tags=(body.tags if body and body.tags is not None else audit.get("suggested_tags")) or [],
+    )
+    new_title, new_description, new_tags = applied.title, applied.description, applied.tags
 
     snippet: dict = {
         "title": new_title,
