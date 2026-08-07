@@ -246,3 +246,6 @@ tools/bgutil-pot/
 # Self-hosted Postgres data dir and local pg_dump working copies.
 pgdata/
 backups/
+
+# One-time Supabase -> self-hosted data export (contains production data).
+migration_export/
