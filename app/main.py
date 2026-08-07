@@ -23,6 +23,7 @@ from app.reflection import reflect as reflection_reflect, router as reflection_r
 from app.shorts.routes import router as shorts_router, video_router as shorts_video_router
 from app.shorts.autoshorts import router as autoshorts_router
 from app.shorts.dispatcher import dispatch_tick
+from app.backup import run_nightly_backup
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
 from app.measurement import router as measurement_router, eval_measurements
@@ -292,6 +293,18 @@ async def lifespan(app: FastAPI):
         # awaiting_window/measuring and self-heals tomorrow.
         timezone="UTC",
         id="measurement_eval",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_nightly_backup,
+        "cron",
+        hour=settings.BACKUP_HOUR,
+        minute=0,
+        # Server-local, not UTC: "midnight" here means the office's midnight,
+        # which is what bounds the accepted one-day data loss. Self-hosting put
+        # the DB on one machine, so this snapshot is the whole recovery story.
+        id="nightly_db_backup",
         max_instances=1,
         coalesce=True,
     )

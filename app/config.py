@@ -198,6 +198,21 @@ class Settings:
     # local-mode root (mode="local"): a directory that stands in for the share.
     NAS_LOCAL_ROOT      = os.getenv("NAS_LOCAL_ROOT", "./nas_data")
 
+    # ── Self-hosted Postgres + nightly NAS snapshot (app/backup.py) ────────
+    # DATABASE_URL is the direct libpq connection used by pg_dump and by
+    # scripts/apply_migrations.py. It is NOT how the app reads data — that
+    # still goes through PostgREST via SUPABASE_URL, so no call site changed.
+    DATABASE_URL        = os.getenv("DATABASE_URL", "")
+    BACKUP_ENABLED      = os.getenv("BACKUP_ENABLED", "true").lower() == "true"
+    # Local hour for the nightly dump. Late enough that the day's work is done,
+    # early enough to be well clear of the 02:00 daily reconcile.
+    BACKUP_HOUR         = int(os.getenv("BACKUP_HOUR") or "0")
+    BACKUP_WORK_DIR     = os.getenv("BACKUP_WORK_DIR", "./backups")
+    # 1 = a single snapshot replaced nightly (max one day of data loss, but a
+    # corrupt DB overwrites the last healthy copy). 2 = alternate between two
+    # slots by day-of-year, which costs one extra file and survives that case.
+    BACKUP_SLOTS        = int(os.getenv("BACKUP_SLOTS") or "1")
+
 
 settings = Settings()
 

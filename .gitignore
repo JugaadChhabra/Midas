@@ -242,3 +242,7 @@ tools/bgutil-pot/
 # mattpocock/skills per-repo config (local-only, not tracked)
 /CLAUDE.md
 /docs/agents/
+
+# Self-hosted Postgres data dir and local pg_dump working copies.
+pgdata/
+backups/

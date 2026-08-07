@@ -4,8 +4,12 @@ FROM python:3.13-slim AS base
 WORKDIR /app
 
 # ffmpeg: used by the shorts cutter (clip extraction/encoding) and app/keyframes.py.
+# postgresql-client: app/backup.py shells out to pg_dump for the nightly NAS
+# snapshot. Must match the server's major version (pg16, see docker-compose.yml)
+# — an older pg_dump refuses to dump a newer server.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
 # NOTE: Deno was installed here solely as the JS runtime for yt-dlp's "n"-challenge

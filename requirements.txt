@@ -19,3 +19,9 @@ youtube-transcript-api>=0.6.2
 yt-dlp==2026.07.04
 pytest==8.3.4
 smbprotocol
+
+# Self-hosted Postgres tooling. Neither is used on the app's read path (that is
+# still PostgREST via supabase-py); these are for scripts/apply_migrations.py
+# and scripts/make_service_key.py.
+psycopg[binary]==3.2.3
+PyJWT==2.10.1

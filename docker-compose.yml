@@ -1,8 +1,66 @@
 services:
+  # ── Postgres (self-hosted; replaces the Supabase-hosted project) ─────────
+  # Egress to a hosted DB was the binding constraint: reading a channel's whole
+  # video table on every dashboard load is correct but unaffordable over the
+  # wire. On localhost it is free, so the app can read what it actually needs.
+  #
+  # pgvector image, not stock postgres: 20260518000000_playlists.sql does
+  # `create extension vector` and video_embeddings is a vector(3072).
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: midas-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-midas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-midas}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    # Not published to the host by default — nothing outside this compose
+    # network should reach it. Uncomment to attach psql/pg_dump from the host.
+    # ports:
+    #   - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-midas} -d ${POSTGRES_DB:-midas}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── PostgREST (the API the app actually speaks) ──────────────────────────
+  # Every one of the app's ~190 call sites uses the postgrest fluent builder
+  # (`supabase().table(...).select(...)`), not SQL. Postgres alone is not
+  # enough; this is what makes supabase-py work unchanged against a local DB.
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    container_name: midas-postgrest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-midas}
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      # The app's SUPABASE_SERVICE_KEY must be a JWT signed with this secret
+      # carrying {"role":"service_role"} — see scripts/make_service_key.py.
+      PGRST_JWT_SECRET: ${PGRST_JWT_SECRET:?set PGRST_JWT_SECRET in .env}
+      # Hosted Supabase caps every response at 1000 rows; that cap is the single
+      # most-repeated bug in this codebase. Self-hosted we could raise it, but
+      # it stays put deliberately: app/rows.py pages correctly either way, and
+      # keeping the cap means local and any future hosted deployment behave the
+      # same. Raising it here would let unpaged code work locally and truncate
+      # in production — the exact failure mode we just spent a day removing.
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_DB_POOL: 12
+    restart: unless-stopped
+
   midas:
     image: ghcr.io/jugaadchhabra/midas:latest
     pull_policy: always
     container_name: midas
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
     env_file:
@@ -12,6 +70,11 @@ services:
       KEYFRAMES_LOCAL_DIR: /app/storage/keyframes
       SHORTS_CACHE_DIR: /app/shorts_cache
       LOG_DIR: /app/logs
+      # Point the existing supabase-py client at the local PostgREST. No app
+      # code changes: it only ever needed a base URL and a JWT.
+      SUPABASE_URL: http://postgrest:3000
+      # pg_dump target for the nightly NAS snapshot (app/backup.py).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-midas}
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
       # Host bind mounts (not named volumes) so each job's artifacts stay
@@ -21,6 +84,7 @@ services:
       - ./storage:/app/storage
       - ./shorts_cache:/app/shorts_cache
       - ./logs:/app/logs
+      - ./backups:/app/backups
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)"]
