@@ -249,3 +249,5 @@ backups/
 
 # One-time Supabase -> self-hosted data export (contains production data).
 migration_export/
+
+local_snapshots/

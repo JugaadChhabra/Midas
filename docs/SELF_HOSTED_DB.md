@@ -121,6 +121,27 @@ otherwise overwrite the last good backup with a truncated one, and nothing would
 say so until a restore was attempted. Any failure now leaves the previous
 snapshot exactly where it was.
 
+### Verified once, on 2026-08-08
+
+Run end-to-end with `NAS_MODE=local` (off the office network), writing to
+`./local_snapshots/`: a 366 MB dump, restored into a throwaway database with
+**zero errors** and row counts identical on every table, with `vector(3072)`,
+`jsonb` and `text[]` all intact.
+
+Two things that verification exposed:
+
+1. **The deployed image needs rebuilding.** `app/backup.py` shells out to
+   `pg_dump`, and it must match the server's major version — pg_dump refuses to
+   dump a newer server. The `Dockerfile` now installs `postgresql-client-16`,
+   but `ghcr.io/jugaadchhabra/midas:latest` predates that. **Until the image is
+   rebuilt and pulled, the nightly backup will fail every night**, logging
+   `NIGHTLY DB BACKUP FAILED`. It fails safely — the previous snapshot is never
+   touched — but it fails.
+
+2. **The NAS destination is still untested.** Only the `local` adapter has been
+   exercised. `NAS_MODE=smb` writing to the office share is unproven; run one
+   manual `snapshot_to_nas()` on-network before relying on it.
+
 **Residual risk worth a decision.** One snapshot is kept, so if the database is
 already corrupt when tonight's dump runs, a healthy-looking dump replaces the
 last good copy. `BACKUP_SLOTS=2` alternates between two files by day-of-year —
