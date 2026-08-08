@@ -15,10 +15,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-midas}
     volumes:
       - ./pgdata:/var/lib/postgresql/data
-    # Not published to the host by default — nothing outside this compose
-    # network should reach it. Uncomment to attach psql/pg_dump from the host.
-    # ports:
-    #   - "5432:5432"
+    # Loopback only, on 55432: reachable from host tooling
+    # (scripts/apply_migrations.py, pg_dump) but not from the network. 5432 is
+    # left alone because this machine already runs a local Postgres on it.
+    ports:
+      - "127.0.0.1:55432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-midas} -d ${POSTGRES_DB:-midas}"]
@@ -52,6 +53,24 @@ services:
       # in production — the exact failure mode we just spent a day removing.
       PGRST_DB_MAX_ROWS: 1000
       PGRST_DB_POOL: 12
+    # Loopback only. Needed when running the app on the host (outside compose);
+    # in-compose the midas service reaches it as http://postgrest:3000.
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  # supabase-py hardcodes a /rest/v1 prefix that bare PostgREST does not serve.
+  # This strips it, so SUPABASE_URL keeps the same shape as the hosted project
+  # and no app code has to know which one it is talking to.
+  rest:
+    image: nginx:alpine
+    container_name: midas-rest
+    depends_on:
+      - postgrest
+    volumes:
+      - ./deploy/postgrest-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:8001:80"
     restart: unless-stopped
 
   midas:
@@ -72,7 +91,7 @@ services:
       LOG_DIR: /app/logs
       # Point the existing supabase-py client at the local PostgREST. No app
       # code changes: it only ever needed a base URL and a JWT.
-      SUPABASE_URL: http://postgrest:3000
+      SUPABASE_URL: http://rest
       # pg_dump target for the nightly NAS snapshot (app/backup.py).
       DATABASE_URL: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-midas}
     volumes:
