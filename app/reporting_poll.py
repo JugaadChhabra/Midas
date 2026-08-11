@@ -77,6 +77,41 @@ def coverage_for_channel(channel_id: str) -> tuple[set[str], set[str]]:
     return ({r["report_id"] for r in rows}, {r["data_date"] for r in rows})
 
 
+def _longest_contiguous_run(days: set[str]) -> int:
+    """Longest run of consecutive ISO calendar days in the set (0 if empty)."""
+    if not days:
+        return 0
+    ordered = sorted(date.fromisoformat(d) for d in days)
+    best = run = 1
+    for prev, cur in zip(ordered, ordered[1:]):
+        run = run + 1 if (cur - prev).days == 1 else 1
+        best = max(best, run)
+    return best
+
+
+def certify_ctr_coverage(channel_id: str, min_days: int = 7) -> dict:
+    """Phase 0/0.5 exit gate: is a channel's CTR trustworthy enough to measure?
+
+    Certified when reach reports have been ingested for >= `min_days` CONTIGUOUS
+    calendar data-days (default 7 — the Phase 0 "≥1 week" gate). Coverage is read
+    only from the reporting ledger via `_ledger_state`; "covered" means a report
+    was ingested for that data-day, NOT that impressions were non-trivial — the
+    MIN_IMPRESSIONS floor (CIL §0.5) is applied later, per-video, by
+    measurement.py. This gate is about data *presence* for ≥1 week, not per-video
+    signal strength. Contiguity math mirrors `_window_days` / `measurement.
+    _days_between` (fromisoformat + 1-day steps) rather than a fresh date walk.
+    """
+    _, covered = coverage_for_channel(channel_id)
+    contiguous = _longest_contiguous_run(covered)
+    return {
+        "certified": contiguous >= min_days,
+        "contiguous_days": contiguous,
+        "covered_total": len(covered),
+        "latest_day": max(covered) if covered else None,
+        "min_days": min_days,
+    }
+
+
 def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
     """Download + land one report CSV. Returns rows written.
 
@@ -308,7 +343,12 @@ def poll_reporting() -> None:
     """
     q = supabase().table("channels").select("id").eq("analytics_authorized", True)
     if settings.REPORTING_MEASURED_CHANNELS_ONLY:
-        q = q.eq("measurement_enabled", True)
+        # measurement_enabled channels are polled because measurement consumes
+        # the reach/ctr backfill. reach_warmup channels are polled too: they are
+        # accruing coverage so their CTR can be *certified* before measurement is
+        # turned on (docs/PHASE_2_TRACK1_METADATA_UNLOCK.md §3). Either flag opts
+        # a channel in; neither on → skipped, exactly as before this flag existed.
+        q = q.or_("measurement_enabled.eq.true,reach_warmup.eq.true")
     channels = q.execute().data or []
     if not channels:
         log.info("reporting_poll: no channels to poll "

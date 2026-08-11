@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from app.config import settings
 from app.db import supabase
 from app.status_vocab import PausedReason
+from app.reporting_poll import certify_ctr_coverage
 from app.shorts.nas_source import list_source_languages
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -114,6 +115,7 @@ def list_channels():
         "id,name,handle,last_synced_at,default_language,"
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
         "sync_shorts,analytics_authorized,playlist_health_enabled,"
+        "measurement_enabled,reach_warmup,"
         "autopilot_shorts_enabled,"
         "shorts_cut_mode,shorts_camera_motion,nas_folder"
     ).execute()
@@ -126,6 +128,8 @@ class ChannelSettings(BaseModel):
     autopilot_daily_cap: int | None = None
     sync_shorts: bool | None = None
     playlist_health_enabled: bool | None = None
+    measurement_enabled: bool | None = None
+    reach_warmup: bool | None = None
     autopilot_shorts_enabled: bool | None = None
     shorts_cut_mode: str | None = None
     shorts_camera_motion: str | None = None
@@ -148,6 +152,23 @@ def update_channel(channel_id: str, body: ChannelSettings):
         # channel as they widen the recommend-only health-scoring loop;
         # the playlist_health_score cron skips channels where it's false.
         patch["playlist_health_enabled"] = body.playlist_health_enabled
+    if body.reach_warmup is not None:
+        # Per-channel reach-ingestion warmup (Track 1 §3). Opens reach polling
+        # so CTR coverage can accrue and be certified BEFORE measurement is on.
+        # Always settable — it only affects what reporting_poll ingests.
+        patch["reach_warmup"] = body.reach_warmup
+    if body.measurement_enabled is not None:
+        # Enabling is gated on the Phase 0/0.5 exit gate: a channel must have
+        # >=1 week of certified CTR coverage first (docs/PHASE_2_TRACK1...§3),
+        # else Loop 1 would compare against untrustworthy baselines. Disabling
+        # is always allowed. 409 (state not ready), not 403 (auth).
+        if body.measurement_enabled:
+            cov = certify_ctr_coverage(channel_id)
+            if not cov["certified"]:
+                raise HTTPException(
+                    409, f"CTR coverage not certified for measurement: {cov}"
+                )
+        patch["measurement_enabled"] = body.measurement_enabled
     if body.autopilot_shorts_enabled is not None:
         patch["autopilot_shorts_enabled"] = body.autopilot_shorts_enabled
     if body.shorts_cut_mode in ("highlights", "coverage"):

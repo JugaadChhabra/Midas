@@ -112,6 +112,23 @@ class Settings:
     # flag so it can be validated + enabled separately from PLAYLIST_SIMS_USE_RPC.
     # Defaults OFF; falls back to the in-app greedy clustering if the RPC errors.
     PLAYLIST_DISCOVERY_USE_RPC = os.getenv("PLAYLIST_DISCOVERY_USE_RPC", "false").lower() == "true"
+    # Daily playlist reconcile (_daily_reconcile → sync_playlists + reconcile_channel)
+    # walks every playlist's FULL membership per channel via playlistItems.list — the
+    # dominant YouTube Data API quota cost (~8k units/day fleet-wide, enough to exhaust
+    # the 10k/day cap on its own). Restrict it to channels actively using playlist build.
+    # Comma-separated channel-id allowlist; "*" runs it for all channels (legacy). The
+    # manual reconcile endpoint is unaffected. Default: the four language channels.
+    _PLAYLIST_RECONCILE_DEFAULT = (
+        "UCr5-YUqBiW7PUmeAtxUWuRg,"  # Marathi
+        "UC8KjoL0Z9mTHKqB6gFutkJw,"  # Punjabi
+        "UCOVKJdzghm2gOnuaGeJTonA,"  # Gujarati
+        "UCc4Tv_DEGDEKrKAt-vyVNmw"   # Haryanvi
+    )
+    _pr_raw = os.getenv("PLAYLIST_RECONCILE_CHANNELS", _PLAYLIST_RECONCILE_DEFAULT).strip()
+    PLAYLIST_RECONCILE_ALL = _pr_raw == "*"
+    PLAYLIST_RECONCILE_CHANNELS = set() if PLAYLIST_RECONCILE_ALL else {
+        c.strip() for c in _pr_raw.split(",") if c.strip()
+    }
 
     # Phase 1B — Playlist health scoring (recommend-only).
     # PO §Config table defaults; PHASE_1B_PLAN.md §5.5 for justification.

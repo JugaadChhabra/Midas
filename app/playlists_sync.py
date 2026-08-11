@@ -85,7 +85,7 @@ def sync_playlists(channel_id: str) -> dict:
     # classifier or a manual override) with whatever the regex returns.
     existing_rows = (
         supabase().table("playlists")
-        .select("id,origin,role")
+        .select("id,origin,role,item_count")
         .eq("channel_id", channel_id)
         .in_("id", [p["id"] for p in yt_playlists])
         .execute()
@@ -160,9 +160,28 @@ def sync_playlists(channel_id: str) -> dict:
         ).data or []
     }
 
+    # Incremental walk: re-reading a playlist's full membership every day is the
+    # fleet's dominant YouTube-quota cost (one 50-item page per unit, thousands
+    # of pages/day on large channels) and almost never surfaces anything new.
+    # Skip the walk for any playlist that already existed AND whose YouTube
+    # itemCount (fetched free in yt_playlists_list) is unchanged since the last
+    # sync. New playlists and any count change (add/remove) are always walked.
+    prev_item_count = {r["id"]: r.get("item_count") for r in existing_rows}
+
     memberships_seeded = 0
+    walked = skipped_unchanged = 0
     for playlist in yt_playlists:
         playlist_id = playlist["id"]
+        cur_count = playlist.get("item_count")
+        prev_count = prev_item_count.get(playlist_id)
+        if (
+            playlist_id in existing_by_id
+            and cur_count is not None
+            and cur_count == prev_count
+        ):
+            skipped_unchanged += 1
+            continue
+        walked += 1
         page_token = None
         while True:
             resp = yt_playlist_items_page(yt, channel_id, playlist_id, page_token)
@@ -191,7 +210,12 @@ def sync_playlists(channel_id: str) -> dict:
                 break
 
     log.info(
-        "sync_playlists(%s): seeded %d membership rows",
-        channel_id, memberships_seeded,
+        "sync_playlists(%s): %d playlists (%d walked, %d skipped unchanged), seeded %d membership rows",
+        channel_id, len(yt_playlists), walked, skipped_unchanged, memberships_seeded,
     )
-    return {"playlists": len(yt_playlists), "memberships_seeded": memberships_seeded}
+    return {
+        "playlists": len(yt_playlists),
+        "walked": walked,
+        "skipped_unchanged": skipped_unchanged,
+        "memberships_seeded": memberships_seeded,
+    }

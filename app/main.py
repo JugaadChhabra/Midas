@@ -119,7 +119,16 @@ def _daily_reconcile():
         except Exception as e:
             _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
 
-    _run_per_channel(_one, "Daily reconcile cycle")
+    # Scope the daily reconcile (sync_playlists is the fleet's biggest YouTube-quota
+    # cost) to the allowlist; "*" restores the all-channel behaviour.
+    if settings.PLAYLIST_RECONCILE_ALL:
+        ids = None  # _run_per_channel falls back to every channel
+    else:
+        ids = [c for c in _all_channel_ids() if c in settings.PLAYLIST_RECONCILE_CHANNELS]
+        _main_log.info(
+            "Daily reconcile scoped to %d/%d channels (allowlist)", len(ids), len(_all_channel_ids())
+        )
+    _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids)
 
 
 def _weekly_discovery():

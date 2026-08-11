@@ -1,0 +1,12 @@
+-- Phase 2 Track 1 (Piece 1) — reach warmup flag.
+--
+-- Chicken-and-egg (see docs/PHASE_2_TRACK1_METADATA_UNLOCK.md §3): a channel
+-- must NOT get measurement_enabled=true until its CTR is certified over >=1
+-- week, but reporting_poll only ingests reach for measurement_enabled channels
+-- (REPORTING_MEASURED_CHANNELS_ONLY, default true) — so an uncertified channel
+-- accrues zero certifiable coverage. This per-channel flag breaks the cycle:
+-- flip reach_warmup=true on the pilot to start ingesting its reach WITHOUT
+-- turning on measurement. poll_reporting OR's it with measurement_enabled, so
+-- the DB-size cost stays scoped to the warming channel (not a global re-widen).
+-- Clear it after measurement_enabled is on — that keeps ingestion alive alone.
+alter table channels add column if not exists reach_warmup boolean default false;
