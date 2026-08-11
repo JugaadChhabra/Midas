@@ -10,9 +10,10 @@
      components live in /static/theme.css; every rule here consumes those tokens
      (no colour literals). The nav/btn/table/kpi overrides restore this page's
      historical metrics (they pre-date the shared layer — converge in the redo). */
-  body { max-width: 1180px; margin: 1.5rem auto; padding: 0 1.25rem; }
+  /* The shell owns page layout now (see .app-shell in theme.css); body just
+     provides the backdrop the inset content panel sits on. */
+  body { margin:0; background:var(--surface-faint); }
 
-  .nav { margin-bottom:.5rem; }
   button, .btn { padding:.5rem .9rem; }
   button:disabled { opacity:.5; cursor:progress; }
   textarea, input[type=text], input[type=search], input[type=number], select {
@@ -49,10 +50,7 @@
   .hidden { display:none; }
   details > summary { cursor:pointer; }
 
-  /* Tabs */
-  .tabs { display:flex; gap:.25rem; flex-wrap:wrap; border-bottom:1px solid var(--border); margin:1rem 0 .5rem; }
-  .tab { padding:.55rem .9rem; border-bottom:2px solid transparent; cursor:pointer; }
-  .tab.active { border-bottom-color:var(--color-accent); font-weight:600; }
+  /* Section panels — switched by the sidebar (.snav) instead of a tab rail. */
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
 
@@ -75,11 +73,84 @@
 </style>
 </head>
 <body>
-  <nav class="nav">
-    <a href="/" class="brand">Midas</a>
-    <a href="/" class="navlink">Dashboard</a>
-  </nav>
-  <p><a href="/">← All channels</a></p>
+  <div class="app-shell" id="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <a class="sidebar-brand" href="/" title="Midas — all channels">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.4" fill="currentColor"/>
+          <g stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M12 1.7v3.5M12 18.8v3.5M22.3 12h-3.5M5.2 12H1.7"/>
+            <path d="m19.3 4.7-2.5 2.5M7.2 16.8l-2.5 2.5M19.3 19.3l-2.5-2.5M7.2 7.2 4.7 4.7"/>
+          </g>
+        </svg>
+        <span>Midas</span>
+      </a>
+      <button class="sidebar-toggle" id="sidebar-toggle" title="Collapse sidebar" aria-label="Collapse sidebar">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav" role="tablist" aria-label="Channel sections">
+      <button class="snav active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>
+        </svg><span class="snav-label">Overview</span>
+      </button>
+      <button class="snav" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8.5 5.5 3.5L10 15.5z"/>
+        </svg><span class="snav-label">Videos</span>
+      </button>
+      <button class="snav" data-tab="performance" role="tab" tabindex="-1" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 17.5 9.5 11l4 4L21 7.5"/><path d="M16.5 7.5H21v4.5"/>
+        </svg><span class="snav-label">Performance</span>
+      </button>
+      <button class="snav" data-tab="autopilot" role="tab" tabindex="-1" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/>
+        </svg><span class="snav-label">Autopilot</span>
+      </button>
+      <button class="snav" data-tab="playlists" role="tab" tabindex="-1" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6h11M3 12h11M3 18h7"/><path d="m16.5 12.5 4.5 2.75-4.5 2.75z"/>
+        </svg><span class="snav-label">Playlists</span>
+      </button>
+      <button class="snav" data-tab="settings" role="tab" tabindex="-1" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.1 14.4a1.5 1.5 0 0 0 .3 1.7l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.5 1.5 0 0 0-2.6 1.1v.2a2 2 0 1 1-4 0v-.1a1.5 1.5 0 0 0-2.6-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.5 1.5 0 0 0-1.1-2.6h-.2a2 2 0 1 1 0-4h.1a1.5 1.5 0 0 0 1.1-2.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.5 1.5 0 0 0 2.6-1.1V3a2 2 0 1 1 4 0v.1a1.5 1.5 0 0 0 2.6 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.5 1.5 0 0 0 1.1 2.6h.2a2 2 0 1 1 0 4h-.1a1.5 1.5 0 0 0-1.4.9z"/>
+        </svg><span class="snav-label">Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="chan-switch" id="chan-switch" aria-haspopup="listbox" aria-expanded="false">
+        <span class="chan-avatar" id="chan-avatar">··</span>
+        <span class="chan-meta">
+          <span class="chan-name" id="chan-name">Loading…</span>
+          <span class="chan-handle" id="chan-handle"></span>
+        </span>
+        <svg class="chan-caret" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m7 15 5 5 5-5M7 9l5-5 5 5"/>
+        </svg>
+      </button>
+      <div class="chan-menu" id="chan-menu" role="listbox" aria-label="Switch channel" hidden></div>
+    </div>
+  </aside>
+
+  <main class="app-main">
   <h1 id="title">Channel</h1>
   <p class="sub" id="subtitle"></p>
 
@@ -88,15 +159,6 @@
     <b>Reconnect for analytics.</b>
     <span class="muted">This channel was connected before the analytics scope was added. Outcome measurement (CTR, playlist sessions) is skipped until you re-consent.</span>
     <a class="btn" href="/auth/login" style="margin-left:.5rem">Reconnect Google account →</a>
-  </div>
-
-  <div class="tabs" role="tablist">
-    <div class="tab active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</div>
-    <div class="tab" data-tab="videos" role="tab" tabindex="-1" aria-selected="false">Videos</div>
-    <div class="tab" data-tab="performance" role="tab" tabindex="-1" aria-selected="false">Performance</div>
-    <div class="tab" data-tab="autopilot" role="tab" tabindex="-1" aria-selected="false">Autopilot</div>
-    <div class="tab" data-tab="playlists" role="tab" tabindex="-1" aria-selected="false">Playlists</div>
-    <div class="tab" data-tab="settings" role="tab" tabindex="-1" aria-selected="false">Settings</div>
   </div>
 
   <!-- ─── OVERVIEW ─── -->
@@ -333,6 +395,9 @@
     </div>
   </div>
 
+  </main>
+  </div>
+
   <div id="toasts" aria-live="assertive" role="alert"></div>
 
 <script src="/static/swr.js"></script>
@@ -391,12 +456,15 @@ function confirmDialog(message, okLabel = 'Confirm') {
   });
 }
 
-// ── Tabs ───────────────────────────────────────────────────────────────
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+// ── Sections (sidebar) ─────────────────────────────────────────────────
+// The nav moved from a horizontal tab rail to the sidebar, but the panels are
+// unchanged: switchTab still toggles `.active` by data-panel, so every panel's
+// markup and lazy-load behaviour carries over as-is.
+document.querySelectorAll('.snav').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.snav').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
-  document.querySelectorAll('.tab').forEach(t => {
+  document.querySelectorAll('.snav').forEach(t => {
     const isActive = t.dataset.tab === name;
     t.setAttribute('aria-selected', isActive ? 'true' : 'false');
     t.setAttribute('tabindex', isActive ? '0' : '-1');
@@ -446,6 +514,90 @@ function ensureTabLoaded(name) {
 const initialTab = location.hash.slice(1);
 if (initialTab) switchTab(initialTab);
 
+// ── Sidebar: collapse ──────────────────────────────────────────────────
+const COLLAPSE_KEY = 'midas.sidebar.collapsed';
+const appShell = $('app-shell');
+if (localStorage.getItem(COLLAPSE_KEY) === '1') appShell.classList.add('collapsed');
+$('sidebar-toggle').onclick = () => {
+  const collapsed = appShell.classList.toggle('collapsed');
+  localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+  $('sidebar-toggle').setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+};
+
+// ── Sidebar: channel switcher ──────────────────────────────────────────
+// Fed by applyChannel() off the shared '/auth/channels' SWR cache — the same
+// response that paints the header — so switching costs no extra request.
+const chanMenu = $('chan-menu');
+const chanSwitch = $('chan-switch');
+
+function setSwitcherOpen(open) {
+  chanMenu.hidden = !open;
+  chanSwitch.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+chanSwitch.addEventListener('click', e => { e.stopPropagation(); setSwitcherOpen(chanMenu.hidden); });
+document.addEventListener('click', e => { if (!chanMenu.contains(e.target)) setSwitcherOpen(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') setSwitcherOpen(false); });
+
+// These channels are all one show ("Taarak Mehta Ka Ooltah Chashmah …"), so
+// what distinguishes them — the language or format — sits at the END of the
+// name. Ellipsising the tail would render every row identical, so the switcher
+// strips the prefix the whole set shares and labels each channel by what's
+// left. The prefix is derived from the data, not hardcoded, so a differently
+// named set just yields an empty prefix and full names.
+function commonWordPrefix(names) {
+  if (names.length < 2) return 0;
+  const split = names.map(n => String(n || '').trim().split(/\s+/));
+  const first = split[0];
+  let i = 0;
+  while (i < first.length - 1 && split.every(w => w[i] === first[i])) i++;
+  return i;
+}
+
+function shortLabel(name, prefixLen) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  const rest = words.slice(prefixLen);
+  return (rest.length ? rest : words).join(' ');
+}
+
+function channelInitials(label) {
+  const words = String(label || '').split(/\s+/)
+    .map(w => w.replace(/[^A-Za-z0-9]/g, '')).filter(Boolean);
+  if (!words.length) return '··';
+  return words.slice(0, 2).map(w => w[0]).join('').toUpperCase();
+}
+
+function renderChannelSwitcher(all, current) {
+  const channels = (all || []).slice()
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const prefixLen = commonWordPrefix(channels.map(c => c.name));
+
+  const currentLabel = shortLabel(current.name || channelId, prefixLen);
+  $('chan-avatar').textContent = channelInitials(currentLabel);
+  $('chan-name').textContent = currentLabel || channelId || 'Unknown channel';
+  $('chan-handle').textContent = current.handle || '';
+  chanSwitch.title = current.name || channelId || '';
+
+  // Carry the current hash across so switching channels keeps you on the same
+  // section rather than dropping you back on Overview.
+  const rows = channels.map(ch => {
+    const label = shortLabel(ch.name || ch.id, prefixLen);
+    return `
+      <a class="chan-opt${ch.id === channelId ? ' current' : ''}" role="option"
+         aria-selected="${ch.id === channelId}" title="${escapeHtml(ch.name || ch.id)}"
+         href="/channel?id=${encodeURIComponent(ch.id)}${location.hash}">
+        <span class="chan-avatar sm">${escapeHtml(channelInitials(label))}</span>
+        <span class="chan-opt-name">${escapeHtml(label || ch.id)}</span>
+      </a>`;
+  }).join('');
+
+  chanMenu.innerHTML =
+    '<div class="chan-menu-label">Channels</div>' +
+    (rows || '<div class="muted-row">No channels connected.</div>') +
+    '<div class="chan-menu-sep"></div>' +
+    '<a class="chan-opt" href="/"><span class="chan-avatar sm">↩</span>' +
+    '<span class="chan-opt-name">All channels</span></a>';
+}
+
 // ── Status taxonomy (single source of truth) ───────────────────────────
 // Status pills (audit + shorts) come from the shared canonical map — see
 // /static/status.js (global statusPill / AUDIT_STATUS / SHORTS_STATUS).
@@ -455,6 +607,7 @@ let channelMeta = {};
 async function applyChannel(all) {
   const c = all.find(x => x.id === channelId) || {};
   channelMeta = c;
+  renderChannelSwitcher(all, c);
   $('title').textContent = c.name || channelId;
   $('subtitle').innerHTML = `${escapeHtml(c.handle || '')} · <code>${escapeHtml(c.id || channelId)}</code> · last synced ${c.last_synced_at ? c.last_synced_at.slice(0,16).replace('T',' ') : '—'}`;
   $('lang-select').value = c.default_language || '';
@@ -1453,7 +1606,7 @@ $('pl-health-evaluate-btn').onclick = async () => {
 // before loading the visible tab — everything paints from cache on this tick.
 loadChannel();
 tabsReady = true;
-ensureTabLoaded(document.querySelector('.tab.active')?.dataset.tab || 'overview');
+ensureTabLoaded(document.querySelector('.snav.active')?.dataset.tab || 'overview');
 
 // ── Reflection ────────────────────────────────────────────────────────────
 
