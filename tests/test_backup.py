@@ -18,6 +18,20 @@ import pytest
 
 from app import backup
 
+#: Captured before the autouse fixture below patches the module attribute, so
+#: the version-match tests can exercise the real function.
+_assert_versions_match = backup._assert_pg_dump_matches_server
+
+
+@pytest.fixture(autouse=True)
+def _guards_pass():
+    """snapshot_to_nas refuses to run against an empty database or a mismatched
+    pg_dump, both of which need a live server. Those two guards have their own
+    tests below; here they are satisfied so each test is about its own failure."""
+    with patch("app.provision.assert_populated"), \
+         patch.object(backup, "_assert_pg_dump_matches_server"):
+        yield
+
 
 @pytest.fixture
 def nas(tmp_path):
@@ -163,3 +177,59 @@ def test_missing_pg_dump_names_the_setting_that_fixes_it():
          patch.object(backup.subprocess, "run", side_effect=FileNotFoundError):
         with pytest.raises(backup.BackupError, match="BACKUP_PG_DUMP"):
             backup._run_pg_dump("dsn", Path("/tmp/x.sql"))
+
+
+# ── the client/server version match ───────────────────────────────────────
+
+def _server(major):
+    """psycopg.connect stub returning `major` from show server_version_num."""
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    cur = conn.cursor.return_value
+    cur.__enter__.return_value = cur
+    cur.fetchone.return_value = (str(major * 10000 + 14),)
+    return conn
+
+
+def test_a_newer_pg_dump_than_the_server_is_refused():
+    """The dangerous direction: pg_dump 18 runs fine against pg16 and writes
+    `SET transaction_timeout = 0` (a pg17 parameter), so the restore dies on
+    line 13 — months later, when someone finally needs the backup."""
+    with patch("psycopg.connect", return_value=_server(16)), \
+         patch.object(backup, "_binary_major", return_value=18):
+        with pytest.raises(backup.BackupError, match="pg_dump is 18 but the server is 16"):
+            _assert_versions_match("dsn")
+
+
+def test_an_older_pg_dump_than_the_server_is_refused():
+    with patch("psycopg.connect", return_value=_server(16)), \
+         patch.object(backup, "_binary_major", return_value=14):
+        with pytest.raises(backup.BackupError, match="pg_dump is 14"):
+            _assert_versions_match("dsn")
+
+
+def test_a_matching_pg_dump_passes():
+    with patch("psycopg.connect", return_value=_server(16)), \
+         patch.object(backup, "_binary_major", return_value=16):
+        _assert_versions_match("dsn")      # does not raise
+
+
+def test_binary_major_parses_the_version_string():
+    proc = MagicMock(stdout="pg_dump (PostgreSQL) 16.14 (Homebrew)\n")
+    with patch.object(backup.subprocess, "run", return_value=proc):
+        assert backup._binary_major("pg_dump") == 16
+
+
+def test_the_version_check_runs_before_the_dump(tmp_path):
+    """Otherwise a mismatched client burns 90 seconds producing a file that is
+    then published — the check has to gate the work, not follow it."""
+    nas = MagicMock()
+    with patch.object(backup, "_nas", return_value=nas), \
+         patch("app.provision.assert_populated"), \
+         patch.object(backup, "_assert_pg_dump_matches_server",
+                      side_effect=backup.BackupError("mismatch")), \
+         patch.object(backup, "_run_pg_dump") as dump:
+        with pytest.raises(backup.BackupError, match="mismatch"):
+            backup.snapshot_to_nas(dsn="x", work_dir=tmp_path)
+    dump.assert_not_called()
+    nas.copy_from_local.assert_not_called()

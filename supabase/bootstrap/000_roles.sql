@@ -1,9 +1,12 @@
--- Bootstrap for a SELF-HOSTED Postgres. Runs ONCE, before any migration.
+-- Bootstrap part 1 of 2: ROLES ONLY. Runs before anything else, and before a
+-- restore.
 --
--- The migrations in ../migrations were written against Supabase, which
--- pre-provisions things bare Postgres does not. Rather than edit 33 historical
--- migrations (they are an applied ledger — rewriting them makes the two
--- environments diverge silently), this shim provides what they assume.
+-- Split out from the storage shim deliberately. app/provision.py restores a
+-- pg_dump into an empty database on first boot, and a plain pg_dump contains
+-- SCHEMAS but not ROLES — roles are cluster-level. So the dump's own
+-- `CREATE SCHEMA storage` collides with a pre-created one ("schema storage
+-- already exists", and the restore stops), while its GRANT statements need the
+-- roles to already exist. Roles before, everything else after.
 --
 -- Safe to re-run.
 
@@ -47,21 +50,3 @@ alter default privileges in schema public
   grant all on sequences to service_role;
 alter default privileges in schema public
   grant all on functions to service_role;
-
--- ── 2. storage.buckets shim ───────────────────────────────────────────────
--- 20260508082931_content_intelligence.sql registers a private 'keyframes'
--- bucket. Supabase Storage is NOT part of this deployment: app/keyframes.py is
--- the only module that ever used it and nothing imports that module (see the
--- note at app/audits.py:19). This table exists purely so that historical
--- migration applies unchanged. If Storage is ever genuinely needed, it needs a
--- real service, not this.
-create schema if not exists storage;
-
-create table if not exists storage.buckets (
-    id      text primary key,
-    name    text not null,
-    public  boolean not null default false
-);
-
-grant usage on schema storage to service_role;
-grant all on all tables in schema storage to service_role;

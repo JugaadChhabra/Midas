@@ -234,6 +234,13 @@ class Settings:
     # machine whose `pg_dump` is older than the server, point this at a newer
     # one (macOS/Homebrew: /opt/homebrew/opt/libpq/bin/pg_dump).
     BACKUP_PG_DUMP      = os.getenv("BACKUP_PG_DUMP", "pg_dump")
+    # First boot on a new machine: ./pgdata starts empty, so the app restores
+    # last night's NAS snapshot into it before serving anything (app/provision.py).
+    # Turning this off means a fresh machine comes up with an empty catalogue.
+    RESTORE_ON_EMPTY    = os.getenv("RESTORE_ON_EMPTY", "true").lower() == "true"
+    # Same version story as BACKUP_PG_DUMP, one direction earlier: psql replays
+    # the dump. Older psql chokes on newer dump syntax.
+    RESTORE_PSQL        = os.getenv("RESTORE_PSQL", "psql")
 
 
 settings = Settings()

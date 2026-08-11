@@ -74,8 +74,10 @@ and assume things bare Postgres lacks:
 - five of them `grant execute ... to service_role`, a role Supabase provides;
 - `20260508082931_content_intelligence.sql` inserts into `storage.buckets`.
 
-`supabase/bootstrap/000_local_compat.sql` creates the roles and a minimal
-`storage.buckets` table so those migrations apply **unchanged**. Editing the
+`supabase/bootstrap/*.sql` creates the roles and a minimal `storage.buckets`
+table so those migrations apply **unchanged**. It is two files, not one, because
+`app/provision.py` needs the roles *before* a restore and the rest *after* —
+see "Restoring by hand" below. Editing the
 historical migrations would have been the other option and is worse — they are an
 applied ledger, and rewriting them makes the hosted and local schemas diverge
 silently.
@@ -141,11 +143,8 @@ Four things only failed once this ran against real infrastructure, all now fixed
 2. **64 KB SMB buffers.** ~5,800 round trips for the dump, and the share dropped
    partway through with `[Errno 49] Can't assign requested address`. `SMB_CHUNK`
    is 4 MB; the same file now moves in ~80s.
-3. **`pg_dump` version skew.** It refuses to dump a newer server, and a dev
-   machine's client is often older (here 14 vs 16). `BACKUP_PG_DUMP` makes the
-   binary configurable. The image installs the unversioned `postgresql-client`
-   — Debian trixie has no `-16` package at all, which is why the image had been
-   failing to build — with a build-time gate that fails if it is ever < 16.
+3. **`pg_dump` version skew, in both directions.** The client major must EQUAL
+   the server's — see the section below, which is where that is written down.
 4. **nginx's 8 KB header buffers** were smaller than hosted Supabase's, so the
    500-id `in_()` batches (~10 KB URLs) came back 414/502.
 
@@ -161,59 +160,87 @@ there is no backup.
 
 ---
 
-## Where the data actually lives
+## Where the data actually lives, and how a new machine gets it
 
-`./pgdata`, bind-mounted to `/var/lib/postgresql/data` (`docker-compose.yml`).
-Two consequences worth being explicit about, because both are easy to assume
-wrongly:
+`./pgdata`, bind-mounted to `/var/lib/postgresql/data`.
 
-**It does not reset on restart.** Postgres's entrypoint runs `initdb` only when
-that directory is *empty*, so every later start just opens the existing cluster.
+**It does not reset on restart.** Postgres runs `initdb` only when that
+directory is *empty*, so every later start reopens the existing cluster.
 Restarts, `docker compose down`, and reboots all preserve the data. Deleting
-`./pgdata` is the only thing that wipes it — and that is also the only way to
-change `POSTGRES_PASSWORD`, since it is read at `initdb` time and ignored after.
+`./pgdata` is the only thing that wipes it — and also the only way to change
+`POSTGRES_PASSWORD`, which is read at `initdb` time and ignored afterwards.
 
-**It does not travel with the image.** `pgdata/` is gitignored, the image holds
-app code only, nothing is mounted to `/docker-entrypoint-initdb.d`, and the app
-does not apply migrations at startup. So on a machine that has never run this
-before, `docker compose up` gives you a **completely empty database** and an app
-that 404s on every table. Standing one up is the manual sequence below — there
-is no automatic path from the NAS snapshot into a fresh cluster.
+**A machine that has never run Midas provisions itself.** `pgdata/` is
+gitignored and the image carries app code only, so a new machine starts with an
+empty cluster. On startup `app/provision.py` notices, pulls last night's
+snapshot off the NAS, and restores it — before a single scheduled job is
+registered. Deploying is `docker compose up` plus a `.env`, which is the point:
+the tool should be runnable by someone who never has to learn what psql is.
+
+Only machines you have put a `.env` on can do this, and only on the office
+network. That is the intended blast radius.
+
+### It fails closed
+
+If the database is empty and the NAS is unreachable, **the app does not start**.
+Starting anyway is much worse than not starting: it would serve an empty
+catalogue as if it were real, and at 00:00 the backup would dump that empty
+database over the last good snapshot — turning a missing mount into permanent
+data loss. `snapshot_to_nas()` refuses from the other side too, so both ends of
+that loop are closed.
+
+`RESTORE_ON_EMPTY=false` opts out.
+
+### Client and server major versions must be EQUAL
+
+Not "client at least as new", which is the easy half-memory:
+
+* **older client than the server** — `pg_dump` refuses to run. Loud, harmless.
+* **newer client than the server** — `pg_dump` runs fine and writes a dump the
+  server cannot replay. pg_dump 18 against this pg16 emits
+  `SET transaction_timeout = 0`, a parameter added in pg17, and the restore dies
+  on line 13 with `unrecognized configuration parameter`.
+
+The second one is the dangerous one: nothing fails until the day someone needs
+the backup. The image installs `postgresql-client-16` from apt.postgresql.org
+(Debian trixie carries only 17) with a build-time assertion, and
+`_assert_pg_dump_matches_server()` re-checks against the live server before
+every dump, so a server upgrade cannot silently orphan a pinned client.
+
+On this Mac: `BACKUP_PG_DUMP` and `RESTORE_PSQL` point at
+`/opt/homebrew/opt/postgresql@16/bin/` — the default `pg_dump` is 14 (refuses)
+and libpq's is 18 (writes an unreplayable dump).
+
+### Verified 2026-08-11
+
+A brand-new empty database, provisioned from the real NAS snapshot:
+**366.1 MB restored in 206s**, every row count identical, `vector(3072)` intact,
+`service_role` able to read, all four RPCs present.
 
 ---
 
-## Restore, or standing up a new machine
+## Restoring by hand
 
-Same procedure either way: the snapshot is a full dump, so restoring it *is* the
-migration.
+The automatic path above covers a new machine. To force a restore over a
+database that already has data — recovering from corruption, say — the app will
+not do it for you, since it only acts on an empty database:
 
 ```bash
-# 1. Secrets. POSTGRES_PASSWORD, PGRST_JWT_SECRET, LOCAL_SERVICE_KEY and
-#    DATABASE_URL must match the ones in .env on the machine you are replacing —
-#    LOCAL_SERVICE_KEY is a JWT signed with PGRST_JWT_SECRET, so a fresh secret
-#    means minting a fresh key (scripts/make_service_key.py).
-docker compose up -d db          # creates an empty cluster on first run
-
-# 2. Roles. The dump is --no-owner --no-privileges, so it needs no *original*
-#    roles — but PostgREST still needs anon/authenticated/service_role to exist,
-#    and they are not in the dump.
-psql "$DATABASE_URL" -f supabase/bootstrap/000_local_compat.sql
-
-# 3. Data. This creates the schema as well; do NOT run apply_migrations first.
-#    fetch <NAS>/midas-db-backups/midas.sql
+docker compose stop midas
+psql "$DATABASE_URL" -f supabase/bootstrap/000_roles.sql     # roles are not in the dump
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f midas.sql
-
-# 4. Only if the dump predates a migration.
-python scripts/apply_migrations.py
-
-docker compose up -d             # postgrest, rest, midas
+psql "$DATABASE_URL" -f supabase/bootstrap/010_storage_shim.sql
+docker compose start midas
 ```
 
-Restoring over a *live* database instead of an empty one: `docker compose stop
-midas` first, so the app is not writing while the dump replays.
+The bootstrap is split around the restore on purpose: a plain `pg_dump` carries
+schemas but **not** roles (they are cluster-level), so `anon`/`service_role` must
+exist before its GRANTs run — while pre-creating the storage shim collides with
+the dump's own `CREATE SCHEMA storage` and stops the restore dead.
 
-`ON_ERROR_STOP=1` matters — without it psql reports failures on stderr and still
-exits 0, which is how a half-restored database gets mistaken for a good one.
+`ON_ERROR_STOP=1` is not optional. Without it psql reports failures on stderr
+and still exits 0, which is how a half-restored database gets mistaken for a
+good one.
 
 ---
 

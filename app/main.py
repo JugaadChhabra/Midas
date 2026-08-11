@@ -24,6 +24,7 @@ from app.shorts.routes import router as shorts_router, video_router as shorts_vi
 from app.shorts.autoshorts import router as autoshorts_router
 from app.shorts.dispatcher import dispatch_tick
 from app.backup import run_nightly_backup
+from app.provision import ensure_database_populated
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
 from app.measurement import router as measurement_router, eval_measurements
@@ -186,6 +187,13 @@ def _refresh_pot_provider():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # BEFORE anything else, and before a single scheduled job is registered: on
+    # a machine that has never run Midas, ./pgdata is an empty cluster and this
+    # restores last night's NAS snapshot into it. Raising here keeps the app
+    # down, which is the intended behaviour when the NAS is unreachable — see
+    # app/provision.py for why serving an empty database is the worse outcome.
+    ensure_database_populated()
+
     scheduler.add_job(
         autopilot_tick,
         "interval",

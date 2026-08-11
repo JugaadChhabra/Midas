@@ -21,6 +21,7 @@ extra file and removes that failure mode; set BACKUP_SLOTS=2 to enable it.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -49,6 +50,51 @@ class BackupError(RuntimeError):
 
 def _nas() -> NASService:
     return NASService()
+
+
+def _binary_major(binary: str, flag: str = "--version") -> int:
+    """Major version of a Postgres client binary, e.g. 16 from 'pg_dump 16.14'."""
+    try:
+        out = subprocess.run([binary, flag], capture_output=True, text=True,
+                             timeout=30).stdout
+    except FileNotFoundError as e:
+        raise BackupError(
+            f"{binary} not found — set BACKUP_PG_DUMP to a pg_dump matching the "
+            f"server's major version"
+        ) from e
+    m = re.search(r"(\d+)", out)
+    if not m:
+        raise BackupError(f"could not read a version out of `{binary} {flag}`: {out!r}")
+    return int(m.group(1))
+
+
+def _assert_pg_dump_matches_server(dsn: str) -> None:
+    """pg_dump's major version must EQUAL the server's, not merely exceed it.
+
+    Both directions bite, which is easy to get wrong by remembering only one:
+
+    * older pg_dump than the server -> it refuses to run at all, loudly.
+    * NEWER pg_dump than the server -> it runs happily and produces a dump the
+      server cannot replay. pg_dump 18 against this pg16 emits
+      `SET transaction_timeout = 0` (a parameter added in pg17), and the restore
+      dies on line 13 with "unrecognized configuration parameter".
+
+    The second one is the dangerous one: nothing fails until someone needs the
+    backup. Checked here, against the live server, so it also catches the server
+    being upgraded out from under a pinned client.
+    """
+    import psycopg
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("show server_version_num")
+        server_major = int(cur.fetchone()[0]) // 10000
+    dump_major = _binary_major(settings.BACKUP_PG_DUMP)
+    if dump_major != server_major:
+        raise BackupError(
+            f"pg_dump is {dump_major} but the server is {server_major}. A dump "
+            f"from a newer pg_dump restores into an older server only up to the "
+            f"first parameter it does not know — set BACKUP_PG_DUMP to a "
+            f"pg_dump {server_major}."
+        )
 
 
 def _run_pg_dump(dsn: str, dest: Path) -> None:
@@ -112,6 +158,16 @@ def snapshot_to_nas(*, dsn: str | None = None, work_dir: Path | None = None,
     local = work_dir / f"midas-{now:%Y%m%dT%H%M%S}.sql"
     final = _slot_name(now, settings.BACKUP_SLOTS)
     staged = f"{final}.tmp"
+
+    # An empty database dumps to a valid, complete, useless file — the
+    # completion marker cannot tell that apart from a real snapshot, and
+    # publishing it destroys the only copy of the data. Reachable whenever a
+    # machine comes up unprovisioned (see app/provision.py).
+    from app.provision import assert_populated
+    assert_populated("nightly backup")
+    # A dump the server cannot replay is not a backup. Checked before spending
+    # ninety seconds producing one.
+    _assert_pg_dump_matches_server(dsn)
 
     nas = _nas()
     try:
