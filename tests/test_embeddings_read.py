@@ -114,7 +114,7 @@ def test_pooled_embeddings_chunks_past_the_row_cap():
     def build(chunk):
         seen.append(list(chunk))
         b = MagicMock()
-        b.range.return_value.execute.return_value.data = [
+        b.order.return_value.range.return_value.execute.return_value.data = [
             {"video_id": v, "embedding": "[1]"} for v in chunk
         ]
         return b

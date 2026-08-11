@@ -72,7 +72,9 @@ def coverage_for_channel(channel_id: str) -> tuple[set[str], set[str]]:
     rows = all_rows(
         supabase().table("reporting_reports_ingested")
         .select("report_id,data_date")
-        .eq("channel_id", channel_id)
+        .eq("channel_id", channel_id),
+        # The one paged table without an `id` primary key.
+        order_by="report_id",
     )
     return ({r["report_id"] for r in rows}, {r["data_date"] for r in rows})
 

@@ -12,7 +12,7 @@ def test_measured_video_ids_pages_and_dedups():
     def table(name):
         assert name == "audits"
         t = MagicMock()
-        t.select.return_value.in_.return_value.range.return_value.execute.return_value.data = page
+        t.select.return_value.in_.return_value.order.return_value.range.return_value.execute.return_value.data = page
         return t
 
     sb.table.side_effect = table
@@ -67,7 +67,7 @@ def test_fetch_channel_videos_wide_net_paginates_all():
     def table(name):
         assert name == "videos"
         t = MagicMock()
-        t.select.return_value.eq.return_value.range.return_value.execute.return_value.data = [
+        t.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value.data = [
             {"id": "v1", "privacy_status": "public"},
             {"id": "v2", "privacy_status": "unlisted"},
         ]
@@ -97,7 +97,7 @@ def test_poll_channel_pages_playlists():
                 # one short page => loop terminates after the first read
                 r.execute.return_value.data = [{"id": "pl1"}] if lo == 0 else []
                 return r
-            t.select.return_value.eq.return_value.range.side_effect = _range
+            t.select.return_value.eq.return_value.order.return_value.range.side_effect = _range
         return t
 
     sb = MagicMock()
@@ -126,7 +126,7 @@ def test_poll_metrics_measured_empty_skips_video_poll():
         if name == "channels":
             t.select.return_value.eq.return_value.execute.return_value.data = channels
         else:  # playlists (and any other) -> one short page
-            t.select.return_value.eq.return_value.range.return_value.execute.return_value.data = [
+            t.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value.data = [
                 {"id": "pl1"}
             ]
         return t

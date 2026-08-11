@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.rows import IN_CHUNK, PAGE_SIZE, all_rows, rows_for_ids
+from app.rows import IN_CHUNK, ORDER_KEY, PAGE_SIZE, all_rows, rows_for_ids
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -24,6 +24,11 @@ class _Query:
         self.total = total
         self.page_size = page_size
         self.ranges: list[tuple[int, int]] = []
+        self.orders: list[str] = []
+
+    def order(self, column, **kw):
+        self.orders.append(column)
+        return self
 
     def range(self, lo, hi):
         self.ranges.append((lo, hi))
@@ -71,8 +76,35 @@ def test_empty_result():
 
 def test_none_data_is_treated_as_empty():
     q = MagicMock()
-    q.range.return_value.execute.return_value.data = None
+    q.order.return_value.range.return_value.execute.return_value.data = None
     assert all_rows(q) == []
+
+
+# ── deterministic paging ──────────────────────────────────────────────────
+
+def test_paging_appends_a_total_order():
+    """OFFSET paging assumes every page sees the same row order, and a query
+    with no ORDER BY promises nothing. Postgres runs synchronize_seqscans=on, so
+    a scan joins an already-running scan of the same table mid-way; consecutive
+    pages then get differently-rotated orders and OFFSET skips and repeats rows.
+    Measured on the dashboard's read of `videos`: 49,144 rows, ~31k distinct."""
+    q = _Query(2500)
+    all_rows(q)
+    assert q.orders == [ORDER_KEY]
+
+
+def test_the_order_key_is_overridable():
+    """reporting_reports_ingested is keyed by report_id, not id."""
+    q = _Query(10)
+    all_rows(q, order_by="report_id")
+    assert q.orders == ["report_id"]
+
+
+def test_the_order_key_is_appended_not_substituted():
+    """A caller's own .order() must still sort first — this only breaks ties."""
+    q = _Query(10).order("created_at", desc=True)
+    all_rows(q)
+    assert q.orders == ["created_at", ORDER_KEY]
 
 
 # ── rows_for_ids ──────────────────────────────────────────────────────────
@@ -83,7 +115,9 @@ def test_chunks_the_id_list():
     def build(chunk):
         seen.append(list(chunk))
         b = MagicMock()
-        b.range.return_value.execute.return_value.data = [{"id": i} for i in chunk]
+        b.order.return_value.range.return_value.execute.return_value.data = [
+            {"id": i} for i in chunk
+        ]
         return b
 
     out = rows_for_ids(build, [f"v{n}" for n in range(1200)])
