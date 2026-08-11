@@ -148,11 +148,20 @@ Four things only failed once this ran against real infrastructure, all now fixed
 4. **nginx's 8 KB header buffers** were smaller than hosted Supabase's, so the
    500-id `in_()` batches (~10 KB URLs) came back 414/502.
 
-**Residual risk worth a decision.** One snapshot is kept, so if the database is
-already corrupt when tonight's dump runs, a healthy-looking dump replaces the
-last good copy. `BACKUP_SLOTS=2` alternates between two files by day-of-year —
-one extra file, and that failure mode goes away. Default is `1`, matching the
-stated intent of no redundant snapshots.
+**Two slots, since 2026-08-11.** `BACKUP_SLOTS=2` alternates between
+`midas.0.sql` and `midas.1.sql` by day-of-year. With one slot, a database that is
+already corrupt at midnight produces a healthy-looking dump that replaces the
+last good copy — and now that a new machine restores itself on first boot, the
+next deploy would restore that corruption. One extra file on the NAS removes the
+whole failure mode.
+
+There is no fixed filename to restore any more, so `app/provision.py` picks the
+most recently modified snapshot in the directory rather than a name computed
+from the current setting. That is also what makes raising the setting safe: for
+one night the only backup that exists is still the old single-slot `midas.sql`,
+and it is still found. The staged `.tmp` is excluded — it is a half-uploaded
+file by definition, and it is the newest thing in the directory while it is
+being written.
 
 Failures log at `exception` level with `NIGHTLY DB BACKUP FAILED`. That is the
 line to alert on: a silent backup failure is how you find out months later that

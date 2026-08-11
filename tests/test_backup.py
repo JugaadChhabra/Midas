@@ -27,8 +27,15 @@ _assert_versions_match = backup._assert_pg_dump_matches_server
 def _guards_pass():
     """snapshot_to_nas refuses to run against an empty database or a mismatched
     pg_dump, both of which need a live server. Those two guards have their own
-    tests below; here they are satisfied so each test is about its own failure."""
+    tests below; here they are satisfied so each test is about its own failure.
+
+    BACKUP_SLOTS is pinned for the same reason: these tests describe the staged
+    publish, and without pinning they silently changed meaning the moment the
+    real .env was set to 2 (the filename stops being SNAPSHOT_NAME). Slot
+    behaviour has its own tests, which set it explicitly.
+    """
     with patch("app.provision.assert_populated"), \
+         patch.object(backup.settings, "BACKUP_SLOTS", 1), \
          patch.object(backup, "_assert_pg_dump_matches_server"):
         yield
 
@@ -233,3 +240,33 @@ def test_the_version_check_runs_before_the_dump(tmp_path):
             backup.snapshot_to_nas(dsn="x", work_dir=tmp_path)
     dump.assert_not_called()
     nas.copy_from_local.assert_not_called()
+
+
+# ── slot names ────────────────────────────────────────────────────────────
+
+def test_one_slot_is_a_single_replaced_file():
+    from datetime import datetime, timezone
+    now = datetime(2026, 8, 11, tzinfo=timezone.utc)
+    assert backup._slot_name(now, 1) == backup.SNAPSHOT_NAME
+
+
+def test_two_slots_alternate_by_day_of_year():
+    from datetime import datetime, timedelta, timezone
+    day = datetime(2026, 8, 11, tzinfo=timezone.utc)
+    names = {backup._slot_name(day + timedelta(days=n), 2) for n in range(4)}
+    assert names == {"midas.0.sql", "midas.1.sql"}
+    # consecutive days must differ, or the second slot never gets written
+    assert backup._slot_name(day, 2) != backup._slot_name(day + timedelta(days=1), 2)
+
+
+@pytest.mark.parametrize("name,ok", [
+    ("midas.sql", True),
+    ("midas.0.sql", True),
+    ("midas.1.sql", True),
+    ("midas.sql.tmp", False),      # a staged, half-uploaded upload
+    ("midas.0.sql.tmp", False),
+    ("notes.txt", False),
+    ("midas.sql.gz", False),
+])
+def test_is_snapshot_name(name, ok):
+    assert backup.is_snapshot_name(name) is ok

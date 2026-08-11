@@ -90,6 +90,32 @@ class NASService:
                  if not e.is_dir() and Path(e.name).suffix.lower() in VIDEO_EXTENSIONS]
         return sorted(names)
 
+    def list_files(self, relative_dir: str) -> list[str]:
+        """Every file name in a directory, unfiltered.
+
+        `list_video_files` filters by extension, which is right for the cutter
+        and useless for the DB snapshots. Returns [] for a missing directory
+        rather than raising — an absent backup directory is a legitimate state
+        (nothing has ever been backed up), not an error.
+        """
+        if self.mode == "local":
+            d = self._local(relative_dir)
+            return sorted(e.name for e in d.iterdir() if e.is_file()) if d.is_dir() else []
+        import smbclient
+        self._connect()
+        base = self._remote(relative_dir)
+        if not smbclient.path.exists(base):
+            return []
+        return sorted(e.name for e in smbclient.scandir(base) if not e.is_dir())
+
+    def modified_at(self, relative_path: str) -> float:
+        """Unix mtime of a file. Used to pick the newest of several snapshots."""
+        if self.mode == "local":
+            return self._local(relative_path).stat().st_mtime
+        import smbclient
+        self._connect()
+        return smbclient.stat(self._remote(relative_path)).st_mtime
+
     def copy_to_local(self, relative_path: str, local_dest: Path) -> Path:
         local_dest = Path(local_dest)
         local_dest.parent.mkdir(parents=True, exist_ok=True)

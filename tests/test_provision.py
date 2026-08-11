@@ -74,6 +74,11 @@ def _run(tmp_path, *, populated_before, populated_after=True, nas=None,
 
     if not hasattr(nas.copy_to_local, "side_effect") or nas.copy_to_local.side_effect is None:
         nas.copy_to_local.side_effect = fake_copy
+    # One snapshot on the NAS unless a test says otherwise; _latest_snapshot
+    # picks from a real listing now that BACKUP_SLOTS can be >1.
+    if not isinstance(nas.list_files.return_value, list):
+        nas.list_files.return_value = ["midas.sql"]
+        nas.modified_at.return_value = 100.0
 
     with patch.object(provision.settings, "RESTORE_ON_EMPTY", True), \
          patch.object(provision.settings, "BACKUP_WORK_DIR", str(tmp_path)), \
@@ -192,3 +197,49 @@ def test_nightly_backup_refuses_to_publish_from_an_empty_database(tmp_path):
             backup.snapshot_to_nas(dsn="x", work_dir=tmp_path)
     dump.assert_not_called()                 # refused before spending the dump
     nas.copy_from_local.assert_not_called()  # and before touching the NAS
+
+
+# ── which snapshot to restore, under BACKUP_SLOTS ─────────────────────────
+
+def _nas_with(files: dict[str, float]):
+    """A NAS stub holding {name: mtime} under the backup directory."""
+    nas = MagicMock()
+    nas.list_files.return_value = sorted(files)
+    nas.modified_at.side_effect = lambda p: files[p.rsplit("/", 1)[-1]]
+    return nas
+
+
+def test_single_slot_restores_the_one_snapshot():
+    assert provision._latest_snapshot(_nas_with({"midas.sql": 100.0})) == "midas.sql"
+
+
+def test_two_slots_restore_the_newer_one():
+    """BACKUP_SLOTS=2 alternates by day-of-year, so there is no fixed filename —
+    yesterday's slot sits right beside today's."""
+    nas = _nas_with({"midas.0.sql": 100.0, "midas.1.sql": 200.0})
+    assert provision._latest_snapshot(nas) == "midas.1.sql"
+    nas = _nas_with({"midas.0.sql": 300.0, "midas.1.sql": 200.0})
+    assert provision._latest_snapshot(nas) == "midas.0.sql"
+
+
+def test_a_legacy_single_slot_file_is_still_found_after_raising_slots():
+    """Raising BACKUP_SLOTS from 1 to 2 leaves midas.sql as the ONLY backup
+    until the next nightly run. A restore in that window must still find it."""
+    assert provision._latest_snapshot(_nas_with({"midas.sql": 100.0})) == "midas.sql"
+
+
+def test_the_staged_upload_is_never_restored():
+    """A .tmp is a half-uploaded file by definition, and it is the newest thing
+    in the directory while it is being written."""
+    nas = _nas_with({"midas.sql": 100.0, "midas.sql.tmp": 999.0})
+    assert provision._latest_snapshot(nas) == "midas.sql"
+
+
+def test_unrelated_files_are_ignored():
+    nas = _nas_with({"midas.sql": 100.0, "notes.txt": 999.0, "midas.sql.gz": 999.0})
+    assert provision._latest_snapshot(nas) == "midas.sql"
+
+
+def test_no_snapshot_at_all_stops_the_app():
+    with pytest.raises(ProvisionError, match="no snapshot"):
+        provision._latest_snapshot(_nas_with({}))

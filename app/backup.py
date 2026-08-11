@@ -145,6 +145,19 @@ def _slot_name(now: datetime, slots: int) -> str:
     return f"{stem}.{now.timetuple().tm_yday % slots}.{ext}"
 
 
+def is_snapshot_name(name: str) -> bool:
+    """Does `name` look like one of our snapshots, in any slot configuration?
+
+    Matches `midas.sql` and `midas.<n>.sql`. Deliberately not "whatever
+    _slot_name() would produce for the CURRENT setting": raising BACKUP_SLOTS
+    from 1 to 2 leaves a perfectly good `midas.sql` on the NAS that is the only
+    backup until the next nightly run, and a restore must still find it.
+    Excludes the staged `.tmp`, which is a half-uploaded file by definition.
+    """
+    stem, _, ext = SNAPSHOT_NAME.rpartition(".")
+    return bool(re.fullmatch(rf"{re.escape(stem)}(\.\d+)?\.{re.escape(ext)}", name))
+
+
 def snapshot_to_nas(*, dsn: str | None = None, work_dir: Path | None = None,
                     now: datetime | None = None) -> dict:
     """Dump the database and publish it to the NAS. Returns a summary dict."""

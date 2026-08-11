@@ -139,6 +139,26 @@ def _restore(dump: Path) -> None:
                              f"{proc.stderr.strip()[:2000]}")
 
 
+def _latest_snapshot(nas) -> str:
+    """Name of the most recent snapshot on the NAS.
+
+    BACKUP_SLOTS=2 alternates between `midas.0.sql` and `midas.1.sql` by
+    day-of-year, so there is no single fixed filename to restore — and right
+    after the setting is raised from 1 the only backup that exists is still the
+    old `midas.sql`. Pick by modification time across whatever is actually
+    there, which is correct under every slot configuration including a change of
+    one.
+    """
+    from app.backup import NAS_SUBDIR, is_snapshot_name
+    names = [n for n in nas.list_files(NAS_SUBDIR) if is_snapshot_name(n)]
+    if not names:
+        raise ProvisionError(
+            f"database is empty and the NAS has no snapshot in {NAS_SUBDIR}. "
+            f"Not starting: there is nothing to restore from."
+        )
+    return max(names, key=lambda n: nas.modified_at(f"{NAS_SUBDIR}/{n}"))
+
+
 def _reload_postgrest(conn) -> None:
     """Tell PostgREST to re-read the schema.
 
@@ -181,7 +201,12 @@ def ensure_database_populated() -> dict:
 
     try:
         try:
-            NASService().copy_to_local(f"{NAS_SUBDIR}/{SNAPSHOT_NAME}", local)
+            nas = NASService()
+            snapshot = _latest_snapshot(nas)
+            log.info("provision: restoring from %s", snapshot)
+            nas.copy_to_local(f"{NAS_SUBDIR}/{snapshot}", local)
+        except ProvisionError:
+            raise
         except Exception as e:
             raise ProvisionError(
                 f"database is empty and the NAS snapshot could not be fetched "
