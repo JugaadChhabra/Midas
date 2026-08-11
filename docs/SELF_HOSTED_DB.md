@@ -121,26 +121,33 @@ otherwise overwrite the last good backup with a truncated one, and nothing would
 say so until a restore was attempted. Any failure now leaves the previous
 snapshot exactly where it was.
 
-### Verified once, on 2026-08-08
+### Verified on the office NAS, 2026-08-11
 
-Run end-to-end with `NAS_MODE=local` (off the office network), writing to
-`./local_snapshots/`: a 366 MB dump, restored into a throwaway database with
-**zero errors** and row counts identical on every table, with `vector(3072)`,
-`jsonb` and `text[]` all intact.
+`run_nightly_backup()` — the actual scheduler entry point, not a stand-in — run
+on-network with `NAS_MODE=smb`: **366.1 MB published in 90s**, overwriting the
+previous snapshot, and the file read back off the share is **sha256-identical**
+to the local dump. Restoring it into a throwaway database with
+`psql -v ON_ERROR_STOP=1` exits 0, with row counts identical on every table and
+`vector(3072)`, `jsonb` and `text[]` intact.
 
-Two things that verification exposed:
+Four things only failed once this ran against real infrastructure, all now fixed
+(commit `1bd66a5`):
 
-1. **The deployed image needs rebuilding.** `app/backup.py` shells out to
-   `pg_dump`, and it must match the server's major version — pg_dump refuses to
-   dump a newer server. The `Dockerfile` now installs `postgresql-client-16`,
-   but `ghcr.io/jugaadchhabra/midas:latest` predates that. **Until the image is
-   rebuilt and pulled, the nightly backup will fail every night**, logging
-   `NIGHTLY DB BACKUP FAILED`. It fails safely — the previous snapshot is never
-   touched — but it fails.
-
-2. **The NAS destination is still untested.** Only the `local` adapter has been
-   exercised. `NAS_MODE=smb` writing to the office share is unproven; run one
-   manual `snapshot_to_nas()` on-network before relying on it.
+1. **`NASService.move` could never overwrite.** It used `smbclient.rename`,
+   which passes `replace_if_exists=False`. The staged publish moves a `.tmp`
+   *onto* yesterday's snapshot, so it succeeded once and would have failed with
+   `NtStatus 0xc0000035` every night after. Now `replace()`, matching what the
+   `local` adapter already did.
+2. **64 KB SMB buffers.** ~5,800 round trips for the dump, and the share dropped
+   partway through with `[Errno 49] Can't assign requested address`. `SMB_CHUNK`
+   is 4 MB; the same file now moves in ~80s.
+3. **`pg_dump` version skew.** It refuses to dump a newer server, and a dev
+   machine's client is often older (here 14 vs 16). `BACKUP_PG_DUMP` makes the
+   binary configurable. The image installs the unversioned `postgresql-client`
+   — Debian trixie has no `-16` package at all, which is why the image had been
+   failing to build — with a build-time gate that fails if it is ever < 16.
+4. **nginx's 8 KB header buffers** were smaller than hosted Supabase's, so the
+   500-id `in_()` batches (~10 KB URLs) came back 414/502.
 
 **Residual risk worth a decision.** One snapshot is kept, so if the database is
 already corrupt when tonight's dump runs, a healthy-looking dump replaces the
@@ -154,18 +161,59 @@ there is no backup.
 
 ---
 
-## Restore
+## Where the data actually lives
+
+`./pgdata`, bind-mounted to `/var/lib/postgresql/data` (`docker-compose.yml`).
+Two consequences worth being explicit about, because both are easy to assume
+wrongly:
+
+**It does not reset on restart.** Postgres's entrypoint runs `initdb` only when
+that directory is *empty*, so every later start just opens the existing cluster.
+Restarts, `docker compose down`, and reboots all preserve the data. Deleting
+`./pgdata` is the only thing that wipes it — and that is also the only way to
+change `POSTGRES_PASSWORD`, since it is read at `initdb` time and ignored after.
+
+**It does not travel with the image.** `pgdata/` is gitignored, the image holds
+app code only, nothing is mounted to `/docker-entrypoint-initdb.d`, and the app
+does not apply migrations at startup. So on a machine that has never run this
+before, `docker compose up` gives you a **completely empty database** and an app
+that 404s on every table. Standing one up is the manual sequence below — there
+is no automatic path from the NAS snapshot into a fresh cluster.
+
+---
+
+## Restore, or standing up a new machine
+
+Same procedure either way: the snapshot is a full dump, so restoring it *is* the
+migration.
 
 ```bash
-# fetch <NAS>/midas-db-backups/midas.sql
-docker compose stop midas
-psql "$DATABASE_URL" -f midas.sql
-docker compose start midas
+# 1. Secrets. POSTGRES_PASSWORD, PGRST_JWT_SECRET, LOCAL_SERVICE_KEY and
+#    DATABASE_URL must match the ones in .env on the machine you are replacing —
+#    LOCAL_SERVICE_KEY is a JWT signed with PGRST_JWT_SECRET, so a fresh secret
+#    means minting a fresh key (scripts/make_service_key.py).
+docker compose up -d db          # creates an empty cluster on first run
+
+# 2. Roles. The dump is --no-owner --no-privileges, so it needs no *original*
+#    roles — but PostgREST still needs anon/authenticated/service_role to exist,
+#    and they are not in the dump.
+psql "$DATABASE_URL" -f supabase/bootstrap/000_local_compat.sql
+
+# 3. Data. This creates the schema as well; do NOT run apply_migrations first.
+#    fetch <NAS>/midas-db-backups/midas.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f midas.sql
+
+# 4. Only if the dump predates a migration.
+python scripts/apply_migrations.py
+
+docker compose up -d             # postgrest, rest, midas
 ```
 
-The dump is `--no-owner --no-privileges`, so it restores into a fresh database
-without the original roles. Run `python scripts/apply_migrations.py` afterwards
-only if the dump predates a migration.
+Restoring over a *live* database instead of an empty one: `docker compose stop
+midas` first, so the app is not writing while the dump replays.
+
+`ON_ERROR_STOP=1` matters — without it psql reports failures on stderr and still
+exits 0, which is how a half-restored database gets mistaken for a good one.
 
 ---
 
