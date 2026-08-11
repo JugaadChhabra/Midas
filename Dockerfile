@@ -5,12 +5,21 @@ WORKDIR /app
 
 # ffmpeg: used by the shorts cutter (clip extraction/encoding) and app/keyframes.py.
 # postgresql-client: app/backup.py shells out to pg_dump for the nightly NAS
-# snapshot. Must match the server's major version (pg16, see docker-compose.yml)
-# — an older pg_dump refuses to dump a newer server.
+# snapshot. pg_dump REFUSES to dump a server newer than itself, so this has to
+# stay >= the server's major version (pg16, see docker-compose.yml).
+#
+# Unversioned on purpose: python:3.13-slim is Debian trixie, which ships
+# postgresql-client-17 and has no -16 package at all, so pinning the server's
+# exact major failed the build outright. The meta-package tracks whatever the
+# base image's Debian offers, which has only ever moved forward — and the RUN
+# below fails the build if it ever doesn't, rather than letting a too-old
+# pg_dump ship and break the nightly backup at 00:00.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    postgresql-client-16 \
-    && rm -rf /var/lib/apt/lists/*
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && pg_dump --version \
+    && [ "$(pg_dump --version | sed -E 's/.* ([0-9]+).*/\1/')" -ge 16 ]
 
 # NOTE: Deno was installed here solely as the JS runtime for yt-dlp's "n"-challenge
 # solver in the retired YouTube-URL shorts download flow. Removed with that flow.
