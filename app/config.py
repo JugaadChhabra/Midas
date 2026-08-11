@@ -229,6 +229,11 @@ class Settings:
     # corrupt DB overwrites the last healthy copy). 2 = alternate between two
     # slots by day-of-year, which costs one extra file and survives that case.
     BACKUP_SLOTS        = int(os.getenv("BACKUP_SLOTS") or "1")
+    # pg_dump refuses to dump a server newer than itself. The container image
+    # installs postgresql-client-16, so the default is right there; on a dev
+    # machine whose `pg_dump` is older than the server, point this at a newer
+    # one (macOS/Homebrew: /opt/homebrew/opt/libpq/bin/pg_dump).
+    BACKUP_PG_DUMP      = os.getenv("BACKUP_PG_DUMP", "pg_dump")
 
 
 settings = Settings()

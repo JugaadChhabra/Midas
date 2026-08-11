@@ -50,3 +50,37 @@ def test_move_relocates_file_and_creates_dest_dir(tmp_path):
     svc.move("RHYMES/HINDI/song.mp4", "COMPLETED/HINDI/song.mp4")
     assert not (tmp_path / "RHYMES" / "HINDI" / "song.mp4").exists()
     assert (tmp_path / "COMPLETED" / "HINDI" / "song.mp4").read_bytes() == b"v"
+
+
+def test_move_overwrites_an_existing_destination(tmp_path):
+    """The nightly backup publishes by moving a .tmp ONTO yesterday's snapshot,
+    so a move that refuses an existing destination fails every night after the
+    first. The SMB adapter used to do exactly that (smbclient.rename passes
+    replace_if_exists=False -> NtStatus 0xc0000035)."""
+    (tmp_path / "midas-db-backups").mkdir()
+    (tmp_path / "midas-db-backups" / "midas.sql").write_bytes(b"yesterday")
+    (tmp_path / "midas-db-backups" / "midas.sql.tmp").write_bytes(b"tonight")
+    svc = _svc(tmp_path)
+    svc.move("midas-db-backups/midas.sql.tmp", "midas-db-backups/midas.sql")
+    assert (tmp_path / "midas-db-backups" / "midas.sql").read_bytes() == b"tonight"
+    assert not (tmp_path / "midas-db-backups" / "midas.sql.tmp").exists()
+
+
+def test_smb_move_replaces_rather_than_refusing(monkeypatch):
+    """Adapter parity: local mode overwrites, so SMB must too. Asserted at the
+    smbclient call because the two adapters share no code path."""
+    import app.services.nas_service as mod
+    calls = {}
+    fake = type("m", (), {
+        "replace": staticmethod(lambda s, d: calls.update(replace=(s, d))),
+        "rename": staticmethod(lambda s, d: calls.update(rename=(s, d))),
+        "makedirs": staticmethod(lambda p, exist_ok=False: None),
+    })
+    monkeypatch.setitem(__import__("sys").modules, "smbclient", fake)
+    svc = NASService()
+    svc.mode = "smb"
+    svc._connected = True
+    monkeypatch.setattr(mod.NASService, "_connect", lambda self: None)
+    svc.move("d/a.tmp", "d/a")
+    assert "rename" not in calls, "rename() refuses an existing destination"
+    assert calls["replace"] == (svc._remote("d/a.tmp"), svc._remote("d/a"))

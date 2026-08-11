@@ -13,6 +13,12 @@ from app.config import settings
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
+#: Bytes per SMB read/write. shutil's 64 KB default means ~5,800 round trips for
+#: a 366 MB DB snapshot, and the office share dies partway through with
+#: "[Errno 49] Can't assign requested address". At 4 MB the same file transfers
+#: in ~80s. Only applies to SMB — local mode uses shutil's own copy.
+SMB_CHUNK = 4 * 1024 * 1024
+
 
 class NASService:
     def __init__(self) -> None:
@@ -92,9 +98,10 @@ class NASService:
             return local_dest
         import smbclient
         self._connect()
-        with smbclient.open_file(self._remote(relative_path), mode="rb") as src, \
+        with smbclient.open_file(self._remote(relative_path), mode="rb",
+                                 buffering=0) as src, \
                 open(local_dest, "wb") as dst:
-            shutil.copyfileobj(src, dst)
+            shutil.copyfileobj(src, dst, SMB_CHUNK)
         return local_dest
 
     def copy_from_local(self, local_src: Path, relative_path: str) -> None:
@@ -106,8 +113,9 @@ class NASService:
         import smbclient
         self._connect()
         with open(local_src, "rb") as src, \
-                smbclient.open_file(self._remote(relative_path), mode="wb") as dst:
-            shutil.copyfileobj(src, dst)
+                smbclient.open_file(self._remote(relative_path), mode="wb",
+                                    buffering=0) as dst:
+            shutil.copyfileobj(src, dst, SMB_CHUNK)
 
     def move(self, src_relative: str, dst_relative: str) -> None:
         parent = str(Path(self._rel(dst_relative)).parent)
@@ -117,7 +125,13 @@ class NASService:
             return
         import smbclient
         self._connect()
-        smbclient.rename(self._remote(src_relative), self._remote(dst_relative))
+        # replace(), not rename(): smbclient.rename passes replace_if_exists=False
+        # and raises "[NtStatus 0xc0000035] File exists" when the destination is
+        # already there. The nightly backup's staged publish (upload .tmp, then
+        # move onto the live snapshot) hit that on its SECOND run and every run
+        # after. local mode's shutil.move already overwrites, so this also stops
+        # the two adapters disagreeing.
+        smbclient.replace(self._remote(src_relative), self._remote(dst_relative))
 
 
 nas_service = NASService()

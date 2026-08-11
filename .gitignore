@@ -149,6 +149,8 @@ activemq-data/
 
 # Environments
 .env
+# Timestamped copies made before editing .env — same secrets, same rules.
+.env.bak*
 .envrc
 .venv
 env/

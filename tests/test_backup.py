@@ -139,9 +139,27 @@ def test_local_working_copy_is_cleaned_up(nas, tmp_path):
 
 def test_pg_dump_is_invoked_with_the_dsn_and_fails_loudly():
     proc = MagicMock(returncode=1, stderr="could not connect")
-    with patch.object(backup.subprocess, "run", return_value=proc) as run:
+    with patch.object(backup.settings, "BACKUP_PG_DUMP", "pg_dump"), \
+         patch.object(backup.subprocess, "run", return_value=proc) as run:
         with pytest.raises(backup.BackupError, match="could not connect"):
             backup._run_pg_dump("postgresql://u:p@db:5432/midas", Path("/tmp/x.sql"))
     argv = run.call_args.args[0]
     assert argv[0] == "pg_dump"
     assert "postgresql://u:p@db:5432/midas" in argv
+
+
+def test_pg_dump_binary_is_configurable():
+    """The container has postgresql-client-16 on PATH; a dev machine may have
+    only an older pg_dump, which refuses to dump a newer server."""
+    proc = MagicMock(returncode=0, stderr="")
+    with patch.object(backup.settings, "BACKUP_PG_DUMP", "/opt/pg16/bin/pg_dump"), \
+         patch.object(backup.subprocess, "run", return_value=proc) as run:
+        backup._run_pg_dump("dsn", Path("/tmp/x.sql"))
+    assert run.call_args.args[0][0] == "/opt/pg16/bin/pg_dump"
+
+
+def test_missing_pg_dump_names_the_setting_that_fixes_it():
+    with patch.object(backup.settings, "BACKUP_PG_DUMP", "/nope/pg_dump"), \
+         patch.object(backup.subprocess, "run", side_effect=FileNotFoundError):
+        with pytest.raises(backup.BackupError, match="BACKUP_PG_DUMP"):
+            backup._run_pg_dump("dsn", Path("/tmp/x.sql"))

@@ -53,13 +53,22 @@ def _nas() -> NASService:
 
 def _run_pg_dump(dsn: str, dest: Path) -> None:
     """Dump `dsn` to `dest`. Raises BackupError on any non-zero exit."""
-    proc = subprocess.run(
-        ["pg_dump", "--no-owner", "--no-privileges", "--file", str(dest), dsn],
-        capture_output=True,
-        text=True,
-        timeout=DUMP_TIMEOUT_SECONDS,
-    )
+    binary = settings.BACKUP_PG_DUMP
+    try:
+        proc = subprocess.run(
+            [binary, "--no-owner", "--no-privileges", "--file", str(dest), dsn],
+            capture_output=True,
+            text=True,
+            timeout=DUMP_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as e:
+        raise BackupError(
+            f"{binary} not found — set BACKUP_PG_DUMP to a pg_dump at least as "
+            f"new as the server"
+        ) from e
     if proc.returncode != 0:
+        # The most common failure by far is a client older than the server,
+        # which pg_dump reports on stderr and nowhere else.
         raise BackupError(f"pg_dump failed ({proc.returncode}): {proc.stderr.strip()}")
 
 
