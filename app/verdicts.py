@@ -25,6 +25,7 @@ the end, which is why the rollups here return what they do.
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
 
 from app.status_vocab import AuditStatus, MEASURED_STATUSES, MeasurementStatus
@@ -120,6 +121,82 @@ def from_audit(audit: dict) -> Verdict | None:
         return None
     return Verdict(status, audit.get("outcome_decision"),
                    audit.get("measurement_result") or {})
+
+
+# ── Evidence ──────────────────────────────────────────────────────────────
+
+def is_evidence(audit: dict) -> bool:
+    """Does this audit's verdict count as evidence about the prompt?
+
+    Measured status alone — deliberately NOT also `status='applied'`.
+
+    Two of the three rollups used to add that filter, and it biases the result in
+    one direction. Reverting is what an operator does to a BAD outcome, so
+    excluding reverted audits systematically drops the worst evidence and
+    flatters the prompt version that produced it. A prompt that wrote a title
+    which measurably lost CTR produced a regression; undoing the damage is
+    remediation, not erasure.
+
+    Distinct from live state: `performance`'s view-count columns keep their own
+    `applied` filter, because a reverted video's before/after view stats describe
+    metadata that is no longer there.
+    """
+    return audit.get("measurement_status") in MEASURED_STATUSES
+
+
+def evidence(audits) -> list[Verdict]:
+    """Every verdict in `audits` that counts as evidence, parsed."""
+    return [v for v in (from_audit(a) for a in audits) if v is not None]
+
+
+# ── Rollups ───────────────────────────────────────────────────────────────
+#
+# All three aggregate on RAW values and round once, at the end. `performance`
+# used to round each delta to one decimal place before taking the median, which
+# is a small error that compounds with even-sized cohorts — and, more to the
+# point, meant the number the UI showed and the number the prompt loop acted on
+# were computed differently.
+
+def win_rate(statuses) -> float | None:
+    """Share of measured verdicts that won, as a percentage. None if empty.
+
+    Neutral counts in the denominator: it is a measured outcome, not an absent
+    one. `not_applicable` never reaches here — it is not evidence.
+    """
+    statuses = list(statuses)
+    if not statuses:
+        return None
+    wins = sum(1 for s in statuses if s == MeasurementStatus.WIN)
+    return round(100.0 * wins / len(statuses), 1)
+
+
+def median_ctr_delta_pct(deltas) -> float | None:
+    """Median relative CTR change as a percentage. None if nothing comparable.
+
+    `deltas` are raw fractions; None entries are dropped rather than counted as
+    zero. A verdict with no delta is a verdict with nothing to compare, which is
+    not the same as one that measured no change.
+    """
+    usable = [d for d in deltas if d is not None]
+    if not usable:
+        return None
+    return round(statistics.median(usable) * 100.0, 1)
+
+
+def distribution(statuses) -> dict:
+    """Counts per measured status, plus the total."""
+    statuses = list(statuses)
+    counts = {s: sum(1 for x in statuses if x == s) for s in MEASURED_STATUSES}
+    return {**counts, "total": len(statuses)}
+
+
+def rollup(verdicts_: list[Verdict]) -> dict:
+    """win_rate / median_ctr_delta_pct / distribution over a set of verdicts."""
+    return {
+        "win_rate": win_rate(v.status for v in verdicts_),
+        "median_ctr_delta_pct": median_ctr_delta_pct(v.ctr_delta for v in verdicts_),
+        "distribution": distribution(v.status for v in verdicts_),
+    }
 
 
 # ── Levers ────────────────────────────────────────────────────────────────

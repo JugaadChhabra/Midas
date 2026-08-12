@@ -159,6 +159,91 @@ def test_all_three_can_move_together():
     assert moved == frozenset(verdicts.ALL_LEVERS)
 
 
+# ── evidence ──────────────────────────────────────────────────────────────
+
+def test_a_reverted_regression_is_still_evidence():
+    """The behaviour change. Reverting is what an operator does to a BAD outcome,
+    so filtering evidence on status='applied' drops the worst results and
+    flatters the prompt version that produced them."""
+    reverted = {"status": "reverted", "measurement_status": MeasurementStatus.REGRESSION,
+                "measurement_result": _result(**{verdicts.CTR_DELTA: -0.4})}
+    assert verdicts.is_evidence(reverted) is True
+    assert verdicts.evidence([reverted])[0].ctr_delta == -0.4
+
+
+def test_an_unmeasured_audit_is_not_evidence():
+    for status in (MeasurementStatus.MEASURING, MeasurementStatus.NOT_APPLICABLE, None):
+        assert verdicts.is_evidence({"measurement_status": status}) is False
+
+
+def test_evidence_drops_the_rows_without_verdicts():
+    rows = [_audit(), {"measurement_status": MeasurementStatus.MEASURING}, _audit()]
+    assert len(verdicts.evidence(rows)) == 2
+
+
+# ── rollups ───────────────────────────────────────────────────────────────
+
+def test_win_rate_counts_neutral_in_the_denominator():
+    """Neutral is a measured outcome, not an absent one — a prompt that produces
+    flat results is not a prompt with no results."""
+    assert verdicts.win_rate(["win", "neutral", "neutral", "regression"]) == 25.0
+
+
+def test_win_rate_of_nothing_is_none_not_zero():
+    """Zero would claim a measured 0% success; None says we have no evidence."""
+    assert verdicts.win_rate([]) is None
+
+
+def test_median_is_taken_on_raw_values_then_rounded_once():
+    """The behaviour change. performance used to round each delta to one decimal
+    before the median; on an even-sized cohort the two disagree.
+
+    Raw: median(0.12345, 0.12355) = 0.1235 -> 12.35 -> 12.4 (banker's rounding
+    on the exact float). Pre-rounded to 12.3 and 12.4, the median is 12.35 too,
+    but the intermediate loss is what compounds — assert the raw path directly.
+    """
+    assert verdicts.median_ctr_delta_pct([0.10, 0.20, 0.30]) == 20.0
+    assert verdicts.median_ctr_delta_pct([0.1234, 0.5678]) == pytest.approx(34.6)
+
+
+def test_median_ignores_verdicts_with_nothing_to_compare():
+    """A neutral with no delta is not a zero — averaging it in as one would drag
+    every median toward the middle."""
+    assert verdicts.median_ctr_delta_pct([0.5, None, None]) == 50.0
+    assert verdicts.median_ctr_delta_pct([None, None]) is None
+
+
+def test_median_of_nothing_is_none():
+    assert verdicts.median_ctr_delta_pct([]) is None
+
+
+def test_distribution_counts_every_measured_status():
+    d = verdicts.distribution(["win", "win", "neutral", "regression"])
+    assert d == {"win": 2, "neutral": 1, "regression": 1, "total": 4}
+
+
+def test_distribution_of_nothing_is_zeros_not_empty():
+    """The UI renders these counts; a missing key would render as blank rather
+    than as zero."""
+    d = verdicts.distribution([])
+    assert d == {"win": 0, "neutral": 0, "regression": 0, "total": 0}
+
+
+def test_rollup_reports_all_three_together():
+    vs = verdicts.evidence([
+        _audit(measurement_status=MeasurementStatus.WIN,
+               measurement_result=_result(**{verdicts.CTR_DELTA: 0.5})),
+        _audit(measurement_status=MeasurementStatus.NEUTRAL,
+               measurement_result=_result()),                       # no delta
+        _audit(measurement_status=MeasurementStatus.REGRESSION,
+               measurement_result=_result(**{verdicts.CTR_DELTA: -0.3})),
+    ])
+    r = verdicts.rollup(vs)
+    assert r["win_rate"] == pytest.approx(33.3)
+    assert r["median_ctr_delta_pct"] == 10.0        # median(0.5, -0.3) = 0.1
+    assert r["distribution"] == {"win": 1, "neutral": 1, "regression": 1, "total": 3}
+
+
 # ── nobody re-solves it ───────────────────────────────────────────────────
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -169,6 +254,14 @@ _RAW_KEY = re.compile(r"""["'](?:ctr_delta_relative|pre_window|post_window)["']"
 #: differed only in the response key they assigned it to.
 _OWN_LEVERS = re.compile(
     r"""["']title_before["']\s*\)?\s*or\s*["']{2}\s*\)?\s*!=""")
+#: A win rate derived by hand. Matches both historical spellings —
+#: `counts["win"] / len(measured)` and `wins / len(enriched)`. A first attempt
+#: matched any `100.0 * x`, which flagged four modules computing perfectly
+#: legitimate percentages; a guard with false positives gets deleted, not obeyed.
+_OWN_WIN_RATE = re.compile(r"""(?:\[["']win["']\]|\bwins\b)\s*/""")
+#: A median taken outside the owner. Both readers used to take their own, one of
+#: them over pre-rounded values.
+_OWN_MEDIAN = re.compile(r"statistics\.median")
 
 
 def _app_sources():
@@ -192,4 +285,20 @@ def test_no_module_derives_the_levers_itself(path):
     assert not _OWN_LEVERS.search(path.read_text()), (
         f"{path.name} derives the lever taxonomy itself — use "
         "app.verdicts.levers so the UI and the prompt describe the same fact"
+    )
+
+
+@pytest.mark.parametrize("path", list(_app_sources()), ids=lambda p: p.name)
+def test_no_module_computes_its_own_win_rate(path):
+    assert not _OWN_WIN_RATE.search(path.read_text()), (
+        f"{path.name} computes a win rate itself — use app.verdicts.win_rate, so "
+        "the number the UI shows and the number the prompt loop acts on agree"
+    )
+
+
+@pytest.mark.parametrize("path", list(_app_sources()), ids=lambda p: p.name)
+def test_no_module_takes_its_own_median(path):
+    assert not _OWN_MEDIAN.search(path.read_text()), (
+        f"{path.name} takes its own median of CTR deltas — use "
+        "app.verdicts.median_ctr_delta_pct, which aggregates raw and rounds once"
     )

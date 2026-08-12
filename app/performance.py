@@ -1,6 +1,5 @@
 import csv
 import io
-import statistics
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -161,6 +160,10 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
             "title_changed": title_changed,
             "description_changed": desc_changed,
             "tags_changed": tags_changed,
+            # The raw fraction alongside the rounded percentage: the summary
+            # aggregates on this, because rounding each row first and then taking
+            # a median is a small error that compounds on even-sized cohorts.
+            "ctr_delta": m_delta,
             "ai_reasoning": a.get("ai_reasoning"),
             "view_count_at_apply": view_at,
             "like_count_at_apply": like_at,
@@ -230,25 +233,24 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
     positive = [d for d in deltas if d > 0]
     avg_pct = round(sum(pct_list) / len(pct_list), 2) if pct_list else None
 
-    # Measured outcomes — only audits whose CTR window has closed. Everything
-    # else is `not_applicable` (never measured) and carries no evidence, so it
-    # is excluded from the verdict stats rather than counted as neutral.
-    measured = [r for r in applied if r.get("measurement_status") in MEASURED_STATUSES]
-    median_ctr_delta = None
-    win_rate = None
-    outcome_distribution = {"win": 0, "neutral": 0, "regression": 0, "total": 0}
-    ctr_deltas: list[float] = []
-    if measured:
-        # NB: this list is deliberately NOT called `deltas`. It used to be, which
-        # rebound the view-delta list above it — so `total_delta_views` returned
-        # a sum of CTR percentages and `positive_pct_share` divided a count of
-        # positive view deltas by a count of CTR rows, yielding 2160%.
-        ctr_deltas = [r["ctr_delta_pct"] for r in measured if r.get("ctr_delta_pct") is not None]
-        median_ctr_delta = round(statistics.median(ctr_deltas), 1) if ctr_deltas else None
-        counts = {k: sum(1 for r in measured if r["measurement_status"] == k)
-                  for k in MEASURED_STATUSES}
-        win_rate = round(100.0 * counts["win"] / len(measured), 1)
-        outcome_distribution = {**counts, "total": len(measured)}
+    # Measured outcomes — audits whose CTR window has closed. Everything else is
+    # `not_applicable` (never measured) and carries no evidence, so it is
+    # excluded from the verdict stats rather than counted as neutral.
+    #
+    # NOT scoped to `applied`: a verdict is evidence about the prompt that
+    # produced it, and reverting is what an operator does to a bad outcome — so
+    # filtering on `applied` would systematically drop the worst evidence. See
+    # verdicts.is_evidence. The view-count stats above stay applied-only, because
+    # those describe metadata that is actually live.
+    measured = [r for r in rows if verdicts.is_evidence(r)]
+    # NB: this list is deliberately NOT called `deltas`. It used to be, which
+    # rebound the view-delta list above it — so `total_delta_views` returned a
+    # sum of CTR percentages and `positive_pct_share` divided a count of positive
+    # view deltas by a count of CTR rows, yielding 2160%.
+    ctr_deltas = [r["ctr_delta_pct"] for r in measured if r.get("ctr_delta_pct") is not None]
+    median_ctr_delta = verdicts.median_ctr_delta_pct(r.get("ctr_delta") for r in measured)
+    win_rate = verdicts.win_rate(r["measurement_status"] for r in measured)
+    outcome_distribution = verdicts.distribution(r["measurement_status"] for r in measured)
 
     def _cohort(predicate) -> dict:
         sub = [r for r in applied if predicate(r)]

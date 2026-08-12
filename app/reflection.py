@@ -1,5 +1,4 @@
 import logging
-import statistics
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 
@@ -87,6 +86,7 @@ def _build_perf_report(channel_id: str) -> dict | None:
             "audit_id": a["id"],
             "measurement_status": status,
             "ctr_delta_pct": (delta * 100.0) if delta is not None else None,
+            "ctr_delta": delta,
             "title_before": a.get("title_before"),
             "title_after": a.get("suggested_title"),
             "title_changed": verdicts.TITLE in moved,
@@ -99,14 +99,14 @@ def _build_perf_report(channel_id: str) -> dict | None:
     if len(enriched) < _MIN_DATA_POINTS:
         return None
 
-    wins = sum(1 for r in enriched if r["measurement_status"] == "win")
-    win_rate = round(wins / len(enriched) * 100, 1)
+    win_rate = verdicts.win_rate(r["measurement_status"] for r in enriched)
     regression_count = sum(
         1 for r in enriched if r["is_recent"] and r["measurement_status"] == "regression"
     )
 
-    deltas = [r["ctr_delta_pct"] for r in enriched if r["ctr_delta_pct"] is not None]
-    median_delta = round(statistics.median(deltas), 1) if deltas else None
+    # Aggregated from the raw fractions, not from the per-row percentages: the
+    # UI and the prompt loop must not compute this number two different ways.
+    median_delta = verdicts.median_ctr_delta_pct(r["ctr_delta"] for r in enriched)
 
     def _lever_avg(key: str) -> float | None:
         sub = [r["ctr_delta_pct"] for r in enriched
@@ -512,28 +512,25 @@ def _cohort_median_ctr_delta(version_id: int) -> float | None:
     the audit row, which is the point of measuring CTR rather than views.
     """
     # Version-scoped measured audits, fully paged past the 1000-row cap.
+    #
+    # No `status='applied'` filter: this cohort is the evidence for or against a
+    # prompt version, and a regression an operator later reverted is still a
+    # regression that version produced. Filtering on applied would drop exactly
+    # the outcomes an operator felt the need to undo — the worst ones — and
+    # flatter the version that caused them. See verdicts.is_evidence.
     audits = fetch_all(
         supabase().table("audits")
         .select("id,measurement_status,measurement_result")
         .eq("prompt_version_id", version_id)
-        .eq("status", AuditStatus.APPLIED)
         .in_("measurement_status", list(MEASURED_STATUSES))
     )
     if not audits:
         return None
 
-    deltas = []
-    for a in audits:
-        if a.get("measurement_status") not in MEASURED_STATUSES:
-            continue
-        verdict = verdicts.from_audit(a)
-        delta = verdict.ctr_delta if verdict else None
-        if delta is not None:
-            deltas.append(delta * 100.0)
-
-    if len(deltas) < _MIN_DATA_POINTS:
+    usable = [v.ctr_delta for v in verdicts.evidence(audits) if v.ctr_delta is not None]
+    if len(usable) < _MIN_DATA_POINTS:
         return None
-    return statistics.median(deltas)
+    return verdicts.median_ctr_delta_pct(usable)
 
 
 def _check_auto_revert(channel_id: str) -> None:
