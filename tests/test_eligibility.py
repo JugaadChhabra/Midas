@@ -7,12 +7,13 @@ the style of tests/test_channel_audits.py.
 """
 import re
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from app import eligibility as el
 from app.eligibility import Job
+from tests.fakes import FakeSupabase
 
 
 # ── predicates ────────────────────────────────────────────────────────────
@@ -44,23 +45,30 @@ def test_has_work_is_either_path():
 
 
 # ── selection ─────────────────────────────────────────────────────────────
+#
+# Asserted as behaviour — which channels come back — rather than as query shape.
+# The double interprets the filters and honours the projection, so these tests say
+# what eligibility MEANS instead of restating how it is spelled. See tests/fakes.py.
 
-def _sb(rows):
-    """A supabase stub whose paged reads return `rows` for any filter chain."""
-    sb = MagicMock()
-    sel = sb.table.return_value.select.return_value
-    for chain in (
-        sel,                                  # no filter (EVERY, RECONCILE)
-        sel.eq.return_value,                  # one flag
-        sel.or_.return_value,                 # autopilot's two flags
-        sel.eq.return_value.or_.return_value,  # REACH with the opt-in narrowing
-    ):
-        chain.order.return_value.range.return_value.execute.return_value.data = rows
-    return sb
+FLEET = [
+    {"id": "audit_only", "autopilot_enabled": True, "autopilot_shorts_enabled": False,
+     "analytics_authorized": True, "measurement_enabled": True, "reach_warmup": False,
+     "playlist_health_enabled": False, "refresh_token": "tok-1"},
+    {"id": "paused", "autopilot_enabled": True, "autopilot_paused_reason": "token_expired",
+     "autopilot_shorts_enabled": True, "analytics_authorized": True,
+     "measurement_enabled": False, "reach_warmup": True,
+     "playlist_health_enabled": True, "refresh_token": "tok-2"},
+    {"id": "shorts_only", "autopilot_enabled": False, "autopilot_shorts_enabled": True,
+     "analytics_authorized": False, "measurement_enabled": False, "reach_warmup": False,
+     "playlist_health_enabled": False, "refresh_token": "tok-3"},
+    {"id": "idle", "autopilot_enabled": False, "autopilot_shorts_enabled": False,
+     "analytics_authorized": True, "measurement_enabled": False, "reach_warmup": False,
+     "playlist_health_enabled": False, "refresh_token": "tok-4"},
+]
 
 
-def _run(job, rows, columns="id", **settings_overrides):
-    sb = _sb(rows)
+def _run(job, columns="id", fleet=None, **settings_overrides):
+    sb = FakeSupabase({"channels": fleet if fleet is not None else FLEET})
     patches = [patch.object(el, "supabase", return_value=sb)]
     for k, v in settings_overrides.items():
         patches.append(patch.object(el.settings, k, v))
@@ -73,110 +81,76 @@ def _run(job, rows, columns="id", **settings_overrides):
             p.stop()
 
 
-def test_analytics_selects_on_the_consent_flag():
-    _, sb = _run(Job.ANALYTICS, [{"id": "c1"}])
-    sb.table.return_value.select.return_value.eq.assert_called_once_with(
-        "analytics_authorized", True)
+def _ids(job, **kw):
+    got, _ = _run(job, **kw)
+    return sorted(c["id"] for c in got)
 
 
-def test_playlist_health_selects_on_its_own_flag():
-    _, sb = _run(Job.PLAYLIST_HEALTH, [{"id": "c1"}])
-    sb.table.return_value.select.return_value.eq.assert_called_once_with(
-        "playlist_health_enabled", True)
+def test_analytics_excludes_channels_that_never_consented():
+    assert _ids(Job.ANALYTICS) == ["audit_only", "idle", "paused"]
 
 
-def test_autopilot_asks_sql_for_either_flag_then_filters_in_python():
-    """The OR keeps the read small; the pause check has to happen in Python
-    because a paused channel is still a valid shorts candidate."""
-    rows = [
-        {"id": "audit", "autopilot_enabled": True},
-        {"id": "paused", "autopilot_enabled": True, "autopilot_paused_reason": "x"},
-        {"id": "shorts", "autopilot_shorts_enabled": True},
-    ]
-    got, sb = _run(Job.AUTOPILOT, rows)
-    sb.table.return_value.select.return_value.or_.assert_called_once_with(
-        "autopilot_enabled.eq.true,autopilot_shorts_enabled.eq.true")
-    assert [c["id"] for c in got] == ["audit", "shorts"]
+def test_playlist_health_runs_only_where_its_flag_is_on():
+    assert _ids(Job.PLAYLIST_HEALTH) == ["paused"]
 
 
 def test_the_audit_job_excludes_a_paused_channel_the_shorts_job_keeps():
-    rows = [{"id": "paused", "autopilot_enabled": True,
-             "autopilot_paused_reason": "token_expired",
-             "autopilot_shorts_enabled": True}]
-    audit, _ = _run(Job.AUDIT, rows)
-    shorts, _ = _run(Job.SHORTS, rows)
-    assert audit == []
-    assert [c["id"] for c in shorts] == ["paused"]
+    """The pause is path-specific: a channel can be picked purely for shorts."""
+    assert _ids(Job.AUDIT) == ["audit_only"]
+    assert _ids(Job.SHORTS) == ["paused", "shorts_only"]
+    assert _ids(Job.AUTOPILOT) == ["audit_only", "paused", "shorts_only"]
 
 
-def test_reach_narrows_to_the_measurement_optin_by_default():
-    _, sb = _run(Job.REACH, [{"id": "c1"}], REPORTING_MEASURED_CHANNELS_ONLY=True)
-    eq = sb.table.return_value.select.return_value.eq
-    eq.assert_called_once_with("analytics_authorized", True)
-    eq.return_value.or_.assert_called_once_with(
-        "measurement_enabled.eq.true,reach_warmup.eq.true")
+def test_an_idle_channel_is_no_ones_work():
+    assert "idle" not in _ids(Job.AUTOPILOT)
 
 
-def test_reach_widens_when_the_flag_is_off():
-    _, sb = _run(Job.REACH, [{"id": "c1"}], REPORTING_MEASURED_CHANNELS_ONLY=False)
-    sb.table.return_value.select.return_value.eq.return_value.or_.assert_not_called()
+def test_reach_needs_consent_and_an_opt_in():
+    """analytics_authorized AND (measurement_enabled OR reach_warmup).
+    `shorts_only` has an opt-in but no consent; `idle` has consent but no opt-in."""
+    assert _ids(Job.REACH, REPORTING_MEASURED_CHANNELS_ONLY=True) == \
+        ["audit_only", "paused"]
+
+
+def test_reach_widens_to_every_consented_channel_when_the_flag_is_off():
+    assert _ids(Job.REACH, REPORTING_MEASURED_CHANNELS_ONLY=False) == \
+        ["audit_only", "idle", "paused"]
 
 
 def test_reconcile_honours_the_env_allowlist():
-    rows = [{"id": "in1"}, {"id": "out"}, {"id": "in2"}]
-    got, _ = _run(Job.RECONCILE, rows,
-                  PLAYLIST_RECONCILE_ALL=False,
-                  PLAYLIST_RECONCILE_CHANNELS={"in1", "in2"})
-    assert [c["id"] for c in got] == ["in1", "in2"]
+    assert _ids(Job.RECONCILE, PLAYLIST_RECONCILE_ALL=False,
+                PLAYLIST_RECONCILE_CHANNELS={"idle", "paused"}) == ["idle", "paused"]
 
 
 def test_reconcile_wildcard_restores_every_channel():
-    rows = [{"id": "a"}, {"id": "b"}]
-    got, _ = _run(Job.RECONCILE, rows, PLAYLIST_RECONCILE_ALL=True,
-                  PLAYLIST_RECONCILE_CHANNELS=set())
-    assert [c["id"] for c in got] == ["a", "b"]
+    assert _ids(Job.RECONCILE, PLAYLIST_RECONCILE_ALL=True,
+                PLAYLIST_RECONCILE_CHANNELS=set()) == \
+        ["audit_only", "idle", "paused", "shorts_only"]
 
 
-def test_every_applies_no_filter():
-    got, sb = _run(Job.EVERY, [{"id": "a"}, {"id": "b"}])
-    sel = sb.table.return_value.select.return_value
-    sel.eq.assert_not_called()
-    sel.or_.assert_not_called()
-    assert len(got) == 2
+def test_every_means_every_channel():
+    assert _ids(Job.EVERY) == ["audit_only", "idle", "paused", "shorts_only"]
 
 
-def test_the_caller_chooses_the_projection():
-    """autopilot needs the whole row (OAuth tokens); the dashboard deliberately
-    does not read them."""
-    _, sb = _run(Job.AUTOPILOT, [], columns="*")
-    sb.table.return_value.select.assert_called_once_with("*")
+def test_a_narrow_projection_still_filters_correctly():
+    """The bug a live parity check caught and the old mock-based tests could not:
+    with columns="id" the predicate read flags that were not selected, matched
+    nothing, and every autopilot job returned an empty list — the tick would have
+    gone silently quiet. The double honours the projection, so this now fails at
+    the assertion rather than in production."""
+    assert _ids(Job.AUDIT, columns="id") == ["audit_only"]
+    assert _ids(Job.SHORTS, columns="id") == ["paused", "shorts_only"]
 
 
-@pytest.mark.parametrize("job,needed", [
-    (Job.AUDIT, ["autopilot_enabled", "autopilot_paused_reason"]),
-    (Job.SHORTS, ["autopilot_shorts_enabled"]),
-    (Job.AUTOPILOT, ["autopilot_enabled", "autopilot_paused_reason",
-                     "autopilot_shorts_enabled"]),
-])
-def test_a_narrow_projection_still_includes_what_the_predicate_reads(job, needed):
-    """The failure this prevents is silent, and was real: with columns="id" the
-    Python predicate read absent keys, matched nothing, and the job went quiet.
-    A live parity check caught it; these assertions are why it can't return."""
-    _, sb = _run(job, [], columns="id")
-    selected = sb.table.return_value.select.call_args[0][0]
-    for col in needed:
-        assert col in selected, f"{job} filters on {col} but did not select it"
+def test_the_caller_can_ask_for_the_whole_row():
+    """autopilot needs the OAuth token; the dashboard deliberately does not."""
+    got, _ = _run(Job.AUDIT, columns="*")
+    assert got[0]["refresh_token"] == "tok-1"
 
 
-def test_a_wildcard_projection_is_left_alone():
-    _, sb = _run(Job.AUDIT, [], columns="*")
-    assert sb.table.return_value.select.call_args[0][0] == "*"
-
-
-def test_the_predicate_columns_are_not_duplicated():
-    _, sb = _run(Job.AUDIT, [], columns="id,autopilot_enabled")
-    selected = sb.table.return_value.select.call_args[0][0].split(",")
-    assert len(selected) == len(set(selected))
+def test_a_narrow_projection_does_not_leak_the_token():
+    got, _ = _run(Job.AUDIT, columns="id")
+    assert "refresh_token" not in got[0]
 
 
 def test_an_unknown_job_raises():
