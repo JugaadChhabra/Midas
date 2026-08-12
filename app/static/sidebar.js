@@ -272,5 +272,7 @@
       '<span class="chan-opt-name">Add channel</span></a>';
   }
 
-  window.Sidebar = { mount, setChannels };
+  // shortLabel/commonWordPrefix are shared with the Running board, so channel
+  // names are shortened the same way everywhere.
+  window.Sidebar = { mount, setChannels, shortLabel, commonWordPrefix };
 })();

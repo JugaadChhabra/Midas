@@ -2,274 +2,132 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Midas</title>
+<title>Midas · Running</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="/static/theme.css" />
 <style>
-  /* Page layout + widgets unique to the dashboard. Shared tokens and components
-     live in /static/theme.css; every rule here consumes those tokens (no colour
-     literals) so the dashboard's look can't drift from the other pages. */
   /* The shell owns page layout (see .app-shell in theme.css); body just
      provides the backdrop the inset content panel sits on. */
   body { margin:0; background:var(--surface-faint); }
+  button, .btn { padding:.5rem .9rem; }
+  .btn-sm { padding:.25rem .55rem; font-size:.78rem; }
 
-  .freshness-ok { color:var(--color-ok); }
-  .freshness-stale { color:var(--color-warn); }
-  .freshness-old { color:var(--color-err); }
-  .pace-bar { display:inline-block; width:80px; height:6px; background:var(--surface-tint); border-radius:3px; vertical-align:middle; overflow:hidden; }
-  .pace-bar > i { display:block; height:100%; background:var(--color-ok); }
-
-  /* Hero — the live "today / now" figures; the dashboard's focal point. */
-  .hero { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:.9rem; margin:1.1rem 0; }
-  .hero-tile { border:1px solid var(--border); border-radius:var(--radius); padding:1.05rem 1.2rem; display:flex; flex-direction:column; }
-  .hero-tile .hv { font-size:2.4rem; font-weight:800; line-height:1; letter-spacing:-.02em; }
-  .hero-tile .hl { font-size:.78rem; font-weight:600; opacity:.7; text-transform:uppercase; letter-spacing:.05em; margin-top:.45rem; }
-  .hero-tile .hsub { font-size:.75rem; opacity:.55; margin-top:.3rem; }
-
-  /* Attention banner — shown only when something needs the operator. */
-  .attention { border:1px solid var(--color-warn-border); background:var(--color-warn-bg); color:var(--color-warn);
-               border-radius:var(--radius); padding:.7rem 1rem; margin:1rem 0; font-size:.9rem; }
-
-  /* Mini pipeline bar in table */
-  .mini-prog { display:flex; align-items:center; gap:.35rem; }
-  .mini-track { width:48px; height:5px; background:var(--surface-tint); border-radius:3px; overflow:hidden; }
-  .mini-fill  { height:100%; border-radius:3px; background:var(--color-accent); }
-
-  /* Activity feed */
-  .feed { display:flex; flex-direction:column; gap:.35rem; }
-  .feed-item { display:flex; gap:.65rem; align-items:flex-start; font-size:.87rem;
-               padding:.5rem .7rem; border-radius:7px; border:1px solid var(--surface-tint); }
-  .feed-item .fbody { flex:1; }
-  .feed-item .ftime { font-size:.74rem; opacity:.45; flex-shrink:0; white-space:nowrap; }
+  /* Attention banner — only when something needs saying at the very top. */
+  .attention { border:1px solid var(--color-warn-border); background:var(--color-warn-bg);
+               color:var(--color-warn); border-radius:var(--radius); padding:.7rem 1rem;
+               margin:0 0 1.2rem; font-size:.9rem; }
 </style>
 </head>
 <body>
   <div class="app-shell" id="app-shell">
   <main class="app-main">
-  <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
-    <div>
-      <h1 style="margin-bottom:.25rem">All channels</h1>
-      <p class="sub">YouTube metadata audit + write-back. Autopilot ready.</p>
+    <header class="page-head">
+      <h1 class="page-title">Running</h1>
+    </header>
+
+    <p class="page-lede" id="run-lede">Checking…</p>
+    <p class="page-meta" id="run-meta"></p>
+
+    <div id="attention" class="attention" role="alert" hidden></div>
+
+    <div class="quota" id="quota" aria-live="polite"></div>
+
+    <div id="groups" aria-live="polite">
+      <div class="skel" data-skeleton data-rows="6"></div>
     </div>
-  </div>
-
-  <!-- Attention banner — only rendered when a channel needs the operator -->
-  <div id="attention" class="attention" role="alert" hidden></div>
-
-  <!-- Hero: live today / now figures — the focal point -->
-  <div class="hero" id="hero" aria-live="polite">Loading…</div>
-
-  <!-- Channels -->
-  <div class="card">
-    <!-- "Add channel" moved into the sidebar's channel switcher, where the rest
-         of the channel-picking lives. -->
-    <h3 style="margin:0">Connected channels</h3>
-    <div id="channels" style="margin-top:.5rem">Loading…</div>
-  </div>
-
-  <!-- Activity feed -->
-  <div class="card">
-    <h3 style="margin-top:0; font-size:.95rem;">Recent activity</h3>
-    <div class="feed" id="activity-feed" aria-live="polite" role="log"><span class="muted">Loading…</span></div>
-  </div>
-
   </main>
   </div>
 
+  <div id="toasts" aria-live="assertive" role="alert"></div>
+
 <script src="/static/swr.js"></script>
-<script src="/static/status.js"></script>
+<script src="/static/components.js"></script>
 <script src="/static/sidebar.js"></script>
+<script src="/static/running.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const fmt = (n) => (n ?? 0).toLocaleString();
-const signed = (n) => (n > 0 ? '+' : '') + fmt(n ?? 0);
-const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-function freshnessClass(hours) {
-  if (hours == null) return 'freshness-old';
-  if (hours < 6) return 'freshness-ok';
-  if (hours < 24) return 'freshness-stale';
-  return 'freshness-old';
-}
-function freshnessText(hours) {
-  if (hours == null) return 'never';
-  if (hours < 1) return Math.round(hours * 60) + ' min ago';
-  if (hours < 48) return Math.round(hours) + 'h ago';
-  return Math.round(hours / 24) + 'd ago';
-}
-function autopilotPill(c) {
-  if (c.autopilot_paused_reason) return `<span class="pill pill--err">Paused</span>`;
-  if (c.autopilot_enabled) return `<span class="pill pill--ok">Running</span>`;
-  return `<span class="pill pill--neutral">Off</span>`;
-}
-function pace(c) {
-  const cap = c.autopilot_daily_cap || 0;
-  if (!cap) return '';
-  const pct = Math.max(0, Math.min(100, (c.applied_today / cap) * 100));
-  return `<span class="muted" style="font-size:.78rem">${c.applied_today}/${cap}</span>
-          <span class="pace-bar"><i style="width:${pct}%"></i></span>`;
-}
-function fmtResetTime(seconds) {
-  if (seconds == null) return '';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
-// The rail lives in /static/sidebar.js (shared with the channel page). This is
-// the no-channel-selected state, so its one section is the fleet view itself;
-// the footer switcher is how you drop into a channel.
+// The rail here is global — this page isn't scoped to a channel, so the only
+// section is the board itself and the switcher is how you drop into a channel.
 Sidebar.mount({
-  items: [{ id: 'all', label: 'All channels', icon: 'home', href: '/' }],
-  activeId: 'all',
+  items: [{ id: 'running', label: 'Running', icon: 'home', href: '/' }],
+  activeId: 'running',
 });
 
-function renderDashboard(j) {
-  renderHero(j);
-  renderAttention(j.health);
-  renderChannels(j.channels, j.pipeline);
-  renderActivityFeed(j.activity || []);
-  // Reuses the payload already on screen — the rail costs no extra request.
-  Sidebar.setChannels(j.channels, null);
+function toast(msg, kind = 'ok', timeout = 3200) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = 0; el.style.transition = '.3s';
+                     setTimeout(() => el.remove(), 300); }, timeout);
 }
 
-// Stale-while-revalidate: paint the last dashboard instantly, then refresh in
-// the background and repaint only if something changed. The 30s interval below
-// reuses this, so each tick is a silent revalidate rather than a blank reload.
-function loadDashboard() {
-  SWR.swr('/dashboard', renderDashboard, {
+const els = {
+  lede: $('run-lede'), meta: $('run-meta'),
+  groups: $('groups'), quota: $('quota'),
+};
+
+function paint(payload) {
+  Running.render(payload, els);
+  Sidebar.setChannels(payload.channels, null);
+
+  const paused = (payload.health || {}).autopilot_paused || 0;
+  const banner = $('attention');
+  banner.hidden = paused === 0;
+  if (paused) {
+    banner.textContent = `${paused} channel${paused > 1 ? 's' : ''} stopped on their own — `
+      + 'open one to see why and start it again.';
+  }
+}
+
+// Stale-while-revalidate: paint the last board instantly, then refresh behind
+// it. The 30s poll below reuses this, so each tick is a quiet repaint rather
+// than a blank reload.
+function load() {
+  SWR.swr('/dashboard', paint, {
     onError: () => {
       if (SWR.get('/dashboard') === undefined) {
-        $('channels').innerHTML = '<em style="color:var(--color-err)">Failed to load. Is Supabase configured?</em>';
+        els.groups.innerHTML =
+          '<em class="muted">Could not reach Midas. Is the server running?</em>';
       }
     },
   });
 }
 
-// Absolute clock time (viewer's IST) when YouTube's daily quota resets, derived
-// from the seconds-until-reset the server sends. Lets the operator plan around
-// the midnight-Pacific reset in local terms.
-function quotaResetIST(seconds) {
-  if (seconds == null) return '';
-  const at = new Date(Date.now() + seconds * 1000);
-  return at.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST';
-}
-
-// The four live figures the dashboard leads with — each a "right now / today"
-// operational number. Cumulative totals live on each channel's Overview page.
-function renderHero(j) {
-  const q = j.quota || {}, k = j.kpis || {};
-  const remPct = q.remaining / Math.max(1, (q.limit - q.safety_buffer));
-  const qColor = remPct > 0.3 ? 'var(--color-ok)' : remPct > 0.1 ? 'var(--color-warn)' : 'var(--color-err)';
-  const qVal = q.remaining < 0 ? `${fmt(-q.remaining)} over` : fmt(q.remaining);
-  const jobs = k.jobs_running ?? 0;
-  $('hero').innerHTML = `
-    <div class="hero-tile">
-      <div class="hv" style="color:${qColor}">${qVal}</div>
-      <div class="hl">YouTube quota left</div>
-      <div class="hsub">resets in ${fmtResetTime(q.reset_in_seconds)} · ${quotaResetIST(q.reset_in_seconds)}</div>
-    </div>
-    <div class="hero-tile">
-      <div class="hv">${fmt(k.shorts_cut_today)}</div>
-      <div class="hl">Shorts cut today</div>
-    </div>
-    <div class="hero-tile">
-      <div class="hv">${fmt(k.audited_today)}</div>
-      <div class="hl">Videos audited today</div>
-    </div>
-    <div class="hero-tile">
-      <div class="hv" style="color:${jobs > 0 ? 'var(--color-accent)' : 'inherit'}">${fmt(jobs)}</div>
-      <div class="hl">Jobs running now</div>
-      <div class="hsub">${jobs > 0 ? 'shorts cutting in progress' : 'idle'}</div>
-    </div>`;
-}
-
-// Only surfaces when the operator needs to act — today, that's paused autopilot.
-function renderAttention(h) {
-  const el = $('attention');
-  const paused = (h && h.autopilot_paused) || 0;
-  if (paused > 0) {
-    el.innerHTML = `<b>${paused} channel${paused > 1 ? 's' : ''} paused</b> — autopilot has stopped. Open the channel to see why and resume.`;
-    el.hidden = false;
+// Row actions live here, not in running.js — the board decides what a state
+// means, the page decides what to do about it.
+document.addEventListener('click', (e) => {
+  const act = e.target.closest('[data-run-action]');
+  if (!act) return;
+  e.preventDefault();          // the row is a link; the button inside it isn't
+  e.stopPropagation();
+  const { runAction, channel } = act.dataset;
+  if (runAction === 'Sync') {
+    toast('Fetching the latest from YouTube…');
+    fetch(`/channels/${encodeURIComponent(channel)}/sync`, { method: 'POST' })
+      .then(r => r.json())
+      .then(j => { toast(`${j.synced ?? 0} new videos.`, 'ok'); SWR.invalidate('/dashboard'); load(); })
+      .catch(() => toast('Sync failed.', 'err'));
   } else {
-    el.hidden = true;
+    // Starting and resuming change what the machine does on its own, so they
+    // happen on the channel page where the reason it stopped is in view.
+    location.href = `/channel?id=${encodeURIComponent(channel)}#autopilot`;
   }
-}
-
-function renderChannels(list, pipeline) {
-  // The empty state points at the switcher, since that's where "Add channel" is.
-  if (!list || !list.length) { $('channels').innerHTML = '<em class="muted">No channels yet — use “Add channel” in the switcher, bottom-left.</em>'; return; }
-  $('channels').innerHTML = `<table>
-    <thead><tr>
-      <th>Name</th><th>Handle</th><th>Pipeline</th><th>Applied 7d</th>
-      <th>Δ views 7d</th><th>Autopilot</th><th>Synced</th><th></th>
-    </tr></thead><tbody>` +
-    list.map(c => {
-      const totalVids = c.video_count || 0;
-      // Exact per-channel audited count from /dashboard (audited_regular + audited_shorts).
-      const audited = (c.audited_regular || 0) + (c.audited_shorts || 0);
-      const touchedPct = totalVids > 0 ? Math.min(100, Math.round(audited / totalVids * 100)) : 0;
-      return `<tr>
-        <td><b>${escapeHtml(c.name || c.id)}</b>
-            ${c.analytics_authorized ? '' : '<span class="pill pill--warn" style="margin-left:.4rem" title="Reconnect for analytics — Loop 0 polling is skipped">Reconnect for analytics</span>'}</td>
-        <td class="muted">${escapeHtml(c.handle || '')}</td>
-        <td>
-          <div class="mini-prog" title="${audited} of ${totalVids} videos audited">
-            <div class="mini-track"><div class="mini-fill" style="width:${touchedPct}%"></div></div>
-            <span class="muted" style="font-size:.76rem">${touchedPct}%</span>
-          </div>
-          ${c.pending_count > 0 ? `<span class="pill pill--info" style="margin-top:.2rem;display:inline-block">${c.pending_count} pending</span>` : ''}
-        </td>
-        <td>${c.applied_7d}</td>
-        <td class="${c.delta_views_7d > 0 ? 'pos' : c.delta_views_7d < 0 ? 'neg' : 'muted'}">${signed(c.delta_views_7d)}</td>
-        <td>${autopilotPill(c)} ${pace(c)}</td>
-        <td class="${freshnessClass(c.hours_since_sync)}">${freshnessText(c.hours_since_sync)}</td>
-        <td><a class="btn" href="/channel?id=${encodeURIComponent(c.id)}" aria-label="Open channel ${escapeHtml(c.name || c.id)}">Open →</a></td>
-      </tr>`;
-    }).join('') + '</tbody></table>';
-}
-
-function renderActivityFeed(items) {
-  if (!items.length) {
-    $('activity-feed').innerHTML = '<span class="muted" style="font-size:.88rem">No recent activity.</span>';
-    return;
-  }
-  $('activity-feed').innerHTML = items.map(item => {
-    const ts = item.applied_at || item.created_at || '';
-    const ago = ts ? timeAgo(ts) : '';
-    const channelPart = item.channel_name ? `<span class="muted"> · ${escapeHtml(item.channel_name)}</span>` : '';
-    return `<div class="feed-item">
-      <div class="fbody">
-        ${statusPill(item.status, 'audit', 'sm')}
-        <b style="margin-left:.35rem">${escapeHtml(item.video_title || item.video_id)}</b>${channelPart}
-      </div>
-      <div class="ftime">${escapeHtml(ago)}</div>
-    </div>`;
-  }).join('');
-}
-
-function timeAgo(iso) {
-  try {
-    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (diff < 60) return diff + 's ago';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    return Math.floor(diff / 86400) + 'd ago';
-  } catch { return ''; }
-}
-
-loadDashboard();
-// Poll only while the tab is visible. A backgrounded dashboard tab otherwise keeps
-// triggering full videos+audits scans on the server (Supabase egress) for nothing;
-// refresh immediately whenever the tab regains focus.
-let dashTimer = null;
-function startDashPolling() { if (!dashTimer) dashTimer = setInterval(loadDashboard, 30000); }
-function stopDashPolling() { clearInterval(dashTimer); dashTimer = null; }
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { stopDashPolling(); }
-  else { loadDashboard(); startDashPolling(); }
 });
-if (!document.hidden) startDashPolling();
+
+load();
+
+// Poll only while the tab is visible — a backgrounded board otherwise keeps
+// triggering full scans on the server for nobody.
+let timer = null;
+const startPolling = () => { if (!timer) timer = setInterval(load, 30000); };
+const stopPolling = () => { clearInterval(timer); timer = null; };
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopPolling();
+  else { load(); startPolling(); }
+});
+if (!document.hidden) startPolling();
 </script>
 </body>
 </html>

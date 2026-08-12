@@ -57,10 +57,33 @@
   /* App shell */
   --sidebar-w:            248px;
   --sidebar-w-collapsed:   60px;
+
+  /* Text ramp — four steps, not two. The alpha greys above can't express
+     "supporting" vs "metadata" vs "disabled", so everything muted ended up
+     looking equally muted. */
+  --ink:    inherit;
+  --ink-2:  #4a4f57;
+  --ink-3:  #767c86;
+  --ink-4:  #9aa0aa;
+
+  /* Depth — a recessed groove, and a fill that sits down inside it. Used by
+     .meter, .progress and .hold so anything with a track reads the same. */
+  --sunken:    #e8eaee;
+  --groove:    inset 0 1px 2px #14161a26, inset 0 0 0 1px #14161a14;
+  --raised:    inset 0 1px 0 #ffffff59, inset 0 -1px 1px #00000024;
+  --fill-gloss: linear-gradient(180deg, #ffffff2e, #00000021);
+  --hold-fill: #c0392b30;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root { --panel-bg: #222; --panel-fg: #fff; }
+  :root {
+    --panel-bg: #222; --panel-fg: #fff;
+    --ink-2: #aab1ba; --ink-3: #7d858f; --ink-4: #5d646d;
+    --sunken: #090b0d;
+    --groove: inset 0 1px 2px #00000087, inset 0 0 0 1px #ffffff0f;
+    --raised: inset 0 1px 0 #ffffff33, inset 0 -1px 1px #00000052;
+    --hold-fill: #f0685a47;
+  }
 }
 
 /* ── Base ───────────────────────────────────────────────────────────── */
@@ -317,3 +340,91 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .modal { background:var(--panel-bg); color:var(--panel-fg); border-radius:var(--radius); padding:1.1rem 1.25rem; max-width:440px; width:90%; box-shadow:var(--shadow-2); }
 .modal-msg { line-height:1.5; margin-bottom:1rem; white-space:pre-wrap; }
 .modal-actions { display:flex; gap:.5rem; justify-content:flex-end; }
+
+/* ── Depth: meters and progress ─────────────────────────────────────── */
+/* The track is a groove with real inner padding, so the fill is visibly
+   contained rather than sitting flush on top. The gloss overlay shades
+   whatever colour is underneath, so one rule covers accent and ok. */
+.meter { height:10px; padding:1.5px; background:var(--sunken); box-shadow:var(--groove);
+         border-radius:var(--radius-pill); overflow:hidden; }
+.meter > i { display:block; height:100%; border-radius:var(--radius-pill);
+             background-color:var(--color-accent); background-image:var(--fill-gloss);
+             box-shadow:var(--raised); transition:width .4s cubic-bezier(.23,1,.32,1); }
+.meter.ok > i { background-color:var(--color-ok); }
+
+/* ── Hold to confirm ────────────────────────────────────────────────── */
+/* For anything that changes something on YouTube. A click can be a slip; a
+   deliberate press can't. The fill is the progress readout, so it carries its
+   own tint rather than borrowing a status colour. */
+.hold { position:relative; overflow:hidden; isolation:isolate; }
+.hold .fill { position:absolute; inset:0; z-index:-1; width:0;
+              background:var(--hold-fill); transition:width 60ms linear; }
+.hold[data-holding="true"] { border-color:var(--color-err); }
+.hold[data-done="true"] { border-color:var(--color-ok); color:var(--color-ok); }
+.hold[data-done="true"] .fill { width:100%; background:var(--color-ok-bg); }
+.hold.btn-primary .fill { background:#ffffff4d; }
+.hold.btn-primary[data-holding="true"] { border-color:#fff6; }
+
+/* ── Status lamp ────────────────────────────────────────────────────── */
+/* State as form, not only as text — readable down a column of 13 rows. */
+.lamp { width:9px; height:9px; border-radius:50%; background:var(--color-neutral); flex:0 0 auto; }
+.lamp--run   { background:var(--color-ok);   box-shadow:0 0 0 3px var(--color-ok-bg); }
+.lamp--warn  { background:var(--color-warn); box-shadow:0 0 0 3px var(--color-warn-bg); }
+.lamp--fault { background:var(--color-err);  box-shadow:0 0 0 3px var(--color-err-bg); }
+
+/* ── Heartbeat / sparkline ──────────────────────────────────────────── */
+/* Bars share one scale across every row, or rows stop being comparable.
+   The baseline is what makes an empty strip read as flatline, not absence. */
+.beat { display:inline-flex; align-items:flex-end; gap:3px; height:20px; padding-bottom:3px;
+        border-bottom:1px solid var(--border-soft); }
+.beat > i { width:8px; border-radius:1.5px; background:var(--color-ok); display:block; }
+.beat > i.zero { height:2px; background:var(--border-strong); opacity:.5; }
+.beat > i.now  { box-shadow:0 4px 0 -1px var(--color-accent); }
+.beat--neutral > i { background:var(--text-faint); }
+
+/* ── Triage group ───────────────────────────────────────────────────── */
+.group { margin-bottom:1.6rem; }
+.group-head { display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem;
+              font-size:.69rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+              color:var(--ink-3); }
+.group-head .n { font-variant-numeric:tabular-nums; letter-spacing:0; color:var(--ink-4); }
+.group-head .rule { flex:1; height:1px; background:var(--border-soft); }
+
+/* ── Fleet row ──────────────────────────────────────────────────────── */
+/* One channel on the Running board. A whole-row target, so the columns are
+   declared here rather than on a table. */
+.frow { display:grid; grid-template-columns:9px minmax(140px,1.3fr) minmax(165px,1.1fr) 86px 78px 84px;
+        gap:.9rem; align-items:center; width:100%; padding:.7rem .75rem; text-align:left;
+        background:none; border:1px solid transparent; border-radius:var(--radius-md);
+        transition:background-color .12s, border-color .12s; }
+.frow, .frow:hover { text-decoration:none; color:inherit; }
+.frow:hover { background:var(--surface-tint); border-color:var(--border-soft); }
+.frow + .frow { margin-top:2px; }
+.frow .nm  { font-weight:600; font-size:.86rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.frow .why { font-size:.79rem; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.frow .why b { color:var(--ink-2); font-weight:600; }
+.frow .fig { font-variant-numeric:tabular-nums; font-size:.76rem; color:var(--ink-3); }
+.frow .act { justify-self:end; }
+
+/* ── Quota strip ────────────────────────────────────────────────────── */
+.quota { display:flex; align-items:center; gap:.9rem; padding:.7rem .9rem; margin-bottom:1.6rem;
+         border:1px solid var(--border); border-radius:var(--radius); flex-wrap:wrap; }
+.quota-fig { font-size:1.1rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
+.quota-l { font-size:.7rem; color:var(--ink-3); }
+.quota .meter { flex:1; min-width:110px; }
+
+@media (max-width: 860px) {
+  .frow { grid-template-columns:9px 1fr auto; row-gap:.35rem; }
+  .frow .why { grid-column:2 / -1; }
+  .frow .beat, .frow .fig { display:none; }
+}
+
+/* ── Skeleton ───────────────────────────────────────────────────────── */
+.skel { display:grid; gap:.6rem; }
+.skel-row { display:grid; grid-template-columns:9px 1fr 86px 84px; gap:.9rem; align-items:center; }
+.skel-box { height:11px; border-radius:4px; background:var(--surface-tint); position:relative; overflow:hidden; }
+.skel-box.thumb { height:9px; border-radius:50%; }
+.skel-box::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
+  background:linear-gradient(90deg, transparent, var(--border), transparent); animation:skel-sweep 1.4s infinite; }
+@keyframes skel-sweep { 100% { transform:translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .skel-box::after { animation:none; } }
