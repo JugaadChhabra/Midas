@@ -81,6 +81,23 @@ def window_for(applied: date) -> tuple[Window, Window]:
     return pre, post
 
 
+def window_ending(end: date) -> Window:
+    """The MEASUREMENT_WINDOW_DAYS window whose last data-day is `end`.
+
+    Read this together with `window_for`: it is exactly the PRE window of an
+    audit applied `ROLLOVER_SLOP_DAYS + 1` days after `end`. That equivalence is
+    what lets certification ask a question the evaluator will later answer the
+    same way — see `certify`.
+    """
+    start = end - timedelta(days=settings.MEASUREMENT_WINDOW_DAYS - 1)
+    return start.isoformat(), end.isoformat()
+
+
+def applied_after(end: date) -> date:
+    """The apply date whose pre window is exactly `window_ending(end)`."""
+    return end + timedelta(days=ROLLOVER_SLOP_DAYS + 1)
+
+
 def days(window: Window) -> list[str]:
     """Inclusive list of ISO data-days in `window`.
 
@@ -124,18 +141,6 @@ def missing_days(covered: set[str], *windows: Window) -> list[str]:
     return [d for d in need if d not in covered]
 
 
-def contiguous_run(covered: set[str]) -> int:
-    """Longest run of consecutive data-days in the set (0 if empty)."""
-    if not covered:
-        return 0
-    ordered = sorted(date.fromisoformat(d) for d in covered)
-    best = run = 1
-    for prev, cur in zip(ordered, ordered[1:]):
-        run = run + 1 if (cur - prev).days == 1 else 1
-        best = max(best, run)
-    return best
-
-
 def frontier(covered: set[str]) -> str | None:
     """The most recent covered data-day, or None.
 
@@ -148,26 +153,47 @@ def frontier(covered: set[str]) -> str | None:
 
 # ── Certification ─────────────────────────────────────────────────────────
 
-def certify(channel_id: str, min_days: int = 7) -> dict:
-    """Phase 0/0.5 exit gate: is this channel's CTR trustworthy enough to measure?
+def certify(channel_id: str) -> dict:
+    """Phase 0/0.5 exit gate: is this channel's reach complete enough to measure?
 
-    Certified when reach reports have been ingested for >= `min_days`
-    CONTIGUOUS calendar data-days (default 7 — the Phase 0 ">=1 week" gate).
-    This gate is about data *presence*, not per-video signal strength.
+    Certified when the window ending at the frontier is fully covered — which
+    is to say: an audit applied `applied_after(frontier)` would have a fully
+    observable pre window. The gate and the evaluator therefore ask the same
+    question through the same predicate, and cannot drift apart.
 
-    KNOWN GAP, corrected in the commit after this one: 7 contiguous days
-    anywhere in history is a far weaker test than what `measurement` actually
-    needs (a specific 2 x MEASUREMENT_WINDOW_DAYS of days around the apply
-    date). A channel enabled at 7 days has audits whose pre-window reaches
-    into data-days no reporting job existed for — permanently unobservable,
-    and eventually recorded as measured-and-flat.
+    This replaces ">= 7 contiguous data-days anywhere in history", which was a
+    sixth of what the evaluator needs. Under it a channel could be switched on
+    while audits applied that day had pre windows reaching back into data-days
+    no reporting job existed for. YouTube only emits reports for dates after a
+    job is created, so those days were unobservable forever, and 36 days later
+    the grace path recorded them as measured-and-flat.
+
+    Anchored to the frontier, not to today, deliberately: reach CSVs arrive 1-6
+    days after their data-day, so a window ending today can never be covered and
+    a today-anchored gate would never pass. A stale frontier does not make this
+    easier — it still demands a full window of consecutive covered days — it just
+    means the question is asked about a slightly older apply date. `latest_day`
+    is in the response so staleness is visible to whoever reads it.
+
+    "Covered" is data presence, not signal strength; the MIN_IMPRESSIONS floor
+    is applied per video, later, by `measurement`.
     """
     covered = coverage(channel_id)
-    run = contiguous_run(covered)
+    latest = frontier(covered)
+    if latest is None:
+        return {
+            "certified": False,
+            "window": None,
+            "missing_days": None,
+            "latest_day": None,
+            "covered_total": 0,
+        }
+    window = window_ending(date.fromisoformat(latest))
+    missing = missing_days(covered, window)
     return {
-        "certified": run >= min_days,
-        "contiguous_days": run,
+        "certified": not missing,
+        "window": window,
+        "missing_days": missing,
+        "latest_day": latest,
         "covered_total": len(covered),
-        "latest_day": frontier(covered),
-        "min_days": min_days,
     }

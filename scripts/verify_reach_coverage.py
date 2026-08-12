@@ -1,8 +1,9 @@
 """Phase 0/0.5 exit-gate check: is a channel's CTR coverage certified?
 
-Read-only. Prints the coverage report from `reach.certify` (>=7 contiguous
-ingested reach data-days = "≥1 week of trustworthy CTR", the Phase 0 exit
-gate). Use this before flipping `measurement_enabled` on a channel —
+Read-only. Prints the coverage report from `reach.certify`: is the window
+ending at the channel's coverage frontier fully ingested, i.e. would an audit
+applied around now have an observable pre-change baseline? Names the missing
+data-days when it isn't. Use this before flipping `measurement_enabled` —
 the PATCH /channels/{id} endpoint enforces the same check, this is the ops view.
 
 Exits non-zero when a named channel is NOT certified, so it can gate a deploy
@@ -23,10 +24,18 @@ def _report(channel_id: str) -> dict:
 
     cov = certify(channel_id)
     mark = "OK " if cov["certified"] else "NOT"
+    missing = cov["missing_days"]
+    detail = (
+        "no reach reports ingested" if cov["window"] is None
+        else f"window={cov['window'][0]}→{cov['window'][1]} complete"
+        if not missing
+        else f"window={cov['window'][0]}→{cov['window'][1]} "
+             f"missing {len(missing)}d: {', '.join(missing[:5])}"
+             + (" …" if len(missing) > 5 else "")
+    )
     print(
-        f"[{mark}] {channel_id}: "
-        f"contiguous={cov['contiguous_days']}/{cov['min_days']}d "
-        f"covered_total={cov['covered_total']} latest={cov['latest_day']}"
+        f"[{mark}] {channel_id}: {detail} "
+        f"(covered_total={cov['covered_total']} latest={cov['latest_day']})"
     )
     return cov
 

@@ -85,27 +85,7 @@ def test_missing_days_of_no_windows_is_empty():
     assert reach.missing_days({"2026-01-01"}) == []
 
 
-# ── contiguity and frontier ───────────────────────────────────────────────
-
-def test_contiguous_run_of_nothing_is_zero():
-    assert reach.contiguous_run(set()) == 0
-
-
-def test_contiguous_run_finds_the_longest_not_the_first():
-    covered = {
-        "2026-01-01", "2026-01-02",                                  # run of 2
-        "2026-01-10", "2026-01-11", "2026-01-12", "2026-01-13",      # run of 4
-    }
-    assert reach.contiguous_run(covered) == 4
-
-
-def test_contiguous_run_counts_a_lone_day():
-    assert reach.contiguous_run({"2026-01-01"}) == 1
-
-
-def test_contiguous_run_spans_a_month_boundary():
-    assert reach.contiguous_run({"2026-01-30", "2026-01-31", "2026-02-01"}) == 3
-
+# ── frontier ──────────────────────────────────────────────────────────────
 
 def test_frontier_is_the_latest_covered_day():
     assert reach.frontier({"2026-01-01", "2026-03-01", "2026-02-01"}) == "2026-03-01"
@@ -119,41 +99,97 @@ def _run_of(n: int, start=date(2026, 6, 1)) -> set[str]:
     return {(start + timedelta(days=i)).isoformat() for i in range(n)}
 
 
-def test_certify_needs_a_full_contiguous_week():
-    with patch.object(reach, "coverage", return_value=_run_of(7)):
+def test_certify_needs_a_full_window_behind_the_frontier():
+    with patch.object(reach, "coverage", return_value=_run_of(21)):
         assert reach.certify("c1")["certified"] is True
-    with patch.object(reach, "coverage", return_value=_run_of(6)):
+    with patch.object(reach, "coverage", return_value=_run_of(20)):
         assert reach.certify("c1")["certified"] is False
 
 
-def test_certify_is_not_satisfied_by_a_week_of_scattered_days():
-    """Contiguity is the point — seven days spread over a month is not a week
-    of trustworthy CTR."""
-    scattered = {f"2026-06-{d:02d}" for d in (1, 4, 8, 12, 16, 20, 24)}
-    with patch.object(reach, "coverage", return_value=scattered):
+def test_a_week_of_coverage_no_longer_certifies():
+    """The bug this commit closes. Seven contiguous days used to pass, then the
+    evaluator asked for 42 specific ones and could never get them."""
+    with patch.object(reach, "coverage", return_value=_run_of(7)):
         cov = reach.certify("c1")
     assert cov["certified"] is False
-    assert cov["contiguous_days"] == 1
-    assert cov["covered_total"] == 7
+    assert len(cov["missing_days"]) == 14
 
 
-def test_certify_reports_what_it_measured():
-    with patch.object(reach, "coverage", return_value=_run_of(9)):
+def test_certify_names_the_missing_days():
+    """Usually a failed report retry away — the operator needs to know which."""
+    covered = _run_of(21) - {"2026-06-10", "2026-06-15"}
+    with patch.object(reach, "coverage", return_value=covered):
         cov = reach.certify("c1")
-    assert cov == {
-        "certified": True,
-        "contiguous_days": 9,
-        "covered_total": 9,
-        "latest_day": "2026-06-09",
-        "min_days": 7,
-    }
+    assert cov["certified"] is False
+    assert cov["missing_days"] == ["2026-06-10", "2026-06-15"]
+    assert cov["window"] == ("2026-06-01", "2026-06-21")
+
+
+def test_certify_ignores_history_older_than_the_window():
+    """A clean run from months ago says nothing about measuring now."""
+    stale = _run_of(40, start=date(2026, 1, 1))
+    with patch.object(reach, "coverage", return_value=stale | {"2026-06-30"}):
+        cov = reach.certify("c1")
+    assert cov["certified"] is False
+    assert cov["latest_day"] == "2026-06-30"
+
+
+def test_a_stale_frontier_does_not_make_certification_easier():
+    """It still demands a full window; it just asks about an older apply date."""
+    with patch.object(reach, "coverage", return_value=_run_of(21, start=date(2025, 1, 1))):
+        cov = reach.certify("c1")
+    assert cov["certified"] is True          # 21 consecutive days, however old
+    assert cov["latest_day"] == "2025-01-21"  # and the staleness is visible
 
 
 def test_certify_of_an_unpolled_channel_is_not_an_error():
     with patch.object(reach, "coverage", return_value=set()):
         cov = reach.certify("c1")
-    assert cov["certified"] is False
-    assert cov["latest_day"] is None
+    assert cov == {
+        "certified": False, "window": None, "missing_days": None,
+        "latest_day": None, "covered_total": 0,
+    }
+
+
+# ── the property this refactor exists for ─────────────────────────────────
+
+@pytest.mark.parametrize("label,covered", [
+    ("exactly one window",   _run_of(21)),
+    ("more than a window",   _run_of(60)),
+    ("one short",            _run_of(20)),
+    ("a week",               _run_of(7)),
+    ("hole in the middle",   _run_of(21) - {"2026-06-11"}),
+    ("hole at the frontier", _run_of(22) - {"2026-06-21"}),
+])
+def test_the_gate_and_the_evaluator_agree(label, covered):
+    """The keystone.
+
+    The gate and the evaluator must not be able to disagree about how many
+    data-days a comparison needs. Before app/reach.py they were separate walks
+    in separate modules: the gate accepted 7 contiguous days anywhere in
+    history, while plan_measurement then required 42 specific ones and parked
+    the audit until a grace period turned it into a measured-and-flat verdict.
+
+    Stated as a biconditional, so it bites in both directions: certification
+    passes for exactly those coverage sets where the audit it vouches for has an
+    observable pre window — measured with the evaluator's own predicate, not a
+    restatement of it.
+    """
+    with patch.object(reach, "coverage", return_value=covered):
+        cov = reach.certify("c1")
+
+    applied = reach.applied_after(date.fromisoformat(cov["latest_day"]))
+    pre, _post = reach.window_for(applied)
+    observable = reach.missing_days(covered, pre) == []
+
+    assert cov["certified"] is observable, label
+
+
+def test_the_certification_window_is_exactly_a_pre_window():
+    """The equivalence the keystone rests on, asserted directly."""
+    end = date(2026, 6, 21)
+    pre, _ = reach.window_for(reach.applied_after(end))
+    assert pre == reach.window_ending(end)
 
 
 # ── the one I/O function ──────────────────────────────────────────────────
