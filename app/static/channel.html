@@ -56,11 +56,8 @@
   .act-bar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin:1.15rem 0 .25rem; }
   .act-bar .btn-link { margin-left:auto; }
 
-  /* Coverage: how much of the channel Midas has actually been through. */
+  /* Coverage: a stack of data-progress rows. */
   .cov-rows { display:grid; gap:1rem; }
-  .cov-head { display:flex; justify-content:space-between; align-items:baseline;
-              font-size:.88rem; margin-bottom:.4rem; }
-  .cov-val { font-variant-numeric:tabular-nums; }
 
   /* Diff highlighting */
   .diff-add { background:var(--color-ok-border); padding:0 .15em; border-radius:3px; }
@@ -71,8 +68,8 @@
   /* Videos table column track. Declared once; .dt-head and every .dt-row read
      it, so the header can't drift out of step with the rows. --dt-min forces a
      horizontal scroll rather than letting 11 columns crush each other. */
-  #videos .dt { --dt-cols: 1.1rem 88px minmax(220px, 2fr) 7rem 4.2rem 6.4rem 4.6rem 5.8rem;
-                --dt-min: 880px; }
+  #videos .dt { --dt-cols: 1.1rem 88px minmax(220px, 2fr) 7rem 4.2rem 6.4rem 4.6rem 7.6rem;
+                --dt-min: 920px; }
   #videos .dt-row { align-items:start; }
 
   /* Card section headers — title left, a quiet action right. Replaces the
@@ -127,16 +124,15 @@
     <div class="card">
       <!-- Audit state moved from a <select> to chips: the states double as a
            breakdown, since each carries its own live count. -->
-      <div class="chip-bar" id="v-chips" role="group" aria-label="Filter by audit state"></div>
+      <div id="v-chips" data-label="What state each video is in"></div>
       <div class="filter-bar">
         <input type="search" id="v-search" placeholder="Search title or id…" style="min-width: 220px"/>
-        <select id="v-privacy">
-          <option value="">Any privacy</option>
-          <option value="public">Public</option>
-          <option value="unlisted">Unlisted</option>
-          <option value="private">Private</option>
-        </select>
-        <span class="muted" style="margin-left:auto"><span id="v-count">0</span> shown</span>
+        <div id="v-privacy" data-dropdown data-label="Visibility" data-options='[
+          {"value":"","label":"Any visibility"},
+          {"value":"public","label":"Public"},
+          {"value":"unlisted","label":"Unlisted"},
+          {"value":"private","label":"Private"}]'></div>
+        <span class="muted" style="margin-left:auto" id="v-count"></span>
       </div>
       <div class="filter-bar">
         <button id="bulk-audit-btn" disabled>Rewrite selected</button>
@@ -168,8 +164,7 @@
         <span id="ap-pill"></span>
       </div>
       <p class="note" id="ap-note">Loading…</p>
-      <div class="mrow"><span>Put live today</span><span class="v" id="ap-today">—</span></div>
-      <div class="meter" data-meter data-pct="0" id="ap-today-meter"></div>
+      <div id="ap-today"></div>
       <div class="act-bar">
         <!-- Whatever unblocks the channel takes the primary slot. Same action
              the board row offered, so clicking through doesn't change the ask. -->
@@ -220,8 +215,9 @@
       </div>
       <p class="note">Cuts every video in this channel's folder on the office drive into Shorts, saved back to the same drive. Nothing is uploaded to YouTube.</p>
       <div class="field">
-        <label for="nas-folder">Folder on the drive</label>
-        <select id="nas-folder"><option value="">— none —</option></select>
+        <label id="nas-label">Folder on the drive</label>
+        <div id="nas-folder" data-dropdown data-label="Folder on the drive"
+             data-options='[{"value":"","label":"— none —"}]'></div>
         <span class="hint" id="nas-status"></span>
       </div>
       <label class="field-check"><input type="checkbox" id="nas-autocut" /> <span>Cut new videos in this folder automatically</span></label>
@@ -302,22 +298,9 @@
       <div class="sec-head"><h3>Channel</h3></div>
       <p class="note">Every video Midas publishes is set to <b>Education</b>, <b>made for kids</b>, and tagged with the language below.</p>
       <div class="field">
-        <label for="lang-select">Content language</label>
-      <select id="lang-select" style="min-width: 220px;">
-        <option value="">— not set —</option>
-        <option value="en">English</option>
-        <option value="hi">Hindi</option>
-        <option value="mr">Marathi</option>
-        <option value="bn">Bengali</option>
-        <option value="pa">Punjabi</option>
-        <option value="gu">Gujarati</option>
-        <option value="ta">Tamil</option>
-        <option value="te">Telugu</option>
-        <option value="kn">Kannada</option>
-        <option value="ml">Malayalam</option>
-        <option value="or">Odia</option>
-        <option value="ur">Urdu</option>
-      </select>
+        <label id="lang-label">Content language</label>
+        <div id="lang-select" data-dropdown data-label="Content language"
+             data-options='[{"value": "", "label": "\u2014 not set \u2014"}, {"value": "en", "label": "English"}, {"value": "hi", "label": "Hindi"}, {"value": "mr", "label": "Marathi"}, {"value": "bn", "label": "Bengali"}, {"value": "pa", "label": "Punjabi"}, {"value": "gu", "label": "Gujarati"}, {"value": "ta", "label": "Tamil"}, {"value": "te", "label": "Telugu"}, {"value": "kn", "label": "Kannada"}, {"value": "ml", "label": "Malayalam"}, {"value": "or", "label": "Odia"}, {"value": "ur", "label": "Urdu"}]'></div>
       </div>
       <label class="field-check"><input type="checkbox" id="sync-shorts" />
         <span>Include Shorts — videos of 3 minutes or less get rewritten too</span></label>
@@ -345,11 +328,10 @@
       <div class="sec-head"><h3>Letting Midas improve its own instructions</h3></div>
       <p class="note">Midas can draft a better version of the instructions above by looking at what it has written so far. Either it shows you the draft first, or it tries it live and puts the old one back if things get worse.</p>
       <div class="field">
-        <label for="reflectionMode">When it has a new draft</label>
-        <select id="reflectionMode" onchange="saveReflectionMode(this.value)">
-          <option value="shadow">Show me first — nothing changes until I say so</option>
-          <option value="auto">Try it live, and undo it if results get worse</option>
-        </select>
+        <label id="reflection-label">When it has a new draft</label>
+        <div id="reflectionMode" data-dropdown data-label="When it has a new draft" data-options='[
+          {"value":"shadow","label":"Show me first","hint":"nothing changes until I say so"},
+          {"value":"auto","label":"Try it live","hint":"undone if results get worse"}]'></div>
       </div>
       <div class="act-bar" style="margin-top:0">
         <button onclick="triggerReflection(this)">Draft one now</button>
@@ -460,10 +442,6 @@ const loadedTabs = new Set();
 const tabLoaders = {
   videos:    () => loadVideos(),
   autopilot: () => {
-    // Wire the hold buttons and meters once, before any data arrives — the
-    // markup is static, so re-initialising on every repaint would be waste
-    // (Components.init is idempotent, but the calls aren't free).
-    Components.init(document.querySelector('.tab-panel[data-panel="autopilot"]'));
     loadChannelState(); loadAutopilotLog();
     if (!apInterval) apInterval = setInterval(pollAutopilotLog, 30000);
   },
@@ -534,7 +512,8 @@ async function applyChannel(all) {
   // No subtitle: the switcher already shows the handle, freshness lives in the
   // Autopilot meta line, and the raw channel id was developer detail taking
   // header space.
-  $('lang-select').value = c.default_language || '';
+  // `true` = don't fire change; this is repainting from the server, not an edit.
+  $('lang-select').dd.set(c.default_language || '', true);
   $('ap-enabled').checked = !!c.autopilot_enabled;
   $('ap-cap').value = c.autopilot_daily_cap ?? 10;
   $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
@@ -584,15 +563,11 @@ function freshness(hours) {
 }
 
 // A ratio says what two separate counts couldn't: how far along this is.
+// data-progress owns the label, the value and the percentage arithmetic, so
+// the three can't drift — this page used to round its own.
 function coverageRow(label, done, total) {
-  const pct = total ? Math.round(done / total * 100) : 0;
-  return `<div>
-      <div class="cov-head">
-        <span>${label}</span>
-        <span class="cov-val"><b>${fmt(done)}</b> / ${fmt(total)} <span class="muted">· ${pct}%</span></span>
-      </div>
-      <div class="meter"><i style="width:${pct}%"></i></div>
-    </div>`;
+  return `<div data-progress data-label="${escapeHtml(label)}"
+               data-done="${done}" data-total="${total}"></div>`;
 }
 
 function renderChannelState(j) {
@@ -618,6 +593,7 @@ function renderChannelState(j) {
   $('ap-coverage').innerHTML =
     coverageRow('Videos rewritten', c.audited_regular || 0, c.regular_count || 0) +
     coverageRow('Shorts rewritten', c.audited_shorts || 0, c.shorts_count || 0);
+  Components.init($('ap-coverage'));
 
   renderWhy(st, c);
   syncApplyButton();
@@ -759,9 +735,10 @@ function renderAutopilotLog(j) {
     // job — repeating it as a pill here made the same sentence appear twice,
     // once in plain words and once in jargon.
     const cap = j.daily_cap || 0;
-    const pct = cap > 0 ? Math.max(0, Math.min(100, (j.applies_today / cap) * 100)) : 0;
-    $('ap-today').textContent = `${fmt(j.applies_today)} / ${fmt(cap)}`;
-    $('ap-today-meter').querySelector('i').style.width = pct + '%';
+    $('ap-today').innerHTML =
+      `<div data-progress data-label="Put live today"
+            data-done="${j.applies_today || 0}" data-total="${cap}"></div>`;
+    Components.init($('ap-today'));
 
     // An expired sign-in is the one stop the Resume button can't clear, so it
     // gets the only action offered here — every other state is handled by the
@@ -837,9 +814,12 @@ let nasLangs = [];   // [{language, uncut}] from GET /shorts/languages
 function nasPopulate(c) {
   $('nas-autocut').checked = !!c.autopilot_shorts_enabled;
   const sel = $('nas-folder');
-  const cur = c.nas_folder || '';
-  sel.innerHTML = '<option value="">— none —</option>' +
-    nasLangs.map(l => `<option value="${escapeHtml(l.language)}"${l.language === cur ? ' selected' : ''}>${escapeHtml(l.language)}</option>`).join('');
+  sel.dataset.value = c.nas_folder || '';
+  // Each folder carries its own backlog, so the count belongs on the option
+  // rather than only on the one you happen to have selected.
+  sel.dd.setOptions([{ value: '', label: '— none —' }].concat(
+    nasLangs.map(l => ({ value: l.language, label: l.language,
+                         hint: l.uncut ? `${l.uncut} not cut yet` : '' }))), true);
   nasRefreshStatus();
 }
 async function nasLoadLanguages() {
@@ -847,7 +827,7 @@ async function nasLoadLanguages() {
   catch { nasLangs = []; }
 }
 async function nasRefreshStatus() {
-  const folder = $('nas-folder').value;
+  const folder = $('nas-folder').dd.value;
   const lang = nasLangs.find(l => l.language === folder);
   let cutting = 0;
   try {
@@ -860,8 +840,8 @@ async function nasRefreshStatus() {
     : '';
   $('nas-cut-now').disabled = !folder;
 }
-$('nas-folder').onchange = async () => {
-  const folder = $('nas-folder').value;
+$('nas-folder').addEventListener('change', async () => {
+  const folder = $('nas-folder').dd.value;
   try {
     const r = await fetch(`/auth/channels/${channelId}`, {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
@@ -871,8 +851,8 @@ $('nas-folder').onchange = async () => {
     toast('Folder saved.', 'ok');
     SWR.invalidate('/auth/channels');
     nasRefreshStatus();
-  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
-};
+  } catch (e) { toast('Could not save: ' + escapeHtml(String(e)), 'err'); }
+});
 $('nas-autocut').onchange = async () => {
   try {
     const r = await fetch(`/auth/channels/${channelId}`, {
@@ -885,7 +865,7 @@ $('nas-autocut').onchange = async () => {
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); $('nas-autocut').checked = !$('nas-autocut').checked; }
 };
 $('nas-cut-now').onclick = async () => {
-  const folder = $('nas-folder').value;
+  const folder = $('nas-folder').dd.value;
   if (!folder) return;
   const btn = $('nas-cut-now'); btn.disabled = true;
   $('nas-cut-msg').textContent = 'enqueuing…';
@@ -911,7 +891,7 @@ $('lang-save').onclick = async () => {
     const r = await fetch(`/auth/channels/${channelId}`, {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        default_language: $('lang-select').value || null,
+        default_language: $('lang-select').dd.value || null,
         sync_shorts: $('sync-shorts').checked,
       }),
     });
@@ -942,7 +922,9 @@ function renderConfig(cfg) {
   $('prompt').value = cfg.generated_prompt || '';
   $('shorts-prompt').value = cfg.shorts_prompt || '';
   const modeEl = document.getElementById('reflectionMode');
-  if (modeEl && cfg.reflection_mode) modeEl.value = cfg.reflection_mode;
+  // Silent: repainting from the server must not look like the operator just
+  // changed the mode, or it saves straight back what it only just read.
+  if (modeEl && cfg.reflection_mode) modeEl.dd.set(cfg.reflection_mode, true);
 }
 function loadConfig() {
   SWR.swr(`/channels/${channelId}/audit-config`, renderConfig);
@@ -954,7 +936,7 @@ $('save-btn').onclick = async () => {
       body: JSON.stringify({
         generated_prompt: $('prompt').value,
         shorts_prompt: $('shorts-prompt').value || null,
-        reflection_mode: document.getElementById('reflectionMode')?.value || 'shadow',
+        reflection_mode: document.getElementById('reflectionMode')?.dd?.value || 'shadow',
       }),
     });
     SWR.invalidate(`/channels/${channelId}/audit-config`);
@@ -1021,6 +1003,15 @@ let videoState = '';   // '' = all
 const VIDEO_PAGE = 40;
 let videoPage = VIDEO_PAGE;
 
+// The state breakdown is a distribution, and the shape of it is the point:
+// "439 Live · 4,724 Not rewritten" reads as two numbers, while a bar sized by
+// share reads as 8% done at a glance. Each band is also the filter for itself,
+// so the picture and the control are the same object rather than a legend
+// sitting next to a row of buttons that repeat it.
+//
+// Driven by status.js rather than a list kept here: every state appears the
+// moment it exists in the data, and its colour always matches the pill the
+// same status renders in the table.
 function renderChips() {
   const counts = {};
   allVideos.forEach(v => {
@@ -1028,40 +1019,51 @@ function renderChips() {
     counts[k] = (counts[k] || 0) + 1;
   });
 
-  const chip = (key, label, role, count, active) => `
-    <button type="button" class="chip" data-state="${key}" aria-pressed="${active}">
-      ${role ? `<span class="chip-dot dot--${role}"></span>` : ''}
-      ${escapeHtml(label)}
-      <span class="chip-count">${fmt(count)}</span>
-    </button>`;
+  const segs = Object.entries(Status.AUDIT_STATUS)
+    .map(([key, meta]) => ({
+      key, label: meta.label, n: counts[key] || 0,
+      role: meta.cls.replace('pill--', ''),
+    }))
+    .filter(seg => seg.n > 0 || videoState === seg.key);
 
-  // Driven by status.js rather than a list kept here: every audit state gets a
-  // chip the moment it appears in the data, and the dot's role always matches
-  // the pill the same status renders in the table. (The old <select> hardcoded
-  // seven states and silently had no way to filter to shadow_pending.)
-  let html = chip('', 'All', '', allVideos.length, videoState === '');
-  Object.entries(Status.AUDIT_STATUS).forEach(([key, meta]) => {
-    const n = counts[key] || 0;
-    // Empty states are noise — offer a filter only if it would return
-    // something, or if it's the one currently applied.
-    if (!n && videoState !== key) return;
-    html += chip(key, meta.label, meta.cls.replace('pill--', ''), n, videoState === key);
-  });
-  $('v-chips').innerHTML = html;
-
-  $('v-chips').querySelectorAll('.chip').forEach(b => {
-    b.onclick = () => { videoState = b.dataset.state; videoPage = VIDEO_PAGE; renderVideos(); };
-  });
+  const el = $('v-chips');
+  // Re-render only when the composition actually changed. Rebuilding on every
+  // keystroke of the search box would restart the bar's width transition and
+  // drop focus out of the legend mid-keyboard-navigation.
+  const sig = JSON.stringify(segs) + '|' + videoState;
+  if (el.dataset.sig !== sig) {
+    el.dataset.sig = sig;
+    el.dataset.value = videoState;
+    delete el.dataset.cmpWired;
+    el.dataset.segments = JSON.stringify(segs);
+    Components.seg(el);
+    el.dataset.cmpWired = '1';
+  }
 }
 
 function renderVideos() {
   const q = ($('v-search').value || '').toLowerCase().trim();
   const state = videoState;
-  const privacy = $('v-privacy').value;
+  const privacy = $('v-privacy').dd.value;
   renderChips();
   const filtered = allVideos.filter(v => videoMatches(v, q, state, privacy));
   const sorted = sortVideos(filtered);
-  $('v-count').textContent = sorted.length;
+  const filters = [
+    videoState ? (Status.AUDIT_STATUS[videoState] || {}).label || videoState : null,
+    privacy ? privacy[0].toUpperCase() + privacy.slice(1) : null,
+    q ? `“${q}”` : null,
+  ].filter(Boolean);
+  $('v-count').innerHTML = filters.length
+    ? `${fmt(sorted.length)} of ${fmt(allVideos.length)} · ${escapeHtml(filters.join(' · '))}`
+      + ` <button type="button" class="btn-link" id="v-clear">Show all</button>`
+    : `${fmt(sorted.length)} videos`;
+  // Wired here, above the empty-list early returns: a filter matching nothing
+  // is precisely when this button has to work.
+  const clr = $('v-clear');
+  if (clr) clr.onclick = () => {
+    videoState = ''; $('v-search').value = ''; $('v-privacy').dd.set('', true);
+    videoPage = VIDEO_PAGE; renderVideos();
+  };
   const quarantinedCount = allVideos.filter(v => v.audit_status === 'quarantined').length;
   const rqBtn = $('reaudit-quarantined-btn');
   rqBtn.style.display = quarantinedCount > 0 ? '' : 'none';
@@ -1100,7 +1102,8 @@ function renderVideos() {
       <span>
         <div class="vid-title truncate">${escapeHtml(v.title || '')}</div>
         <div class="vid-sub"><code>${v.id}</code>${(v.privacy_status && v.privacy_status !== 'public') ? ` · <span class="pill pill--sm">${escapeHtml(v.privacy_status)}</span>` : ''}</div>
-        ${v.ai_reasoning_short ? `<div class="vid-why">${escapeHtml(v.ai_reasoning_short)}</div>` : ''}
+        ${v.ai_reasoning_short ? `<div class="clamp vid-why" data-clamp data-lines="2"
+          ><div class="clamp-body"><p>${escapeHtml(v.ai_reasoning_short)}</p></div></div>` : ''}
       </span>
       <span>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="Show what changed and when">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</span>
       <span>${v.issues_count > 0
@@ -1113,16 +1116,14 @@ function renderVideos() {
     '</div></div></div>'
     // 5,076 rows is a scan, not a list — render a page and let the operator ask
     // for more. Filtering or sorting resets to the first page.
-    + (sorted.length > shown.length
-        ? `<div class="load-more">
-             <button type="button" id="v-more" class="btn">Show ${fmt(Math.min(VIDEO_PAGE, sorted.length - shown.length))} more</button>
-             <span class="muted">${fmt(shown.length)} of ${fmt(sorted.length)} shown</span>
-           </div>`
-        : (sorted.length > VIDEO_PAGE
-            ? `<div class="load-more"><span class="muted">All ${fmt(sorted.length)} shown</span></div>` : ''));
+    + (sorted.length > VIDEO_PAGE
+        ? `<div data-loadmore data-page="${VIDEO_PAGE}" data-shown="${shown.length}"
+                data-total="${sorted.length}"></div>` : '');
 
-  const more = $('v-more');
-  if (more) more.onclick = () => { videoPage += VIDEO_PAGE; renderVideos(); };
+  // The component owns the button, the running count and "That's all"; this
+  // page only has to widen the slice and repaint.
+  const lm = $('videos').querySelector('[data-loadmore]');
+  if (lm) lm.addEventListener('more', (e) => { videoPage = e.detail.shown; renderVideos(); });
 
   // Wire up sort headers
   $('videos').querySelectorAll('.dt-sort').forEach(el => {
@@ -1140,6 +1141,10 @@ function renderVideos() {
     else { selected.clear(); renderVideos(); updateSelectionUi(); }
   };
   updateSelectionUi();
+  // The table is re-rendered wholesale on every filter, sort and page change,
+  // so the clamps and the pager have to be re-wired each time. init() marks
+  // what it has already touched, so this only costs the new nodes.
+  Components.init($('videos'));
 }
 
 function toggleSelect(id, on) {
@@ -1161,7 +1166,16 @@ function updateSelectionUi() {
 }
 
 // State is a chip now (see renderChips); these two stay as controls.
-['v-search','v-privacy'].forEach(id => $(id).oninput = () => { videoPage = VIDEO_PAGE; renderVideos(); });
+$('v-chips').addEventListener('pick', (e) => {
+  videoState = e.detail.key;
+  videoPage = VIDEO_PAGE;
+  renderVideos();
+});
+
+// Search is an <input> (oninput); the visibility filter is the dropdown
+// component, which reports through a bubbling `change`.
+$('v-search').oninput = () => { videoPage = VIDEO_PAGE; renderVideos(); };
+$('v-privacy').addEventListener('change', () => { videoPage = VIDEO_PAGE; renderVideos(); });
 
 $('select-clear-btn').onclick = () => { selected.clear(); renderVideos(); };
 
@@ -1484,7 +1498,10 @@ async function revertAudit(auditId, videoId) {
 
 // ── Get latest + put pending live (Autopilot section) ────────────────
 $('sync-btn').onclick = async () => {
-  $('sync-btn').disabled = true; $('sync-status').textContent = ' Syncing…';
+  // A disabled button with no clock looks hung on a channel with 6,000 videos.
+  // The elapsed time is the part that tells you it's still working.
+  Components.busy($('sync-btn'), 'Fetching from YouTube');
+  $('sync-status').textContent = '';
   try {
     // Incremental: discovers new uploads only (cheap), then refreshes counts +
     // privacy on existing videos via the stats endpoint. Use ?full=true for a
@@ -1496,17 +1513,17 @@ $('sync-btn').onclick = async () => {
       throw new Error(detail || `HTTP ${r.status} ${r.statusText}`);
     }
     const j = await r.json();
-    $('sync-status').textContent = ' Refreshing stats…';
+    Components.busy($('sync-btn'), 'Updating view counts');
     await fetch(`/channels/${channelId}/refresh-stats`, { method: 'POST' });
-    $('sync-status').textContent = ` ${j.synced} new`;
+    $('sync-status').textContent = `${j.synced} new`;
     toast(`Synced ${j.synced} new video(s); refreshed stats.`, 'ok');
     bustChannelData();
     SWR.invalidate('/auth/channels'); // last_synced_at / counts changed
     await loadVideos(); await loadChannel(); await loadChannelState();
   } catch (e) {
-    $('sync-status').textContent = ' Sync failed';
-    toast('Sync failed: ' + escapeHtml(String(e)), 'err');
-  } finally { $('sync-btn').disabled = false; }
+    $('sync-status').textContent = 'Failed';
+    toast('Could not fetch from YouTube: ' + escapeHtml(String(e)), 'err');
+  } finally { Components.done($('sync-btn')); }
 };
 
 // Hold, not click: this publishes to YouTube, and a hold can't be a slip. The
@@ -1700,13 +1717,10 @@ $('pl-refresh-btn').onclick = loadProposals;
 // meter; the rest sit in the lede's meta line as context rather than competing
 // with the count of changes waiting.
 function renderPlaylistStatus(s) {
-  const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
-  $('pl-embed-progress').innerHTML = `
-    <div class="cov-head">
-      <span>Videos read</span>
-      <span class="cov-val"><b>${fmt(s.embedded)}</b> / ${fmt(s.total_videos)} <span class="muted">· ${pct}%</span></span>
-    </div>
-    <div class="meter"><i style="width:${pct}%"></i></div>`;
+  $('pl-embed-progress').innerHTML =
+    `<div data-progress data-label="Videos read"
+          data-done="${s.embedded || 0}" data-total="${s.total_videos || 0}"></div>`;
+  Components.init($('pl-embed-progress'));
   plStatus = s;
   renderPlLede();
 }
@@ -1721,8 +1735,8 @@ function loadPlaylistStatus() {
 }
 
 $('pl-bootstrap-btn').onclick = async () => {
-  $('pl-bootstrap-btn').disabled = true;
-  $('pl-action-status').textContent = 'Reading every video… this takes a few minutes.';
+  Components.busy($('pl-bootstrap-btn'), 'Reading every video');
+  $('pl-action-status').textContent = 'This takes a few minutes.';
   try {
     const r = await fetch(`/channels/${channelId}/playlists/bootstrap`, { method: 'POST' });
     const j = await r.json();
@@ -1734,12 +1748,12 @@ $('pl-bootstrap-btn').onclick = async () => {
   } catch (e) {
     toast('Could not read the videos: ' + escapeHtml(String(e)), 'err');
     $('pl-action-status').textContent = '';
-  } finally { $('pl-bootstrap-btn').disabled = false; }
+  } finally { Components.done($('pl-bootstrap-btn')); $('pl-action-status').textContent = ''; }
 };
 
 $('pl-reconcile-btn').onclick = async () => {
-  $('pl-reconcile-btn').disabled = true;
-  $('pl-action-status').textContent = 'Updating playlists…';
+  Components.busy($('pl-reconcile-btn'), 'Updating playlists');
+  $('pl-action-status').textContent = '';
   try {
     const r = await fetch(`/channels/${channelId}/playlists/reconcile`, { method: 'POST' });
     const j = await r.json();
@@ -1752,7 +1766,7 @@ $('pl-reconcile-btn').onclick = async () => {
   } catch (e) {
     toast('Could not update the playlists: ' + escapeHtml(String(e)), 'err');
     $('pl-action-status').textContent = '';
-  } finally { $('pl-reconcile-btn').disabled = false; }
+  } finally { Components.done($('pl-reconcile-btn')); $('pl-action-status').textContent = ''; }
 };
 
 // ── Playlist health (Phase 1B — recommend-only) ───────────────────────────
@@ -1870,6 +1884,11 @@ $('pl-health-evaluate-btn').onclick = async () => {
   }
 };
 
+// Wire every component in the static markup before anything loads. This has to
+// come first: loadChannel() paints the settings form on this same tick, and a
+// dropdown that hasn't been initialised has no .dd to paint into.
+Components.init(document);
+
 // loadChannel() paints the header/settings from cache synchronously (and
 // revalidates in the background), so there's no need to await the network
 // before loading the visible tab — everything paints from cache on this tick.
@@ -1944,6 +1963,9 @@ function renderReflectionHistory(versions) {
     </div>`;
   }).join('');
 }
+
+document.getElementById('reflectionMode')
+  .addEventListener('change', (e) => saveReflectionMode(e.detail.value));
 
 async function saveReflectionMode(mode) {
   if (!channelId) return;

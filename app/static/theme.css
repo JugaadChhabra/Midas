@@ -350,6 +350,99 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
              box-shadow:var(--raised); transition:width .4s cubic-bezier(.23,1,.32,1); }
 .meter.ok > i { background-color:var(--color-ok); }
 
+/* ── Dropdown ───────────────────────────────────────────────────────── */
+/* A styled listbox, because a native <select> renders as an OS widget that
+   ignores every token here and can't carry a per-option count. */
+.dd { position:relative; display:inline-block; min-width:13rem; }
+.dd-trigger { display:flex; align-items:center; gap:.5rem; width:100%; padding:.45rem .6rem;
+              border:1px solid var(--border-strong); background:var(--surface-faint);
+              border-radius:var(--radius-md); font:inherit; font-size:.85rem;
+              color:inherit; text-align:left; cursor:pointer; }
+.dd-trigger:hover { border-color:var(--ink-3); }
+.dd-trigger .dd-lab { position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+                      overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.dd-trigger .val { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dd-trigger svg { flex:none; opacity:.55; transition:transform .18s cubic-bezier(.23,1,.32,1); }
+.dd[data-open="true"] .dd-trigger svg { transform:rotate(180deg); }
+.dd-menu { position:absolute; z-index:40; top:calc(100% + .3rem); left:0; right:0; min-width:100%;
+           padding:.25rem; background:var(--panel-bg); border:1px solid var(--border-strong);
+           border-radius:var(--radius); box-shadow:var(--shadow-1); max-height:16rem;
+           overflow-y:auto; transform-origin:top; animation:ddpop .16s cubic-bezier(.23,1,.32,1); }
+.dd-menu[hidden] { display:none; }
+@keyframes ddpop { from { opacity:0; transform:scale(.97) translateY(-3px); } to { opacity:1; transform:none; } }
+.dd-opt { display:flex; align-items:center; gap:.5rem; width:100%; padding:.35rem .5rem;
+          border:0; background:none; border-radius:var(--radius-sm); font:inherit;
+          font-size:.85rem; color:inherit; text-align:left; cursor:pointer; }
+.dd-opt:hover:not(:disabled), .dd-opt:focus-visible { background:var(--surface-tint); outline:none; }
+.dd-opt[aria-selected="true"] { color:var(--color-accent); font-weight:600; background:var(--color-accent-bg); }
+.dd-opt:disabled { opacity:.4; cursor:not-allowed; }
+.dd-opt .hint { margin-left:auto; font-size:.7rem; color:var(--ink-3); font-weight:400; }
+.dd-opt .check { margin-left:auto; opacity:0; flex:none; }
+.dd-opt[aria-selected="true"] .check { opacity:1; }
+
+/* ── Show more (clamp) ──────────────────────────────────────────────── */
+/* The fade is the affordance — a hard cut reads as the end of the text. */
+.clamp-body { overflow:hidden; transition:max-height .28s cubic-bezier(.23,1,.32,1); }
+.clamp[data-expanded="false"] .clamp-body { position:relative; }
+.clamp[data-expanded="false"] .clamp-body::after {
+  content:""; position:absolute; left:0; right:0; bottom:0; height:2rem;
+  background:linear-gradient(transparent, var(--panel-bg)); pointer-events:none; }
+.clamp-toggle { margin-top:.35rem; font:inherit; font-size:.75rem; padding:.1rem 0;
+                border:0; background:none; color:var(--color-accent); font-weight:500; cursor:pointer; }
+.clamp-toggle:hover { text-decoration:underline; }
+
+/* ── Load more ──────────────────────────────────────────────────────── */
+/* The count is the component: it says the list is a window onto something
+   larger, which a bare button at the foot of a table does not. */
+.lm { display:flex; flex-direction:column; align-items:center; gap:.5rem; padding:1rem 0 .25rem; }
+.lm-count { font-size:.75rem; color:var(--ink-3); font-family:var(--mono);
+            font-variant-numeric:tabular-nums; }
+
+/* ── Progress (labelled meter) ──────────────────────────────────────── */
+.progress { display:grid; gap:.35rem; }
+.progress-top { display:flex; align-items:baseline; justify-content:space-between;
+                gap:.75rem; font-size:.85rem; }
+.progress-label { font-weight:500; }
+.progress-value { font-family:var(--mono); font-variant-numeric:tabular-nums;
+                  color:var(--ink-3); font-size:.78rem; }
+
+/* ── Loading ────────────────────────────────────────────────────────── */
+/* The elapsed clock separates "slow" from "hung"; a spinner can't. */
+.loader { display:inline-flex; align-items:center; gap:.6rem; }
+.loader-grid { display:grid; grid-template-columns:repeat(3, 4px); gap:2px; }
+.loader-grid i { width:4px; height:4px; background:currentColor; border-radius:1px;
+                 opacity:.15; display:block; }
+@keyframes cell-on { 0%, 100% { opacity:.15; } 45% { opacity:1; } }
+.loader-label { font-size:.85rem; font-weight:500; }
+.loader-time { font-family:var(--mono); font-size:.75rem; opacity:.7;
+               font-variant-numeric:tabular-nums; }
+
+/* ── Segmented bar ──────────────────────────────────────────────────── */
+/* Sized by share, and every band is the filter for itself. Counts alone don't
+   show proportion; a pie gives you nothing to click. */
+.seg { display:flex; height:1.6rem; gap:2px; padding:3px; background:var(--sunken);
+       box-shadow:var(--groove); border-radius:var(--radius-pill); overflow:hidden; }
+.seg button { border:0; border-radius:var(--radius-pill); position:relative; overflow:hidden;
+              cursor:pointer; background-image:var(--fill-gloss); box-shadow:var(--raised);
+              min-width:3px; transition:opacity .25s cubic-bezier(.23,1,.32,1), transform .2s; }
+.seg button:active { transform:scale(.985); }
+.seg-ok      { background-color:var(--color-ok); }
+.seg-info    { background-color:var(--color-accent); }
+.seg-warn    { background-color:var(--color-warn); }
+.seg-err     { background-color:var(--color-err); }
+.seg-neutral { background-color:var(--color-neutral); }
+/* Dim the others rather than highlight the one, so the bar keeps its shape. */
+.seg:has([aria-pressed="true"]) button[aria-pressed="false"] { opacity:.35; }
+.seg button[aria-pressed="true"] { box-shadow:var(--raised), inset 0 0 0 1px #ffffff40; }
+.seg-legend { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.55rem; }
+.seg-legend button { display:inline-flex; align-items:center; gap:.4rem; padding:.2rem .5rem;
+                     border:0; background:none; border-radius:var(--radius-pill); font:inherit;
+                     font-size:.78rem; color:var(--ink-3); cursor:pointer; }
+.seg-legend button:hover { background:var(--surface-tint); color:inherit; }
+.seg-legend button[aria-pressed="true"] { background:var(--surface-tint); color:inherit; font-weight:600; }
+.seg-legend .sw { width:8px; height:8px; border-radius:2px; flex:none; }
+.seg-n { font-variant-numeric:tabular-nums; font-size:.72rem; color:var(--ink-3); }
+
 /* ── Hold to confirm ────────────────────────────────────────────────── */
 /* For anything that changes something on YouTube. A click can be a slip; a
    deliberate press can't. The fill is the progress readout, so it carries its
@@ -376,12 +469,6 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .log .wn { color:var(--color-warn); }
 .log .er { color:var(--color-err); }
 .log .what { font-family:inherit; color:var(--ink-2); }
-
-/* ── Metered row ────────────────────────────────────────────────────── */
-/* The label/value line that sits directly above a .meter. */
-.mrow { display:flex; justify-content:space-between; align-items:baseline;
-        font-size:.85rem; margin-bottom:.4rem; }
-.mrow .v { font-family:var(--mono); font-variant-numeric:tabular-nums; }
 
 /* ── Explanatory note ───────────────────────────────────────────────── */
 /* Plain English, under a card heading. Carries facts about this channel —
