@@ -7,9 +7,12 @@ compares post-change CTR against the video's own pre-change trailing window
 (single-video A/B is impossible; trailing self-comparison is the honest
 substitute — CIL Decision 3) and lands a terminal verdict:
 
-    applied ─▶ awaiting_window ─▶ measuring ─┬─▶ win        ─▶ kept
-                                             ├─▶ neutral    ─▶ kept
-                                             └─▶ regression ─▶ (human review)
+    applied ─▶ awaiting_window ─▶ measuring ─┬─▶ win            ─▶ kept
+                                             ├─▶ neutral        ─▶ kept
+                                             ├─▶ regression     ─▶ (human review)
+                                             └─▶ not_applicable ─▶ (never measured:
+                                                  dormant video, or coverage that
+                                                  never arrived)
 
 `measuring` here means "window elapsed, waiting for reach-CSV coverage" —
 reach reports for a data-day arrive 1-6 days late (2026-07-02 probe), so a
@@ -24,6 +27,10 @@ Deliberate deviations from the CIL §1 table, all toward caution:
     regressions first. redo_of_audit_id exists in the schema so nothing
     blocks it later.
   * Both windows exclude the apply day itself: it mixes pre/post regimes.
+  * An audit whose reach coverage never completes exits `not_applicable`, not
+    the `neutral` the §1.4 table implies. Coverage failing is a fact about our
+    ingestion, not the audience — treating it as a measured-and-flat outcome
+    let a downed poller depress the win rate that promotes prompt versions.
 
 Windows are computed from `video_reach_daily` (daily grain — this is exactly
 why Phase 0.5 chose a daily table), and the pre-change window is also written
@@ -189,7 +196,16 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
     missing = reach.missing_days(covered, pre, post)
     if missing:
         if today > post_end + timedelta(days=settings.MEASUREMENT_COVERAGE_GRACE_DAYS):
-            return Plan(FINALIZE, MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, {
+            # not_applicable, NOT neutral — the same reasoning as the missing
+            # timestamp branch above. Coverage never arriving is a fact about
+            # OUR ingestion, not about the audience: we weren't watching, so
+            # there is no evidence either way. Recording it as neutral put
+            # infrastructure lateness into the win rate that promotes prompt
+            # versions (reflection filters on MEASURED_STATUSES and divides
+            # wins by that population), and let a downed poller both depress
+            # the rate and help satisfy the _MIN_DATA_POINTS floor that exists
+            # to stop the prompt loop running on thin evidence.
+            return Plan(FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, {
                 "rationale": "reach coverage never completed within grace period",
                 "missing_days": missing[:14],
                 "pre_window": pre, "post_window": post,

@@ -129,16 +129,37 @@ def test_missing_coverage_within_grace_waits_as_measuring():
     assert p.action == m.MARK_MEASURING
 
 
-def test_missing_coverage_past_grace_gives_up_as_neutral():
+def test_missing_coverage_past_grace_gives_up_as_never_measured():
+    """not_applicable, NOT neutral.
+
+    Coverage never arriving is a fact about our ingestion, not about the
+    audience — we weren't watching, so there is no evidence either way. As
+    neutral it entered the win rate that promotes prompt versions (reflection
+    filters on MEASURED_STATUSES, which excludes not_applicable) and counted
+    toward the _MIN_DATA_POINTS floor meant to keep the prompt loop off thin
+    evidence. A downed poller must not read as a prompt that didn't work.
+    """
     pre, post = reach.window_for(APPLIED)
     covered = _covered(pre, post) - {post[1]}
     # post_end is 2026-06-23; grace is 14 days
     p = m.plan_measurement(_audit(), date(2026, 7, 20), covered)
     assert p.action == m.FINALIZE
-    assert p.status == MeasurementStatus.NEUTRAL
-    assert p.outcome == OutcomeDecision.KEPT
+    assert p.status == MeasurementStatus.NOT_APPLICABLE
+    assert p.outcome == OutcomeDecision.NONE
     assert "grace" in p.result["rationale"]
     assert p.result["missing_days"]
+
+
+def test_the_grace_verdict_is_excluded_from_the_evidence_base():
+    """The property that makes the status choice matter, asserted rather than
+    assumed: whatever plan_measurement finalizes here must not be a status the
+    prompt loop counts."""
+    from app.status_vocab import MEASURED_STATUSES
+
+    pre, post = reach.window_for(APPLIED)
+    covered = _covered(pre, post) - {post[1]}
+    p = m.plan_measurement(_audit(), date(2026, 7, 20), covered)
+    assert p.status not in MEASURED_STATUSES
 
 
 def test_grace_boundary_is_not_off_by_one():
