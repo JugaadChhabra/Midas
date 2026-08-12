@@ -123,6 +123,39 @@ otherwise overwrite the last good backup with a truncated one, and nothing would
 say so until a restore was attempted. Any failure now leaves the previous
 snapshot exactly where it was.
 
+### Snapshot again after any DB change — don't wait for the nightly
+
+The nightly run bounds *steady-state* data loss to one day. It does nothing about
+the window between changing the database and the next 00:00: during it, the only
+snapshot on the NAS describes a database that no longer exists. Restore from it
+after a schema migration and you get the pre-migration schema back, which the
+running code no longer matches — a restore that "succeeds" and then fails at the
+first query is worse than an obvious one.
+
+So: **after a migration, a backfill, or any bulk mutation, publish a snapshot.**
+
+```bash
+# on-network (NAS_MODE=smb), AFTER verifying the change landed
+PYTHONPATH=. venv/bin/python -c \
+  "from app.backup import snapshot_to_nas; print(snapshot_to_nas())"
+```
+
+`snapshot_to_nas()` is the same function the scheduler calls, minus
+`run_nightly_backup`'s never-raise wrapper — so a failure surfaces as a
+traceback instead of a log line, which is what you want when running it by hand.
+Both guards still apply: it refuses to publish from an empty database
+(`assert_populated`) and refuses to dump with a `pg_dump` whose major version
+does not equal the server's.
+
+Order it correctly: **verify, then snapshot.** Publishing replaces a slot, so
+snapshotting an unverified change trades a known-good copy for an unknown one.
+
+Slot arithmetic bounds what an extra run can cost you. `BACKUP_SLOTS=2` and
+`_slot_name` picks `day_of_year % 2`, so an ad-hoc snapshot lands in *today's*
+slot — the one that night's run will overwrite anyway. It can never consume
+yesterday's. The corollary is that extra runs buy no extra history: slots rotate
+by date, not by invocation.
+
 ### Verified on the office NAS, 2026-08-11
 
 `run_nightly_backup()` — the actual scheduler entry point, not a stand-in — run
