@@ -11,15 +11,13 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from app import quota
 from app.config import settings
 from app.db import supabase
 from app.quota import JobBudget
 from app.youtube_client import youtube_for_channel, yt_playlists_list, yt_playlist_items_page
 
 log = logging.getLogger("midas.playlists_sync")
-
-#: One `playlistItems.list` page costs 1 unit (yt_playlist_items_page).
-PAGE_COST = 1
 
 
 # Role classification — regex-only, conservative (PHASE_1B_PLAN.md §4.2).
@@ -114,6 +112,20 @@ def _walk_plan(yt_playlists: list[dict], existing_by_id: dict[str, dict],
 
 
 def sync_playlists(channel_id: str, budget: JobBudget | None = None) -> dict:
+    """Sync inventory + membership, spending at most `budget` on the walk.
+
+    Opens the quota.spending() block itself rather than trusting the caller to:
+    a budget that is asked for permission but never told what was spent answers
+    yes forever, which is an unbounded walk wearing a cap. Handing the budget in
+    and having it counted are now the same act.
+    """
+    if budget is None:
+        return _sync_playlists(channel_id, None)
+    with quota.spending(budget):
+        return _sync_playlists(channel_id, budget)
+
+
+def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
     """Fetch all playlists + their members from YouTube and seed the local tables.
 
     Existing rows are upserted (title/description may have changed). Membership
@@ -252,11 +264,16 @@ def sync_playlists(channel_id: str, budget: JobBudget | None = None) -> dict:
     # `_walk_plan` decides who is owed a walk — changed counts first, then the
     # rotation candidates that guard against equal-count swaps — and `budget`
     # bounds how far down that list this run gets.
+    # Asked before each page; the spend itself is counted by quota.charge inside
+    # the wrapper, under the quota.spending() block the caller opened. Asking is
+    # explicit because stopping is a decision; counting is not.
+    _PAGE = quota.cost(quota.Op.PLAYLIST_ITEMS_LIST)
+
     memberships_seeded = 0
     walked = truncated = 0
     for entry in plan:
         playlist_id = entry["id"]
-        if budget is not None and not budget.can_spend(PAGE_COST):
+        if budget is not None and not budget.can_spend(_PAGE):
             # Out of budget. Everything left in the plan keeps its stale
             # item_count and old membership_walked_at, so the next run re-plans
             # it and — ordered by walked_at — starts from here.
@@ -270,14 +287,12 @@ def sync_playlists(channel_id: str, budget: JobBudget | None = None) -> dict:
         page_token = None
         complete = False
         while not complete:
-            if budget is not None and not budget.can_spend(PAGE_COST):
+            if budget is not None and not budget.can_spend(_PAGE):
                 # Mid-playlist stop. Deliberately NOT stamped: a partially read
                 # membership must not look walked, or the pages past this point
                 # would never be read.
                 break
             resp = yt_playlist_items_page(yt, channel_id, playlist_id, page_token)
-            if budget is not None:
-                budget.note(PAGE_COST)
             for item in resp.get("items", []):
                 playlist_item_id = item["id"]
                 video_id = item["contentDetails"]["videoId"]

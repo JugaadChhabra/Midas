@@ -5,6 +5,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 import json
 
+from app import quota
 from app.config import settings
 from app.db import supabase
 
@@ -49,18 +50,14 @@ def youtube_for_channel(channel_id: str):
 
 
 # ── Quota-logged YouTube call helpers ────────────────────────────────────
-# Each helper executes the API call and writes a quota_log row regardless of success.
+# Each helper executes the API call and charges quota regardless of success.
+#
+# What an operation COSTS is not written here — app.quota.UNIT_COST owns it, so
+# the module that answers "can I afford this?" and the module that spends it read
+# the same table. These wrappers name the operation; quota prices it.
 
-def _log_quota(channel_id: str | None, operation: str, units: int, success: bool):
-    try:
-        supabase().table("quota_log").insert({
-            "channel_id": channel_id,
-            "operation": operation,
-            "units": units,
-            "success": success,
-        }).execute()
-    except Exception:
-        pass
+def _log_quota(channel_id: str | None, op: str, success: bool, n: int = 1) -> None:
+    quota.charge(channel_id, op, success, n)
 
 
 def _guard_token(e: Exception, channel_id: str | None) -> None:
@@ -70,7 +67,7 @@ def _guard_token(e: Exception, channel_id: str | None) -> None:
 
 
 def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
-    """Return uploads playlist id and snippet metadata. Cost: 1."""
+    """Return uploads playlist id and snippet metadata."""
     success = False
     try:
         resp = yt.channels().list(part="contentDetails,snippet", id=channel_id).execute()
@@ -87,11 +84,11 @@ def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "channels.list", 1, success)
+        _log_quota(channel_id, quota.Op.CHANNELS_LIST, success)
 
 
 def yt_playlist_items_page(yt, channel_id: str, playlist_id: str, page_token: str | None) -> dict:
-    """One page of playlistItems. Cost: 1."""
+    """One page of playlistItems."""
     success = False
     try:
         resp = yt.playlistItems().list(
@@ -106,11 +103,11 @@ def yt_playlist_items_page(yt, channel_id: str, playlist_id: str, page_token: st
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "playlistItems.list", 1, success)
+        _log_quota(channel_id, quota.Op.PLAYLIST_ITEMS_LIST, success)
 
 
 def yt_videos_list_full(yt, channel_id: str | None, ids: list[str]) -> list[dict]:
-    """Full snippet+statistics+contentDetails+status for up to 50 videos. Cost: 1."""
+    """Full snippet+statistics+contentDetails+status for up to 50 videos."""
     success = False
     try:
         resp = yt.videos().list(part="snippet,statistics,contentDetails,status", id=",".join(ids)).execute()
@@ -120,11 +117,11 @@ def yt_videos_list_full(yt, channel_id: str | None, ids: list[str]) -> list[dict
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "videos.list", 1, success)
+        _log_quota(channel_id, quota.Op.VIDEOS_LIST, success)
 
 
 def yt_videos_list_stats(yt, channel_id: str | None, ids: list[str]) -> list[dict]:
-    """Statistics + status for up to 50 videos. Cost: 1.
+    """Statistics + status for up to 50 videos.
 
     `status` is included (same quota cost) so callers can detect privacy flips
     on already-synced videos without a full snippet re-fetch.
@@ -138,11 +135,11 @@ def yt_videos_list_stats(yt, channel_id: str | None, ids: list[str]) -> list[dic
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "videos.list", 1, success)
+        _log_quota(channel_id, quota.Op.VIDEOS_LIST, success)
 
 
 def yt_captions_list(yt, channel_id: str | None, video_id: str) -> list[dict]:
-    """List caption tracks for a video. Cost: 50."""
+    """List caption tracks for a video."""
     success = False
     try:
         resp = yt.captions().list(part="snippet", videoId=video_id).execute()
@@ -152,11 +149,11 @@ def yt_captions_list(yt, channel_id: str | None, video_id: str) -> list[dict]:
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "captions.list", 50, success)
+        _log_quota(channel_id, quota.Op.CAPTIONS_LIST, success)
 
 
 def yt_captions_download(yt, channel_id: str | None, caption_id: str) -> bytes:
-    """Download a caption track in VTT format. Cost: 200."""
+    """Download a caption track in VTT format."""
     success = False
     try:
         data = yt.captions().download(id=caption_id, tfmt="vtt").execute()
@@ -166,11 +163,11 @@ def yt_captions_download(yt, channel_id: str | None, caption_id: str) -> bytes:
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "captions.download", 200, success)
+        _log_quota(channel_id, quota.Op.CAPTIONS_DOWNLOAD, success)
 
 
 def yt_videos_update(yt, channel_id: str | None, payload: dict, parts: str = "snippet,status") -> dict:
-    """Update a video. Cost: 50."""
+    """Update a video."""
     success = False
     try:
         resp = yt.videos().update(part=parts, body=payload).execute()
@@ -180,11 +177,11 @@ def yt_videos_update(yt, channel_id: str | None, payload: dict, parts: str = "sn
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "videos.update", 50, success)
+        _log_quota(channel_id, quota.Op.VIDEOS_UPDATE, success)
 
 
 def yt_playlists_list(yt, channel_id: str) -> list[dict]:
-    """All playlists for a channel (paginates internally). Cost: 1 per page.
+    """All playlists for a channel (paginates internally). Charged once per page.
 
     Returns list of {id, title, description, item_count}. `item_count` comes
     free with `contentDetails` (Google bundles it into the same 1-unit list
@@ -207,7 +204,7 @@ def yt_playlists_list(yt, channel_id: str) -> list[dict]:
             _guard_token(e, channel_id)
             raise
         finally:
-            _log_quota(channel_id, "playlists.list", 1, success)
+            _log_quota(channel_id, quota.Op.PLAYLISTS_LIST, success)
         for item in resp.get("items", []):
             items.append({
                 "id": item["id"],
@@ -222,7 +219,7 @@ def yt_playlists_list(yt, channel_id: str) -> list[dict]:
 
 
 def yt_playlists_insert(yt, channel_id: str, title: str, description: str) -> str:
-    """Create a public playlist. Cost: 50. Returns the new playlist id."""
+    """Create a public playlist. Returns the new playlist id."""
     success = False
     try:
         resp = yt.playlists().insert(
@@ -238,11 +235,11 @@ def yt_playlists_insert(yt, channel_id: str, title: str, description: str) -> st
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "playlists.insert", 50, success)
+        _log_quota(channel_id, quota.Op.PLAYLISTS_INSERT, success)
 
 
 def yt_playlist_items_insert(yt, channel_id: str, playlist_id: str, video_id: str) -> str:
-    """Add a video to a playlist. Cost: 50. Returns the playlistItem id."""
+    """Add a video to a playlist. Returns the playlistItem id."""
     success = False
     try:
         resp = yt.playlistItems().insert(
@@ -260,11 +257,11 @@ def yt_playlist_items_insert(yt, channel_id: str, playlist_id: str, video_id: st
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "playlistItems.insert", 50, success)
+        _log_quota(channel_id, quota.Op.PLAYLIST_ITEMS_INSERT, success)
 
 
 def yt_playlist_items_delete(yt, channel_id: str, playlist_item_id: str) -> None:
-    """Remove a video from a playlist by its playlistItem id. Cost: 50."""
+    """Remove a video from a playlist by its playlistItem id."""
     success = False
     try:
         yt.playlistItems().delete(id=playlist_item_id).execute()
@@ -273,11 +270,11 @@ def yt_playlist_items_delete(yt, channel_id: str, playlist_item_id: str) -> None
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "playlistItems.delete", 50, success)
+        _log_quota(channel_id, quota.Op.PLAYLIST_ITEMS_DELETE, success)
 
 
 def yt_search_videos(yt, channel_id: str, query: str, max_results: int = 10, published_after: str | None = None) -> list[dict]:
-    """Search YouTube for videos matching query. Cost: 100 quota units.
+    """Search YouTube for videos matching query. Charged once per call.
 
     Returns list of {video_id, title, description, tags}.
     published_after: ISO 8601 string e.g. '2026-02-19T00:00:00Z'
@@ -309,4 +306,4 @@ def yt_search_videos(yt, channel_id: str, query: str, max_results: int = 10, pub
         _guard_token(e, channel_id)
         raise
     finally:
-        _log_quota(channel_id, "search.list", 100, success)
+        _log_quota(channel_id, quota.Op.SEARCH_LIST, success)

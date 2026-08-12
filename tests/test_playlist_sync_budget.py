@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import app.playlists_sync as ps
+from app import quota
 from app.quota import JobBudget
 
 
@@ -104,6 +105,11 @@ def _stub_sync(yt_playlists, existing_rows, pages_by_playlist):
 
     def _page(yt, channel_id, playlist_id, page_token):
         pages_fetched.append(playlist_id)
+        # Stand in for yt_playlist_items_page faithfully: the real wrapper
+        # charges quota, and that charge is what advances the active budget.
+        # A stub that skipped it would let the walk run past its cap in tests
+        # while stopping correctly in production.
+        quota.charge(channel_id, quota.Op.PLAYLIST_ITEMS_LIST, True)
         pages = pages_by_playlist[playlist_id]
         idx = 0 if page_token is None else int(page_token)
         return pages[idx]
@@ -113,6 +119,7 @@ def _stub_sync(yt_playlists, existing_rows, pages_by_playlist):
 
 def _run(sb, page_fn, yt_playlists, budget, full_walk_days=30):
     with patch.object(ps, "supabase", return_value=sb), \
+         patch.object(quota, "supabase", return_value=MagicMock()), \
          patch.object(ps, "youtube_for_channel", return_value=MagicMock()), \
          patch.object(ps, "yt_playlists_list", return_value=yt_playlists), \
          patch.object(ps, "yt_playlist_items_page", side_effect=page_fn), \

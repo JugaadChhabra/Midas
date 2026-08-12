@@ -1,4 +1,7 @@
 import logging
+import math
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter
 
@@ -9,6 +12,74 @@ from app.rows import all_rows
 log = logging.getLogger("midas.quota")
 
 router = APIRouter(tags=["quota"])
+
+
+class Op:
+    """A metered YouTube Data API operation.
+
+    The string is what lands in `quota_log.operation` — persisted, so these
+    values may not be renamed (same rule as app/status_vocab.py).
+    """
+
+    CHANNELS_LIST = "channels.list"
+    PLAYLIST_ITEMS_LIST = "playlistItems.list"
+    VIDEOS_LIST = "videos.list"
+    CAPTIONS_LIST = "captions.list"
+    CAPTIONS_DOWNLOAD = "captions.download"
+    VIDEOS_UPDATE = "videos.update"
+    PLAYLISTS_LIST = "playlists.list"
+    PLAYLISTS_INSERT = "playlists.insert"
+    PLAYLIST_ITEMS_INSERT = "playlistItems.insert"
+    PLAYLIST_ITEMS_DELETE = "playlistItems.delete"
+    SEARCH_LIST = "search.list"
+
+
+#: What each operation costs, per call. YouTube's published prices.
+#:
+#: This table is the ONLY place a unit cost appears. It used to live as a
+#: literal in each youtube_client wrapper — where it was written to the ledger
+#: but never read — while every gate that had to decide "can I afford this?"
+#: re-invented the number: `APPLY_COST = 51` in audits, `1 + 50` in autopilot,
+#: `51 * n` and `1 + 2 * ceil(n/50)` in the preview endpoint, `PAGE_COST = 1` in
+#: playlists_sync. Five copies of arithmetic derived from a table nobody could
+#: consult.
+UNIT_COST = {
+    Op.CHANNELS_LIST: 1,
+    Op.PLAYLIST_ITEMS_LIST: 1,
+    Op.VIDEOS_LIST: 1,
+    Op.CAPTIONS_LIST: 50,
+    Op.CAPTIONS_DOWNLOAD: 200,
+    Op.VIDEOS_UPDATE: 50,
+    Op.PLAYLISTS_LIST: 1,
+    Op.PLAYLISTS_INSERT: 50,
+    Op.PLAYLIST_ITEMS_INSERT: 50,
+    Op.PLAYLIST_ITEMS_DELETE: 50,
+    Op.SEARCH_LIST: 100,
+}
+
+#: Ids accepted by one `videos.list` call. A batching fact about the API, so it
+#: belongs with the prices: callers sizing a bulk read need both.
+IDS_PER_CALL = 50
+
+#: What applying one audit spends: refresh the stats baseline, then update.
+#: Named because it is the product's actual output and three places quote it.
+APPLY = (Op.VIDEOS_LIST, Op.VIDEOS_UPDATE)
+
+
+def cost(op: str, n: int = 1) -> int:
+    """Units for `n` calls of `op`. KeyError on an unpriced operation — loudly,
+    because silently charging 0 is how a spender escapes its budget."""
+    return UNIT_COST[op] * n
+
+
+def cost_of(*ops: str) -> int:
+    """Units for one call of each operation — a composite like APPLY."""
+    return sum(UNIT_COST[op] for op in ops)
+
+
+def calls_for(n_ids: int) -> int:
+    """How many batched list calls `n_ids` ids take (at least one)."""
+    return max(1, math.ceil(max(1, n_ids) / IDS_PER_CALL))
 
 
 def _today_start_iso() -> str:
@@ -58,8 +129,60 @@ def units_remaining(reserve: int = 0) -> int:
     )
 
 
-def can_afford(cost: int, reserve: int = 0) -> bool:
-    return units_remaining(reserve) >= cost
+def can_afford(units: int, reserve: int = 0) -> bool:
+    return units_remaining(reserve) >= units
+
+
+# ── Charging ──────────────────────────────────────────────────────────────
+
+_local = threading.local()
+
+
+@contextmanager
+def spending(budget: "JobBudget"):
+    """Make `budget` the active budget on this thread for the duration.
+
+    Inside this block, every `charge()` is counted against `budget` without the
+    caller doing anything. That is the point: a budget whose accounting depends
+    on each call site remembering to report its spend is a budget that will be
+    wrong, and was — sync_playlists asked for permission before each membership
+    page but never counted the playlist-inventory pages it read first, so the
+    nightly walk under-reported itself.
+
+    Deciding to stop stays explicit (`can_spend` at the call site); only the
+    accounting is automatic. Thread-local because the scheduler runs each job on
+    its own thread, so two jobs can hold different budgets — the same reason
+    app/db.py caches its client per thread.
+    """
+    prev = getattr(_local, "budget", None)
+    _local.budget = budget
+    try:
+        yield budget
+    finally:
+        _local.budget = prev
+
+
+def charge(channel_id: str | None, op: str, success: bool, n: int = 1) -> int:
+    """Record `n` calls of `op` against the ledger. Returns units charged.
+
+    Called from the API wrappers, so the cost is charged where it is actually
+    incurred rather than wherever someone remembered to. Never raises: a failed
+    ledger write must not take down the call it was measuring.
+    """
+    units = cost(op, n)
+    try:
+        supabase().table("quota_log").insert({
+            "channel_id": channel_id,
+            "operation": op,
+            "units": units,
+            "success": success,
+        }).execute()
+    except Exception:
+        pass
+    budget = getattr(_local, "budget", None)
+    if budget is not None:
+        budget.note(units)
+    return units
 
 
 class JobBudget:

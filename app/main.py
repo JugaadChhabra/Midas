@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
+from app import quota
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
 from app.performance import router as performance_router

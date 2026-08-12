@@ -563,7 +563,7 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
     """
     from app import quota
 
-    APPLY_COST = 51
+    APPLY_COST = quota.cost_of(*quota.APPLY)
 
     # Latest audit per video for this channel (join-scoped — no 1000-row
     # truncation); only 'pending' ones are applied below.
@@ -800,24 +800,31 @@ def revert_audit(audit_id: int):
 def quota_cost_preview(action: str, n: int = 1):
     """Estimate quota cost for an upcoming bulk action. UI uses this for confirmations.
 
+    Every price comes from quota.UNIT_COST, so this estimate cannot drift from
+    what the apply path will actually be charged. What lives here is the SHAPE
+    of each action — which operations it makes and how many times — not what
+    they cost.
+
     actions:
-      audit  → 0 YouTube quota (uses OpenRouter, not YouTube quota_log)
-      apply  → 51 per video (1 stats + 50 update)
-      sync   → 1 + 2 * ceil(n/50) (rough)
-      refresh-stats → ceil(n/50)
+      audit  → no YouTube quota (OpenRouter + transcript fetch)
+      apply  → one stats refresh + one update, per video
+      sync   → the channel lookup, then a page walk and a details read per batch
+      refresh-stats → one batched stats read per 50 ids
     """
     from app import quota
-    cost = 0
     if action == "audit":
         cost = 0  # transcript fetch + LLM, not YouTube quota
     elif action == "apply":
-        cost = 51 * max(0, n)
+        cost = quota.cost_of(*quota.APPLY) * max(0, n)
     elif action == "sync":
-        import math
-        cost = 1 + 2 * max(1, math.ceil(max(1, n) / 50))
+        batches = quota.calls_for(n)
+        cost = (
+            quota.cost(quota.Op.CHANNELS_LIST)
+            + quota.cost(quota.Op.PLAYLIST_ITEMS_LIST, batches)
+            + quota.cost(quota.Op.VIDEOS_LIST, batches)
+        )
     elif action == "refresh-stats":
-        import math
-        cost = max(1, math.ceil(max(1, n) / 50))
+        cost = quota.cost(quota.Op.VIDEOS_LIST, quota.calls_for(n))
     else:
         raise HTTPException(400, f"Unknown action: {action}")
     remaining = quota.units_remaining()
@@ -826,6 +833,6 @@ def quota_cost_preview(action: str, n: int = 1):
         "n": n,
         "cost": cost,
         "remaining": remaining,
-        "can_afford": remaining >= cost,
+        "can_afford": quota.can_afford(cost),
         "pct_of_remaining": round(100.0 * cost / remaining, 1) if remaining > 0 else None,
     }

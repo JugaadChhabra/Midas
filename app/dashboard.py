@@ -414,7 +414,7 @@ def _compute_dashboard():
         "used_today": used_today,
         "limit": settings.YT_DAILY_QUOTA,
         "safety_buffer": settings.YT_QUOTA_SAFETY_BUFFER,
-        "remaining": settings.YT_DAILY_QUOTA - settings.YT_QUOTA_SAFETY_BUFFER - used_today,
+        "remaining": quota_mod.units_remaining(),
         "reset_in_seconds": quota_reset_in_seconds,
         "sparkline": spark,
     }

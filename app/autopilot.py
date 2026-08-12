@@ -49,11 +49,6 @@ def _next_yt_quota_reset() -> datetime:
     return next_midnight.astimezone(timezone.utc)
 
 
-# Per-tick cost gates
-COST_STATS_FETCH = 1
-COST_VIDEO_UPDATE = 50
-APPLY_COST = COST_STATS_FETCH + COST_VIDEO_UPDATE  # 51
-
 # How often to run a full (snippet-rebuilding) sync instead of an incremental
 # one. Incremental syncs miss edits to old titles/tags, so we do a full pass
 # this often to repair them.
@@ -566,11 +561,10 @@ def tick():
             _touch_tick(channel_id)
             return
 
-        # 9. Re-check quota right before apply (disabled: letting YouTube's quotaExceeded be the signal)
-        # if not quota.can_afford(APPLY_COST):
-        #     log.info("Quota dipped during audit; deferring apply of %s", audit_row.get("id"))
-        #     _touch_tick(channel_id)
-        #     return
+        # 9. No pre-apply quota re-check: YouTube's own quotaExceeded is the
+        # signal (see _quota_dormant / _next_yt_quota_reset above). To restore
+        # one, gate on quota.can_afford(quota.cost_of(*quota.APPLY)) — the price
+        # lives in app.quota now, not in a constant here.
 
         # 10. Apply and react to the typed outcome.
         _apply_audit_and_handle(audit_row, video, channel_id)
