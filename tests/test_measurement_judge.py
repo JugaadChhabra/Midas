@@ -12,7 +12,7 @@ The decision is now two pure stages with the I/O pushed to the edges:
 
 so every branch below runs with no mocks at all.
 """
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -129,25 +129,61 @@ def test_missing_coverage_within_grace_waits_as_measuring():
     assert p.action == m.MARK_MEASURING
 
 
-def test_missing_coverage_past_grace_gives_up_as_never_measured():
-    """not_applicable, NOT neutral.
+def _covered_up_to(pre, post, frontier_day, missing):
+    """Coverage of both windows minus `missing`, extended to `frontier_day`.
+
+    The grace period runs in INGESTED time, so a test about giving up has to say
+    how far ingestion actually got — not just what today's date is.
+    """
+    days = _covered(pre, post) - set(missing)
+    cursor = date.fromisoformat(post[1])
+    end = date.fromisoformat(frontier_day)
+    while cursor <= end:
+        days.add(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return days - set(missing)
+
+
+def test_missing_coverage_gives_up_once_ingestion_has_moved_past_the_window():
+    """not_applicable, NOT neutral — and only once the frontier proves the days
+    are lost rather than late.
 
     Coverage never arriving is a fact about our ingestion, not about the
-    audience — we weren't watching, so there is no evidence either way. As
-    neutral it entered the win rate that promotes prompt versions (reflection
-    filters on MEASURED_STATUSES, which excludes not_applicable) and counted
-    toward the _MIN_DATA_POINTS floor meant to keep the prompt loop off thin
-    evidence. A downed poller must not read as a prompt that didn't work.
+    audience. As neutral it entered the win rate that promotes prompt versions
+    (reflection filters on MEASURED_STATUSES, which excludes not_applicable) and
+    counted toward the _MIN_DATA_POINTS floor meant to keep the prompt loop off
+    thin evidence. A downed poller must not read as a prompt that didn't work.
     """
     pre, post = reach.window_for(APPLIED)
-    covered = _covered(pre, post) - {post[1]}
-    # post_end is 2026-06-23; grace is 14 days
+    # post_end is 2026-06-23; ingestion has reached 2026-07-10, well past
+    # post_end + 14 — so the hole at post[1] will never be filled.
+    covered = _covered_up_to(pre, post, "2026-07-10", {post[1]})
     p = m.plan_measurement(_audit(), date(2026, 7, 20), covered)
     assert p.action == m.FINALIZE
     assert p.status == MeasurementStatus.NOT_APPLICABLE
     assert p.outcome == OutcomeDecision.NONE
-    assert "grace" in p.result["rationale"]
-    assert p.result["missing_days"]
+    assert p.result["missing_days"] == [post[1]]
+    assert p.result["frontier"] == "2026-07-10"
+
+
+def test_a_stalled_poller_holds_instead_of_expiring():
+    """The reason this commit exists. The window closed a month ago on the
+    calendar, but ingestion stopped the day it closed — so there is nothing to
+    conclude, and wall-clock grace would have manufactured a verdict out of our
+    own outage."""
+    pre, post = reach.window_for(APPLIED)
+    covered = _covered(pre, post) - {post[1]}          # frontier stuck at post_end - 1
+    p = m.plan_measurement(_audit(), date(2026, 8, 30), covered)
+    assert p.action == m.MARK_MEASURING
+    assert p.result["awaiting_ingestion"] is True
+    assert p.result["missing_days"] == [post[1]]
+
+
+def test_a_channel_with_no_coverage_at_all_holds():
+    """Nothing ingested ever: there is no frontier, so no clock can have run."""
+    p = m.plan_measurement(_audit(), date(2026, 12, 31), set())
+    assert p.action == m.MARK_MEASURING
+    assert p.result["awaiting_ingestion"] is True
 
 
 def test_the_grace_verdict_is_excluded_from_the_evidence_base():
@@ -157,20 +193,24 @@ def test_the_grace_verdict_is_excluded_from_the_evidence_base():
     from app.status_vocab import MEASURED_STATUSES
 
     pre, post = reach.window_for(APPLIED)
-    covered = _covered(pre, post) - {post[1]}
+    covered = _covered_up_to(pre, post, "2026-07-10", {post[1]})
     p = m.plan_measurement(_audit(), date(2026, 7, 20), covered)
     assert p.status not in MEASURED_STATUSES
 
 
 def test_grace_boundary_is_not_off_by_one():
+    """Measured against the frontier, not today: grace expires when ingestion has
+    passed post_end + 14, whatever the calendar says."""
     pre, post = reach.window_for(APPLIED)
-    covered = _covered(pre, post) - {post[1]}
     post_end = date.fromisoformat(post[1])
-    from datetime import timedelta
-    assert m.plan_measurement(_audit(), post_end + timedelta(days=14), covered).action \
-        == m.MARK_MEASURING          # still inside grace
-    assert m.plan_measurement(_audit(), post_end + timedelta(days=15), covered).action \
-        == m.FINALIZE                # grace expired
+    far_future = date(2027, 1, 1)
+
+    at_edge = _covered_up_to(pre, post, (post_end + timedelta(days=14)).isoformat(), {post[1]})
+    assert m.plan_measurement(_audit(), far_future, at_edge).action \
+        == m.MARK_MEASURING          # frontier only just reached the edge
+    past_edge = _covered_up_to(pre, post, (post_end + timedelta(days=15)).isoformat(), {post[1]})
+    assert m.plan_measurement(_audit(), far_future, past_edge).action \
+        == m.FINALIZE                # ingestion moved past it; the days are lost
 
 
 # ── judge_reach: the post-reach policies ──────────────────────────────────

@@ -151,6 +151,28 @@ def frontier(covered: set[str]) -> str | None:
     return max(covered) if covered else None
 
 
+def days_behind(covered: set[str], today: date) -> int | None:
+    """How far behind `today` the coverage frontier is. None if never covered.
+
+    The freshness fact. Reach CSVs for a data-day arrive 1-6 days late, so a few
+    days behind is the pipeline working normally; a number that keeps growing
+    means ingestion has stopped, which is the difference between "the audience
+    did not move" and "we were not watching". Nothing downstream could ask this
+    before — `poll_reporting`'s only output was log lines — so a judge had no way
+    to tell an outage from a result.
+    """
+    latest = frontier(covered)
+    if latest is None:
+        return None
+    return (today - date.fromisoformat(latest)).days
+
+
+def is_stale(covered: set[str], today: date) -> bool:
+    """Is ingestion behind by more than the normal arrival lag?"""
+    behind = days_behind(covered, today)
+    return behind is None or behind > settings.REACH_STALE_AFTER_DAYS
+
+
 # ── Values ────────────────────────────────────────────────────────────────
 
 def weighted_ctr(rows) -> tuple[int, float | None]:

@@ -180,22 +180,43 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
 
     missing = reach.missing_days(covered, pre, post)
     if missing:
-        if today > post_end + timedelta(days=settings.MEASUREMENT_COVERAGE_GRACE_DAYS):
+        # The grace period runs in INGESTED time, not wall-clock time.
+        #
+        # Wall-clock was the bug: an audit's window closes on the calendar, the
+        # reach poller is down for three weeks, and the grace expires against a
+        # channel we simply were not watching. Giving up then records our outage
+        # as a fact about the audience.
+        #
+        # The frontier — the latest data-day we have ANY report for — is what
+        # says whether the pipeline has moved past this window. If it has, and
+        # days inside the window are still missing, they are genuinely lost:
+        # YouTube emitted later days and never these. If it has not, we are still
+        # behind and there is nothing to conclude yet, however long ago the
+        # window closed on the calendar.
+        frontier = reach.frontier(covered)
+        caught_up = frontier is not None and date.fromisoformat(frontier) > (
+            post_end + timedelta(days=settings.MEASUREMENT_COVERAGE_GRACE_DAYS))
+        if caught_up:
             # not_applicable, NOT neutral — the same reasoning as the missing
-            # timestamp branch above. Coverage never arriving is a fact about
-            # OUR ingestion, not about the audience: we weren't watching, so
-            # there is no evidence either way. Recording it as neutral put
-            # infrastructure lateness into the win rate that promotes prompt
-            # versions (reflection filters on MEASURED_STATUSES and divides
-            # wins by that population), and let a downed poller both depress
-            # the rate and help satisfy the _MIN_DATA_POINTS floor that exists
-            # to stop the prompt loop running on thin evidence.
+            # timestamp branch above. A window with permanent holes was never
+            # measured. Recording it as neutral put it into the win rate that
+            # promotes prompt versions (reflection filters on MEASURED_STATUSES
+            # and divides wins by that population), and let it help satisfy the
+            # _MIN_DATA_POINTS floor that exists to stop the prompt loop running
+            # on thin evidence.
             return Plan(FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, {
-                "rationale": "reach coverage never completed within grace period",
+                "rationale": "reach coverage never completed; ingestion has moved "
+                             "past this window, so the missing days will not arrive",
                 "missing_days": missing[:14],
+                "frontier": frontier,
                 verdicts.PRE_WINDOW: pre, verdicts.POST_WINDOW: post,
             })
-        return Plan(MARK_MEASURING, MeasurementStatus.MEASURING)
+        # Held, not judged. Distinct from reach.is_stale, which is about the
+        # CHANNEL's poller being broken: this says only that ingestion has not yet
+        # reached the point where a missing day could be called lost.
+        return Plan(MARK_MEASURING, MeasurementStatus.MEASURING,
+                    result={"awaiting_ingestion": True, "frontier": frontier,
+                            "missing_days": missing[:14]})
 
     return Plan(MEASURE, pre=pre, post=post)
 
@@ -329,6 +350,8 @@ def eval_measurements() -> dict:
 
     today = datetime.now(timezone.utc).date()
     coverage: dict[str, set[str]] = {}
+    #: channel_id -> days behind, for channels whose reach ingestion has stalled.
+    stalled_channels: dict[str, int | None] = {}
     counts: dict[str, int] = {}
     errors = 0
     for audit in audits:
@@ -342,6 +365,18 @@ def eval_measurements() -> dict:
             cid = video["channel_id"]
             if cid not in coverage:
                 coverage[cid] = reach.coverage(cid)
+                # Say it once per channel, not once per audit: a stalled poller
+                # is a property of the channel, and this pass is the only place
+                # that reads coverage often enough to notice. Without it, an
+                # ingestion outage looks exactly like a quiet fleet — audits sit
+                # in `measuring` and nothing anywhere says why.
+                if reach.is_stale(coverage[cid], today):
+                    stalled_channels[cid] = reach.days_behind(coverage[cid], today)
+                    log.warning(
+                        "measurement_eval: %s reach is %s days behind (frontier %s) — "
+                        "audits will hold in measuring, not be judged, until it catches up",
+                        cid, stalled_channels[cid], reach.frontier(coverage[cid]),
+                    )
             status = _eval_audit(audit, video, coverage[cid], today)
             counts[status] = counts.get(status, 0) + 1
         except Exception as e:
@@ -349,6 +384,10 @@ def eval_measurements() -> dict:
             log.exception("measurement_eval failed for audit %s: %s", audit.get("id"), e)
 
     summary = {"evaluated": len(audits), "errors": errors, **counts}
+    if stalled_channels:
+        # In the summary so the fact survives the log rotation and is visible to
+        # anything that calls this directly (the ops endpoint, a future check).
+        summary["reach_stalled_channels"] = stalled_channels
     log.info("measurement_eval: %s", summary)
     return summary
 

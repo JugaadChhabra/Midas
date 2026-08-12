@@ -183,6 +183,14 @@ class Settings:
     # window still hasn't completed after this many extra days, give up and
     # classify neutral ("can't tell") rather than waiting forever.
     MEASUREMENT_COVERAGE_GRACE_DAYS = int(os.getenv("MEASUREMENT_COVERAGE_GRACE_DAYS") or "14")
+    # Reach CSVs for a data-day arrive 1-6 days late (2026-07-02 probe), so a
+    # frontier a few days behind is the pipeline working. Past this, ingestion has
+    # stopped and measurement is judging nothing — reach.is_stale says so, and the
+    # measurement pass reports it per channel rather than waiting for someone to
+    # notice a flat outcomes page. NOT a grace period: the grace runs in ingested
+    # time now, so a stalled channel holds rather than expiring (see
+    # plan_measurement).
+    REACH_STALE_AFTER_DAYS = int(os.getenv("REACH_STALE_AFTER_DAYS") or "7")
     # reporting_poll ingests daily reach CSVs into video_reach_daily and backfills
     # video_metrics.impressions/ctr. BOTH are consumed only by app/measurement.py,
     # which only runs on measurement_enabled channels. Ingesting reach for the
