@@ -93,6 +93,24 @@
   #videos .dt { --dt-cols: 1.1rem 88px minmax(210px, 1.7fr) 7rem 4.2rem 4.2rem 5.4rem 4.6rem 6rem 6rem 5.6rem;
                 --dt-min: 1080px; }
   #videos .dt-row { align-items:start; }
+
+  /* Card section headers — title left, a quiet action right. Replaces the
+     `<span style="flex:1">` spacers these rows used to be built from. */
+  .sec-head { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; }
+  .sec-head h3 { margin:0; font-size:.98rem; }
+  .sec-head > :last-child { margin-left:auto; }
+  .sec-tag { font-weight:400; font-size:.74rem; opacity:.55; }
+  .sec-note { font-size:.82rem; margin:.35rem 0 .6rem; max-width:62ch; }
+  .sec-toggle { display:flex; align-items:center; gap:.5rem; cursor:pointer; font-weight:600; font-size:.88rem; }
+
+  /* Playlist tables. Same grid contract as #videos — columns declared once. */
+  #pl-proposals .dt { --dt-cols: 1.1rem 5.5rem minmax(200px,1.6fr) minmax(150px,1.1fr) 5rem 7rem; --dt-min: 760px; }
+  #pl-health .dt   { --dt-cols: 7.5rem minmax(200px,1.7fr) 4.5rem 4.5rem 4.5rem 6rem 6.5rem; --dt-min: 900px; }
+  #pl-health .dt-row { align-items:start; }
+  .pl-title { font-weight:600; }
+  .pl-sub { font-size:.75rem; opacity:.6; margin-top:.15rem; }
+  .pl-why > summary { font-size:.75rem; opacity:.6; cursor:pointer; }
+  .pl-why pre { font-size:.72rem; white-space:pre-wrap; margin:.35rem 0 0; max-height:11rem; overflow:auto; }
   #videos .vid-title { font-weight:600; }
   #videos .vid-sub { font-size:.75rem; opacity:.6; margin-top:.15rem; }
   /* The audit's reasoning runs to a paragraph; unclamped it triples the row
@@ -233,46 +251,51 @@
 
   <!-- ─── PLAYLISTS ─── -->
   <div class="tab-panel" data-panel="playlists">
+    <!-- Same shape as Overview: what needs the operator, then the work. -->
+    <p class="ov-lede" id="pl-lede">—</p>
+    <p class="ov-meta" id="pl-meta"></p>
+
     <div class="card">
-      <h3 style="margin-top:0">Playlist allocation</h3>
-      <p class="muted">Bootstrap embeds all videos so the system can score them against playlists. Run once, then auto-allocation happens after every audit.</p>
-      <div class="row">
-        <button id="pl-bootstrap-btn">Bootstrap (sync + embed all)</button>
-        <button id="pl-reconcile-btn">Reconcile now</button>
+      <div class="sec-head">
+        <h3>Allocation</h3>
         <span id="pl-action-status" class="muted"></span>
       </div>
-    </div>
-    <div class="card">
-      <h3 style="margin-top:0">Status</h3>
-      <div id="pl-status">Loading…</div>
-    </div>
-    <div class="card" id="pl-health-card">
-      <div class="row" style="margin-bottom:.6rem">
-        <h3 style="margin:0">Playlist health <span class="muted" style="font-weight:400; font-size:.78rem">(recommend-only)</span></h3>
-        <span style="flex:1"></span>
-        <button id="pl-health-evaluate-btn">Run evaluation</button>
-        <button id="pl-health-refresh-btn">Refresh</button>
+      <p class="muted sec-note">Bootstrap embeds every video so it can be scored against playlists. Run once — after that, allocation happens automatically following each audit.</p>
+      <div id="pl-embed-progress"></div>
+      <div class="ov-actions">
+        <button id="pl-reconcile-btn">Reconcile now</button>
+        <button id="pl-bootstrap-btn">Bootstrap · sync + embed all</button>
       </div>
-      <div class="row" style="margin-bottom:.6rem; gap:.6rem">
-        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-          <input type="checkbox" id="playlist-health-enabled" />
-          <b>Enable scoring</b>
-        </label>
-        <button id="playlist-health-save">Save</button>
-        <span class="muted" style="font-size:.78rem; flex:1; min-width:200px">Daily job scoring each playlist on session contribution (web-only counts). <b>Never deletes anything</b> — operator confirms. Off by default.</span>
-      </div>
-      <div id="pl-health-status" class="muted" style="font-size:.85rem; margin-bottom:.5rem"></div>
-      <div id="pl-health">Loading…</div>
     </div>
     <div class="card" id="pl-proposals-card">
-      <div class="row" style="margin-bottom:.75rem">
-        <h3 style="margin:0">Pending proposals</h3>
-        <span style="flex:1"></span>
-        <button id="pl-approve-all-btn" disabled>Approve selected</button>
+      <div class="sec-head">
+        <h3>Pending proposals</h3>
+        <button id="pl-refresh-btn" class="btn-link">Refresh</button>
+      </div>
+      <div class="chip-bar" id="pl-chips" role="group" aria-label="Filter proposals by action"></div>
+      <div class="ov-actions" style="margin-top:0">
+        <button id="pl-approve-all-btn" class="btn-primary" disabled>Approve selected</button>
         <button id="pl-reject-all-btn" disabled>Reject selected</button>
-        <button id="pl-refresh-btn">Refresh</button>
       </div>
       <div id="pl-proposals">Loading…</div>
+    </div>
+
+    <div class="card" id="pl-health-card">
+      <div class="sec-head">
+        <h3>Playlist health <span class="sec-tag">recommend-only</span></h3>
+        <button id="pl-health-refresh-btn" class="btn-link">Refresh</button>
+      </div>
+      <p class="muted sec-note">A daily job scores each playlist on session contribution (web-only counts). It <b>never deletes anything</b> — you confirm every change. Off by default.</p>
+      <div class="ov-actions" style="margin-top:.6rem">
+        <label class="sec-toggle">
+          <input type="checkbox" id="playlist-health-enabled" />
+          <span>Enable scoring</span>
+        </label>
+        <button id="playlist-health-save">Save</button>
+        <button id="pl-health-evaluate-btn">Run evaluation</button>
+      </div>
+      <div id="pl-health-status" class="muted sec-note"></div>
+      <div id="pl-health">Loading…</div>
     </div>
   </div>
 
@@ -1336,39 +1359,92 @@ $('apply-pending-btn').onclick = async () => {
 
 // ── Playlists ──────────────────────────────────────────────────────────
 let plProposals = [];
+let plStatus = null;
+let plAction = '';            // '' = all; otherwise 'add' | 'remove'
 const plSelected = new Set();
 
+// The section's focal line, matching Overview: the count that implies work,
+// with the rest of the figures demoted to context beneath it.
+function renderPlLede() {
+  const n = plProposals.length;
+  $('pl-lede').innerHTML = n
+    ? `${fmt(n)} proposal${n === 1 ? '' : 's'} <span class="u">await${n === 1 ? 's' : ''} review</span>`
+    : 'No proposals pending <span class="u">allocation is settled</span>';
+
+  const s = plStatus;
+  $('pl-meta').textContent = s
+    ? `${fmt(s.playlists)} playlists · ${fmt(s.videos_in_playlists)} videos allocated · ${fmt(s.orphans)} orphans`
+    : '';
+}
+
+function plVisibleProposals() {
+  return plAction ? plProposals.filter(p => p.action === plAction) : plProposals;
+}
+
+function renderPlChips() {
+  const counts = {};
+  plProposals.forEach(p => { counts[p.action] = (counts[p.action] || 0) + 1; });
+  const meta = { add: { label: 'Add', role: 'ok' }, remove: { label: 'Remove', role: 'err' } };
+
+  const chip = (key, label, role, count, active) => `
+    <button type="button" class="chip" data-plaction="${key}" aria-pressed="${active}">
+      ${role ? `<span class="chip-dot dot--${role}"></span>` : ''}
+      ${escapeHtml(label)}<span class="chip-count">${fmt(count)}</span>
+    </button>`;
+
+  let html = chip('', 'All', '', plProposals.length, plAction === '');
+  Object.entries(meta).forEach(([key, m]) => {
+    const n = counts[key] || 0;
+    if (!n && plAction !== key) return;
+    html += chip(key, m.label, m.role, n, plAction === key);
+  });
+  $('pl-chips').innerHTML = html;
+  $('pl-chips').querySelectorAll('.chip').forEach(b => {
+    b.onclick = () => { plAction = b.dataset.plaction; renderProposals(); };
+  });
+}
+
 function renderProposals() {
+  renderPlLede();
+  renderPlChips();
+
   if (!plProposals.length) {
-    $('pl-proposals').innerHTML = '<em class="muted">No pending proposals.</em>';
-    $('pl-approve-all-btn').disabled = true;
-    $('pl-reject-all-btn').disabled = true;
+    $('pl-proposals').innerHTML = '<div class="dt"><div class="dt-empty muted">No pending proposals.</div></div>';
+    updatePlBtns();
     return;
   }
-  const rows = plProposals.map(p => {
+  const shown = plVisibleProposals();
+  if (!shown.length) {
+    $('pl-proposals').innerHTML = '<div class="dt"><div class="dt-empty muted">No proposals of this kind.</div></div>';
+    updatePlBtns();
+    return;
+  }
+
+  const rows = shown.map(p => {
     const badge = p.action === 'add'
-      ? `<span class="pill pill--ok">add</span>`
-      : `<span class="pill pill--err">remove</span>`;
+      ? '<span class="pill pill--ok pill--sm">Add</span>'
+      : '<span class="pill pill--err pill--sm">Remove</span>';
     const sim = p.similarity != null ? (p.similarity * 100).toFixed(1) + '%' : '—';
-    return `<tr>
-      <td><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''}></td>
-      <td>${badge}</td>
-      <td>${escapeHtml(p.video_title || p.video_id)}</td>
-      <td class="muted">${escapeHtml(p.playlist_title || p.playlist_id)}</td>
-      <td class="muted">${sim}</td>
-      <td class="muted" style="font-size:.8rem">${escapeHtml(p.decision_source)}</td>
-    </tr>`;
+    return `<div class="dt-row">
+      <span><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''} aria-label="Select proposal" /></span>
+      <span>${badge}</span>
+      <span class="truncate" title="${escapeHtml(p.video_title || p.video_id)}">${escapeHtml(p.video_title || p.video_id)}</span>
+      <span class="truncate muted" title="${escapeHtml(p.playlist_title || p.playlist_id)}">${escapeHtml(p.playlist_title || p.playlist_id)}</span>
+      <span class="dt-num">${sim}</span>
+      <span class="muted truncate">${escapeHtml(p.decision_source)}</span>
+    </div>`;
   }).join('');
-  $('pl-proposals').innerHTML =
-    `<table style="width:100%;border-collapse:collapse">
-      <thead><tr style="text-align:left;border-bottom:1px solid var(--surface-tint)">
-        <th><input type="checkbox" id="pl-select-all"></th>
-        <th>Action</th><th>Video</th><th>Playlist</th><th>Similarity</th><th>Source</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+
+  $('pl-proposals').innerHTML = `<div class="dt"><div class="dt-scroll"><div class="dt-body">
+    <div class="dt-head">
+      <span><input type="checkbox" id="pl-select-all" aria-label="Select all shown" /></span>
+      <span>Action</span><span>Video</span><span>Playlist</span><span>Similarity</span><span>Source</span>
+    </div>${rows}</div></div></div>`;
+
+  // Select-all applies to what's on screen, not the whole set — selecting rows
+  // a filter is hiding is the kind of thing you find out about afterwards.
   $('pl-select-all').onchange = e => {
-    plProposals.forEach(p => e.target.checked ? plSelected.add(p.id) : plSelected.delete(p.id));
+    shown.forEach(p => e.target.checked ? plSelected.add(p.id) : plSelected.delete(p.id));
     renderProposals();
   };
   $('pl-proposals').querySelectorAll('input[data-id]').forEach(cb => {
@@ -1378,8 +1454,11 @@ function renderProposals() {
 }
 
 function updatePlBtns() {
-  $('pl-approve-all-btn').disabled = plSelected.size === 0;
-  $('pl-reject-all-btn').disabled = plSelected.size === 0;
+  const n = plSelected.size;
+  $('pl-approve-all-btn').disabled = n === 0;
+  $('pl-reject-all-btn').disabled = n === 0;
+  $('pl-approve-all-btn').textContent = n ? `Approve ${fmt(n)} selected` : 'Approve selected';
+  $('pl-reject-all-btn').textContent = n ? `Reject ${fmt(n)} selected` : 'Reject selected';
 }
 
 function loadProposals() {
@@ -1420,21 +1499,27 @@ $('pl-reject-all-btn').onclick = () => decideProposals('rejected');
 $('pl-refresh-btn').onclick = loadProposals;
 
 
+// The four figures used to be marked up with .kpi-val / .kpi-label, which are
+// defined in no stylesheet — they rendered as undifferentiated plain text. The
+// embedding ratio is the one with a target, so it becomes a meter; the rest
+// move to the lede's meta line where they read as context, not as headline
+// numbers competing with the proposal count.
 function renderPlaylistStatus(s) {
-    const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
-    $('pl-status').innerHTML =
-      `<div class="kpi-grid">
-        <div><div class="kpi-val">${s.embedded}/${s.total_videos}</div><div class="kpi-label">Videos embedded (${pct}%)</div></div>
-        <div><div class="kpi-val">${s.playlists}</div><div class="kpi-label">Playlists tracked</div></div>
-        <div><div class="kpi-val">${s.videos_in_playlists}</div><div class="kpi-label">Videos in playlists</div></div>
-        <div><div class="kpi-val">${s.orphans}</div><div class="kpi-label">Orphans (no playlist)</div></div>
-      </div>`;
+  const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
+  $('pl-embed-progress').innerHTML = `
+    <div class="ov-row-head">
+      <span>Videos embedded</span>
+      <span class="ov-row-val"><b>${fmt(s.embedded)}</b> / ${fmt(s.total_videos)} <span class="muted">· ${pct}%</span></span>
+    </div>
+    <div class="meter"><i style="width:${pct}%"></i></div>`;
+  plStatus = s;
+  renderPlLede();
 }
 function loadPlaylistStatus() {
   SWR.swr(`/channels/${channelId}/playlists/status`, renderPlaylistStatus, {
     onError: () => {
       if (SWR.get(`/channels/${channelId}/playlists/status`) === undefined) {
-        $('pl-status').innerHTML = '<em class="muted">Could not load playlist status.</em>';
+        $('pl-embed-progress').innerHTML = '<em class="muted">Could not load playlist status.</em>';
       }
     },
   });
@@ -1514,7 +1599,7 @@ function renderHealth(envelope) {
 
   const recs = envelope.recommendations || [];
   if (!recs.length) {
-    $('pl-health').innerHTML = '<em class="muted">No playlists for this channel yet — run sync first.</em>';
+    $('pl-health').innerHTML = '<div class="dt"><div class="dt-empty muted">No playlists for this channel yet — run sync first.</div></div>';
     return;
   }
   const rows = recs.map(r => {
@@ -1523,28 +1608,30 @@ function renderHealth(envelope) {
     const pctl = pctlRaw == null ? '—' : pctlRaw + '%';
     const startsField = r.rationale?.playlist_starts ?? r.rationale?.playlist_starts_in_window ?? '—';
     const small = r.rationale?.small_channel_note
-      ? ' <span class="pill" title="' + escapeHtml(r.rationale.small_channel_note) + '" style="background:var(--border)">small ch.</span>'
+      ? ` <span class="pill pill--neutral pill--sm" title="${escapeHtml(r.rationale.small_channel_note)}">small ch.</span>`
       : '';
-    return `<tr>
-      <td>${plActionPill(r.action)}${small}</td>
-      <td>
-        <div style="font-weight:600">${escapeHtml(r.title || r.playlist_id)}</div>
-        <div class="muted" style="font-size:.78rem"><code>${escapeHtml(r.playlist_id)}</code>${r.role && r.role !== 'inherited' ? ` · ${escapeHtml(r.role)}` : ''}${r.origin && r.origin !== 'inherited' ? ` · ${escapeHtml(r.origin)}` : ''}</div>
-      </td>
-      <td class="muted">${r.item_count ?? '—'}</td>
-      <td>${score}</td>
-      <td>${pctl}</td>
-      <td class="muted" style="font-size:.78rem">${startsField} starts</td>
-      <td><details><summary class="muted">rationale</summary><pre style="font-size:.75rem; max-width:32rem; white-space:pre-wrap">${escapeHtml(JSON.stringify(r.rationale, null, 2))}</pre></details></td>
-    </tr>`;
+    const sub = [
+      r.role && r.role !== 'inherited' ? escapeHtml(r.role) : null,
+      r.origin && r.origin !== 'inherited' ? escapeHtml(r.origin) : null,
+    ].filter(Boolean).join(' · ');
+    return `<div class="dt-row">
+      <span>${plActionPill(r.action)}${small}</span>
+      <span>
+        <div class="pl-title truncate" title="${escapeHtml(r.title || r.playlist_id)}">${escapeHtml(r.title || r.playlist_id)}</div>
+        <div class="pl-sub"><code>${escapeHtml(r.playlist_id)}</code>${sub ? ` · ${sub}` : ''}</div>
+      </span>
+      <span class="dt-num muted">${r.item_count ?? '—'}</span>
+      <span class="dt-num">${score}</span>
+      <span class="dt-num">${pctl}</span>
+      <span class="dt-num muted">${startsField} starts</span>
+      <span><details class="pl-why"><summary>rationale</summary><pre>${escapeHtml(JSON.stringify(r.rationale, null, 2))}</pre></details></span>
+    </div>`;
   }).join('');
-  $('pl-health').innerHTML =
-    `<table>
-      <thead><tr>
-        <th>Action</th><th>Playlist</th><th>Items</th><th>Score</th><th>Pctl</th><th>Window</th><th></th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  $('pl-health').innerHTML = `<div class="dt"><div class="dt-scroll"><div class="dt-body">
+    <div class="dt-head">
+      <span>Action</span><span>Playlist</span><span>Items</span><span>Score</span>
+      <span>Pctl</span><span>Window</span><span aria-hidden="true"></span>
+    </div>${rows}</div></div></div>`;
 }
 
 function loadHealth() {
