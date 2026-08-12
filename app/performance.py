@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
+from app import verdicts
 from app.channel_audits import audits_for_channel, fetch_all
 from app.db import supabase
 from app.status_vocab import MEASURED_STATUSES, AuditStatus
@@ -111,11 +112,12 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
         d_comments = comment_now - comment_at
         days = _days_since(a.get("applied_at"))
 
-        title_changed = (a.get("title_before") or "") != (a.get("suggested_title") or "")
-        desc_changed = (a.get("description_before") or "") != (a.get("suggested_description") or "")
+        moved = verdicts.levers(a)
+        title_changed = verdicts.TITLE in moved
+        desc_changed = verdicts.DESCRIPTION in moved
+        tags_changed = verdicts.TAGS in moved
         tags_before = a.get("tags_before") or []
         tags_after = a.get("suggested_tags") or []
-        tags_changed = list(tags_before or []) != list(tags_after or [])
 
         # Engagement ratios
         eng_at = ((like_at + comment_at) / view_at * 100.0) if view_at > 0 else None
@@ -129,15 +131,15 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
         # Loop 1's verdict for this audit, if the measurement window has closed.
         # `neutral` can legitimately carry no delta (pre-CTR was zero, or post
         # impressions were under the floor) — the verdict still stands.
-        m_result = a.get("measurement_result") or {}
+        verdict = verdicts.from_audit(a)
         m_status = a.get("measurement_status")
-        m_delta = m_result.get("ctr_delta_relative")
+        m_delta = verdict.ctr_delta if verdict else None
         ctr_delta_pct = round(m_delta * 100.0, 1) if m_delta is not None else None
         # The measured window pair, for the before/after chart. These are real
         # rates over matched windows, which is what the old before/after view
         # bars only pretended to be.
-        _pre_ctr = (m_result.get("pre_window") or {}).get("ctr")
-        _post_ctr = (m_result.get("post_window") or {}).get("ctr")
+        _pre_ctr = verdict.pre_ctr if verdict else None
+        _post_ctr = verdict.post_ctr if verdict else None
         ctr_before_pct = round(_pre_ctr * 100.0, 2) if _pre_ctr is not None else None
         ctr_after_pct = round(_post_ctr * 100.0, 2) if _post_ctr is not None else None
 

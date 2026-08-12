@@ -62,7 +62,8 @@ from app.status_vocab import (
     MeasurementStatus,
     OutcomeDecision,
 )
-from app import reach
+from app import reach, verdicts
+from app.verdicts import Verdict
 
 log = logging.getLogger("midas.measurement")
 
@@ -160,15 +161,6 @@ class Plan:
     post: tuple[str, str] | None = None
 
 
-@dataclass(frozen=True)
-class Verdict:
-    """A terminal measurement outcome and the evidence behind it."""
-
-    status: str
-    outcome: str
-    result: dict
-
-
 def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
     """Decide an audit's next state from its timestamps and coverage alone."""
     applied = _apply_date(audit)
@@ -201,7 +193,7 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
             return Plan(FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, {
                 "rationale": "reach coverage never completed within grace period",
                 "missing_days": missing[:14],
-                "pre_window": pre, "post_window": post,
+                verdicts.PRE_WINDOW: pre, verdicts.POST_WINDOW: post,
             })
         return Plan(MARK_MEASURING, MeasurementStatus.MEASURING)
 
@@ -212,20 +204,18 @@ def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
                 pre_imp: int, pre_ctr: float | None,
                 post_imp: int, post_ctr: float | None) -> Verdict:
     """Turn a measured window pair into a terminal verdict."""
-    result = {
-        "pre_window": {"start": pre[0], "end": pre[1], "impressions": pre_imp, "ctr": pre_ctr},
-        "post_window": {"start": post[0], "end": post[1], "impressions": post_imp, "ctr": post_ctr},
-        # Recorded so a later threshold change can't silently reinterpret an
-        # old verdict.
-        "min_impressions": settings.MIN_IMPRESSIONS,
-        "win_threshold": settings.CTR_WIN_THRESHOLD,
-        "regression_threshold": settings.CTR_REGRESSION_THRESHOLD,
-        "evaluated_at": datetime.now(timezone.utc).isoformat(),
-        # v1 is bundle-level attribution (title+description+tags moved
-        # together) — CIL open-question decision. Recorded so Loop 2's
-        # distiller can say so.
-        "attribution": "bundle",
-    }
+    # Built through app.verdicts so the writer and the four readers share one
+    # definition of this shape — a renamed key here would otherwise leave every
+    # reader silently finding None (see verdicts' module docstring).
+    result = verdicts.result_of(
+        pre=pre, post=post,
+        pre_imp=pre_imp, pre_ctr=pre_ctr,
+        post_imp=post_imp, post_ctr=post_ctr,
+        min_impressions=settings.MIN_IMPRESSIONS,
+        win_threshold=settings.CTR_WIN_THRESHOLD,
+        regression_threshold=settings.CTR_REGRESSION_THRESHOLD,
+        evaluated_at=datetime.now(timezone.utc).isoformat(),
+    )
 
     # Dormant is checked first and deliberately: not_applicable and neutral
     # mean different things to Loop 2, and a dormant video fails both floors.
@@ -237,7 +227,7 @@ def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
         return Verdict(MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
 
     status, delta = _classify(pre_ctr, post_ctr)
-    result["ctr_delta_relative"] = delta
+    result[verdicts.CTR_DELTA] = delta
     if status == MeasurementStatus.WIN:
         result["rationale"] = "CTR up beyond win threshold"
         return Verdict(status, OutcomeDecision.KEPT, result)
@@ -294,7 +284,7 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
         log.warning(
             "REGRESSION verdict: audit %s video %s ctr %.4f → %.4f (Δ %.1f%%) — awaiting human review",
             audit["id"], audit["video_id"], pre_ctr or 0.0, post_ctr or 0.0,
-            (verdict.result.get("ctr_delta_relative") or 0.0) * 100,
+            (verdict.ctr_delta or 0.0) * 100,
         )
     return verdict.status
 

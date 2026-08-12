@@ -3,6 +3,7 @@ import statistics
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 
+from app import verdicts
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
@@ -79,16 +80,18 @@ def _build_perf_report(channel_id: str) -> dict | None:
         # `neutral` can legitimately carry no delta (pre_ctr was 0, or post
         # impressions were under the floor). It is still a measured verdict, so
         # it counts toward the win rate — it just can't contribute to the median.
-        delta = (a.get("measurement_result") or {}).get("ctr_delta_relative")
+        verdict = verdicts.from_audit(a)
+        delta = verdict.ctr_delta if verdict else None
+        moved = verdicts.levers(a)
         enriched.append({
             "audit_id": a["id"],
             "measurement_status": status,
             "ctr_delta_pct": (delta * 100.0) if delta is not None else None,
             "title_before": a.get("title_before"),
             "title_after": a.get("suggested_title"),
-            "title_changed": (a.get("title_before") or "") != (a.get("suggested_title") or ""),
-            "desc_changed": (a.get("description_before") or "") != (a.get("suggested_description") or ""),
-            "tags_changed": list(a.get("tags_before") or []) != list(a.get("suggested_tags") or []),
+            "title_changed": verdicts.TITLE in moved,
+            "desc_changed": verdicts.DESCRIPTION in moved,
+            "tags_changed": verdicts.TAGS in moved,
             "ai_reasoning": a.get("ai_reasoning"),
             "is_recent": (now - ap) < timedelta(days=14),
         })
@@ -523,7 +526,8 @@ def _cohort_median_ctr_delta(version_id: int) -> float | None:
     for a in audits:
         if a.get("measurement_status") not in MEASURED_STATUSES:
             continue
-        delta = (a.get("measurement_result") or {}).get("ctr_delta_relative")
+        verdict = verdicts.from_audit(a)
+        delta = verdict.ctr_delta if verdict else None
         if delta is not None:
             deltas.append(delta * 100.0)
 
