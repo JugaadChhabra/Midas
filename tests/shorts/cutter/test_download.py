@@ -78,6 +78,7 @@ def test_ytdlp_options_falls_back_to_script_when_env_absent(monkeypatch):
     assert ("youtubepot-bgutilscript" in ea) == BGUTIL_POT_SCRIPT.is_file()
 
 
+@pytest.mark.needs_socket
 def test_pot_provider_preflight_raises_when_unreachable():
     # An unreachable provider must fail with an honest, actionable error rather
     # than letting yt-dlp degrade to a token-less client and report the source
@@ -86,6 +87,7 @@ def test_pot_provider_preflight_raises_when_unreachable():
         _ensure_pot_provider_ready("http://127.0.0.1:1", attempts=1, delay=0)
 
 
+@pytest.mark.needs_socket
 def test_pot_provider_preflight_passes_when_listening_and_minting():
     # Port open AND the provider mints a token → ready.
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -99,6 +101,7 @@ def test_pot_provider_preflight_passes_when_listening_and_minting():
         srv.close()
 
 
+@pytest.mark.needs_socket
 def test_pot_provider_preflight_raises_when_port_open_but_not_minting():
     # The whole point of layer 1: a provider whose HTTP port is open but that
     # cannot mint a token must fail loudly here — otherwise yt-dlp silently

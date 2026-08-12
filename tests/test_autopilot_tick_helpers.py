@@ -5,7 +5,10 @@ exercised by running the whole tick with heavy mocking. Now each is its own
 small, directly-testable surface.
 """
 from datetime import datetime, timezone, timedelta
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
+
+from tests.fakes import FakeSupabase
 
 import app.autopilot as ap
 from app.apply_outcome import ApplyError, ApplyOutcome
@@ -34,34 +37,45 @@ def test_quota_dormant_transitions():
     assert ap._yt_quota_exhausted_until is None            # …and it self-clears
 
 
-def _channels_returning(rows):
-    sb = MagicMock()
-    t = sb.table.return_value
-    # Selection goes through app.eligibility, which pages via all_rows —
-    # .select().or_().order().range().execute(). A stub missing the paging hops
-    # returns an empty MagicMock instead of failing, so the assertions below are
-    # what proves the wiring, not this chain.
-    t.select.return_value.or_.return_value.order.return_value \
-        .range.return_value.execute.return_value.data = rows
-    # _clear_expired_pauses() update(...).eq(...).lt(...).execute() -> nothing expired
-    t.update.return_value.eq.return_value.lt.return_value.execute.return_value.data = []
-    return sb
+@contextmanager
+def _fleet(rows):
+    """One store standing in for both modules the picker reads through.
+
+    _pick_next_channel spans two: eligibility selects the channels, and
+    autopilot's _clear_expired_pauses writes to the same table. An earlier version
+    of this fixture patched only one of them, so every offline run issued a live
+    UPDATE against the production channels table — silently, because the update's
+    result is not asserted. tests/fakes.py raises on an unstubbed table instead.
+    """
+    sb = FakeSupabase({"channels": rows})
+    with patch("app.eligibility.supabase", return_value=sb), \
+         patch("app.autopilot.supabase", return_value=sb):
+        yield sb
 
 
 def test_pick_next_channel_never_ticked_first_then_oldest():
-    sb = _channels_returning([
+    with _fleet([
         {"id": "B", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-02T00:00:00Z"},
         {"id": "A", "autopilot_enabled": True, "autopilot_last_tick_at": None},   # never ticked → highest priority
         {"id": "C", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-01T00:00:00Z"},
-    ])
-    with patch("app.eligibility.supabase", return_value=sb):
+    ]):
         assert ap._pick_next_channel()["id"] == "A"
 
 
 def test_pick_next_channel_none_when_no_eligible():
-    sb = _channels_returning([])
-    with patch("app.eligibility.supabase", return_value=sb):
+    with _fleet([]):
         assert ap._pick_next_channel() is None
+
+
+def test_pick_next_channel_skips_a_paused_channel_without_writing_to_it():
+    """The pause clearing runs first and must not disturb a live pause that has
+    not aged out."""
+    with _fleet([
+        {"id": "P", "autopilot_enabled": True, "autopilot_paused_reason": "token_expired",
+         "autopilot_paused_at": "2099-01-01T00:00:00Z", "autopilot_last_tick_at": None},
+    ]) as sb:
+        assert ap._pick_next_channel() is None
+        assert sb.rows("channels")[0]["autopilot_paused_reason"] == "token_expired"
 
 
 def test_resync_skips_when_fresh():
