@@ -37,7 +37,12 @@ def test_quota_dormant_transitions():
 def _channels_returning(rows):
     sb = MagicMock()
     t = sb.table.return_value
-    t.select.return_value.or_.return_value.execute.return_value.data = rows
+    # Selection goes through app.eligibility, which pages via all_rows —
+    # .select().or_().order().range().execute(). A stub missing the paging hops
+    # returns an empty MagicMock instead of failing, so the assertions below are
+    # what proves the wiring, not this chain.
+    t.select.return_value.or_.return_value.order.return_value \
+        .range.return_value.execute.return_value.data = rows
     # _clear_expired_pauses() update(...).eq(...).lt(...).execute() -> nothing expired
     t.update.return_value.eq.return_value.lt.return_value.execute.return_value.data = []
     return sb
@@ -49,13 +54,13 @@ def test_pick_next_channel_never_ticked_first_then_oldest():
         {"id": "A", "autopilot_enabled": True, "autopilot_last_tick_at": None},   # never ticked → highest priority
         {"id": "C", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-01T00:00:00Z"},
     ])
-    with patch("app.autopilot.supabase", return_value=sb):
+    with patch("app.eligibility.supabase", return_value=sb):
         assert ap._pick_next_channel()["id"] == "A"
 
 
 def test_pick_next_channel_none_when_no_eligible():
     sb = _channels_returning([])
-    with patch("app.autopilot.supabase", return_value=sb):
+    with patch("app.eligibility.supabase", return_value=sb):
         assert ap._pick_next_channel() is None
 
 

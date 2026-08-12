@@ -11,14 +11,17 @@ def _run_tick_with_channel(channel_row):
     def table(name):
         t = MagicMock()
         if name == "channels":
-            # _pick_next_channel: select("*").or_(...).execute()
-            t.select.return_value.or_.return_value.execute.return_value.data = [channel_row]
+            # _pick_next_channel -> eligibility.channels_for: it pages, so the
+            # chain is select("*").or_().order().range().execute()
+            t.select.return_value.or_.return_value.order.return_value \
+                .range.return_value.execute.return_value.data = [channel_row]
             # _clear_expired_pauses: update(...).eq(...).lt(...).execute() -> nothing expired
             t.update.return_value.eq.return_value.lt.return_value.execute.return_value.data = []
         return t
     sb.table.side_effect = table
 
     with patch("app.autopilot.supabase", return_value=sb), \
+         patch("app.eligibility.supabase", return_value=sb), \
          patch("app.autopilot._run_shorts_action") as shorts, \
          patch("app.autopilot._touch_tick"), \
          patch("app.autopilot._needs_full_sync", return_value=False), \
@@ -84,6 +87,7 @@ def test_clear_expired_pauses_clears_repeated_failures_and_resets_counter():
 
     ap._failure_counts["UC1"] = 3
     with patch("app.autopilot.supabase", return_value=sb), \
+         patch("app.eligibility.supabase", return_value=sb), \
          patch.object(ap.settings, "AUTOPILOT_PAUSE_COOLDOWN_MINUTES", 60):
         ap._clear_expired_pauses()
 
@@ -100,6 +104,7 @@ def test_clear_expired_pauses_disabled_when_cooldown_zero():
     import app.autopilot as ap
     sb = MagicMock()
     with patch("app.autopilot.supabase", return_value=sb), \
+         patch("app.eligibility.supabase", return_value=sb), \
          patch.object(ap.settings, "AUTOPILOT_PAUSE_COOLDOWN_MINUTES", 0):
         ap._clear_expired_pauses()
     sb.table.assert_not_called()   # no DB work when auto-unpause is off

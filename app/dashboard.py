@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, all_rows_parallel
+from app import eligibility
 from app import quota as quota_mod
 from app.shorts.status import WORKING_STATUSES
 
@@ -261,7 +262,9 @@ def _compute_dashboard():
         })
 
     # ── System health ─────────────────────────────────────────────────────
-    running_count = sum(1 for c in enriched if c.get("autopilot_enabled") and not c.get("autopilot_paused_reason"))
+    # Same predicate the tick uses, so the page cannot report a channel as
+    # running that autopilot would skip.
+    running_count = sum(1 for c in enriched if eligibility.can_audit(c))
     paused_count = sum(1 for c in enriched if c.get("autopilot_paused_reason"))
     enabled_count = sum(1 for c in enriched if c.get("autopilot_enabled"))
     sync_hours = [c["hours_since_sync"] for c in enriched if c["hours_since_sync"] is not None]

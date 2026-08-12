@@ -34,6 +34,7 @@ from app.analytics_client import (
     yt_analytics_video_report,
     yt_analytics_video_traffic_source_playlist,
 )
+from app import eligibility
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
@@ -349,12 +350,10 @@ def poll_metrics() -> None:
     start, end = _window_dates()
     log.info("metrics_poll start — window %s → %s", start, end)
 
-    channels = (
-        supabase().table("channels")
-        .select("id,analytics_authorized,playlist_health_enabled")
-        .eq("analytics_authorized", True)
-        .execute()
-        .data or []
+    # playlist_health_enabled comes along in the projection because it selects
+    # the tier-2 (playlist) half of each channel's poll, below.
+    channels = eligibility.channels_for(
+        eligibility.Job.ANALYTICS, columns="id,playlist_health_enabled"
     )
     if not channels:
         log.info("metrics_poll: no channels with analytics_authorized=true; nothing to do")

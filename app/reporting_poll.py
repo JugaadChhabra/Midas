@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from app import reach
+from app import eligibility, reach
 from app.analytics_client import AnalyticsNotAuthorizedError
 from app.config import settings
 from app.db import supabase
@@ -299,15 +299,7 @@ def poll_reporting() -> None:
     video_reach_daily. Flip the flag off to poll every analytics_authorized
     channel again.
     """
-    q = supabase().table("channels").select("id").eq("analytics_authorized", True)
-    if settings.REPORTING_MEASURED_CHANNELS_ONLY:
-        # measurement_enabled channels are polled because measurement consumes
-        # the reach/ctr backfill. reach_warmup channels are polled too: they are
-        # accruing coverage so their CTR can be *certified* before measurement is
-        # turned on (docs/PHASE_2_TRACK1_METADATA_UNLOCK.md §3). Either flag opts
-        # a channel in; neither on → skipped, exactly as before this flag existed.
-        q = q.or_("measurement_enabled.eq.true,reach_warmup.eq.true")
-    channels = q.execute().data or []
+    channels = eligibility.channels_for(eligibility.Job.REACH)
     if not channels:
         log.info("reporting_poll: no channels to poll "
                  "(measured-only=%s); nothing to do", settings.REPORTING_MEASURED_CHANNELS_ONLY)

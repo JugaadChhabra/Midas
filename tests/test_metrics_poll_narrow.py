@@ -103,6 +103,7 @@ def test_poll_channel_pages_playlists():
     sb = MagicMock()
     sb.table.side_effect = table
     with patch.object(metrics_poll, "supabase", return_value=sb), \
+         patch("app.eligibility.supabase", return_value=sb), \
          patch.object(metrics_poll, "analytics_for_channel", return_value=MagicMock()), \
          patch.object(metrics_poll, "yt_analytics_playlist_report", return_value=None):
         counts = metrics_poll._poll_channel(
@@ -124,7 +125,9 @@ def test_poll_metrics_measured_empty_skips_video_poll():
     def table(name):
         t = MagicMock()
         if name == "channels":
-            t.select.return_value.eq.return_value.execute.return_value.data = channels
+            # Selection moved to app.eligibility, which pages via all_rows.
+            t.select.return_value.eq.return_value.order.return_value \
+                .range.return_value.execute.return_value.data = channels
         else:  # playlists (and any other) -> one short page
             t.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value.data = [
                 {"id": "pl1"}
@@ -138,6 +141,7 @@ def test_poll_metrics_measured_empty_skips_video_poll():
     with patch.object(metrics_poll.settings, "METRICS_POLL_MEASURED_ONLY", True), \
          patch.object(metrics_poll, "_measured_video_ids", return_value=set()), \
          patch.object(metrics_poll, "supabase", return_value=sb), \
+         patch("app.eligibility.supabase", return_value=sb), \
          patch.object(metrics_poll, "analytics_for_channel", return_value=MagicMock()), \
          patch.object(metrics_poll, "yt_analytics_video_report", video_report), \
          patch.object(metrics_poll, "yt_analytics_playlist_report", playlist_report), \

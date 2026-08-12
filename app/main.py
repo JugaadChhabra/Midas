@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app import quota
+from app import eligibility, quota
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
 from app.performance import router as performance_router
@@ -72,21 +72,19 @@ log = logging.getLogger("midas")
 scheduler = BackgroundScheduler(daemon=True)
 
 
-def _all_channel_ids() -> list[str]:
-    rows = supabase().table("channels").select("id").execute().data or []
-    return [r["id"] for r in rows]
-
-
 def _run_per_channel(fn, label, channel_ids=None) -> None:
     """Fan a per-channel job out over every channel, isolating failures.
 
-    Calls ``fn(channel_id)`` for each id (from ``_all_channel_ids()`` unless
-    ``channel_ids`` is supplied). ``fn`` is responsible for its own success
+    Calls ``fn(channel_id)`` for each id (every channel unless ``channel_ids``
+    is supplied). ``fn`` is responsible for its own success
     logging; a raised exception is caught and logged per channel as
     ``"<label> failed for <id>: <err>"`` so one bad channel never kills the
     loop — the shared shape behind the daily/weekly scheduler jobs.
     """
-    ids = _all_channel_ids() if channel_ids is None else channel_ids
+    ids = (
+        eligibility.channel_ids_for(eligibility.Job.EVERY)
+        if channel_ids is None else channel_ids
+    )
     for channel_id in ids:
         try:
             fn(channel_id)
@@ -156,16 +154,7 @@ def _daily_reconcile():
         except Exception as e:
             _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
 
-    # Scope the daily reconcile (sync_playlists is the fleet's biggest YouTube-quota
-    # cost) to the allowlist; "*" restores the all-channel behaviour.
-    if settings.PLAYLIST_RECONCILE_ALL:
-        ids = None  # _run_per_channel falls back to every channel
-    else:
-        ids = [c for c in _all_channel_ids() if c in settings.PLAYLIST_RECONCILE_CHANNELS]
-        _main_log.info(
-            "Daily reconcile scoped to %d/%d channels (allowlist)", len(ids), len(_all_channel_ids())
-        )
-        ids = _reconcile_channel_order(ids)
+    ids = _reconcile_channel_order(eligibility.channel_ids_for(eligibility.Job.RECONCILE))
     _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids)
     _main_log.info("Daily reconcile cycle done — %s", budget)
 
@@ -195,14 +184,8 @@ def _daily_playlist_health_score():
     skipped silently — same graceful-degradation pattern as Phase 0's
     metrics_poll skipping `analytics_authorized=false`.
     """
-    rows = (
-        supabase().table("channels")
-        .select("id")
-        .eq("playlist_health_enabled", True)
-        .execute()
-        .data or []
-    )
-    if not rows:
+    ids = eligibility.channel_ids_for(eligibility.Job.PLAYLIST_HEALTH)
+    if not ids:
         _main_log.info("playlist_health_score: no channels with playlist_health_enabled=true")
         return
 
@@ -210,7 +193,7 @@ def _daily_playlist_health_score():
         summary = playlist_health_score_channel(channel_id)
         _main_log.info("Daily playlist_health_score %s: %s", channel_id, summary)
 
-    _run_per_channel(_one, "Daily playlist_health_score", channel_ids=[r["id"] for r in rows])
+    _run_per_channel(_one, "Daily playlist_health_score", channel_ids=ids)
 
 
 def _refresh_pot_provider():

@@ -9,7 +9,7 @@ from fastapi import APIRouter
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel
-from app import quota
+from app import eligibility, quota
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
@@ -352,14 +352,9 @@ def _quota_dormant() -> bool:
     return False
 
 
-def _channel_has_work(c: dict) -> bool:
-    """True if the channel can run at least one path this tick. The pause is
-    path-specific: it gates the metadata-audit path only. Shorts (NAS cutting)
-    are decoupled — they run whenever autopilot_shorts_enabled, regardless of an
-    audit-side pause, so an audit blip never silences a full NAS folder."""
-    audit_ok = c.get("autopilot_enabled") and not c.get("autopilot_paused_reason")
-    shorts_ok = c.get("autopilot_shorts_enabled")
-    return bool(audit_ok or shorts_ok)
+#: Eligibility lives in app.eligibility; this alias keeps the local name that
+#: tests/test_autopilot_tick_helpers.py and the tick body already use.
+_channel_has_work = eligibility.has_work
 
 
 def _pick_next_channel() -> dict | None:
@@ -369,13 +364,9 @@ def _pick_next_channel() -> dict | None:
     Auto-clears expired transient pauses first so a recovered channel rejoins
     the rotation without a manual Resume."""
     _clear_expired_pauses()
-    channels = (
-        supabase().table("channels")
-        .select("*")
-        .or_("autopilot_enabled.eq.true,autopilot_shorts_enabled.eq.true")
-        .execute()
-    ).data or []
-    eligible = [c for c in channels if _channel_has_work(c)]
+    # The whole row: the tick needs OAuth tokens and the pause reason, and
+    # re-checks the audit path before applying.
+    eligible = eligibility.channels_for(eligibility.Job.AUTOPILOT, columns="*")
     if not eligible:
         return None
     # null last_tick_at first (never ticked → highest priority), then oldest tick
@@ -484,10 +475,10 @@ def tick():
             except Exception as e:
                 log.exception("Shorts autopilot failed for %s: %s", channel_id, e)
 
-        # The metadata-audit path runs only for channels with metadata autopilot
-        # enabled AND not audit-paused. (A channel can be picked purely for shorts
-        # while audit-paused, so the pause is re-checked here, not just at pick.)
-        if not ch.get("autopilot_enabled") or ch.get("autopilot_paused_reason"):
+        # The metadata-audit path runs only for channels whose audit path is open.
+        # (A channel can be picked purely for shorts while audit-paused, so this
+        # is re-checked here, not just at pick — same predicate, one owner.)
+        if not eligibility.can_audit(ch):
             _touch_tick(channel_id)
             return
 
