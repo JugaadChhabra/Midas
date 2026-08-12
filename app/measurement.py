@@ -123,6 +123,18 @@ def _finalize(audit_id: int, status: str, outcome: str, result: dict) -> None:
     }).eq("id", audit_id).execute()
 
 
+def _mark_measuring(audit_id: int) -> None:
+    """Park an audit in `measuring`: window closed, reach CSVs not in yet.
+
+    Named rather than inline so `_eval_audit` holds no database call of its own —
+    the shell is then pure decisions, one injected read, and three named writes,
+    and a test can observe each write without standing up a query builder.
+    """
+    supabase().table("audits").update(
+        {"measurement_status": MeasurementStatus.MEASURING}
+    ).eq("id", audit_id).execute()
+
+
 # ── The decision, as two pure stages ──────────────────────────────────────
 #
 # Everything below decides; nothing reads or writes. _eval_audit is the shell
@@ -239,11 +251,19 @@ def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
     return Verdict(status, OutcomeDecision.NONE, result)
 
 
-def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str:
+def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
+                read_reach=reach.aggregate) -> str:
     """Evaluate one audit. Returns the (possibly unchanged) measurement_status.
 
     Plumbing only: decide, fetch what the decision asked for, decide again,
     persist. The policies live in plan_measurement and judge_reach.
+
+    `read_reach(video_id, window) -> (impressions, ctr)` is a parameter so this
+    composition can be tested at all. The two pure stages were already covered,
+    but the shell between them was not — and it holds the mistakes that would
+    quietly invert a verdict rather than raise: reading the windows in the wrong
+    order, or judging before the baseline is written. Both are now assertable at
+    this interface instead of only observable in production three weeks later.
     """
     plan = plan_measurement(audit, today, covered)
 
@@ -253,14 +273,14 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str
         _finalize(audit["id"], plan.status, plan.outcome, plan.result)
         return plan.status
     if plan.action == MARK_MEASURING:
+        # Only if it isn't already parked there: re-stamping every pass would
+        # rewrite the row daily for the weeks a window can wait on coverage.
         if audit["measurement_status"] != MeasurementStatus.MEASURING:
-            supabase().table("audits").update(
-                {"measurement_status": MeasurementStatus.MEASURING}
-            ).eq("id", audit["id"]).execute()
+            _mark_measuring(audit["id"])
         return MeasurementStatus.MEASURING
 
-    pre_imp, pre_ctr = reach.aggregate(audit["video_id"], plan.pre)
-    post_imp, post_ctr = reach.aggregate(audit["video_id"], plan.post)
+    pre_imp, pre_ctr = read_reach(audit["video_id"], plan.pre)
+    post_imp, post_ctr = read_reach(audit["video_id"], plan.post)
 
     _write_baseline(video_id=audit["video_id"], channel_id=video["channel_id"],
                     pre=plan.pre, impressions=pre_imp, ctr=pre_ctr)
