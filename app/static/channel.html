@@ -53,18 +53,8 @@
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
 
-  /* Page header — the channel name is a label, not the story. The sidebar
-     already says which channel you're in, so this is context, and the section
-     below it gets to own the focal point. */
-  .page-head { margin-bottom:1.25rem; }
-  h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
-
-  /* Overview — one question ("what does this channel need from me?"), answered
-     by the lede. Everything under it is supporting detail and is demoted. */
-  .ov-lede { font-size:1.95rem; font-weight:750; letter-spacing:-.022em; line-height:1.15;
-             margin:0 0 .3rem; text-wrap:balance; font-variant-numeric:tabular-nums; }
-  .ov-lede .u { font-size:1rem; font-weight:600; opacity:.55; letter-spacing:0; }
-  .ov-meta { font-size:.85rem; opacity:.75; margin:0; }
+  /* Page header, lede and meta are shared components now (theme.css) — both
+     this page and Performance use them. */
 
   .ov-actions { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin:1.15rem 0 .25rem; }
   .ov-actions .btn-link { margin-left:auto; }
@@ -143,8 +133,8 @@
   <div class="tab-panel active" data-panel="overview">
     <!-- The lede is the focal point: the channel's state in one line, with the
          action that resolves it sitting directly beneath. -->
-    <p class="ov-lede" id="ov-lede">—</p>
-    <p class="ov-meta" id="ov-meta"></p>
+    <p class="page-lede" id="ov-lede">—</p>
+    <p class="page-meta" id="ov-meta"></p>
 
     <div class="ov-actions">
       <button id="apply-pending-btn" class="btn-primary" disabled>Apply pending</button>
@@ -252,8 +242,8 @@
   <!-- ─── PLAYLISTS ─── -->
   <div class="tab-panel" data-panel="playlists">
     <!-- Same shape as Overview: what needs the operator, then the work. -->
-    <p class="ov-lede" id="pl-lede">—</p>
-    <p class="ov-meta" id="pl-meta"></p>
+    <p class="page-lede" id="pl-lede">—</p>
+    <p class="page-meta" id="pl-meta"></p>
 
     <div class="card">
       <div class="sec-head">

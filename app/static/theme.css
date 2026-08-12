@@ -227,6 +227,17 @@ code { background:var(--surface-tint); padding:0 .3rem; border-radius:var(--radi
 .pill--neutral { background:var(--surface-tint);     color:var(--color-neutral); border:1px solid var(--border-soft); }
 .pill--sm      { padding:.1rem .4rem; font-size:.72rem; font-weight:600; }
 
+/* ── Page header ────────────────────────────────────────────────────── */
+/* Shared across the channel pages. The name of the thing you're looking at is
+   a label — the sidebar already says where you are — so the title is small and
+   the lede below it carries the focal point: the state that implies work. */
+.page-head { margin-bottom:1.25rem; }
+h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
+.page-lede { font-size:1.95rem; font-weight:750; letter-spacing:-.022em; line-height:1.15;
+             margin:0 0 .3rem; text-wrap:balance; font-variant-numeric:tabular-nums; }
+.page-lede .u { font-size:1rem; font-weight:600; opacity:.55; letter-spacing:0; }
+.page-meta { font-size:.85rem; opacity:.75; margin:0 0 .9rem; font-variant-numeric:tabular-nums; }
+
 /* ── Filter chips ───────────────────────────────────────────────────── */
 /* A row of toggles that filter the list beneath them. The selected chip is
    raised onto a surface rather than tinted, so "selected" reads as position

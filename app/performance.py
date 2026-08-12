@@ -212,6 +212,7 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
             "count": 0,
             "applied_count": 0,
             "measured_count": 0,
+            "ctr_measured_count": 0,
             "total_delta_views": 0,
             "total_delta_likes": 0,
             "total_delta_comments": 0,
@@ -234,9 +235,14 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
     median_ctr_delta = None
     win_rate = None
     outcome_distribution = {"win": 0, "neutral": 0, "regression": 0, "total": 0}
+    ctr_deltas: list[float] = []
     if measured:
-        deltas = [r["ctr_delta_pct"] for r in measured if r.get("ctr_delta_pct") is not None]
-        median_ctr_delta = round(statistics.median(deltas), 1) if deltas else None
+        # NB: this list is deliberately NOT called `deltas`. It used to be, which
+        # rebound the view-delta list above it — so `total_delta_views` returned
+        # a sum of CTR percentages and `positive_pct_share` divided a count of
+        # positive view deltas by a count of CTR rows, yielding 2160%.
+        ctr_deltas = [r["ctr_delta_pct"] for r in measured if r.get("ctr_delta_pct") is not None]
+        median_ctr_delta = round(statistics.median(ctr_deltas), 1) if ctr_deltas else None
         counts = {k: sum(1 for r in measured if r["measurement_status"] == k)
                   for k in MEASURED_STATUSES}
         win_rate = round(100.0 * counts["win"] / len(measured), 1)
@@ -284,6 +290,10 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
         "positive_pct_share": round(100.0 * len(positive) / len(deltas), 1) if deltas else None,
         "regression_count": outcome_distribution["regression"],
         "measured_count": outcome_distribution["total"],
+        # How many of the measured rows actually carry a CTR delta. The median
+        # and the lever averages are computed over this, not over
+        # measured_count — the page was citing the larger number.
+        "ctr_measured_count": len(ctr_deltas),
         "median_ctr_delta_pct": median_ctr_delta,
         "win_rate": win_rate,
         "outcome_distribution": outcome_distribution,
