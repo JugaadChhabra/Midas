@@ -428,3 +428,24 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
   background:linear-gradient(90deg, transparent, var(--border), transparent); animation:skel-sweep 1.4s infinite; }
 @keyframes skel-sweep { 100% { transform:translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .skel-box::after { animation:none; } }
+
+/* ── Audit history ──────────────────────────────────────────────────── */
+/* Every change to a video, newest first. The date is the load-bearing
+   figure — it's what you line up against the chart in YouTube Studio. */
+.hist { padding:.7rem .9rem .8rem; background:var(--surface-faint); border-radius:var(--radius-md); margin:.5rem 0; }
+.hist-head { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+             color:var(--ink-4); margin-bottom:.4rem; }
+.ev { display:grid; grid-template-columns:9.5rem 1fr auto; gap:.9rem; align-items:start; padding:.5rem 0; }
+.ev + .ev { border-top:1px dashed var(--border-soft); }
+.ev-when { font-variant-numeric:tabular-nums; font-size:.78rem; color:var(--ink-2); }
+.ev-when .ago { display:block; font-size:.7rem; color:var(--ink-4); }
+.ev-what { font-size:.8rem; }
+.ev-v { margin-left:.4rem; font-size:.72rem; color:var(--ink-4); }
+.ev-tags { display:flex; gap:.3rem; flex-wrap:wrap; margin-top:.35rem; }
+.tag { font-size:.68rem; padding:.05rem .4rem; border-radius:var(--radius-sm);
+       background:var(--surface-tint); color:var(--ink-3); }
+.tag--off { color:var(--ink-4); background:none; box-shadow:inset 0 0 0 1px var(--border-soft); }
+
+/* ── Load more ──────────────────────────────────────────────────────── */
+.load-more { display:flex; flex-direction:column; align-items:center; gap:.4rem; padding:1rem 0 .2rem; }
+.load-more .muted { font-size:.78rem; font-variant-numeric:tabular-nums; }

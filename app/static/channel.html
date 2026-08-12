@@ -80,8 +80,8 @@
   /* Videos table column track. Declared once; .dt-head and every .dt-row read
      it, so the header can't drift out of step with the rows. --dt-min forces a
      horizontal scroll rather than letting 11 columns crush each other. */
-  #videos .dt { --dt-cols: 1.1rem 88px minmax(210px, 1.7fr) 7rem 4.2rem 4.2rem 5.4rem 4.6rem 6rem 6rem 5.6rem;
-                --dt-min: 1080px; }
+  #videos .dt { --dt-cols: 1.1rem 88px minmax(220px, 2fr) 7rem 4.2rem 6.4rem 4.6rem 5.8rem;
+                --dt-min: 880px; }
   #videos .dt-row { align-items:start; }
 
   /* Card section headers — title left, a quiet action right. Replaces the
@@ -373,6 +373,7 @@
 
 <script src="/static/swr.js"></script>
 <script src="/static/status.js"></script>
+<script src="/static/components.js"></script>
 <script src="/static/sidebar.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
@@ -889,6 +890,8 @@ function sortVideos(list) {
 // The audit states, as toggles that carry their own counts. Roles and labels
 // come from status.js so the dots match the pills in the table beneath them.
 let videoState = '';   // '' = all
+const VIDEO_PAGE = 40;
+let videoPage = VIDEO_PAGE;
 
 function renderChips() {
   const counts = {};
@@ -919,7 +922,7 @@ function renderChips() {
   $('v-chips').innerHTML = html;
 
   $('v-chips').querySelectorAll('.chip').forEach(b => {
-    b.onclick = () => { videoState = b.dataset.state; renderVideos(); };
+    b.onclick = () => { videoState = b.dataset.state; videoPage = VIDEO_PAGE; renderVideos(); };
   });
 }
 
@@ -945,6 +948,7 @@ function renderVideos() {
     return;
   }
 
+  const shown = sorted.slice(0, videoPage);
   const arrow = (k) => sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
   const sortCell = (k, label, title) =>
     `<button type="button" class="dt-sort" data-sort="${k}"${title ? ` title="${title}"` : ''}>${label}${arrow(k)}</button>`;
@@ -955,17 +959,14 @@ function renderVideos() {
     <div class="dt-head">
       <span><input type="checkbox" id="select-all" aria-label="Select all shown" /></span>
       <span aria-hidden="true"></span>
-      <span>${sortCell('title', 'Title')}</span>
+      <span>${sortCell('title', 'Video')}</span>
       <span>${sortCell('audit_status', 'State')}</span>
       <span>${sortCell('issues_count', 'Issues')}</span>
-      <span>${sortCell('audit_count', 'Audits', 'Number of audits run on this video')}</span>
-      <span>${sortCell('view_count', 'Views')}</span>
-      <span>${sortCell('views_per_day', 'v/day')}</span>
-      <span>${sortCell('published_at', 'Published')}</span>
-      <span>${sortCell('audit_last_at', 'Last audit')}</span>
+      <span>${sortCell('audit_applied_at', 'Changed')}</span>
+      <span>${sortCell('audit_count', 'Changes', 'How many times this video has been rewritten')}</span>
       <span aria-hidden="true"></span>
     </div>` +
-    sorted.map(v => `<div id="row-${v.id}" class="dt-row${selected.has(v.id) ? ' selected' : ''}">
+    shown.map(v => `<div id="row-${v.id}" class="dt-row${selected.has(v.id) ? ' selected' : ''}">
       <span><input type="checkbox" class="vsel" data-id="${v.id}" ${selected.has(v.id) ? 'checked' : ''} aria-label="Select video" /></span>
       <span>${v.thumbnail_url ? `<img class="vid-thumb" src="${v.thumbnail_url}" loading="lazy" alt="" />` : ''}</span>
       <span>
@@ -973,18 +974,27 @@ function renderVideos() {
         <div class="vid-sub"><code>${v.id}</code>${(v.privacy_status && v.privacy_status !== 'public') ? ` · <span class="pill pill--sm">${escapeHtml(v.privacy_status)}</span>` : ''}</div>
         ${v.ai_reasoning_short ? `<div class="vid-why">${escapeHtml(v.ai_reasoning_short)}</div>` : ''}
       </span>
-      <span>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="View latest audit">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</span>
+      <span>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="Show what changed and when">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</span>
       <span>${v.issues_count > 0
             ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill pill--warn pill--sm">${v.issues_count}</span></a>`
             : '<span class="muted">—</span>'}</span>
+      <span class="dt-num">${v.audit_applied_at ? v.audit_applied_at.slice(0,10) : '<span class="muted">—</span>'}</span>
       <span class="dt-num">${v.audit_count || 0}</span>
-      <span class="dt-num">${fmt(v.view_count)}</span>
-      <span class="dt-num muted">${v.views_per_day != null ? fmt(v.views_per_day) : '—'}</span>
-      <span class="dt-num muted">${(v.published_at || '').slice(0,10)}</span>
-      <span class="dt-num muted">${v.audit_last_at ? v.audit_last_at.slice(0,10) : '—'}</span>
       <span>${auditButton(v)}</span>
     </div><div class="dt-detail" id="audit-${v.id}"><div></div></div><div class="dt-detail" id="shorts-${v.id}"><div></div></div>`).join('') +
-    '</div></div></div>';
+    '</div></div></div>'
+    // 5,076 rows is a scan, not a list — render a page and let the operator ask
+    // for more. Filtering or sorting resets to the first page.
+    + (sorted.length > shown.length
+        ? `<div class="load-more">
+             <button type="button" id="v-more" class="btn">Show ${fmt(Math.min(VIDEO_PAGE, sorted.length - shown.length))} more</button>
+             <span class="muted">${fmt(shown.length)} of ${fmt(sorted.length)} shown</span>
+           </div>`
+        : (sorted.length > VIDEO_PAGE
+            ? `<div class="load-more"><span class="muted">All ${fmt(sorted.length)} shown</span></div>` : ''));
+
+  const more = $('v-more');
+  if (more) more.onclick = () => { videoPage += VIDEO_PAGE; renderVideos(); };
 
   // Wire up sort headers
   $('videos').querySelectorAll('.dt-sort').forEach(el => {
@@ -1023,7 +1033,7 @@ function updateSelectionUi() {
 }
 
 // State is a chip now (see renderChips); these two stay as controls.
-['v-search','v-privacy'].forEach(id => $(id).oninput = renderVideos);
+['v-search','v-privacy'].forEach(id => $(id).oninput = () => { videoPage = VIDEO_PAGE; renderVideos(); });
 
 $('select-clear-btn').onclick = () => { selected.clear(); renderVideos(); };
 
@@ -1122,22 +1132,80 @@ async function viewAudit(videoId) {
     cell.innerHTML = ''; cell.dataset.shown = '';
     return;
   }
-  cell.innerHTML = '<div class="audit muted">Loading latest audit…</div>';
+  cell.innerHTML = '<div class="audit muted">Loading history…</div>';
   try {
     const [arr] = await Promise.all([
       fetch(`/videos/${videoId}/audits`).then(r => r.json()),
       ensureVideoDetail(videoId),
     ]);
     if (!arr || !arr.length) {
-      cell.innerHTML = '<div class="audit muted">No audit yet — click Audit to run one.</div>';
+      cell.innerHTML = '<div class="audit muted">Never rewritten — click Audit to run one.</div>';
       return;
     }
-    cell.innerHTML = renderAudit(arr[0]);
+    // Every audit, newest first. The endpoint has always returned the full
+    // history; the page used to render arr[0] and discard the rest, which made
+    // "when did this change?" unanswerable and "put the previous one back"
+    // impossible for the 60 videos with more than one.
+    cell.innerHTML = renderHistory(arr) + renderAudit(arr[0]);
     cell.dataset.shown = videoId;
+    Components.init(cell);
   } catch (e) {
-    cell.innerHTML = `<div class="audit" style="border-color:var(--color-err);color:var(--color-err)">Could not load audit: ${escapeHtml(String(e))}</div>`;
+    cell.innerHTML = `<div class="audit" style="border-color:var(--color-err);color:var(--color-err)">Could not load history: ${escapeHtml(String(e))}</div>`;
   }
 }
+
+// Which fields an audit actually wrote, and which it left alone — the second
+// half is the one that answers "what else could I try on this video?".
+function auditFields(a) {
+  const cmp = (a.issues_found || {}).comparisons || {};
+  const changed = [], untouched = [];
+  [['title', 'title'], ['description', 'description'], ['tags', 'tags']].forEach(([key, label]) => {
+    const c = cmp[key];
+    if (!c || c.suggested === undefined) return;
+    const same = JSON.stringify(c.suggested) === JSON.stringify(c.current);
+    (same ? untouched : changed).push(label);
+  });
+  return { changed, untouched };
+}
+
+function renderHistory(arr) {
+  const rows = arr.map(a => {
+    const when = (a.applied_at || a.created_at || '').replace('T', ' ').slice(0, 16);
+    const { changed, untouched } = auditFields(a);
+    const tags = changed.map(f => `<span class="tag">${f} changed</span>`).join('')
+      + untouched.map(f => `<span class="tag tag--off">${f} untouched</span>`).join('');
+    return `<div class="ev">
+      <div class="ev-when">${escapeHtml(when || '—')}<span class="ago">${timeAgo(a.applied_at || a.created_at)}</span></div>
+      <div class="ev-what">
+        ${statusPill(a.status)}
+        ${a.prompt_version_id ? `<span class="ev-v">prompt ${escapeHtml(String(a.prompt_version_id).slice(0, 8))}</span>` : ''}
+        <div class="ev-tags">${tags || '<span class="tag tag--off">nothing written</span>'}</div>
+      </div>
+      <div>${a.status === 'applied'
+        ? `<button class="btn btn-sm hold" data-hold data-ms="800"
+                   data-label="Hold to undo" data-done-label="Undone"
+                   data-audit="${a.id}" data-video="${escapeHtml(a.video_id)}"
+           ><span class="fill"></span><span class="txt">Hold to undo</span></button>`
+        : ''}</div>
+    </div>`;
+  }).join('');
+  return `<div class="hist"><div class="hist-head">${arr.length} change${arr.length > 1 ? 's' : ''} · newest first</div>${rows}</div>`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (d < 1) return 'today';
+  if (d < 30) return `${d} days ago`;
+  const m = Math.round(d / 30);
+  return m < 12 ? `${m} month${m > 1 ? 's' : ''} ago` : `${Math.round(d / 365)}y ago`;
+}
+
+// Undo is a hold, not a click — it rewrites metadata on a live video.
+document.addEventListener('confirm', (e) => {
+  const b = e.target.closest('[data-audit]');
+  if (b) revertAudit(Number(b.dataset.audit), b.dataset.video);
+});
 
 async function audit(videoId) {
   const cell = $('audit-' + videoId).firstElementChild;
