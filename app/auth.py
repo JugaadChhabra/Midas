@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from app.config import settings
 from app.db import supabase
 from app.status_vocab import PausedReason
-from app.reporting_poll import certify_ctr_coverage
+from app.reach import certify
 from app.shorts.nas_source import list_source_languages
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -158,15 +158,27 @@ def update_channel(channel_id: str, body: ChannelSettings):
         # Always settable — it only affects what reporting_poll ingests.
         patch["reach_warmup"] = body.reach_warmup
     if body.measurement_enabled is not None:
-        # Enabling is gated on the Phase 0/0.5 exit gate: a channel must have
-        # >=1 week of certified CTR coverage first (docs/PHASE_2_TRACK1...§3),
-        # else Loop 1 would compare against untrustworthy baselines. Disabling
-        # is always allowed. 409 (state not ready), not 403 (auth).
+        # Enabling is gated on the Phase 0/0.5 exit gate: the channel must have
+        # a full pre window's worth of covered reach data-days (reach.certify),
+        # else Loop 1 compares against a baseline that can never be observed and
+        # eventually records the audit as measured-and-flat. Disabling is always
+        # allowed. 409 (state not ready), not 403 (auth).
+        #
+        # The missing days are in the message on purpose: they are usually a
+        # failed report retry away, and the operator needs to know which.
         if body.measurement_enabled:
-            cov = certify_ctr_coverage(channel_id)
+            cov = certify(channel_id)
             if not cov["certified"]:
                 raise HTTPException(
-                    409, f"CTR coverage not certified for measurement: {cov}"
+                    409,
+                    "reach coverage not certified for measurement: "
+                    f"missing {cov['missing_days']} from window {cov['window']} "
+                    f"(latest covered day {cov['latest_day']}, "
+                    f"{cov['covered_total']} days covered in total)"
+                    if cov["window"] else
+                    "reach coverage not certified for measurement: no reach "
+                    "reports ingested for this channel yet — set reach_warmup "
+                    "first and let coverage accrue",
                 )
         patch["measurement_enabled"] = body.measurement_enabled
     if body.autopilot_shorts_enabled is not None:

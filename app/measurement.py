@@ -7,9 +7,12 @@ compares post-change CTR against the video's own pre-change trailing window
 (single-video A/B is impossible; trailing self-comparison is the honest
 substitute — CIL Decision 3) and lands a terminal verdict:
 
-    applied ─▶ awaiting_window ─▶ measuring ─┬─▶ win        ─▶ kept
-                                             ├─▶ neutral    ─▶ kept
-                                             └─▶ regression ─▶ (human review)
+    applied ─▶ awaiting_window ─▶ measuring ─┬─▶ win            ─▶ kept
+                                             ├─▶ neutral        ─▶ kept
+                                             ├─▶ regression     ─▶ (human review)
+                                             └─▶ not_applicable ─▶ (never measured:
+                                                  dormant video, or coverage that
+                                                  never arrived)
 
 `measuring` here means "window elapsed, waiting for reach-CSV coverage" —
 reach reports for a data-day arrive 1-6 days late (2026-07-02 probe), so a
@@ -24,6 +27,10 @@ Deliberate deviations from the CIL §1 table, all toward caution:
     regressions first. redo_of_audit_id exists in the schema so nothing
     blocks it later.
   * Both windows exclude the apply day itself: it mixes pre/post regimes.
+  * An audit whose reach coverage never completes exits `not_applicable`, not
+    the `neutral` the §1.4 table implies. Coverage failing is a fact about our
+    ingestion, not the audience — treating it as a measured-and-flat outcome
+    let a downed poller depress the win rate that promotes prompt versions.
 
 Windows are computed from `video_reach_daily` (daily grain — this is exactly
 why Phase 0.5 chose a daily table), and the pre-change window is also written
@@ -55,10 +62,7 @@ from app.status_vocab import (
     MeasurementStatus,
     OutcomeDecision,
 )
-# Coverage certification must use the identical definition of "covered
-# data-day" — and the identical window walk — that the reach backfill uses, or
-# the two pipelines disagree about whether a window is observable yet.
-from app.reporting_poll import coverage_for_channel, days_between as _reporting_days_between
+from app import reach
 
 log = logging.getLogger("midas.measurement")
 
@@ -74,26 +78,6 @@ def _apply_date(audit: dict) -> date | None:
     if not ts:
         return None
     return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
-
-
-def _windows(applied: date) -> tuple[tuple[str, str], tuple[str, str]]:
-    """(pre_start, pre_end), (post_start, post_end).
-
-    Apply day ±1 excluded from BOTH windows: reach data-days roll over on
-    America/Los_Angeles while `applied` is a UTC date, so the adjacent
-    data-days can contain mixed pre/post exposure. Each window is still
-    MEASUREMENT_WINDOW_DAYS long — shifted outward, not shortened.
-    """
-    n = settings.MEASUREMENT_WINDOW_DAYS
-    pre = ((applied - timedelta(days=n + 1)).isoformat(), (applied - timedelta(days=2)).isoformat())
-    post = ((applied + timedelta(days=2)).isoformat(), (applied + timedelta(days=n + 1)).isoformat())
-    return pre, post
-
-
-#: Inclusive list of ISO days in a window. Imported rather than redefined:
-#: reporting_poll's backfill must walk windows identically or the two pipelines
-#: disagree about which data-days a window needs.
-days_between = _reporting_days_between
 
 
 def _reach_aggregate(video_id: str, start: str, end: str) -> tuple[int, float | None]:
@@ -204,16 +188,24 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
             {"rationale": "no applied_at/measurement_started_at timestamp; cannot window"},
         )
 
-    pre, post = _windows(applied)
+    pre, post = reach.window_for(applied)
     post_end = date.fromisoformat(post[1])
     if today <= post_end:
         return Plan(HOLD, audit["measurement_status"])
 
-    need = days_between(*pre) + days_between(*post)
-    missing = [d for d in need if d not in covered]
+    missing = reach.missing_days(covered, pre, post)
     if missing:
         if today > post_end + timedelta(days=settings.MEASUREMENT_COVERAGE_GRACE_DAYS):
-            return Plan(FINALIZE, MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, {
+            # not_applicable, NOT neutral — the same reasoning as the missing
+            # timestamp branch above. Coverage never arriving is a fact about
+            # OUR ingestion, not about the audience: we weren't watching, so
+            # there is no evidence either way. Recording it as neutral put
+            # infrastructure lateness into the win rate that promotes prompt
+            # versions (reflection filters on MEASURED_STATUSES and divides
+            # wins by that population), and let a downed poller both depress
+            # the rate and help satisfy the _MIN_DATA_POINTS floor that exists
+            # to stop the prompt loop running on thin evidence.
+            return Plan(FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, {
                 "rationale": "reach coverage never completed within grace period",
                 "missing_days": missing[:14],
                 "pre_window": pre, "post_window": post,
@@ -358,7 +350,7 @@ def eval_measurements() -> dict:
                 continue
             cid = video["channel_id"]
             if cid not in coverage:
-                _, coverage[cid] = coverage_for_channel(cid)
+                coverage[cid] = reach.coverage(cid)
             status = _eval_audit(audit, video, coverage[cid], today)
             counts[status] = counts.get(status, 0) + 1
         except Exception as e:
