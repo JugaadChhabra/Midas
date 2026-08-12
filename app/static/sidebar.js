@@ -90,7 +90,14 @@
     const shell = document.getElementById('app-shell');
     if (!shell) throw new Error('Sidebar.mount: no #app-shell on the page');
 
+    // A `{ section: 'label' }` entry is a divider, not a destination. On the
+    // channel page it separates the board (which is about all 13 channels)
+    // from the four items that only act on this one — without it the rail
+    // reads as six peer destinations and hides which channel you are editing.
     const items = (opts.items || []).map(it => {
+      if (it.section !== undefined) {
+        return `<div class="nav-sec"><span>${esc(it.section)}</span></div>`;
+      }
       const active = it.id === opts.activeId;
       const attrs = `class="snav${active ? ' active' : ''}" data-tab="${esc(it.id)}"
                      role="tab" tabindex="${active ? 0 : -1}" aria-selected="${active}"`;

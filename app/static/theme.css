@@ -60,11 +60,17 @@
 
   /* Text ramp — four steps, not two. The alpha greys above can't express
      "supporting" vs "metadata" vs "disabled", so everything muted ended up
-     looking equally muted. */
+     looking equally muted.
+
+     --ink-4 is the DISABLED step and measures 2.8:1 on the dark ground, under
+     the 4.5:1 minimum for small text. That is correct for something you are
+     not meant to read, and wrong for anything you are — supporting text stops
+     at --ink-3 (4.5:1). Don't reach past it to make something quieter. */
   --ink:    inherit;
   --ink-2:  #4a4f57;
   --ink-3:  #767c86;
   --ink-4:  #9aa0aa;
+  --mono:   ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Depth — a recessed groove, and a fill that sits down inside it. Used by
      .meter, .progress and .hold so anything with a track reads the same. */
@@ -139,6 +145,12 @@ h1 { margin-bottom: .25rem; }
 .snav.active { background:var(--color-accent-bg); color:var(--color-accent); opacity:1; font-weight:600; }
 .snav svg { flex:0 0 auto; }
 .snav-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Rail section divider. Collapsed, the label can't be read, so it degrades to
+   a rule — the split still has to be visible when only icons are. */
+.nav-sec { display:flex; align-items:center; gap:.5rem; margin:.9rem 0 .3rem; padding:0 .6rem;
+           font-size:.65rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--ink-3); white-space:nowrap; overflow:hidden; }
+.nav-sec::after { content:""; flex:1; height:1px; background:var(--border-soft); }
 
 /* Footer — channel switcher */
 .sidebar-foot { position:relative; padding-top:.5rem; }
@@ -182,6 +194,7 @@ h1 { margin-bottom: .25rem; }
 /* Collapsed — icons only. Labels are hidden rather than removed so the DOM
    (and the accessible name of each control) is identical in both states. */
 .app-shell.collapsed .sidebar-brand span,
+.app-shell.collapsed .nav-sec > span,
 .app-shell.collapsed .snav-label,
 .app-shell.collapsed .chan-meta,
 .app-shell.collapsed .chan-caret { display:none; }
@@ -350,6 +363,41 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .hold.btn-primary .fill { background:#ffffff4d; }
 .hold.btn-primary[data-holding="true"] { border-color:#fff6; }
 
+/* ── Run log ────────────────────────────────────────────────────────── */
+/* Every autopilot run, newest first, as instrument readout. Monospace because
+   the columns are timestamps and outcomes — they have to line up to be
+   scannable, and a run that skipped should be findable without reading. */
+.log { font-family:var(--mono); font-size:.75rem; display:grid; }
+.log > div { display:grid; grid-template-columns:8.5rem 3.2rem 1fr; gap:.75rem;
+             padding:.35rem 0; border-bottom:1px solid var(--border-soft); align-items:baseline; }
+.log > div:last-child { border-bottom:0; }
+.log .t  { color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.log .ok { color:var(--color-ok); }
+.log .wn { color:var(--color-warn); }
+.log .er { color:var(--color-err); }
+.log .what { font-family:inherit; color:var(--ink-2); }
+
+/* ── Metered row ────────────────────────────────────────────────────── */
+/* The label/value line that sits directly above a .meter. */
+.mrow { display:flex; justify-content:space-between; align-items:baseline;
+        font-size:.85rem; margin-bottom:.4rem; }
+.mrow .v { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+/* ── Explanatory note ───────────────────────────────────────────────── */
+/* Plain English, under a card heading. Carries facts about this channel —
+   never instructions, and never an explanation of the design. */
+.note { font-size:.85rem; color:var(--ink-2); margin:.35rem 0 .9rem; max-width:64ch; line-height:1.5; }
+
+/* ── Labelled field ─────────────────────────────────────────────────── */
+.field { display:grid; gap:.3rem; margin-bottom:.9rem; max-width:26rem; }
+.field > label { font-size:.8rem; font-weight:600; }
+.field .hint { font-size:.72rem; color:var(--ink-3); }
+/* A checkbox whose label is a sentence, not a word — the click target has to
+   cover the sentence, and the box must not drift as the text wraps. */
+.field-check { display:flex; align-items:flex-start; gap:.55rem; cursor:pointer;
+               font-size:.875rem; line-height:1.45; max-width:44ch; }
+.field-check > input { margin:.2rem 0 0; flex:0 0 auto; }
+
 /* ── Status lamp ────────────────────────────────────────────────────── */
 /* State as form, not only as text — readable down a column of 13 rows. */
 .lamp { width:9px; height:9px; border-radius:50%; background:var(--color-neutral); flex:0 0 auto; }
@@ -372,7 +420,7 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .group-head { display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem;
               font-size:.69rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
               color:var(--ink-3); }
-.group-head .n { font-variant-numeric:tabular-nums; letter-spacing:0; color:var(--ink-4); }
+.group-head .n { font-variant-numeric:tabular-nums; letter-spacing:0; color:var(--ink-3); }
 .group-head .rule { flex:1; height:1px; background:var(--border-soft); }
 
 /* ── Fleet row ──────────────────────────────────────────────────────── */
@@ -419,13 +467,13 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
    figure — it's what you line up against the chart in YouTube Studio. */
 .hist { padding:.7rem .9rem .8rem; background:var(--surface-faint); border-radius:var(--radius-md); margin:.5rem 0; }
 .hist-head { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
-             color:var(--ink-4); margin-bottom:.4rem; }
+             color:var(--ink-3); margin-bottom:.4rem; }
 .ev { display:grid; grid-template-columns:9.5rem 1fr auto; gap:.9rem; align-items:start; padding:.5rem 0; }
 .ev + .ev { border-top:1px dashed var(--border-soft); }
 .ev-when { font-variant-numeric:tabular-nums; font-size:.78rem; color:var(--ink-2); }
-.ev-when .ago { display:block; font-size:.7rem; color:var(--ink-4); }
+.ev-when .ago { display:block; font-size:.7rem; color:var(--ink-3); }
 .ev-what { font-size:.8rem; }
-.ev-v { margin-left:.4rem; font-size:.72rem; color:var(--ink-4); }
+.ev-v { margin-left:.4rem; font-size:.72rem; color:var(--ink-3); }
 .ev-tags { display:flex; gap:.3rem; flex-wrap:wrap; margin-top:.35rem; }
 .tag { font-size:.68rem; padding:.05rem .4rem; border-radius:var(--radius-sm);
        background:var(--surface-tint); color:var(--ink-3); }

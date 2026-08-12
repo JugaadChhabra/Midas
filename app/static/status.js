@@ -15,17 +15,20 @@
   // Must cover every value in app/status_vocab.py's AuditStatus — anything
   // missing falls through to a grey pill showing the raw string. Pinned by
   // tests/test_status_vocab.py.
+  // Labels are what a non-technical operator sees, so they say what happened to
+  // the video on YouTube rather than what the row is called in the database.
+  // The KEYS are persisted values and must never change; only labels may.
   const AUDIT_STATUS = {
-    applied:                  { cls: 'pill--ok',      label: 'Applied' },
-    pending:                  { cls: 'pill--info',    label: 'Pending' },
+    applied:                  { cls: 'pill--ok',      label: 'Live' },
+    pending:                  { cls: 'pill--info',    label: 'Waiting' },
     approved:                 { cls: 'pill--info',    label: 'Approved' },
-    shadow_pending:           { cls: 'pill--info',    label: 'Shadow' },
+    shadow_pending:           { cls: 'pill--info',    label: 'Test run' },
     quarantined:              { cls: 'pill--warn',    label: 'Bad output' },
-    blocked_test_and_compare: { cls: 'pill--warn',    label: 'Blocked · A/B test' },
+    blocked_test_and_compare: { cls: 'pill--warn',    label: 'Held for testing' },
     failed:                   { cls: 'pill--err',     label: 'Failed' },
-    rejected:                 { cls: 'pill--neutral', label: 'Rejected' },
-    reverted:                 { cls: 'pill--neutral', label: 'Reverted' },
-    none:                     { cls: 'pill--neutral', label: 'Not audited' },
+    rejected:                 { cls: 'pill--neutral', label: 'Turned down' },
+    reverted:                 { cls: 'pill--neutral', label: 'Undone' },
+    none:                     { cls: 'pill--neutral', label: 'Not rewritten' },
   };
 
   const SHORTS_STATUS = {
@@ -47,7 +50,7 @@
   // Unknown statuses fall back to a neutral pill showing the raw value.
   function statusPill(status, kind, size) {
     const map = kind === 'shorts' ? SHORTS_STATUS : AUDIT_STATUS;
-    // Falsy audit status (a not-yet-audited video) resolves to 'none' → "Not audited".
+    // Falsy audit status (a video Midas hasn't reached) resolves to 'none'.
     const m = map[status || 'none'] || { cls: 'pill--neutral', label: status };
     const sz = size === 'sm' ? ' pill--sm' : '';
     return `<span class="pill ${m.cls}${sz}">${esc(m.label)}</span>`;

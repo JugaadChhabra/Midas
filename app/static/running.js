@@ -150,7 +150,7 @@
       <div class="meter ok" data-meter data-pct="${pct.toFixed(1)}"></div>
       <div style="text-align:right">
         <div class="quota-l">resets in ${resetH}h ${resetM}m</div>
-        <div class="quota-l" style="color:var(--ink-4)">${fmt(q.used_today)} used today${
+        <div class="quota-l">${fmt(q.used_today)} used today${
           dead ? ` · none used on ${dead} of the last ${spark.length} days` : ''}</div>
       </div>
       ${spark.length ? `<span class="beat beat--neutral" data-spark data-values="${spark.join(',')}"

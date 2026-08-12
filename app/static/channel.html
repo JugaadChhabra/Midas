@@ -79,7 +79,9 @@
      `<span style="flex:1">` spacers these rows used to be built from. */
   .sec-head { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; }
   .sec-head h3 { margin:0; font-size:.98rem; }
-  .sec-head > :last-child { margin-left:auto; }
+  /* Push the trailing element right — but only when there IS one. Without
+     :not(:first-child) a card whose head is just an <h3> right-aligns it. */
+  .sec-head > :last-child:not(:first-child) { margin-left:auto; }
   .sec-tag { font-weight:400; font-size:.74rem; opacity:.55; }
   .sec-note { font-size:.82rem; margin:.35rem 0 .6rem; max-width:62ch; }
   .sec-toggle { display:flex; align-items:center; gap:.5rem; cursor:pointer; font-weight:600; font-size:.88rem; }
@@ -137,9 +139,9 @@
         <span class="muted" style="margin-left:auto"><span id="v-count">0</span> shown</span>
       </div>
       <div class="filter-bar">
-        <button id="bulk-audit-btn" disabled>Audit selected</button>
-        <button id="bulk-apply-btn" disabled>Apply selected pending</button>
-        <button id="reaudit-quarantined-btn" disabled style="display:none">Re-audit bad output</button>
+        <button id="bulk-audit-btn" disabled>Rewrite selected</button>
+        <button id="bulk-apply-btn" disabled>Put selected live</button>
+        <button id="reaudit-quarantined-btn" disabled style="display:none">Try the bad ones again</button>
         <button id="select-clear-btn" disabled>Clear selection</button>
         <span id="selection-count" class="muted"></span>
       </div>
@@ -157,67 +159,89 @@
     <p class="page-lede" id="ap-lede">—</p>
     <p class="page-meta" id="ap-meta"></p>
 
-    <div class="act-bar">
-      <!-- Filled from the same state the lede describes: whatever unblocks the
-           channel is the primary button here. -->
-      <span id="ap-state-action"></span>
-      <button id="apply-pending-btn" class="btn-primary" disabled>Nothing to put live</button>
-      <button id="sync-btn">Get latest from YouTube</button>
-      <span id="sync-status" class="muted"></span>
-    </div>
-    <div id="apply-pending-status" class="muted" style="margin-top:.5rem"></div>
-    <div id="apply-pending-results" style="margin-top:.5rem"></div>
-
+    <!-- Why it's in that state, in words, with today's throughput underneath
+         and the action that changes it. The state sentence alone says what is
+         wrong; this card says what that means and what to do. -->
     <div class="card">
-      <div class="row" style="justify-content:space-between; align-items:center; gap:.5rem">
-        <h3 style="margin:0">Right now</h3>
-        <div id="ap-summary"><span class="muted">Loading…</span></div>
+      <div class="sec-head">
+        <h3>Why it stopped</h3>
+        <span id="ap-pill"></span>
       </div>
-      <div id="ap-eta" class="muted" style="margin-top:.4rem; font-size:.85rem"></div>
+      <p class="note" id="ap-note">Loading…</p>
+      <div class="mrow"><span>Put live today</span><span class="v" id="ap-today">—</span></div>
+      <div class="meter" data-meter data-pct="0" id="ap-today-meter"></div>
+      <div class="act-bar">
+        <!-- Whatever unblocks the channel takes the primary slot. Same action
+             the board row offered, so clicking through doesn't change the ask. -->
+        <span id="ap-state-action"></span>
+        <button id="sync-btn">Get latest from YouTube</button>
+        <span id="sync-status" class="muted"></span>
+      </div>
+      <div id="ap-eta" class="muted" style="margin-top:.6rem; font-size:.8rem"></div>
+    </div>
+
+    <!-- Finished work that hasn't reached YouTube. Separate from the state
+         above because it's true whether or not autopilot is running, and it's
+         the one thing on this page you can clear by hand. -->
+    <div class="card" id="ap-pending-card" hidden>
+      <div class="sec-head">
+        <h3>Not live yet</h3>
+        <span class="pill pill--info pill--sm" id="ap-pending-pill"></span>
+      </div>
+      <p class="note">Rewrites Midas has finished but not published. They change nothing on YouTube until you put them live.</p>
+      <div class="act-bar" style="margin-top:0">
+        <button id="apply-pending-btn" class="btn-primary hold" data-hold data-ms="900"
+                disabled><span class="fill"></span><span class="txt">Nothing to put live</span></button>
+        <button class="btn-link" type="button" data-goto="videos">Review them first →</button>
+      </div>
+      <div id="apply-pending-status" class="muted" style="margin-top:.5rem"></div>
+      <div id="apply-pending-results" style="margin-top:.5rem"></div>
     </div>
 
     <!-- How far through the channel Midas has got. Its own throughput, not
          YouTube's numbers — nothing else reports it. -->
     <div class="card">
+      <div class="sec-head"><h3>How far through this channel</h3></div>
       <div class="cov-rows" id="ap-coverage">Loading…</div>
     </div>
 
-    <!-- Settings: two clearly separated features, one Save at the bottom. -->
     <div class="card">
-      <h3 style="margin-top:0">Autopilot settings</h3>
-
-      <h4 style="margin:.25rem 0 .25rem">Metadata</h4>
-      <p class="muted" style="margin-top:0">Audits and applies title / description / tag changes automatically, starting with the lowest-view-count public video. Stops cleanly before quota runs out.</p>
-      <div class="row">
-        <label><input type="checkbox" id="ap-enabled" /> Enable metadata autopilot</label>
-        <label class="muted">Daily cap:
-          <input id="ap-cap" type="number" min="1" max="200" value="10" style="width: 5rem; margin-left: .25rem;" />
-        </label>
+      <div class="sec-head"><h3>What it writes</h3></div>
+      <p class="note">Autopilot rewrites titles, descriptions and tags on its own, oldest and least-watched first, and stops for the day once it hits the limit below.</p>
+      <label class="field-check"><input type="checkbox" id="ap-enabled" /> <span>Let autopilot rewrite videos on its own</span></label>
+      <div class="field" style="margin-top:.9rem">
+        <label for="ap-cap">Videos per day</label>
+        <input id="ap-cap" type="number" min="1" max="200" value="10" style="width:6rem" />
+        <span class="hint">Autopilot stops after this many each day, then picks up again tomorrow.</span>
       </div>
 
-      <h4 style="margin:1.1rem 0 .25rem; padding-top:1rem; border-top:1px solid var(--border-soft)">Shorts (NAS)</h4>
-      <p class="muted" style="margin-top:0">Cuts every video in this channel's NAS language folder into Shorts, saved back to the NAS. No upload.</p>
-      <div class="row" style="gap:.6rem; align-items:center; flex-wrap:wrap">
-        <label style="display:flex; flex-direction:column; gap:.2rem">
-          <span class="muted" style="font-size:.8rem">Language folder</span>
-          <select id="nas-folder"><option value="">— none —</option></select>
-        </label>
-        <span class="muted" id="nas-status" style="font-size:.85rem; align-self:flex-end; padding-bottom:.4rem"></span>
+      <div class="sec-head" style="margin-top:1.4rem; padding-top:1.1rem; border-top:1px solid var(--border-soft)">
+        <h3>Shorts</h3>
       </div>
-      <label style="display:block; margin-top:.6rem"><input type="checkbox" id="nas-autocut" /> Auto-cut this folder</label>
-      <div style="margin-top:.6rem; display:flex; align-items:center; gap:.6rem">
-        <button class="btn" id="nas-cut-now">Cut now</button>
+      <p class="note">Cuts every video in this channel's folder on the office drive into Shorts, saved back to the same drive. Nothing is uploaded to YouTube.</p>
+      <div class="field">
+        <label for="nas-folder">Folder on the drive</label>
+        <select id="nas-folder"><option value="">— none —</option></select>
+        <span class="hint" id="nas-status"></span>
+      </div>
+      <label class="field-check"><input type="checkbox" id="nas-autocut" /> <span>Cut new videos in this folder automatically</span></label>
+      <div class="act-bar">
+        <button id="nas-cut-now">Cut them now</button>
         <span class="muted" id="nas-cut-msg" style="font-size:.8rem"></span>
       </div>
-      <div style="margin-top:1.1rem; display:flex; align-items:center; gap:.6rem">
-        <button id="ap-save">Save autopilot settings</button>
-        <span class="muted" style="font-size:.8rem">Saves metadata autopilot settings.</span>
+
+      <div class="act-bar" style="margin-top:1.4rem; padding-top:1.1rem; border-top:1px solid var(--border-soft)">
+        <button id="ap-save" class="btn-primary">Save</button>
       </div>
     </div>
 
-    <!-- Recent activity -->
+    <!-- The run log. Answers "when did it last do anything, and did it work?"
+         — which is the question that brought you to the channel. -->
     <div class="card">
-      <h3 style="margin-top:0">Recent activity</h3>
+      <div class="sec-head">
+        <h3>Recent activity</h3>
+        <span class="muted" style="font-size:.75rem" id="ap-activity-count"></span>
+      </div>
       <div id="ap-activity"><span class="muted">Loading…</span></div>
     </div>
   </div>
@@ -230,22 +254,22 @@
 
     <div class="card">
       <div class="sec-head">
-        <h3>Allocation</h3>
+        <h3>Sorting videos into playlists</h3>
         <span id="pl-action-status" class="muted"></span>
       </div>
-      <p class="muted sec-note">Bootstrap embeds every video so it can be scored against playlists. Run once — after that, allocation happens automatically following each audit.</p>
+      <p class="note">Midas has to read a video once before it can tell which playlists it belongs in. After that it sorts each video as it rewrites it.</p>
       <div id="pl-embed-progress"></div>
       <div class="act-bar">
-        <button id="pl-reconcile-btn">Reconcile now</button>
-        <button id="pl-bootstrap-btn">Bootstrap · sync + embed all</button>
+        <button id="pl-reconcile-btn">Update playlists now</button>
+        <button id="pl-bootstrap-btn">Read every video</button>
       </div>
     </div>
     <div class="card" id="pl-proposals-card">
       <div class="sec-head">
-        <h3>Pending proposals</h3>
+        <h3>Suggested changes</h3>
         <button id="pl-refresh-btn" class="btn-link">Refresh</button>
       </div>
-      <div class="chip-bar" id="pl-chips" role="group" aria-label="Filter proposals by action"></div>
+      <div class="chip-bar" id="pl-chips" role="group" aria-label="Filter suggestions by what they do"></div>
       <div class="act-bar" style="margin-top:0">
         <button id="pl-approve-all-btn" class="btn-primary" disabled>Approve selected</button>
         <button id="pl-reject-all-btn" disabled>Reject selected</button>
@@ -255,17 +279,17 @@
 
     <div class="card" id="pl-health-card">
       <div class="sec-head">
-        <h3>Playlist health <span class="sec-tag">recommend-only</span></h3>
+        <h3>Which playlists are worth keeping <span class="sec-tag">suggestions only</span></h3>
         <button id="pl-health-refresh-btn" class="btn-link">Refresh</button>
       </div>
-      <p class="muted sec-note">A daily job scores each playlist on session contribution (web-only counts). It <b>never deletes anything</b> — you confirm every change. Off by default.</p>
+      <p class="note">Once a day, Midas scores each playlist on how much watching it actually leads to. It <b>never deletes anything</b> — every change is yours to confirm. Off unless you turn it on.</p>
       <div class="act-bar" style="margin-top:.6rem">
         <label class="sec-toggle">
           <input type="checkbox" id="playlist-health-enabled" />
-          <span>Enable scoring</span>
+          <span>Score playlists once a day</span>
         </label>
         <button id="playlist-health-save">Save</button>
-        <button id="pl-health-evaluate-btn">Run evaluation</button>
+        <button id="pl-health-evaluate-btn">Score them now</button>
       </div>
       <div id="pl-health-status" class="muted sec-note"></div>
       <div id="pl-health">Loading…</div>
@@ -275,9 +299,10 @@
   <!-- ─── SETTINGS ─── -->
   <div class="tab-panel" data-panel="settings">
     <div class="card">
-      <h3 style="margin-top:0">Channel settings</h3>
-      <p class="muted">Apply always sets <b>Category = Education</b>, <b>Made for kids = Yes</b>. Default language tags every applied video.</p>
-      <label><b>Default language</b></label>
+      <div class="sec-head"><h3>Channel</h3></div>
+      <p class="note">Every video Midas publishes is set to <b>Education</b>, <b>made for kids</b>, and tagged with the language below.</p>
+      <div class="field">
+        <label for="lang-select">Content language</label>
       <select id="lang-select" style="min-width: 220px;">
         <option value="">— not set —</option>
         <option value="en">English</option>
@@ -293,57 +318,55 @@
         <option value="or">Odia</option>
         <option value="ur">Urdu</option>
       </select>
-      <button id="lang-save" style="margin-left:.5rem">Save</button>
-    </div>
-    <div class="card">
-      <h3 style="margin-top:0">Sync settings</h3>
-      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-        <input type="checkbox" id="sync-shorts" />
-        <b>Sync Shorts</b>
-      </label>
-      <p class="muted" style="margin:.35rem 0 .75rem">When enabled, YouTube Shorts (&le;3 min) are included in the sync and eligible for auditing alongside regular videos.</p>
-      <button id="sync-settings-save">Save</button>
-    </div>
-    <div class="card">
-      <h3 style="margin-top:0">Audit prompt</h3>
-      <label><b>Regular videos</b></label>
-      <textarea id="prompt" rows="12" placeholder="Paste your audit prompt here…"></textarea>
-      <label style="display:block;margin-top:.75rem"><b>Shorts</b></label>
-      <p class="muted" style="margin:.15rem 0 .35rem">Used instead of the regular prompt when auditing Shorts (&le;3 min). Leave blank to use the regular prompt for Shorts too.</p>
-      <textarea id="shorts-prompt" rows="10" placeholder="Paste your Shorts-specific audit prompt here…"></textarea>
-      <button id="save-btn" style="margin-top:.5rem">Save prompts</button>
-    </div>
-    <div class="card">
-      <!-- Reflection mode -->
-      <h3 style="margin-top:0">Self-improvement (reflection)</h3>
-      <div class="row" style="justify-content:space-between; align-items:center">
-        <label class="muted" style="font-size:.9rem">Mode:
-          <select id="reflectionMode" onchange="saveReflectionMode(this.value)" style="margin-left:.35rem">
-            <option value="shadow">Shadow (review before applying)</option>
-            <option value="auto">Auto (apply + revert if regression)</option>
-          </select>
-        </label>
-        <button onclick="triggerReflection(this)">Run reflection now</button>
       </div>
-      <p class="muted" style="font-size:.85rem; margin:.5rem 0 0">
-        Shadow: generates improved prompts for your review. Auto: tests live, reverts automatically if performance drops.
-      </p>
+      <label class="field-check"><input type="checkbox" id="sync-shorts" />
+        <span>Include Shorts — videos of 3 minutes or less get rewritten too</span></label>
+      <div class="act-bar">
+        <button id="lang-save" class="btn-primary">Save</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><h3>Instructions</h3></div>
+      <p class="note">These decide every title, description and tag Midas writes. Changing them changes everything written from now on; what's already live stays as it is.</p>
+      <div class="field" style="max-width:none">
+        <label for="prompt">Full-length videos</label>
+        <textarea id="prompt" rows="12" placeholder="What should Midas write, and what should it avoid?"></textarea>
+      </div>
+      <div class="field" style="max-width:none">
+        <label for="shorts-prompt">Shorts</label>
+        <span class="hint">Used instead of the above for videos of 3 minutes or less. Leave it empty to use the same instructions for both.</span>
+        <textarea id="shorts-prompt" rows="10" placeholder="Leave empty to use the same instructions"></textarea>
+      </div>
+      <div class="act-bar">
+        <button id="save-btn" class="btn-primary">Save</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><h3>Letting Midas improve its own instructions</h3></div>
+      <p class="note">Midas can draft a better version of the instructions above by looking at what it has written so far. Either it shows you the draft first, or it tries it live and puts the old one back if things get worse.</p>
+      <div class="field">
+        <label for="reflectionMode">When it has a new draft</label>
+        <select id="reflectionMode" onchange="saveReflectionMode(this.value)">
+          <option value="shadow">Show me first — nothing changes until I say so</option>
+          <option value="auto">Try it live, and undo it if results get worse</option>
+        </select>
+      </div>
+      <div class="act-bar" style="margin-top:0">
+        <button onclick="triggerReflection(this)">Draft one now</button>
+      </div>
 
-      <!-- Shadow comparison panel -->
-      <div id="shadowPanel" class="hidden" style="margin-top:1rem">
-        <h4 style="margin:0 0 .25rem">Shadow comparison</h4>
-        <p class="muted" style="font-size:.82rem; margin:0 0 .6rem">
-          Suggestions from the candidate prompt — not yet applied. Compare with live suggestions and promote if better.
-        </p>
+      <!-- The draft, side by side with what's live. -->
+      <div id="shadowPanel" class="hidden" style="margin-top:1.2rem">
+        <div class="sec-head"><h3>The draft, next to what's live</h3></div>
+        <p class="note">Nothing here has been used on a real video. Compare the two, and switch if the draft is better.</p>
         <div id="shadowComparisons"></div>
-        <div id="shadowPromoteBtn" class="hidden" style="margin-top:.6rem">
-          <button onclick="promoteCandidate()">Promote candidate to live</button>
+        <div id="shadowPromoteBtn" class="hidden act-bar">
+          <button class="btn-primary" onclick="promoteCandidate()">Use the draft from now on</button>
         </div>
       </div>
 
-      <!-- Reflection history -->
-      <div id="reflectionHistory" class="hidden" style="margin-top:1rem">
-        <h4 style="margin:0 0 .25rem">Prompt version history</h4>
+      <div id="reflectionHistory" class="hidden" style="margin-top:1.2rem">
+        <div class="sec-head"><h3>Earlier versions</h3></div>
         <div id="reflectionHistoryList" style="font-size:.8rem"></div>
       </div>
     </div>
@@ -437,12 +460,25 @@ const loadedTabs = new Set();
 const tabLoaders = {
   videos:    () => loadVideos(),
   autopilot: () => {
+    // Wire the hold buttons and meters once, before any data arrives — the
+    // markup is static, so re-initialising on every repaint would be waste
+    // (Components.init is idempotent, but the calls aren't free).
+    Components.init(document.querySelector('.tab-panel[data-panel="autopilot"]'));
     loadChannelState(); loadAutopilotLog();
     if (!apInterval) apInterval = setInterval(pollAutopilotLog, 30000);
   },
   playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
   settings:  () => { loadConfig(); loadReflectionData(); },
 };
+
+// In-page cross-links between sections. A section is a panel, not a URL, so
+// these can't be plain hrefs without reloading the whole channel.
+document.addEventListener('click', (e) => {
+  const go = e.target.closest('[data-goto]');
+  if (!go) return;
+  e.preventDefault();
+  switchTab(go.dataset.goto);
+});
 
 function ensureTabLoaded(name) {
   if (loadedTabs.has(name)) return;
@@ -471,6 +507,10 @@ if (initialTab) switchTab(initialTab);
 // YouTube Studio.
 Sidebar.mount({
   items: [
+    { id: 'running', label: 'Running', icon: 'home', href: '/' },
+    // The divider carries the channel's name, so the four items below it are
+    // visibly scoped to one channel rather than reading as peers of the board.
+    { section: 'This channel' },
     { id: 'autopilot',   label: 'Autopilot',   icon: 'autopilot' },
     { id: 'videos',      label: 'Videos',      icon: 'videos' },
     { id: 'playlists',   label: 'Playlists',   icon: 'playlists' },
@@ -522,7 +562,15 @@ let pendingCount = 0;
 function syncApplyButton() {
   const b = $('apply-pending-btn');
   b.disabled = pendingCount === 0;
-  b.textContent = pendingCount ? `Put ${fmt(pendingCount)} live` : 'Nothing to put live';
+  const label = pendingCount ? `Hold to put ${fmt(pendingCount)} live` : 'Nothing to put live';
+  // .txt, not textContent — the button also holds the .fill layer that draws
+  // the hold progress, and replacing its children would delete it.
+  b.querySelector('.txt').textContent = label;
+  b.dataset.label = label;
+  b.dataset.doneLabel = pendingCount === 1 ? '1 is live' : `${fmt(pendingCount)} are live`;
+  // The whole card is about work waiting; with nothing waiting it says nothing.
+  $('ap-pending-card').hidden = pendingCount === 0;
+  $('ap-pending-pill').textContent = `${fmt(pendingCount)} waiting`;
 }
 
 // Same thresholds the board uses, so identical staleness reads identically on
@@ -571,7 +619,40 @@ function renderChannelState(j) {
     coverageRow('Videos rewritten', c.audited_regular || 0, c.regular_count || 0) +
     coverageRow('Shorts rewritten', c.audited_shorts || 0, c.shorts_count || 0);
 
+  renderWhy(st, c);
   syncApplyButton();
+}
+
+// The lede says what the state is; this says what it means. Written per state
+// because "autopilot is off" and "the data is 12 days old" call for completely
+// different sentences — a single generic paragraph would be true of neither.
+const WHY_PILL = {
+  run:    ['pill--ok',      'Running'],
+  off:    ['pill--neutral', 'Off'],
+  paused: ['pill--err',     'Stopped'],
+  stale:  ['pill--err',     'Not running'],
+  setup:  ['pill--warn',    'Never set up'],
+};
+function renderWhy(st, c) {
+  const [cls, label] = WHY_PILL[st.key] || WHY_PILL.off;
+  $('ap-pill').className = `pill ${cls} pill--sm`;
+  $('ap-pill').textContent = label;
+
+  const days = c.hours_since_sync == null ? null : Math.round(c.hours_since_sync / 24);
+  const note = {
+    run: 'Autopilot is rewriting videos on its own, oldest and least-watched '
+       + 'first. It stops for the day once it reaches the limit below.',
+    off: 'Nothing is rewritten unless you start it or do it by hand from the '
+       + 'Videos page. This channel\'s data is current, so it can start now.',
+    paused: 'Autopilot stopped itself and will not start again on its own. '
+       + 'Resuming makes it try from where it left off.',
+    stale: `Midas is working from a ${days}-day-old copy of this channel, so it `
+       + 'skips every run rather than rewrite videos that may have changed on '
+       + 'YouTube since. Getting the latest clears it.',
+    setup: 'Midas has not fetched this channel\'s videos yet, so there is '
+       + 'nothing to rewrite. Getting the latest is the first step.',
+  }[st.key] || '';
+  $('ap-note').textContent = note;
 }
 // The board offers exactly one action per state; landing here must offer the
 // same one, in the same place, or clicking through changes what you're being
@@ -646,20 +727,45 @@ function ago(iso) {
   return `${Math.round(s / 86400)}d ago`;
 }
 
-// Today's throughput against today's limit. The state itself is the lede's job
-// — repeating it as a pill here made the same sentence appear twice, once in
-// plain words and once in jargon.
+// A run log is read for shape, not for individual rows — so it's three fixed
+// columns of monospace: when, whether it worked, what happened. A table of
+// pills and wrapped titles couldn't be skimmed for "when did this go wrong?".
+const LOG_TAG = {
+  applied:        ['ok', 'live'],
+  approved:       ['ok', 'ok'],
+  pending:        ['wn', 'wait'],
+  shadow_pending: ['wn', 'test'],
+  quarantined:    ['wn', 'bad'],
+  blocked_test_and_compare: ['wn', 'held'],
+  reverted:       ['wn', 'undone'],
+  rejected:       ['wn', 'no'],
+  failed:         ['er', 'fail'],
+};
+
+// "Jul 27 04:06" — a bare ISO slice put the date on every row even when they
+// all share one, and read as machine output rather than a time.
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function logTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return sameDay ? hm : `${MONTHS[d.getMonth()]} ${d.getDate()} ${hm}`;
+}
+
 function renderAutopilotLog(j) {
+    // Today's throughput against today's limit. The state itself is the lede's
+    // job — repeating it as a pill here made the same sentence appear twice,
+    // once in plain words and once in jargon.
     const cap = j.daily_cap || 0;
     const pct = cap > 0 ? Math.max(0, Math.min(100, (j.applies_today / cap) * 100)) : 0;
-    $('ap-summary').innerHTML =
-      `<span class="cov-val"><b>${fmt(j.applies_today)}</b> / ${fmt(cap)}</span>
-       <span class="muted" style="margin-left:.4rem">put live today</span>
-       <span class="meter" style="width:120px; display:inline-block; margin-left:.6rem; vertical-align:middle"><i style="width:${pct}%"></i></span>`;
+    $('ap-today').textContent = `${fmt(j.applies_today)} / ${fmt(cap)}`;
+    $('ap-today-meter').querySelector('i').style.width = pct + '%';
 
-    // An expired token is the one stop the Resume button can't clear, so it
-    // gets the only action offered here — everything else is handled by the
-    // state action above.
+    // An expired sign-in is the one stop the Resume button can't clear, so it
+    // gets the only action offered here — every other state is handled by the
+    // action button above.
     const lastRun = channelMeta.autopilot_last_tick_at;
     const when = lastRun ? `Last run ${ago(lastRun)}.` : 'Has not run yet.';
     $('ap-eta').innerHTML = j.paused_reason === 'token_expired'
@@ -667,25 +773,31 @@ function renderAutopilotLog(j) {
       : j.enabled ? `${when} Checks again within a minute.`
       : `${when} Autopilot is off.`;
 
-    if (!j.items.length) {
-      $('ap-activity').innerHTML = '<em class="muted">No activity yet.</em>';
-    } else {
-      $('ap-activity').innerHTML = `<table><thead><tr>
-        <th>When</th><th>Status</th><th>Video</th><th>Notes</th></tr></thead><tbody>` +
-        j.items.slice(0, 15).map(it => `<tr>
-          <td class="muted" style="font-size:.85rem">${(it.applied_at || it.created_at || '').slice(0,16).replace('T',' ')}</td>
-          <td>${statusPill(it.status)}</td>
-          <td>${escapeHtml(it.video_title || it.video_id)}</td>
-          <td class="muted" style="font-size:.82rem">${escapeHtml(truncate(it.note, 100))}</td>
-        </tr>`).join('') + `</tbody></table>`;
+    const items = j.items.slice(0, 15);
+    $('ap-activity-count').textContent = items.length
+      ? `last ${items.length} videos it touched` : '';
+    if (!items.length) {
+      $('ap-activity').innerHTML = '<em class="muted">Nothing yet.</em>';
+      return;
     }
+    $('ap-activity').innerHTML = '<div class="log">' + items.map(it => {
+      const [cls, tag] = LOG_TAG[it.status] || ['', it.status || '?'];
+      // The note explains an unusual outcome; the title identifies a normal
+      // one. Showing both wrapped the row and lost the columns.
+      const what = it.note || it.video_title || it.video_id;
+      return `<div>
+        <span class="t">${escapeHtml(logTime(it.applied_at || it.created_at))}</span>
+        <span class="${cls}">${escapeHtml(tag)}</span>
+        <span class="what truncate" title="${escapeHtml(what)}">${escapeHtml(truncate(what, 110))}</span>
+      </div>`;
+    }).join('') + '</div>';
 }
 // Cached-first, and reused by the 30s interval below as a silent revalidate.
 function loadAutopilotLog() {
   SWR.swr(`/channels/${channelId}/autopilot/log`, renderAutopilotLog, {
     onError: () => {
       if (SWR.get(`/channels/${channelId}/autopilot/log`) === undefined) {
-        $('ap-summary').innerHTML = '<em class="muted">Could not load autopilot status.</em>';
+        $('ap-activity').innerHTML = '<em class="muted">Could not load recent activity.</em>';
       }
     },
   });
@@ -791,26 +903,22 @@ $('nas-cut-now').onclick = async () => {
   finally { btn.disabled = false; }
 };
 
+// One card, one Save. These were two buttons a few lines apart, both reading
+// "Save", each silently saving only its own field — so setting the language and
+// ticking Shorts, then pressing the nearer one, lost half the change.
 $('lang-save').onclick = async () => {
   try {
     const r = await fetch(`/auth/channels/${channelId}`, {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ default_language: $('lang-select').value || null }),
+      body: JSON.stringify({
+        default_language: $('lang-select').value || null,
+        sync_shorts: $('sync-shorts').checked,
+      }),
     });
     if (!r.ok) throw new Error(await r.text());
-    toast('Language saved.', 'ok');
-  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
-};
-
-$('sync-settings-save').onclick = async () => {
-  try {
-    const r = await fetch(`/auth/channels/${channelId}`, {
-      method: 'PATCH', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ sync_shorts: $('sync-shorts').checked }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    toast('Sync settings saved.', 'ok');
-  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
+    SWR.invalidate('/auth/channels');
+    toast('Saved.', 'ok');
+  } catch (e) { toast('Could not save: ' + escapeHtml(String(e)), 'err'); }
 };
 
 $('playlist-health-save').onclick = async () => {
@@ -1049,7 +1157,7 @@ function updateSelectionUi() {
   const pendingSel = [...selected].filter(id => currentVideos[id]?.audit_status === 'pending');
   $('bulk-apply-btn').disabled = pendingSel.length === 0;
   $('bulk-apply-btn').textContent = pendingSel.length > 0
-    ? `Apply ${pendingSel.length} pending` : 'Apply selected pending';
+    ? `Put ${pendingSel.length} live` : 'Put selected live';
 }
 
 // State is a chip now (see renderChips); these two stay as controls.
@@ -1121,15 +1229,15 @@ $('bulk-apply-btn').onclick = async () => {
     toast(`Applied ${j.applied}, skipped ${j.skipped}, failed ${j.failed}.`, (j.failed || j.skipped) ? 'warn' : 'ok');
     bustChannelData();
     await loadVideos();
-  } catch (e) { toast('Bulk apply failed: ' + escapeHtml(String(e)), 'err'); }
+  } catch (e) { toast('Could not publish: ' + escapeHtml(String(e)), 'err'); }
   finally { $('bulk-apply-btn').disabled = false; updateSelectionUi(); }
 };
 
 function auditButton(v) {
-  const label = v.audit_status === 'applied' ? 'Re-audit'
-    : (v.audit_status === 'pending' || v.audit_status === 'quarantined') ? 'Re-audit'
-    : 'Audit';
-  return `<button onclick="audit('${v.id}')">${label}</button>`;
+  // "Rewrite again" only when there's something to replace — otherwise the
+  // button implies work already happened on a video Midas has never touched.
+  const done = v.audit_status && v.audit_status !== 'none';
+  return `<button onclick="audit('${v.id}')">${done ? 'Rewrite again' : 'Rewrite'}</button>`;
 }
 
 
@@ -1401,39 +1509,41 @@ $('sync-btn').onclick = async () => {
   } finally { $('sync-btn').disabled = false; }
 };
 
-$('apply-pending-btn').onclick = async () => {
-  // Estimate cost: count pending in current data
-  const pendingCount = allVideos.filter(v => v.audit_status === 'pending').length;
-  if (!pendingCount) { toast('No pending audits.', 'warn'); return; }
-  const pv = await (await fetch(`/quota-cost-preview?action=apply&n=${pendingCount}`)).json();
-  if (!await confirmDialog(`Apply ${pendingCount} pending audits? Estimated quota: ${pv.cost} units${pv.pct_of_remaining ? ` (${pv.pct_of_remaining}% of remaining)`:''}.`)) return;
+// Hold, not click: this publishes to YouTube, and a hold can't be a slip. The
+// modal that used to gate it also carried the quota estimate, so that moves to
+// the status line under the button rather than being lost.
+$('apply-pending-btn').addEventListener('confirm', async () => {
+  if (!pendingCount) { toast('Nothing is waiting.', 'warn'); return; }
   $('apply-pending-btn').disabled = true;
-  $('apply-pending-status').textContent = ' Applying…';
+  $('apply-pending-status').textContent = ' Publishing…';
   $('apply-pending-results').innerHTML = '';
   try {
     const r = await fetch(`/channels/${channelId}/audits/apply-pending`, { method: 'POST' });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     $('apply-pending-status').textContent =
-      ` ${j.applied} applied · ${j.skipped} skipped · ${j.failed} failed (of ${j.total_pending}).`;
-    toast(`Applied ${j.applied}, skipped ${j.skipped}, failed ${j.failed}.`, j.failed ? 'warn' : 'ok');
+      ` ${j.applied} went live · ${j.skipped} skipped · ${j.failed} failed (of ${j.total_pending}).`;
+    toast(`${j.applied} live, ${j.skipped} skipped, ${j.failed} failed.`, j.failed ? 'warn' : 'ok');
     if (j.results && j.results.length) {
-      const colorFor = o =>
-        o === 'applied' ? 'var(--color-ok)' : o === 'dry_run' ? 'var(--color-warn)' : o === 'failed' ? 'var(--color-err)' : o === 'quarantined' ? 'var(--color-warn)' : 'var(--color-neutral)';
+      // Same three-column readout as the run log — the outcomes are the same
+      // vocabulary, so they should be scannable the same way.
       $('apply-pending-results').innerHTML =
-        '<details><summary class="muted">Per-audit detail</summary><ul style="font-size:.85rem">' +
-        j.results.map(r =>
-          `<li><code>${r.video_id}</code> · <span style="color:${colorFor(r.outcome)}">${escapeHtml(r.outcome)}</span>${r.reason ? ` — ${escapeHtml(r.reason)}` : ''}</li>`
-        ).join('') + '</ul></details>';
+        '<details><summary class="muted">Video by video</summary><div class="log" style="margin-top:.5rem">' +
+        j.results.map(r => {
+          const [cls, tag] = LOG_TAG[r.outcome] || (r.outcome === 'dry_run' ? ['wn', 'test'] : ['', r.outcome]);
+          return `<div><span class="t">${escapeHtml(r.video_id)}</span>`
+               + `<span class="${cls}">${escapeHtml(tag)}</span>`
+               + `<span class="what">${escapeHtml(r.reason || '')}</span></div>`;
+        }).join('') + '</div></details>';
     }
     bustChannelData();
     SWR.invalidate('/auth/channels');
     await loadVideos(); await loadChannel(); await loadChannelState();
   } catch (e) {
     $('apply-pending-status').textContent = ' Failed';
-    toast('Apply failed: ' + escapeHtml(String(e)), 'err');
+    toast('Could not publish: ' + escapeHtml(String(e)), 'err');
   } finally { syncApplyButton(); }   // re-derive from the count, don't blanket-enable
-};
+});
 
 // ── Playlists ──────────────────────────────────────────────────────────
 let plProposals = [];
@@ -1446,12 +1556,12 @@ const plSelected = new Set();
 function renderPlLede() {
   const n = plProposals.length;
   $('pl-lede').innerHTML = n
-    ? `${fmt(n)} proposal${n === 1 ? '' : 's'} <span class="u">await${n === 1 ? 's' : ''} review</span>`
-    : 'No proposals pending <span class="u">allocation is settled</span>';
+    ? `${fmt(n)} playlist change${n === 1 ? '' : 's'} <span class="u">to review</span>`
+    : 'Nothing to review <span class="u">every video is where it should be</span>';
 
   const s = plStatus;
   $('pl-meta').textContent = s
-    ? `${fmt(s.playlists)} playlists · ${fmt(s.videos_in_playlists)} videos allocated · ${fmt(s.orphans)} orphans`
+    ? `${fmt(s.playlists)} playlists · ${fmt(s.videos_in_playlists)} videos sorted · ${fmt(s.orphans)} in no playlist at all`
     : '';
 }
 
@@ -1498,25 +1608,34 @@ function renderProposals() {
     return;
   }
 
+  // How the suggestion was arrived at. The raw values are internal names for
+  // the mechanism ('embedding', 'rule'); what the operator needs is which of
+  // them decided this row, in words.
+  const DECIDED_BY = {
+    embedding: 'how the video reads',
+    rule: 'a rule you set',
+    title_match: 'the title',
+    manual: 'you',
+  };
   const rows = shown.map(p => {
     const badge = p.action === 'add'
       ? '<span class="pill pill--ok pill--sm">Add</span>'
       : '<span class="pill pill--err pill--sm">Remove</span>';
     const sim = p.similarity != null ? (p.similarity * 100).toFixed(1) + '%' : '—';
     return `<div class="dt-row">
-      <span><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''} aria-label="Select proposal" /></span>
+      <span><input type="checkbox" data-id="${p.id}" ${plSelected.has(p.id) ? 'checked' : ''} aria-label="Select this change" /></span>
       <span>${badge}</span>
       <span class="truncate" title="${escapeHtml(p.video_title || p.video_id)}">${escapeHtml(p.video_title || p.video_id)}</span>
       <span class="truncate muted" title="${escapeHtml(p.playlist_title || p.playlist_id)}">${escapeHtml(p.playlist_title || p.playlist_id)}</span>
       <span class="dt-num">${sim}</span>
-      <span class="muted truncate">${escapeHtml(p.decision_source)}</span>
+      <span class="muted truncate">${escapeHtml(DECIDED_BY[p.decision_source] || p.decision_source)}</span>
     </div>`;
   }).join('');
 
   $('pl-proposals').innerHTML = `<div class="dt"><div class="dt-scroll"><div class="dt-body">
     <div class="dt-head">
       <span><input type="checkbox" id="pl-select-all" aria-label="Select all shown" /></span>
-      <span>Action</span><span>Video</span><span>Playlist</span><span>Similarity</span><span>Source</span>
+      <span>Change</span><span>Video</span><span>Playlist</span><span>How close a match</span><span>Decided by</span>
     </div>${rows}</div></div></div>`;
 
   // Select-all applies to what's on screen, not the whole set — selecting rows
@@ -1577,16 +1696,14 @@ $('pl-reject-all-btn').onclick = () => decideProposals('rejected');
 $('pl-refresh-btn').onclick = loadProposals;
 
 
-// The four figures used to be marked up with .kpi-val / .kpi-label, which are
-// defined in no stylesheet — they rendered as undifferentiated plain text. The
-// embedding ratio is the one with a target, so it becomes a meter; the rest
-// move to the lede's meta line where they read as context, not as headline
-// numbers competing with the proposal count.
+// Only one of these figures has a target to reach, so only that one becomes a
+// meter; the rest sit in the lede's meta line as context rather than competing
+// with the count of changes waiting.
 function renderPlaylistStatus(s) {
   const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
   $('pl-embed-progress').innerHTML = `
     <div class="cov-head">
-      <span>Videos embedded</span>
+      <span>Videos read</span>
       <span class="cov-val"><b>${fmt(s.embedded)}</b> / ${fmt(s.total_videos)} <span class="muted">· ${pct}%</span></span>
     </div>
     <div class="meter"><i style="width:${pct}%"></i></div>`;
@@ -1597,7 +1714,7 @@ function loadPlaylistStatus() {
   SWR.swr(`/channels/${channelId}/playlists/status`, renderPlaylistStatus, {
     onError: () => {
       if (SWR.get(`/channels/${channelId}/playlists/status`) === undefined) {
-        $('pl-embed-progress').innerHTML = '<em class="muted">Could not load playlist status.</em>';
+        $('pl-embed-progress').innerHTML = '<em class="muted">Could not load.</em>';
       }
     },
   });
@@ -1605,35 +1722,35 @@ function loadPlaylistStatus() {
 
 $('pl-bootstrap-btn').onclick = async () => {
   $('pl-bootstrap-btn').disabled = true;
-  $('pl-action-status').textContent = 'Bootstrapping… (this may take a few minutes)';
+  $('pl-action-status').textContent = 'Reading every video… this takes a few minutes.';
   try {
     const r = await fetch(`/channels/${channelId}/playlists/bootstrap`, { method: 'POST' });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-    toast(`Bootstrap done: ${j.playlists} playlists, ${j.memberships_seeded} memberships seeded, ${j.videos_embedded} videos embedded.`, 'ok', 8000);
+    toast(`Done: ${j.playlists} playlists, ${j.videos_embedded} videos read.`, 'ok', 8000);
     $('pl-action-status').textContent = '';
     SWR.invalidatePrefix(`/channels/${channelId}/playlists`);
     await loadPlaylistStatus();
   } catch (e) {
-    toast('Bootstrap failed: ' + escapeHtml(String(e)), 'err');
+    toast('Could not read the videos: ' + escapeHtml(String(e)), 'err');
     $('pl-action-status').textContent = '';
   } finally { $('pl-bootstrap-btn').disabled = false; }
 };
 
 $('pl-reconcile-btn').onclick = async () => {
   $('pl-reconcile-btn').disabled = true;
-  $('pl-action-status').textContent = 'Reconciling…';
+  $('pl-action-status').textContent = 'Updating playlists…';
   try {
     const r = await fetch(`/channels/${channelId}/playlists/reconcile`, { method: 'POST' });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
     const cap = j.skipped_cap ? ' (mutation cap hit)' : '';
-    toast(`Reconcile done: ${j.added} added, ${j.removed} removed${cap}.`, 'ok');
+    toast(`Done: ${j.added} added, ${j.removed} removed${cap}.`, 'ok');
     $('pl-action-status').textContent = '';
     SWR.invalidatePrefix(`/channels/${channelId}/playlists`);
     await loadPlaylistStatus();
   } catch (e) {
-    toast('Reconcile failed: ' + escapeHtml(String(e)), 'err');
+    toast('Could not update the playlists: ' + escapeHtml(String(e)), 'err');
     $('pl-action-status').textContent = '';
   } finally { $('pl-reconcile-btn').disabled = false; }
 };
@@ -1660,24 +1777,24 @@ function plActionPill(action) {
 function renderHealth(envelope) {
   if (!envelope.enabled) {
     $('pl-health-status').innerHTML =
-      'Playlist health scoring is <b>off</b> for this channel. ' +
-      'Tick <b>Enable scoring</b> above and Save, then click <b>Run evaluation</b>.';
-    $('pl-health').innerHTML = '<em class="muted">No recommendations to show.</em>';
+      'Scoring is <b>off</b> for this channel. Tick the box above, Save, '
+      + 'then <b>Score them now</b>.';
+    $('pl-health').innerHTML = '<em class="muted">Nothing to show.</em>';
     return;
   }
   const w = envelope.window || {};
-  const t = envelope.thresholds || {};
-  const tier2 = envelope.tier_2_available
-    ? ''
-    : ' · <span class="muted" title="Tier-2 (playlist-source views to members) ships in a follow-up step">tier-2 pending</span>';
-  $('pl-health-status').innerHTML =
-    `Last computed: ${envelope.computed_at ? envelope.computed_at.slice(0,16).replace('T',' ') : '—'} · ` +
-    `window ${w.weeks}w · gate ≥${w.min_starts_gate} starts · ` +
-    `thresholds remove≤${t.remove_pctl}%, revive≤${t.revive_pctl}%${tier2}`;
+  // This line used to print the scoring parameters — window, gate, percentile
+  // thresholds — which is the configuration, not a finding. What you need to
+  // know is how recent the scores are and how much watching they're based on.
+  const scored = envelope.computed_at
+    ? `Scored ${ago(envelope.computed_at)}` : 'Not scored yet';
+  $('pl-health-status').textContent =
+    `${scored}, from the last ${w.weeks || '—'} weeks. Playlists with fewer than `
+    + `${fmt(w.min_starts_gate || 0)} views started from them are left alone.`;
 
   const recs = envelope.recommendations || [];
   if (!recs.length) {
-    $('pl-health').innerHTML = '<div class="dt"><div class="dt-empty muted">No playlists for this channel yet — run sync first.</div></div>';
+    $('pl-health').innerHTML = '<div class="dt"><div class="dt-empty muted">No playlists yet — get the latest from YouTube first.</div></div>';
     return;
   }
   const rows = recs.map(r => {
@@ -1790,11 +1907,11 @@ function renderShadowComparisons(items) {
       <div class="muted" style="margin-bottom:.35rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"><code>${escapeHtml(item.video_id)}</code></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:.6rem">
         <div>
-          <div class="muted" style="font-size:.72rem; margin-bottom:.2rem">Current</div>
+          <div class="muted" style="font-size:.72rem; margin-bottom:.2rem">What's live</div>
           <div>${escapeHtml(item.live_title || '(none)')}</div>
         </div>
         <div>
-          <div style="color:var(--color-accent); font-size:.72rem; margin-bottom:.2rem">Candidate</div>
+          <div style="color:var(--color-accent); font-size:.72rem; margin-bottom:.2rem">What the draft would write</div>
           <div style="font-weight:600">${escapeHtml(item.shadow_title || '(none)')}</div>
         </div>
       </div>
@@ -1808,16 +1925,24 @@ function renderReflectionHistory(versions) {
   if (!el || !list || !versions || versions.length === 0) return;
   el.classList.remove('hidden');
 
-  const statusCls = { live: 'pill--ok', shadow: 'pill--info', retired: 'pill--neutral', retired_regression: 'pill--err' };
-  list.innerHTML = versions.map(v => `
+  // Persisted status values, given labels an operator can read. Keys unchanged.
+  const VER = {
+    live:               ['pill--ok',      'In use'],
+    shadow:             ['pill--info',    'Draft'],
+    retired:            ['pill--neutral', 'Replaced'],
+    retired_regression: ['pill--err',     'Undone — results got worse'],
+  };
+  list.innerHTML = versions.map(v => {
+    const [cls, label] = VER[v.status] || ['pill--neutral', v.status];
+    return `
     <div class="card" style="padding:.45rem .7rem; margin:.4rem 0">
       <div class="row" style="justify-content:space-between; align-items:center">
-        <span class="pill ${statusCls[v.status] || 'pill--neutral'}">${escapeHtml(v.status)}</span>
+        <span class="pill ${cls}">${escapeHtml(label)}</span>
         <span class="muted" style="font-size:.75rem">${v.created_at ? v.created_at.slice(0, 10) : ''}</span>
       </div>
       ${v.reflection_reasoning ? `<div class="muted" style="margin-top:.3rem">${escapeHtml(v.reflection_reasoning)}</div>` : ''}
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 async function saveReflectionMode(mode) {
