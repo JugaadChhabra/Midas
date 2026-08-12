@@ -8,21 +8,19 @@
 <style>
   /* Page layout + widgets unique to the Performance page. Shared tokens and
      components live in /static/theme.css; every rule here consumes those tokens
-     (no colour literals). The nav/btn/table/pill/kpi block below restores this
-     page's historical metrics, which pre-date the shared layer — see the
-     dashboard design-system notes; these converge in the visual-redo pass. */
-  body { max-width: 1280px; margin: 1.5rem auto; padding: 0 1.25rem; }
+     (no colour literals). The .kpi sizing overrides that used to sit here have
+     been folded into theme.css, so this page no longer redefines a shared
+     component. */
+  /* The shell owns page layout (see .app-shell in theme.css); body just
+     provides the backdrop the inset content panel sits on. Embed mode strips
+     both classes at runtime and falls back to plain flow — see `embedded`. */
+  body { margin:0; background:var(--surface-faint); }
 
-  .nav { margin-bottom:.5rem; }
   button, .btn { padding:.5rem .9rem; }
   th, td { padding:.5rem .35rem; vertical-align:top; }
   th.sortable { cursor:pointer; user-select:none; }
   th.sortable:hover { color:var(--color-accent); }
   .pill { margin:1px; }
-  .kpi-grid { grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
-  .kpi { padding:.65rem .8rem; }
-  .kpi .v { font-size:1.3rem; }
-  .kpi .l { font-size:.74rem; }
 
   .small { font-size:.8rem; }
   .diff-row { background:var(--surface-faint); }
@@ -64,18 +62,8 @@
 </style>
 </head>
 <body>
-  <nav class="nav">
-    <a href="/" class="brand">Midas</a>
-    <a href="/" class="navlink">Dashboard</a>
-    <span class="navlink active" aria-current="page">Performance</span>
-  </nav>
-  <p class="sub" aria-label="Breadcrumb">
-    <a href="/">All channels</a>
-    <span class="muted"> / </span>
-    <a id="channel-link" href="#">Channel</a>
-    <span class="muted"> / </span>
-    <span aria-current="page">Performance</span>
-  </p>
+  <div class="app-shell" id="app-shell">
+  <main class="app-main">
   <h1>Performance</h1>
   <p class="sub">Tracking starts at Apply. Use Sync to refresh stats.</p>
 
@@ -148,45 +136,59 @@
 
   <div id="rows" class="card" aria-live="polite">Loading…</div>
 
+  </main>
+  </div>
+
 <script src="/static/swr.js"></script>
 <script src="/static/status.js"></script>
+<script src="/static/sidebar.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('channel_id');
-// When embedded in the channel page's Performance tab (?embed=1), drop this
-// page's own nav / breadcrumb / redundant title and go full width.
+// This page is also the channel page's Performance tab, embedded in an iframe
+// with ?embed=1. There the parent already supplies the rail and the heading, so
+// embed mode drops both shell classes and falls back to plain full-width flow —
+// rendering a sidebar inside the iframe would nest one rail inside another.
 const embedded = params.get('embed') === '1';
 if (embedded) {
-  // This script runs at the end of <body>, so nav/breadcrumb/h1 are already parsed.
-  document.querySelector('nav.nav')?.remove();
-  document.querySelector('p[aria-label="Breadcrumb"]')?.remove();
+  // This script runs at the end of <body>, so the shell and h1 are parsed.
   document.querySelector('h1')?.remove();
-  document.body.style.margin = '0';
-  document.body.style.maxWidth = 'none';
-  document.body.style.padding = '0';
+  document.getElementById('app-shell')?.classList.remove('app-shell');
+  document.querySelector('.app-main')?.classList.remove('app-main');
+} else {
+  mountSidebar();
 }
+
+// Standalone, this is a channel-scoped page, so it carries the channel rail
+// with Performance current. The other sections navigate back to the channel
+// page's matching panel.
+function mountSidebar() {
+  const sec = (id) => channelId
+    ? `/channel?id=${encodeURIComponent(channelId)}#${id}`
+    : '/';
+  Sidebar.mount({
+    items: [
+      { id: 'overview',    label: 'Overview',    icon: 'home',        href: sec('overview') },
+      { id: 'videos',      label: 'Videos',      icon: 'videos',      href: sec('videos') },
+      { id: 'performance', label: 'Performance', icon: 'performance' },
+      { id: 'autopilot',   label: 'Autopilot',   icon: 'autopilot',   href: sec('autopilot') },
+      { id: 'playlists',   label: 'Playlists',   icon: 'playlists',   href: sec('playlists') },
+      { id: 'settings',    label: 'Settings',    icon: 'settings',    href: sec('settings') },
+    ],
+    activeId: 'performance',
+    // Switching channel from here keeps you on Performance.
+    channelHref: (id) => `/performance?channel_id=${encodeURIComponent(id)}`,
+  });
+  SWR.swr('/auth/channels', (chs) => Sidebar.setChannels(chs, channelId));
+}
+
 if (!channelId) { showMissingId('channel_id'); throw new Error('no id'); }
-// Render a missing-id error in the content area while keeping the top nav intact.
+
+// Render the error inside the content panel so the rail survives.
 function showMissingId(what) {
-  const nav = document.querySelector('nav.nav');
-  document.body.innerHTML = '';
-  if (nav) document.body.appendChild(nav);
-  const err = document.createElement('div');
-  err.className = 'card';
-  err.innerHTML = `<p style="color:var(--color-err);margin:0">Missing ${what} — open a channel from the <a href="/">Dashboard</a>.</p>`;
-  document.body.appendChild(err);
-}
-// In embed mode the breadcrumb (and its #channel-link) was removed above, so
-// guard the lookup — otherwise this throws and halts the whole script before
-// load() runs, leaving the page stuck on "Loading…".
-const channelLink = document.getElementById('channel-link');
-if (channelLink) {
-  channelLink.href = `/channel?id=${encodeURIComponent(channelId)}`;
-  // Label the middle crumb with the channel's name (non-fatal if it can't load).
-  fetch('/auth/channels').then(r => r.json()).then(chs => {
-    const c = (chs || []).find(x => x.id === channelId);
-    if (c && c.name) channelLink.textContent = c.name;
-  }).catch(() => {});
+  const main = document.querySelector('.app-main') || document.body;
+  main.innerHTML = `<div class="card"><p style="color:var(--color-err);margin:0">`
+    + `Missing ${what} — open a channel from the <a href="/">dashboard</a>.</p></div>`;
 }
 
 const $ = (id) => document.getElementById(id);

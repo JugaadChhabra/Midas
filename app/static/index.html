@@ -9,7 +9,9 @@
   /* Page layout + widgets unique to the dashboard. Shared tokens and components
      live in /static/theme.css; every rule here consumes those tokens (no colour
      literals) so the dashboard's look can't drift from the other pages. */
-  body { max-width: 1100px; margin: 2.5rem auto; padding: 0 1.25rem; }
+  /* The shell owns page layout (see .app-shell in theme.css); body just
+     provides the backdrop the inset content panel sits on. */
+  body { margin:0; background:var(--surface-faint); }
 
   .freshness-ok { color:var(--color-ok); }
   .freshness-stale { color:var(--color-warn); }
@@ -42,12 +44,11 @@
 </style>
 </head>
 <body>
-  <nav class="nav">
-    <a href="/" class="brand">Midas</a>
-  </nav>
+  <div class="app-shell" id="app-shell">
+  <main class="app-main">
   <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
     <div>
-      <h1 style="margin-bottom:.25rem">Midas</h1>
+      <h1 style="margin-bottom:.25rem">All channels</h1>
       <p class="sub">YouTube metadata audit + write-back. Autopilot ready.</p>
     </div>
   </div>
@@ -60,10 +61,9 @@
 
   <!-- Channels -->
   <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem;">
-      <h3 style="margin:0">Connected channels</h3>
-      <a class="btn" href="/auth/login">+ Connect channel</a>
-    </div>
+    <!-- "Add channel" moved into the sidebar's channel switcher, where the rest
+         of the channel-picking lives. -->
+    <h3 style="margin:0">Connected channels</h3>
     <div id="channels" style="margin-top:.5rem">Loading…</div>
   </div>
 
@@ -73,8 +73,12 @@
     <div class="feed" id="activity-feed" aria-live="polite" role="log"><span class="muted">Loading…</span></div>
   </div>
 
+  </main>
+  </div>
+
 <script src="/static/swr.js"></script>
 <script src="/static/status.js"></script>
+<script src="/static/sidebar.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => (n ?? 0).toLocaleString();
@@ -112,11 +116,21 @@ function fmtResetTime(seconds) {
   return `${h}h ${m}m`;
 }
 
+// The rail lives in /static/sidebar.js (shared with the channel page). This is
+// the no-channel-selected state, so its one section is the fleet view itself;
+// the footer switcher is how you drop into a channel.
+Sidebar.mount({
+  items: [{ id: 'all', label: 'All channels', icon: 'home', href: '/' }],
+  activeId: 'all',
+});
+
 function renderDashboard(j) {
   renderHero(j);
   renderAttention(j.health);
   renderChannels(j.channels, j.pipeline);
   renderActivityFeed(j.activity || []);
+  // Reuses the payload already on screen — the rail costs no extra request.
+  Sidebar.setChannels(j.channels, null);
 }
 
 // Stale-while-revalidate: paint the last dashboard instantly, then refresh in
@@ -183,7 +197,8 @@ function renderAttention(h) {
 }
 
 function renderChannels(list, pipeline) {
-  if (!list || !list.length) { $('channels').innerHTML = '<em class="muted">No channels yet — connect one above.</em>'; return; }
+  // The empty state points at the switcher, since that's where "Add channel" is.
+  if (!list || !list.length) { $('channels').innerHTML = '<em class="muted">No channels yet — use “Add channel” in the switcher, bottom-left.</em>'; return; }
   $('channels').innerHTML = `<table>
     <thead><tr>
       <th>Name</th><th>Handle</th><th>Pipeline</th><th>Applied 7d</th>

@@ -82,7 +82,10 @@ h1 { margin-bottom: .25rem; }
    holds section nav (`.snav`) and a channel switcher in its footer. Collapsing
    works by redefining --sidebar-w on the shell, so every child that sizes off
    the token follows without its own rule. */
-.app-shell { display:flex; align-items:flex-start; gap:.5rem; min-height:100vh; }
+/* `stretch` (not flex-start) so the content panel fills the viewport on short
+   pages instead of floating as a stranded card — and, once the rail stacks on
+   narrow screens, so both children still span the full width. */
+.app-shell { display:flex; align-items:stretch; gap:.5rem; min-height:100vh; }
 .app-shell.collapsed { --sidebar-w: var(--sidebar-w-collapsed); }
 
 .sidebar { position:sticky; top:0; box-sizing:border-box;
@@ -143,6 +146,14 @@ h1 { margin-bottom: .25rem; }
             border-radius:var(--radius-sm); text-decoration:none; color:inherit; font-size:.88rem; }
 .chan-opt:hover { background:var(--surface-tint); }
 .chan-opt.current { background:var(--color-accent-bg); color:var(--color-accent); font-weight:600; }
+
+/* Keyboard focus. The switcher is arrow-key navigable ('/' opens it), so the
+   focused row has to be obvious — :focus as well as :focus-visible, because
+   focus here is moved programmatically. */
+.snav:focus-visible, .chan-switch:focus-visible,
+.sidebar-toggle:focus-visible, .chan-opt:focus-visible,
+.chan-opt:focus { outline:2px solid var(--color-accent); outline-offset:-2px; }
+.chan-opt:focus { background:var(--surface-tint); }
 .chan-menu .muted-row { padding:.5rem; font-size:.85rem; opacity:.65; }
 
 /* Collapsed — icons only. Labels are hidden rather than removed so the DOM
@@ -175,6 +186,27 @@ button, .btn { font:inherit; padding:.55rem 1rem; border-radius:var(--radius-md)
                text-decoration:none; color:inherit; display:inline-block; }
 button:hover, .btn:hover { background:var(--surface-tint); }
 
+/* Button ranks. The bare button above is the secondary/default rung; these are
+   the two ends of the ladder. At most one primary per view — it marks the
+   consequential action, so it stops meaning anything if everything is one. */
+.btn-primary { background:var(--color-accent); border-color:var(--color-accent);
+               color:#04121f; font-weight:600; }
+.btn-primary:hover { background:var(--color-accent); filter:brightness(1.08); }
+.btn-primary:disabled { opacity:.4; cursor:not-allowed; filter:none; }
+/* Navigation dressed as an action reads as one. This is the rung for "go
+   somewhere" — present, but not competing with things that change data. */
+.btn-link { background:none; border-color:transparent; opacity:.7; padding:.55rem .4rem; }
+.btn-link:hover { background:var(--surface-tint); opacity:1; }
+
+/* Meter — thin progress track for a done/total ratio. */
+.meter { height:6px; border-radius:var(--radius-pill); background:var(--surface-tint); overflow:hidden; }
+.meter > i { display:block; height:100%; border-radius:var(--radius-pill); background:var(--color-accent); }
+
+/* Sync freshness. Semantic, so the same hours read the same on every page. */
+.fresh-ok    { color:var(--color-ok); }
+.fresh-stale { color:var(--color-warn); }
+.fresh-old   { color:var(--color-err); }
+
 /* ── Table ──────────────────────────────────────────────────────────── */
 table { width:100%; border-collapse:collapse; margin-top:.5rem; }
 th, td { text-align:left; padding:.55rem .35rem; border-bottom:1px solid var(--border-soft); font-size:.92rem; vertical-align:middle; }
@@ -195,11 +227,65 @@ code { background:var(--surface-tint); padding:0 .3rem; border-radius:var(--radi
 .pill--neutral { background:var(--surface-tint);     color:var(--color-neutral); border:1px solid var(--border-soft); }
 .pill--sm      { padding:.1rem .4rem; font-size:.72rem; font-weight:600; }
 
+/* ── Filter chips ───────────────────────────────────────────────────── */
+/* A row of toggles that filter the list beneath them. The selected chip is
+   raised onto a surface rather than tinted, so "selected" reads as position
+   rather than as another status colour competing with the dots. */
+.chip-bar { display:flex; align-items:center; gap:.25rem; overflow-x:auto;
+            padding:.25rem; margin:-.25rem -.25rem .4rem; scrollbar-width:none; }
+.chip-bar::-webkit-scrollbar { display:none; }
+.chip { display:inline-flex; align-items:center; gap:.42rem; flex:0 0 auto;
+        height:1.7rem; padding:0 .6rem; border:1px solid transparent;
+        border-radius:var(--radius-pill); background:none; color:inherit;
+        font:inherit; font-size:.76rem; font-weight:500; opacity:.62; cursor:pointer;
+        transition:background-color .2s, box-shadow .2s, opacity .2s; }
+.chip:hover { background:var(--surface-tint); opacity:1; }
+.chip[aria-pressed="true"] { background:var(--panel-bg); border-color:var(--border);
+                             box-shadow:var(--shadow-1); opacity:1; font-weight:600; }
+.chip-dot { width:.4rem; height:.4rem; border-radius:50%; flex:0 0 auto; }
+.chip-count { font-size:.68rem; padding:0 .3rem; border-radius:var(--radius-sm);
+              background:var(--surface-tint); font-variant-numeric:tabular-nums; opacity:.75; }
+
+/* Status dots — same role vocabulary as .pill--*, see status.js. */
+.dot--ok      { background:var(--color-ok); }
+.dot--info    { background:var(--color-accent); }
+.dot--warn    { background:var(--color-warn); }
+.dot--err     { background:var(--color-err); }
+.dot--neutral { background:var(--color-neutral); }
+
+/* ── Data table ─────────────────────────────────────────────────────── */
+/* Grid rather than <table>: the columns are declared once on the container, so
+   header and rows can't drift, and a row can carry an expandable detail panel
+   as a sibling without colspan gymnastics. The consuming page supplies
+   --dt-cols and --dt-min. */
+.dt { border:1px solid var(--border); border-radius:var(--radius); }
+.dt-scroll { overflow-x:auto; scrollbar-width:none; }
+.dt-scroll::-webkit-scrollbar { display:none; }
+.dt-body { min-width:var(--dt-min, 0); }
+.dt-head, .dt-row { display:grid; grid-template-columns:var(--dt-cols); gap:.65rem;
+                    align-items:center; padding:.5rem .75rem; }
+.dt-head { border-bottom:1px solid var(--border); font-size:.72rem; font-weight:600;
+           opacity:.55; letter-spacing:.02em; position:sticky; top:0; }
+.dt-row { border-bottom:1px solid var(--border-soft); font-size:.83rem;
+          transition:background-color .1s; }
+.dt-row:hover { background:var(--surface-tint); }
+.dt-row.selected { background:var(--color-accent-faint); }
+.dt-empty { padding:1.5rem .75rem; text-align:center; }
+.dt-num { font-variant-numeric:tabular-nums; }
+.dt-sort { background:none; border:0; padding:0; font:inherit; color:inherit;
+           text-align:left; cursor:pointer; user-select:none; }
+.dt-sort:hover { color:var(--color-accent); background:none; }
+.truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 /* ── KPI grid ───────────────────────────────────────────────────────── */
-.kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.75rem; }
-.kpi { border:1px solid var(--border); border-radius:var(--radius); padding:.75rem .9rem; }
-.kpi .v { font-size:1.4rem; font-weight:700; line-height:1.1; }
-.kpi .l { font-size:.78rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
+/* Single definition. Channel and Performance each carried a near-identical
+   denser override while these (looser) values went unused — index.html doesn't
+   use .kpi at all. The dense metrics were what actually shipped, so they live
+   here now and the page-level copies are gone. */
+.kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
+.kpi { border:1px solid var(--border); border-radius:var(--radius); padding:.65rem .8rem; }
+.kpi .v { font-size:1.3rem; font-weight:700; line-height:1.1; }
+.kpi .l { font-size:.74rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
 
 /* ── Deltas ─────────────────────────────────────────────────────────── */
 .pos { color:var(--color-ok); font-weight:600; }
