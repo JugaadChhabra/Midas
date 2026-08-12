@@ -18,6 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from app import measurement as m
+from app import reach
 from app.status_vocab import MeasurementStatus, OutcomeDecision
 
 APPLIED = date(2026, 6, 1)
@@ -40,32 +41,12 @@ def _audit(**kw):
 
 
 def _covered(pre, post):
-    return set(m.days_between(*pre)) | set(m.days_between(*post))
+    return set(reach.days(pre)) | set(reach.days(post))
 
 
-# ── window math ───────────────────────────────────────────────────────────
-
-def test_windows_exclude_the_apply_day_and_its_neighbours():
-    """Reach data-days roll over on Pacific while `applied` is a UTC date, so
-    the adjacent days can contain mixed pre/post exposure."""
-    pre, post = m._windows(APPLIED)
-    assert pre[1] == "2026-05-30"      # apply day - 2
-    assert post[0] == "2026-06-03"     # apply day + 2
-    for w in (pre, post):
-        assert APPLIED.isoformat() not in m.days_between(*w)
-
-
-def test_both_windows_are_full_length():
-    """Shifted outward, not shortened — otherwise pre/post aren't comparable."""
-    pre, post = m._windows(APPLIED)
-    assert len(m.days_between(*pre)) == 21
-    assert len(m.days_between(*post)) == 21
-
-
-def test_days_between_is_inclusive():
-    assert m.days_between("2026-01-01", "2026-01-03") == \
-        ["2026-01-01", "2026-01-02", "2026-01-03"]
-    assert m.days_between("2026-01-01", "2026-01-01") == ["2026-01-01"]
+# Window arithmetic itself now belongs to app.reach and is tested in
+# tests/test_reach.py. What remains here is what measurement decides GIVEN a
+# window: the plan, and the verdict.
 
 
 def test_apply_date_prefers_applied_at_then_falls_back():
@@ -133,7 +114,7 @@ def test_open_window_is_held_unchanged():
 
 
 def test_closed_window_with_full_coverage_proceeds_to_measure():
-    pre, post = m._windows(APPLIED)
+    pre, post = reach.window_for(APPLIED)
     p = m.plan_measurement(_audit(), date(2026, 7, 1), _covered(pre, post))
     assert p.action == m.MEASURE
     assert (p.pre, p.post) == (pre, post)
@@ -142,14 +123,14 @@ def test_closed_window_with_full_coverage_proceeds_to_measure():
 def test_missing_coverage_within_grace_waits_as_measuring():
     """'measuring' means window closed, reach CSVs not in yet — they arrive
     1-6 days late."""
-    pre, post = m._windows(APPLIED)
+    pre, post = reach.window_for(APPLIED)
     covered = _covered(pre, post) - {post[1]}
     p = m.plan_measurement(_audit(), date(2026, 7, 1), covered)
     assert p.action == m.MARK_MEASURING
 
 
 def test_missing_coverage_past_grace_gives_up_as_neutral():
-    pre, post = m._windows(APPLIED)
+    pre, post = reach.window_for(APPLIED)
     covered = _covered(pre, post) - {post[1]}
     # post_end is 2026-06-23; grace is 14 days
     p = m.plan_measurement(_audit(), date(2026, 7, 20), covered)
@@ -161,7 +142,7 @@ def test_missing_coverage_past_grace_gives_up_as_neutral():
 
 
 def test_grace_boundary_is_not_off_by_one():
-    pre, post = m._windows(APPLIED)
+    pre, post = reach.window_for(APPLIED)
     covered = _covered(pre, post) - {post[1]}
     post_end = date.fromisoformat(post[1])
     from datetime import timedelta
@@ -174,7 +155,7 @@ def test_grace_boundary_is_not_off_by_one():
 # ── judge_reach: the post-reach policies ──────────────────────────────────
 
 def _judge(pre_imp, pre_ctr, post_imp, post_ctr):
-    pre, post = m._windows(APPLIED)
+    pre, post = reach.window_for(APPLIED)
     return m.judge_reach(pre=pre, post=post, pre_imp=pre_imp, pre_ctr=pre_ctr,
                          post_imp=post_imp, post_ctr=post_ctr)
 

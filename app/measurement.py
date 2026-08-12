@@ -55,10 +55,7 @@ from app.status_vocab import (
     MeasurementStatus,
     OutcomeDecision,
 )
-# Coverage certification must use the identical definition of "covered
-# data-day" — and the identical window walk — that the reach backfill uses, or
-# the two pipelines disagree about whether a window is observable yet.
-from app.reporting_poll import coverage_for_channel, days_between as _reporting_days_between
+from app import reach
 
 log = logging.getLogger("midas.measurement")
 
@@ -74,26 +71,6 @@ def _apply_date(audit: dict) -> date | None:
     if not ts:
         return None
     return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
-
-
-def _windows(applied: date) -> tuple[tuple[str, str], tuple[str, str]]:
-    """(pre_start, pre_end), (post_start, post_end).
-
-    Apply day ±1 excluded from BOTH windows: reach data-days roll over on
-    America/Los_Angeles while `applied` is a UTC date, so the adjacent
-    data-days can contain mixed pre/post exposure. Each window is still
-    MEASUREMENT_WINDOW_DAYS long — shifted outward, not shortened.
-    """
-    n = settings.MEASUREMENT_WINDOW_DAYS
-    pre = ((applied - timedelta(days=n + 1)).isoformat(), (applied - timedelta(days=2)).isoformat())
-    post = ((applied + timedelta(days=2)).isoformat(), (applied + timedelta(days=n + 1)).isoformat())
-    return pre, post
-
-
-#: Inclusive list of ISO days in a window. Imported rather than redefined:
-#: reporting_poll's backfill must walk windows identically or the two pipelines
-#: disagree about which data-days a window needs.
-days_between = _reporting_days_between
 
 
 def _reach_aggregate(video_id: str, start: str, end: str) -> tuple[int, float | None]:
@@ -204,13 +181,12 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
             {"rationale": "no applied_at/measurement_started_at timestamp; cannot window"},
         )
 
-    pre, post = _windows(applied)
+    pre, post = reach.window_for(applied)
     post_end = date.fromisoformat(post[1])
     if today <= post_end:
         return Plan(HOLD, audit["measurement_status"])
 
-    need = days_between(*pre) + days_between(*post)
-    missing = [d for d in need if d not in covered]
+    missing = reach.missing_days(covered, pre, post)
     if missing:
         if today > post_end + timedelta(days=settings.MEASUREMENT_COVERAGE_GRACE_DAYS):
             return Plan(FINALIZE, MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, {
@@ -358,7 +334,7 @@ def eval_measurements() -> dict:
                 continue
             cid = video["channel_id"]
             if cid not in coverage:
-                _, coverage[cid] = coverage_for_channel(cid)
+                coverage[cid] = reach.coverage(cid)
             status = _eval_audit(audit, video, coverage[cid], today)
             counts[status] = counts.get(status, 0) + 1
         except Exception as e:

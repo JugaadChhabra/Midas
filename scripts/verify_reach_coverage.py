@@ -1,8 +1,8 @@
 """Phase 0/0.5 exit-gate check: is a channel's CTR coverage certified?
 
-Read-only. Prints the coverage report from `reporting_poll.certify_ctr_coverage`
-(>=7 contiguous ingested reach data-days = "≥1 week of trustworthy CTR", the
-Phase 0 exit gate). Use this before flipping `measurement_enabled` on a channel —
+Read-only. Prints the coverage report from `reach.certify` (>=7 contiguous
+ingested reach data-days = "≥1 week of trustworthy CTR", the Phase 0 exit
+gate). Use this before flipping `measurement_enabled` on a channel —
 the PATCH /channels/{id} endpoint enforces the same check, this is the ops view.
 
 Exits non-zero when a named channel is NOT certified, so it can gate a deploy
@@ -19,9 +19,9 @@ import sys
 
 
 def _report(channel_id: str) -> dict:
-    from app.reporting_poll import certify_ctr_coverage
+    from app.reach import certify
 
-    cov = certify_ctr_coverage(channel_id)
+    cov = certify(channel_id)
     mark = "OK " if cov["certified"] else "NOT"
     print(
         f"[{mark}] {channel_id}: "

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from app.config import settings
 from app.db import supabase
 from app.status_vocab import PausedReason
-from app.reporting_poll import certify_ctr_coverage
+from app.reach import certify
 from app.shorts.nas_source import list_source_languages
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -163,7 +163,7 @@ def update_channel(channel_id: str, body: ChannelSettings):
         # else Loop 1 would compare against untrustworthy baselines. Disabling
         # is always allowed. 409 (state not ready), not 403 (auth).
         if body.measurement_enabled:
-            cov = certify_ctr_coverage(channel_id)
+            cov = certify(channel_id)
             if not cov["certified"]:
                 raise HTTPException(
                     409, f"CTR coverage not certified for measurement: {cov}"

@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from app import reach
 from app.analytics_client import AnalyticsNotAuthorizedError
 from app.config import settings
 from app.db import supabase
@@ -58,60 +59,26 @@ _UPSERT_CHUNK = 500
 _BACKFILL_LOOKBACK_DAYS = 90
 
 
-def coverage_for_channel(channel_id: str) -> tuple[set[str], set[str]]:
-    """One paginated ledger read → (ingested report ids, covered data-days).
+def _ingested_report_ids(channel_id: str) -> set[str]:
+    """Report ids already ingested for this channel — the dedup set.
 
-    "Covered" means a reach report was ingested for that data-day; it says
-    nothing about whether impressions were non-trivial (measurement.py applies
-    the MIN_IMPRESSIONS floor per-video, later).
+    Ingestion's own concern, deliberately NOT part of `app.reach`: a report id
+    is an artefact of how YouTube delivers data-days, not a fact about which
+    data-days we have. `reach.coverage()` answers the latter.
 
-    Public because measurement.py needs it. It used to reach in for the private
-    `_ledger_state`, which is the right coupling — coverage must be defined once
-    — expressed through the wrong seam.
+    Costs a second read of this (small) ledger per channel per pass, where the
+    old tuple-returning version got both sets from one. Accepted: the table
+    holds one row per channel per data-day, and the alternative was a shared
+    function returning two sets for two unrelated callers.
     """
     rows = all_rows(
         supabase().table("reporting_reports_ingested")
-        .select("report_id,data_date")
+        .select("report_id")
         .eq("channel_id", channel_id),
         # The one paged table without an `id` primary key.
         order_by="report_id",
     )
-    return ({r["report_id"] for r in rows}, {r["data_date"] for r in rows})
-
-
-def _longest_contiguous_run(days: set[str]) -> int:
-    """Longest run of consecutive ISO calendar days in the set (0 if empty)."""
-    if not days:
-        return 0
-    ordered = sorted(date.fromisoformat(d) for d in days)
-    best = run = 1
-    for prev, cur in zip(ordered, ordered[1:]):
-        run = run + 1 if (cur - prev).days == 1 else 1
-        best = max(best, run)
-    return best
-
-
-def certify_ctr_coverage(channel_id: str, min_days: int = 7) -> dict:
-    """Phase 0/0.5 exit gate: is a channel's CTR trustworthy enough to measure?
-
-    Certified when reach reports have been ingested for >= `min_days` CONTIGUOUS
-    calendar data-days (default 7 — the Phase 0 "≥1 week" gate). Coverage is read
-    only from the reporting ledger via `_ledger_state`; "covered" means a report
-    was ingested for that data-day, NOT that impressions were non-trivial — the
-    MIN_IMPRESSIONS floor (CIL §0.5) is applied later, per-video, by
-    measurement.py. This gate is about data *presence* for ≥1 week, not per-video
-    signal strength. Contiguity math mirrors `_window_days` / `measurement.
-    _days_between` (fromisoformat + 1-day steps) rather than a fresh date walk.
-    """
-    _, covered = coverage_for_channel(channel_id)
-    contiguous = _longest_contiguous_run(covered)
-    return {
-        "certified": contiguous >= min_days,
-        "contiguous_days": contiguous,
-        "covered_total": len(covered),
-        "latest_day": max(covered) if covered else None,
-        "min_days": min_days,
-    }
+    return {r["report_id"] for r in rows}
 
 
 def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
@@ -194,17 +161,6 @@ def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
     return len(payload)
 
 
-def days_between(start: str, end: str) -> list[str]:
-    """Inclusive list of ISO calendar days in [start, end].
-
-    Public because measurement.py must walk a window exactly the way the reach
-    backfill does — two different walks would disagree about which data-days a
-    window needs, and therefore about whether it is observable yet.
-    """
-    s, e = date.fromisoformat(start), date.fromisoformat(end)
-    return [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
-
-
 def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
     """Fill video_metrics.impressions/ctr where the window is fully covered."""
     if not covered:
@@ -236,8 +192,7 @@ def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
     filled = 0
     skipped_windows = 0
     for (w_start, w_end), members in windows.items():
-        days = days_between(w_start, w_end)
-        missing = [d for d in days if d not in covered]
+        missing = reach.missing_days(covered, (w_start, w_end))
         if missing:
             # Not fully covered yet; retried next run. Logged (rather than
             # silently skipped) because a data-day YouTube never emits a
@@ -299,7 +254,8 @@ def _poll_channel(channel_id: str) -> dict:
         return {"job": None, "reports_new": 0, "rows_ingested": 0}
 
     reports = list_reports(handle, channel_id, job_id)
-    seen, covered = coverage_for_channel(channel_id)
+    seen = _ingested_report_ids(channel_id)
+    covered = reach.coverage(channel_id)
     new = [r for r in reports if r["id"] not in seen]
     # Oldest data-day first, so coverage grows contiguously and a mid-run
     # crash leaves the older (more backfill-relevant) days ingested.
@@ -368,8 +324,3 @@ def poll_reporting() -> None:
             log.warning("reporting_poll %s: OAuth token expired; skipping until re-consent", cid)
         except Exception as e:
             log.exception("reporting_poll %s crashed: %s", cid, e)
-
-
-#: Back-compat aliases for the previous private names.
-_ledger_state = coverage_for_channel
-_window_days = days_between
