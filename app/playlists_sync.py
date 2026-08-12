@@ -9,12 +9,17 @@ job (app/playlist_health.py — Step 2) has the inventory metadata it needs.
 """
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from app.config import settings
 from app.db import supabase
+from app.quota import JobBudget
 from app.youtube_client import youtube_for_channel, yt_playlists_list, yt_playlist_items_page
 
 log = logging.getLogger("midas.playlists_sync")
+
+#: One `playlistItems.list` page costs 1 unit (yt_playlist_items_page).
+PAGE_COST = 1
 
 
 # Role classification — regex-only, conservative (PHASE_1B_PLAN.md §4.2).
@@ -59,12 +64,66 @@ def _classify_role(title: str, description: str) -> str:
     return "inherited"
 
 
-def sync_playlists(channel_id: str) -> dict:
+def _rotation_cutoff() -> str | None:
+    """ISO timestamp before which a playlist is due a rotation walk.
+
+    None when rotation is disabled (PLAYLIST_FULL_WALK_DAYS=0), which makes
+    `_needs_walk` fall back to the itemCount signal alone.
+    """
+    days = settings.PLAYLIST_FULL_WALK_DAYS
+    if days <= 0:
+        return None
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _walk_plan(yt_playlists: list[dict], existing_by_id: dict[str, dict],
+               cutoff: str | None) -> list[dict]:
+    """Which playlists to walk, most-informative first.
+
+    Two reasons to walk, and the order between them is the point: a playlist
+    whose itemCount moved has *known* drift, while a rotation candidate only
+    might. Under a budget that cannot cover everything, known drift must be
+    walked first — so `changed` sorts ahead of `rotation`, and within each group
+    the least-recently-walked goes first (NULL = never, sorts first) so the
+    backlog drains in a fair, resumable order instead of re-walking one head.
+    """
+    plan = []
+    for p in yt_playlists:
+        existing = existing_by_id.get(p["id"])
+        walked_at = (existing or {}).get("membership_walked_at")
+        if existing is None:
+            reason = "new"
+        elif p.get("item_count") is None or p["item_count"] != existing.get("item_count"):
+            # item_count None = YouTube did not report a count, so we cannot
+            # conclude "unchanged". Walk rather than assume.
+            reason = "changed"
+        elif cutoff is not None and (walked_at is None or walked_at < cutoff):
+            reason = "rotation"
+        else:
+            continue
+        plan.append({
+            "id": p["id"],
+            "item_count": p.get("item_count"),
+            "reason": reason,
+            "walked_at": walked_at,
+        })
+    # "new" and "changed" rank together — both are observed drift, unlike
+    # rotation which is a precaution.
+    plan.sort(key=lambda e: (e["reason"] == "rotation", e["walked_at"] or ""))
+    return plan
+
+
+def sync_playlists(channel_id: str, budget: JobBudget | None = None) -> dict:
     """Fetch all playlists + their members from YouTube and seed the local tables.
 
     Existing rows are upserted (title/description may have changed). Membership
     rows are only inserted for (video_id, playlist_id) pairs not already present
     in playlist_assignments — we never overwrite system-generated decisions.
+
+    `budget` bounds what the membership walk may spend (see JobBudget). When it
+    runs out the walk stops early and the unwalked playlists are picked up by
+    the next run — nothing is lost, only deferred. Pass None (the default, and
+    what the manual endpoint does) for the unbounded walk.
 
     Returns {"playlists": int, "memberships_seeded": int}.
     """
@@ -85,12 +144,18 @@ def sync_playlists(channel_id: str) -> dict:
     # classifier or a manual override) with whatever the regex returns.
     existing_rows = (
         supabase().table("playlists")
-        .select("id,origin,role,item_count")
+        .select("id,origin,role,item_count,membership_walked_at")
         .eq("channel_id", channel_id)
         .in_("id", [p["id"] for p in yt_playlists])
         .execute()
     ).data or []
     existing_by_id: dict[str, dict] = {r["id"]: r for r in existing_rows}
+
+    # Decide what to walk BEFORE the upsert below, because the upsert must not
+    # write a new item_count for anything still owed a walk — see the comment
+    # on `_deferred_item_count`.
+    plan = _walk_plan(yt_playlists, existing_by_id, _rotation_cutoff())
+    planned_ids = {e["id"] for e in plan}
 
     def _preserved_origin(playlist_id: str) -> str:
         existing = existing_by_id.get(playlist_id)
@@ -109,6 +174,27 @@ def sync_playlists(channel_id: str) -> dict:
             return existing["role"]
         return _classify_role(title, description)
 
+    def _deferred_item_count(playlist_id: str, cur_count):
+        """The item_count to persist now.
+
+        For a playlist we are about to walk, persist the PREVIOUS count, not
+        YouTube's current one. The count is the drift signal: writing it before
+        the walk means a walk the budget cuts short (or a crash mid-pass) leaves
+        the row claiming a membership we never read, and tomorrow's plan sees
+        "unchanged" and skips it — the change is lost until rotation. The real
+        count is written by `_stamp_walked` once the walk actually completes.
+        """
+        if playlist_id in planned_ids:
+            return (existing_by_id.get(playlist_id) or {}).get("item_count")
+        return cur_count
+
+    def _stamp_walked(playlist_id: str, item_count) -> None:
+        """Record a COMPLETED membership walk: count observed, clock reset."""
+        supabase().table("playlists").update({
+            "item_count": item_count,
+            "membership_walked_at": now,
+        }).eq("id", playlist_id).execute()
+
     # Upsert playlist rows. Phase 1B writes role / origin / item_count /
     # last_synced_at alongside the existing fields. `synced_at` is kept for
     # backward compat with the legacy playlist allocator; `last_synced_at`
@@ -125,7 +211,7 @@ def sync_playlists(channel_id: str) -> dict:
                 "last_synced_at": now,
                 "origin": _preserved_origin(p["id"]),
                 "role": _preserved_role(p["id"], p["title"], p["description"]),
-                "item_count": p.get("item_count"),
+                "item_count": _deferred_item_count(p["id"], p.get("item_count")),
                 # created_by_optimizer_at and strategy_version stay NULL —
                 # only Phase 2B's optimizer-created path writes them.
             }
@@ -163,28 +249,35 @@ def sync_playlists(channel_id: str) -> dict:
     # Incremental walk: re-reading a playlist's full membership every day is the
     # fleet's dominant YouTube-quota cost (one 50-item page per unit, thousands
     # of pages/day on large channels) and almost never surfaces anything new.
-    # Skip the walk for any playlist that already existed AND whose YouTube
-    # itemCount (fetched free in yt_playlists_list) is unchanged since the last
-    # sync. New playlists and any count change (add/remove) are always walked.
-    prev_item_count = {r["id"]: r.get("item_count") for r in existing_rows}
-
+    # `_walk_plan` decides who is owed a walk — changed counts first, then the
+    # rotation candidates that guard against equal-count swaps — and `budget`
+    # bounds how far down that list this run gets.
     memberships_seeded = 0
-    walked = skipped_unchanged = 0
-    for playlist in yt_playlists:
-        playlist_id = playlist["id"]
-        cur_count = playlist.get("item_count")
-        prev_count = prev_item_count.get(playlist_id)
-        if (
-            playlist_id in existing_by_id
-            and cur_count is not None
-            and cur_count == prev_count
-        ):
-            skipped_unchanged += 1
-            continue
-        walked += 1
+    walked = truncated = 0
+    for entry in plan:
+        playlist_id = entry["id"]
+        if budget is not None and not budget.can_spend(PAGE_COST):
+            # Out of budget. Everything left in the plan keeps its stale
+            # item_count and old membership_walked_at, so the next run re-plans
+            # it and — ordered by walked_at — starts from here.
+            truncated = len(plan) - walked
+            log.info(
+                "sync_playlists(%s): budget exhausted (%s); %d playlists deferred",
+                channel_id, budget, truncated,
+            )
+            break
+
         page_token = None
-        while True:
+        complete = False
+        while not complete:
+            if budget is not None and not budget.can_spend(PAGE_COST):
+                # Mid-playlist stop. Deliberately NOT stamped: a partially read
+                # membership must not look walked, or the pages past this point
+                # would never be read.
+                break
             resp = yt_playlist_items_page(yt, channel_id, playlist_id, page_token)
+            if budget is not None:
+                budget.note(PAGE_COST)
             for item in resp.get("items", []):
                 playlist_item_id = item["id"]
                 video_id = item["contentDetails"]["videoId"]
@@ -206,16 +299,31 @@ def sync_playlists(channel_id: str) -> dict:
                 memberships_seeded += 1
 
             page_token = resp.get("nextPageToken")
-            if not page_token:
-                break
+            complete = not page_token
 
+        if not complete:
+            truncated = len(plan) - walked
+            log.info(
+                "sync_playlists(%s): budget exhausted mid-walk of %s (%s); "
+                "%d playlists deferred",
+                channel_id, playlist_id, budget, truncated,
+            )
+            break
+        walked += 1
+        _stamp_walked(playlist_id, entry["item_count"])
+
+    skipped_unchanged = len(yt_playlists) - len(plan)
     log.info(
-        "sync_playlists(%s): %d playlists (%d walked, %d skipped unchanged), seeded %d membership rows",
-        channel_id, len(yt_playlists), walked, skipped_unchanged, memberships_seeded,
+        "sync_playlists(%s): %d playlists (%d walked, %d skipped unchanged, "
+        "%d deferred over budget), seeded %d membership rows",
+        channel_id, len(yt_playlists), walked, skipped_unchanged, truncated,
+        memberships_seeded,
     )
     return {
         "playlists": len(yt_playlists),
+        "planned": len(plan),
         "walked": walked,
         "skipped_unchanged": skipped_unchanged,
+        "deferred_over_budget": truncated,
         "memberships_seeded": memberships_seeded,
     }
