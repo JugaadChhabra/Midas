@@ -9,7 +9,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app.quota import router as quota_router
+from app.quota import router as quota_router, JobBudget
+from app.rows import all_rows
 from app.performance import router as performance_router
 from app.autopilot import router as autopilot_router, tick as autopilot_tick
 from app.dashboard import router as dashboard_router
@@ -92,7 +93,41 @@ def _run_per_channel(fn, label, channel_ids=None) -> None:
             _main_log.exception("%s failed for %s: %s", label, channel_id, e)
 
 
+def _reconcile_channel_order(ids: list[str]) -> list[str]:
+    """Order channels least-recently-walked first.
+
+    The reconcile budget is shared across the whole pass, so whoever runs first
+    spends it. In a fixed order that starves the tail of the allowlist every
+    single night — the same unfairness `_walk_plan` avoids within a channel, one
+    level up. Sorting by each channel's oldest un-walked playlist rotates who
+    gets the budget across nights. NULL (never walked) sorts first.
+    """
+    oldest: dict[str, str] = {}
+    rows = all_rows(
+        supabase().table("playlists")
+        .select("channel_id,membership_walked_at")
+        .in_("channel_id", ids)
+    )
+    for r in rows:
+        cid = r["channel_id"]
+        walked = r.get("membership_walked_at") or ""
+        if cid not in oldest or walked < oldest[cid]:
+            oldest[cid] = walked
+    # A channel with no playlist rows at all has nothing to walk; "" puts it
+    # first, where it costs one cheap playlists.list and drops through.
+    return sorted(ids, key=lambda c: oldest.get(c, ""))
+
+
 def _daily_reconcile():
+    # One budget for the whole pass, not per channel: the quota ceiling it
+    # protects is fleet-wide. Built here (not inside _one) so every channel
+    # draws from the same pool and the pass stops when the pool is dry.
+    budget = JobBudget(
+        "playlist_sync",
+        settings.PLAYLIST_SYNC_QUOTA_BUDGET,
+        reserve=settings.YT_QUOTA_APPLY_RESERVE,
+    )
+
     def _one(channel_id):
         # Sync playlist inventory FIRST so any new playlists created in
         # YouTube Studio since yesterday have rows (with role / item_count /
@@ -110,7 +145,7 @@ def _daily_reconcile():
         # Behavior is best-effort; the loud .exception() log is the operator
         # signal to investigate.
         try:
-            sync_result = sync_playlists(channel_id)
+            sync_result = sync_playlists(channel_id, budget=budget)
             _main_log.info("Daily playlist sync %s: %s", channel_id, sync_result)
         except Exception as e:
             _main_log.exception("Daily playlist sync failed for %s: %s", channel_id, e)
@@ -129,7 +164,9 @@ def _daily_reconcile():
         _main_log.info(
             "Daily reconcile scoped to %d/%d channels (allowlist)", len(ids), len(_all_channel_ids())
         )
+        ids = _reconcile_channel_order(ids)
     _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids)
+    _main_log.info("Daily reconcile cycle done — %s", budget)
 
 
 def _weekly_discovery():

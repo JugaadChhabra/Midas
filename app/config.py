@@ -37,6 +37,12 @@ class Settings:
 
     YT_DAILY_QUOTA = int(os.getenv("YT_DAILY_QUOTA") or "10000")
     YT_QUOTA_SAFETY_BUFFER = int(os.getenv("YT_QUOTA_SAFETY_BUFFER") or "300")
+    # Units withheld from BULK COLLECTION so applying audits can never be
+    # starved by it. Collection passes this to quota.units_remaining(); the
+    # apply path does not, so it can spend into the reserve. Sized for ~29
+    # applies/day at APPLY_COST=51 — comfortably above the fleet's observed
+    # 12-22/day. Only jobs that opt in (JobBudget) respect it.
+    YT_QUOTA_APPLY_RESERVE = int(os.getenv("YT_QUOTA_APPLY_RESERVE") or "1500")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
     # When true, the autopilot picks the next video to audit via the
     # next_audit_candidate() RPC (returns ONE row) instead of pulling the
@@ -129,6 +135,20 @@ class Settings:
     PLAYLIST_RECONCILE_CHANNELS = set() if PLAYLIST_RECONCILE_ALL else {
         c.strip() for c in _pr_raw.split(",") if c.strip()
     }
+    # Ceiling on what ONE nightly reconcile pass may spend walking playlist
+    # membership, shared across every channel in the pass (not per channel).
+    # The allowlist and the item_count skip above both cut the *expected* cost;
+    # this bounds the WORST case, which neither of them can — a day when many
+    # playlists legitimately changed, or the first pass after a long outage,
+    # still walks everything it is asked to. Work that does not fit is deferred,
+    # not dropped: playlists.membership_walked_at orders the next pass so it
+    # resumes where this one stopped. 0 disables the walk entirely.
+    PLAYLIST_SYNC_QUOTA_BUDGET = int(os.getenv("PLAYLIST_SYNC_QUOTA_BUDGET") or "2000")
+    # Force-walk a playlist that has not been walked in this many days, whatever
+    # its itemCount says. The skip is blind to an equal-count swap (one video
+    # added + one removed => identical count, drifted membership); rotation
+    # bounds how long that drift can hide. 0 disables rotation.
+    PLAYLIST_FULL_WALK_DAYS = int(os.getenv("PLAYLIST_FULL_WALK_DAYS") or "30")
 
     # Phase 1B — Playlist health scoring (recommend-only).
     # PO §Config table defaults; PHASE_1B_PLAN.md §5.5 for justification.
