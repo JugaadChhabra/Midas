@@ -192,6 +192,56 @@ def test_the_certification_window_is_exactly_a_pre_window():
     assert pre == reach.window_ending(end)
 
 
+# ── values ────────────────────────────────────────────────────────────────
+
+def _day(impressions, ctr):
+    return {"impressions": impressions, "ctr": ctr}
+
+
+def test_weighted_ctr_weights_by_impressions_not_by_day():
+    """A low-traffic day's noisy rate must not count as much as a busy day's.
+
+    1 impression at 100% plus 999 at 10% is 10.09%, not the 55% a mean of the
+    two daily rates would give.
+    """
+    imp, ctr = reach.weighted_ctr([_day(1, 1.0), _day(999, 0.10)])
+    assert imp == 1000
+    assert ctr == pytest.approx(0.1009)
+
+
+def test_weighted_ctr_of_a_single_day_is_that_day():
+    assert reach.weighted_ctr([_day(500, 0.04)]) == (500, pytest.approx(0.04))
+
+
+def test_weighted_ctr_of_nothing_is_zero_impressions_and_no_signal():
+    """0/0 is no signal, not 0% CTR — the distinction Loop 1 judges on."""
+    assert reach.weighted_ctr([]) == (0, None)
+
+
+def test_weighted_ctr_of_impressions_without_clicks_is_zero_not_none():
+    """Genuine zero: the video was shown and nobody clicked. Distinct from
+    never having been shown."""
+    assert reach.weighted_ctr([_day(500, 0.0)]) == (500, 0.0)
+
+
+def test_weighted_ctr_ignores_zero_impression_days():
+    imp, ctr = reach.weighted_ctr([_day(0, 0.0), _day(100, 0.05)])
+    assert (imp, ctr) == (100, pytest.approx(0.05))
+
+
+def test_aggregate_reads_one_video_over_the_window():
+    sb = MagicMock()
+    with patch.object(reach, "supabase", return_value=sb), \
+         patch.object(reach, "all_rows", return_value=[_day(100, 0.02), _day(100, 0.04)]):
+        assert reach.aggregate("v1", ("2026-06-01", "2026-06-21")) == (200, pytest.approx(0.03))
+
+    sel = sb.table.return_value.select.return_value
+    sb.table.assert_called_once_with("video_reach_daily")
+    sel.eq.assert_called_once_with("video_id", "v1")
+    sel.eq.return_value.gte.assert_called_once_with("date", "2026-06-01")
+    sel.eq.return_value.gte.return_value.lte.assert_called_once_with("date", "2026-06-21")
+
+
 # ── the one I/O function ──────────────────────────────────────────────────
 
 def test_coverage_reads_the_ledger_scoped_to_the_channel():
@@ -222,6 +272,13 @@ APP = Path(__file__).resolve().parents[1] / "app"
 
 _WINDOW_LENGTH = re.compile(r"settings\.MEASUREMENT_WINDOW_DAYS")
 _MISSING_DAYS = re.compile(r"for\s+\w+\s+in\s+[\w.\[\]()]+\s+if\s+\w+\s+not\s+in\s+cover")
+#: The impression-weighted CTR formula, reconstructed by hand. Existed twice —
+#: here and in reporting_poll's backfill — each claiming in prose to match the
+#: other. A backfilled window and the baseline judged against it must agree.
+#: Matches both historical spellings — `clicks / impressions` in measurement and
+#: `a["clicks"] / a["impressions"]` in the backfill. A first version caught only
+#: the former, which is half a guard.
+_WEIGHTED_CTR = re.compile(r"""clicks["'\]\s]*/\s*[\w.\["']*impressions""")
 
 
 def _app_sources():
@@ -246,4 +303,13 @@ def test_no_module_hand_rolls_the_coverage_diff(path):
     assert not _MISSING_DAYS.search(path.read_text()), (
         f"{path.name} hand-rolls the covered-day diff — use "
         "app.reach.missing_days so the predicate has one owner"
+    )
+
+
+@pytest.mark.parametrize("path", list(_app_sources()), ids=lambda p: p.name)
+def test_no_module_rebuilds_the_weighted_ctr(path):
+    assert not _WEIGHTED_CTR.search(path.read_text()), (
+        f"{path.name} reconstructs the impression-weighted CTR — use "
+        "app.reach.weighted_ctr so a backfilled window and the baseline judged "
+        "against it cannot disagree"
     )

@@ -80,25 +80,6 @@ def _apply_date(audit: dict) -> date | None:
     return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
 
 
-def _reach_aggregate(video_id: str, start: str, end: str) -> tuple[int, float | None]:
-    """(impressions, weighted ctr) over [start, end] from video_reach_daily.
-
-    Weighted like reporting_poll's backfill: ctr = Σclicks / Σimpressions.
-    Missing days are REAL zeros here — callers only invoke this on
-    coverage-certified windows. ctr None on zero impressions (no signal).
-    """
-    rows = all_rows(
-            supabase().table("video_reach_daily")
-            .select("impressions,ctr")
-            .eq("video_id", video_id)
-            .gte("date", start)
-            .lte("date", end)
-    )
-    impressions = sum(r["impressions"] for r in rows)
-    clicks = sum(r["impressions"] * r["ctr"] for r in rows)
-    return impressions, (clicks / impressions) if impressions > 0 else None
-
-
 # ── Verdict ───────────────────────────────────────────────────────────────
 
 def _classify(pre_ctr: float | None, post_ctr: float | None) -> tuple[str, float | None]:
@@ -278,8 +259,8 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date) -> str
             ).eq("id", audit["id"]).execute()
         return MeasurementStatus.MEASURING
 
-    pre_imp, pre_ctr = _reach_aggregate(audit["video_id"], *plan.pre)
-    post_imp, post_ctr = _reach_aggregate(audit["video_id"], *plan.post)
+    pre_imp, pre_ctr = reach.aggregate(audit["video_id"], plan.pre)
+    post_imp, post_ctr = reach.aggregate(audit["video_id"], plan.post)
 
     _write_baseline(video_id=audit["video_id"], channel_id=video["channel_id"],
                     pre=plan.pre, impressions=pre_imp, ctr=pre_ctr)

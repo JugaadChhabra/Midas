@@ -151,6 +151,44 @@ def frontier(covered: set[str]) -> str | None:
     return max(covered) if covered else None
 
 
+# ── Values ────────────────────────────────────────────────────────────────
+
+def weighted_ctr(rows) -> tuple[int, float | None]:
+    """(impressions, CTR) over daily reach rows.
+
+    Impression-weighted, not a mean of daily rates: clicks are reconstructed per
+    day and re-divided by the total, so a low-traffic day's noisy 40% CTR does
+    not count as much as a high-traffic day's 4%.
+
+        ctr = Σ(impressions_d × ctr_d) / Σ(impressions_d)
+
+    `ctr` is None at zero impressions — 0/0 is no signal, not 0% CTR. A day with
+    no row for a video is a REAL zero over a coverage-certified window (the CSV
+    only lists videos with at least one impression), which is why callers must
+    certify coverage before trusting this.
+
+    Two implementations of this formula used to exist — one here, one in
+    reporting_poll's backfill — with a docstring in each claiming to match the
+    other. Same class of prose contract as the window walks this module already
+    absorbed.
+    """
+    impressions = sum(r["impressions"] for r in rows)
+    clicks = sum(r["impressions"] * r["ctr"] for r in rows)
+    return impressions, (clicks / impressions) if impressions > 0 else None
+
+
+def aggregate(video_id: str, window: Window) -> tuple[int, float | None]:
+    """One video's (impressions, CTR) over `window`, read from video_reach_daily."""
+    rows = all_rows(
+        supabase().table("video_reach_daily")
+        .select("impressions,ctr")
+        .eq("video_id", video_id)
+        .gte("date", window[0])
+        .lte("date", window[1])
+    )
+    return weighted_ctr(rows)
+
+
 # ── Certification ─────────────────────────────────────────────────────────
 
 def certify(channel_id: str) -> dict:

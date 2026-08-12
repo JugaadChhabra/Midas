@@ -215,11 +215,9 @@ def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
             .lte("date", w_end)
         )
 
-        agg: dict[str, dict] = {}
+        by_video: dict[str, list[dict]] = {}
         for d in daily:
-            a = agg.setdefault(d["video_id"], {"impressions": 0, "clicks": 0.0})
-            a["impressions"] += d["impressions"]
-            a["clicks"] += d["impressions"] * d["ctr"]
+            by_video.setdefault(d["video_id"], []).append(d)
 
         # One UPDATE per row: ~1 round-trip per video per window. Fine at the
         # current fleet size (a window fills once, then drops out of the
@@ -228,12 +226,12 @@ def _backfill_windows(channel_id: str, covered: set[str]) -> dict:
         # updating with .in_("id", [...]) — an upsert-based batch is unsafe
         # here because a conflict-miss insert would trip NOT NULL columns.
         for m in members:
-            a = agg.get(m["video_id"])
-            impressions = a["impressions"] if a else 0
-            # 0 impressions over a certified-covered window is a REAL zero
-            # (unlike Analytics "no row" = no observation); ctr stays NULL
-            # because 0/0 is no signal, not 0% CTR.
-            ctr = (a["clicks"] / a["impressions"]) if a and a["impressions"] > 0 else None
+            # Same formula measurement judges on — one owner, so a window
+            # backfilled here and a baseline read there cannot disagree. A video
+            # with no rows at all aggregates to 0 impressions, which over a
+            # certified-covered window is a REAL zero (unlike Analytics, where
+            # "no row" means no observation).
+            impressions, ctr = reach.weighted_ctr(by_video.get(m["video_id"], []))
             supabase().table("video_metrics").update(
                 {"impressions": impressions, "ctr": ctr}
             ).eq("id", m["id"]).execute()
