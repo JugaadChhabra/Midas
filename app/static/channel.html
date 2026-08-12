@@ -8,9 +8,8 @@
 <style>
   /* Page layout + widgets unique to the Channel page. Shared tokens and
      components live in /static/theme.css; every rule here consumes those tokens
-     (no colour literals). The .kpi sizing overrides that used to sit here have
-     been folded into theme.css — this page no longer redefines shared
-     components, only ones it alone uses. */
+     (no colour literals). This page never redefines a shared component — only
+     the ones it alone uses. */
   /* The shell owns page layout now (see .app-shell in theme.css); body just
      provides the backdrop the inset content panel sits on. */
   body { margin:0; background:var(--surface-faint); }
@@ -44,8 +43,6 @@
   .sev-medium { background:var(--color-warn); color:white; }
   .sev-low { background:var(--color-neutral); color:white; }
   .audit { margin-top:.75rem; border-left:3px solid var(--color-accent); padding-left:.9rem; }
-  .prog { width:160px; height:6px; background:var(--surface-tint); border-radius:3px; overflow:hidden; margin-bottom:3px; }
-  .prog-bar { height:100%; background:var(--color-accent); transition:width .5s; }
   .hidden { display:none; }
   details > summary { cursor:pointer; }
 
@@ -53,28 +50,22 @@
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
 
-  /* Page header, lede and meta are shared components now (theme.css) — both
-     this page and Performance use them. */
+  /* Page header, lede and meta are shared components (theme.css). */
 
-  .ov-actions { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin:1.15rem 0 .25rem; }
-  .ov-actions .btn-link { margin-left:auto; }
+  /* A row of actions under a lede or a card heading. */
+  .act-bar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin:1.15rem 0 .25rem; }
+  .act-bar .btn-link { margin-left:auto; }
 
-  .ov-rows { display:grid; gap:1rem; }
-  .ov-row-head { display:flex; justify-content:space-between; align-items:baseline;
-                 font-size:.88rem; margin-bottom:.4rem; }
-  .ov-row-val { font-variant-numeric:tabular-nums; }
-
-  .ov-stats { display:flex; gap:2.5rem; flex-wrap:wrap; }
-  .ov-stat-v { font-size:1.15rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
-  .ov-stat-l { font-size:.72rem; opacity:.6; text-transform:uppercase; letter-spacing:.05em; margin-top:.2rem; }
-  .ov-stat-sub { font-size:.78rem; opacity:.55; margin-top:.25rem; font-variant-numeric:tabular-nums; }
+  /* Coverage: how much of the channel Midas has actually been through. */
+  .cov-rows { display:grid; gap:1rem; }
+  .cov-head { display:flex; justify-content:space-between; align-items:baseline;
+              font-size:.88rem; margin-bottom:.4rem; }
+  .cov-val { font-variant-numeric:tabular-nums; }
 
   /* Diff highlighting */
   .diff-add { background:var(--color-ok-border); padding:0 .15em; border-radius:3px; }
   .diff-del { background:var(--color-err-border); padding:0 .15em; border-radius:3px; text-decoration:line-through; opacity:.8; }
 
-  .pace-bar { display:inline-block; width:120px; height:8px; background:var(--surface-tint); border-radius:var(--radius-sm); vertical-align:middle; overflow:hidden; }
-  .pace-bar > i { display:block; height:100%; background:var(--color-ok); }
   .filter-bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin:.5rem 0; }
 
   /* Videos table column track. Declared once; .dt-head and every .dt-row read
@@ -129,30 +120,6 @@
     <a class="btn" href="/auth/login" style="margin-left:.5rem">Reconnect Google account →</a>
   </div>
 
-  <!-- ─── OVERVIEW ─── -->
-  <div class="tab-panel active" data-panel="overview">
-    <!-- The lede is the focal point: the channel's state in one line, with the
-         action that resolves it sitting directly beneath. -->
-    <p class="page-lede" id="ov-lede">—</p>
-    <p class="page-meta" id="ov-meta"></p>
-
-    <div class="ov-actions">
-      <button id="apply-pending-btn" class="btn-primary" disabled>Apply pending</button>
-      <button id="sync-btn">Sync videos</button>
-      <span id="sync-status" class="muted"></span>
-      <button id="perf-link" class="btn-link" type="button">View performance →</button>
-    </div>
-    <div id="apply-pending-status" class="muted" style="margin-top:.5rem"></div>
-    <div id="apply-pending-results" style="margin-top:.5rem"></div>
-
-    <div class="card">
-      <div class="ov-rows" id="ov-audit">Loading…</div>
-    </div>
-    <div class="card">
-      <div class="ov-stats" id="ov-stats"></div>
-    </div>
-  </div>
-
   <!-- ─── VIDEOS ─── -->
   <div class="tab-panel" data-panel="videos">
     <div class="card">
@@ -180,23 +147,39 @@
     </div>
   </div>
 
-  <!-- ─── PERFORMANCE ─── -->
-  <!-- Folded in as a tab via a same-origin iframe of /performance (embed mode
-       hides that page's own nav/breadcrumb). Avoids merging ~500 lines of JS/CSS
-       with colliding names into this file. -->
-  <div class="tab-panel" data-panel="performance">
-    <iframe id="perf-frame" title="Performance" style="width:100%; border:0; display:block; min-height:600px"></iframe>
-  </div>
-
   <!-- ─── AUTOPILOT ─── -->
-  <div class="tab-panel" data-panel="autopilot">
-    <!-- Status first: what autopilot is doing right now. -->
+  <!-- The channel's landing section, and the reason you opened the channel at
+       all: is this one running, and what does it need from you? -->
+  <div class="tab-panel active" data-panel="autopilot">
+    <!-- The same sentence the board shows for this channel — both come from
+         Running.stateOf, so the row you clicked and the page you land on can't
+         disagree about why it stopped. -->
+    <p class="page-lede" id="ap-lede">—</p>
+    <p class="page-meta" id="ap-meta"></p>
+
+    <div class="act-bar">
+      <!-- Filled from the same state the lede describes: whatever unblocks the
+           channel is the primary button here. -->
+      <span id="ap-state-action"></span>
+      <button id="apply-pending-btn" class="btn-primary" disabled>Nothing to put live</button>
+      <button id="sync-btn">Get latest from YouTube</button>
+      <span id="sync-status" class="muted"></span>
+    </div>
+    <div id="apply-pending-status" class="muted" style="margin-top:.5rem"></div>
+    <div id="apply-pending-results" style="margin-top:.5rem"></div>
+
     <div class="card">
       <div class="row" style="justify-content:space-between; align-items:center; gap:.5rem">
-        <h3 style="margin:0">Autopilot status</h3>
+        <h3 style="margin:0">Right now</h3>
         <div id="ap-summary"><span class="muted">Loading…</span></div>
       </div>
       <div id="ap-eta" class="muted" style="margin-top:.4rem; font-size:.85rem"></div>
+    </div>
+
+    <!-- How far through the channel Midas has got. Its own throughput, not
+         YouTube's numbers — nothing else reports it. -->
+    <div class="card">
+      <div class="cov-rows" id="ap-coverage">Loading…</div>
     </div>
 
     <!-- Settings: two clearly separated features, one Save at the bottom. -->
@@ -241,7 +224,7 @@
 
   <!-- ─── PLAYLISTS ─── -->
   <div class="tab-panel" data-panel="playlists">
-    <!-- Same shape as Overview: what needs the operator, then the work. -->
+    <!-- Same shape as Autopilot: what needs the operator, then the work. -->
     <p class="page-lede" id="pl-lede">—</p>
     <p class="page-meta" id="pl-meta"></p>
 
@@ -252,7 +235,7 @@
       </div>
       <p class="muted sec-note">Bootstrap embeds every video so it can be scored against playlists. Run once — after that, allocation happens automatically following each audit.</p>
       <div id="pl-embed-progress"></div>
-      <div class="ov-actions">
+      <div class="act-bar">
         <button id="pl-reconcile-btn">Reconcile now</button>
         <button id="pl-bootstrap-btn">Bootstrap · sync + embed all</button>
       </div>
@@ -263,7 +246,7 @@
         <button id="pl-refresh-btn" class="btn-link">Refresh</button>
       </div>
       <div class="chip-bar" id="pl-chips" role="group" aria-label="Filter proposals by action"></div>
-      <div class="ov-actions" style="margin-top:0">
+      <div class="act-bar" style="margin-top:0">
         <button id="pl-approve-all-btn" class="btn-primary" disabled>Approve selected</button>
         <button id="pl-reject-all-btn" disabled>Reject selected</button>
       </div>
@@ -276,7 +259,7 @@
         <button id="pl-health-refresh-btn" class="btn-link">Refresh</button>
       </div>
       <p class="muted sec-note">A daily job scores each playlist on session contribution (web-only counts). It <b>never deletes anything</b> — you confirm every change. Off by default.</p>
-      <div class="ov-actions" style="margin-top:.6rem">
+      <div class="act-bar" style="margin-top:.6rem">
         <label class="sec-toggle">
           <input type="checkbox" id="playlist-health-enabled" />
           <span>Enable scoring</span>
@@ -375,6 +358,9 @@
 <script src="/static/status.js"></script>
 <script src="/static/components.js"></script>
 <script src="/static/sidebar.js"></script>
+<!-- For Running.stateOf only — the board and this page must agree about why a
+     channel isn't running, so there is one function, not two. -->
+<script src="/static/running.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const channelId = params.get('id');
@@ -449,29 +435,14 @@ let tabsReady = false;
 let apInterval = null;
 const loadedTabs = new Set();
 const tabLoaders = {
-  overview:  () => loadOverview(),
   videos:    () => loadVideos(),
-  performance: () => loadPerformanceFrame(),
-  autopilot: () => { loadAutopilotLog(); if (!apInterval) apInterval = setInterval(pollAutopilotLog, 30000); },
+  autopilot: () => {
+    loadChannelState(); loadAutopilotLog();
+    if (!apInterval) apInterval = setInterval(pollAutopilotLog, 30000);
+  },
   playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
   settings:  () => { loadConfig(); loadReflectionData(); },
 };
-
-// Performance is folded in as an embedded /performance page. Load it once, then
-// size the iframe to its content (same-origin, so we can read/observe its body).
-function loadPerformanceFrame() {
-  const f = $('perf-frame');
-  if (f.src) return;
-  f.src = `/performance?channel_id=${encodeURIComponent(channelId)}&embed=1`;
-  f.onload = () => {
-    try {
-      const doc = f.contentDocument;
-      const resize = () => { f.style.height = doc.body.scrollHeight + 'px'; };
-      resize();
-      new ResizeObserver(resize).observe(doc.body);
-    } catch (e) { /* cross-origin shouldn't happen (same origin); ignore */ }
-  };
-}
 
 function ensureTabLoaded(name) {
   if (loadedTabs.has(name)) return;
@@ -481,22 +452,31 @@ function ensureTabLoaded(name) {
   fn();
 }
 
-const initialTab = location.hash.slice(1);
+// Overview and Performance are gone; a bookmark or a back-button entry can
+// still name them. Land those on Autopilot rather than on a page with every
+// panel hidden.
+const SECTIONS = ['autopilot', 'videos', 'playlists', 'settings'];
+const RETIRED = { overview: 'autopilot', performance: 'autopilot' };
+const hash = location.hash.slice(1);
+const initialTab = SECTIONS.includes(hash) ? hash : (RETIRED[hash] || '');
 if (initialTab) switchTab(initialTab);
 
 // ── Sidebar ────────────────────────────────────────────────────────────
-// The rail itself lives in /static/sidebar.js (shared with the dashboard).
-// These sections are in-page panels, so they get onSelect rather than hrefs.
+// The rail itself lives in /static/sidebar.js (shared with the board). These
+// sections are in-page panels, so they get onSelect rather than hrefs.
+//
+// Autopilot leads and is the landing section: you open a channel to see
+// whether it is running. Videos is a lookup tool, Playlists and Settings are
+// occasional. Overview duplicated all of them, and Performance restated
+// YouTube Studio.
 Sidebar.mount({
   items: [
-    { id: 'overview',    label: 'Overview',    icon: 'home' },
-    { id: 'videos',      label: 'Videos',      icon: 'videos' },
-    { id: 'performance', label: 'Performance', icon: 'performance' },
     { id: 'autopilot',   label: 'Autopilot',   icon: 'autopilot' },
+    { id: 'videos',      label: 'Videos',      icon: 'videos' },
     { id: 'playlists',   label: 'Playlists',   icon: 'playlists' },
     { id: 'settings',    label: 'Settings',    icon: 'settings' },
   ],
-  activeId: initialTab || 'overview',
+  activeId: initialTab || 'autopilot',
   onSelect: switchTab,
 });
 
@@ -511,16 +491,14 @@ async function applyChannel(all) {
   channelMeta = c;
   Sidebar.setChannels(all, channelId);
   $('title').textContent = c.name || channelId;
-  // No subtitle: the switcher already shows the handle, sync freshness lives in
-  // the Overview lede's meta line, and the raw channel id was developer detail
-  // taking header space.
+  // No subtitle: the switcher already shows the handle, freshness lives in the
+  // Autopilot meta line, and the raw channel id was developer detail taking
+  // header space.
   $('lang-select').value = c.default_language || '';
   $('ap-enabled').checked = !!c.autopilot_enabled;
   $('ap-cap').value = c.autopilot_daily_cap ?? 10;
   $('sync-shorts').checked = c.sync_shorts !== false; // null/undefined → true (default on)
   $('playlist-health-enabled').checked = !!c.playlist_health_enabled; // null/undefined → false (default off)
-  // "View performance" now switches to the in-page Performance tab.
-  $('perf-link').onclick = (e) => { e.preventDefault(); switchTab('performance'); };
   // Surface the re-consent banner whenever the analytics scope hasn't been granted.
   $('reconsent-banner').hidden = !!c.analytics_authorized;
   await nasLoadLanguages();
@@ -533,119 +511,161 @@ function loadChannel() {
   return SWR.swr('/auth/channels', applyChannel).fresh;
 }
 
-// ── Overview ───────────────────────────────────────────────────────────
-// The page answers one question — what does this channel need from me? The
-// lede carries that answer; the ratios and totals below it are supporting
-// detail, deliberately demoted so the eye has somewhere to land first.
+// ── Channel state (Autopilot landing) ──────────────────────────────────
+// One question: is this channel running, and what does it need from me? The
+// lede carries the answer; coverage and totals below are supporting detail,
+// deliberately demoted so the eye has somewhere to land first.
 
 // Drives both the primary button's label and its enabled state, so "nothing
-// pending" can't present itself as a live action.
+// waiting" can't present itself as a live action.
 let pendingCount = 0;
 function syncApplyButton() {
   const b = $('apply-pending-btn');
   b.disabled = pendingCount === 0;
-  b.textContent = pendingCount ? `Apply ${fmt(pendingCount)} pending` : 'Nothing to apply';
+  b.textContent = pendingCount ? `Put ${fmt(pendingCount)} live` : 'Nothing to put live';
 }
 
-// Same thresholds the dashboard uses, so identical staleness reads identically
-// on both pages. (Worth hoisting somewhere shared if a third page needs it.)
+// Same thresholds the board uses, so identical staleness reads identically on
+// both pages. (Worth hoisting somewhere shared if a third page needs it.)
 function freshness(hours) {
-  if (hours == null)  return { cls: 'fresh-old',   text: 'never synced' };
-  if (hours < 1)      return { cls: 'fresh-ok',    text: `synced ${Math.round(hours * 60)} min ago` };
-  if (hours < 6)      return { cls: 'fresh-ok',    text: `synced ${Math.round(hours)}h ago` };
-  if (hours < 24)     return { cls: 'fresh-stale', text: `synced ${Math.round(hours)}h ago` };
-  return { cls: 'fresh-old', text: `synced ${Math.round(hours / 24)}d ago` };
+  if (hours == null)  return { cls: 'fresh-old',   text: 'never updated' };
+  if (hours < 1)      return { cls: 'fresh-ok',    text: `updated ${Math.round(hours * 60)} min ago` };
+  if (hours < 6)      return { cls: 'fresh-ok',    text: `updated ${Math.round(hours)}h ago` };
+  if (hours < 24)     return { cls: 'fresh-stale', text: `updated ${Math.round(hours)}h ago` };
+  return { cls: 'fresh-old', text: `updated ${Math.round(hours / 24)}d ago` };
 }
 
 // A ratio says what two separate counts couldn't: how far along this is.
-function auditRow(label, done, total) {
+function coverageRow(label, done, total) {
   const pct = total ? Math.round(done / total * 100) : 0;
   return `<div>
-      <div class="ov-row-head">
+      <div class="cov-head">
         <span>${label}</span>
-        <span class="ov-row-val"><b>${fmt(done)}</b> / ${fmt(total)} <span class="muted">· ${pct}%</span></span>
+        <span class="cov-val"><b>${fmt(done)}</b> / ${fmt(total)} <span class="muted">· ${pct}%</span></span>
       </div>
       <div class="meter"><i style="width:${pct}%"></i></div>
     </div>`;
 }
 
-function renderOverview(j) {
+function renderChannelState(j) {
   const c = (j.channels || []).find(x => x.id === channelId) || {};
   pendingCount = c.pending_count || 0;
 
-  $('ov-lede').innerHTML = pendingCount
-    ? `${fmt(pendingCount)} pending <span class="u">${pendingCount === 1 ? 'edit awaits' : 'edits await'} review</span>`
-    : 'All caught up <span class="u">nothing pending</span>';
+  // Running.stateOf is the only definition of a channel's state anywhere. The
+  // board row you clicked to get here rendered this same sentence, and offered
+  // this same action.
+  const st = Running.stateOf(c);
+  $('ap-lede').innerHTML = st.why;
+  renderStateAction(st.action, c.autopilot_paused_reason);
 
   const f = freshness(c.hours_since_sync);
   const tracked = (c.regular_count || 0) + (c.shorts_count || 0);
-  $('ov-meta').innerHTML = `<span class="${f.cls}">${f.text}</span> · ${fmt(tracked)} tracked`;
+  $('ap-meta').innerHTML = [
+    `<span class="${f.cls}">${f.text}</span>`,
+    `${fmt(tracked)} videos`,
+    pendingCount ? `${fmt(pendingCount)} finished rewrites waiting` : null,
+    `${fmt(c.applied_total || 0)} put live all time`,
+  ].filter(Boolean).join(' · ');
 
-  $('ov-audit').innerHTML =
-    auditRow('Videos audited', c.audited_regular || 0, c.regular_count || 0) +
-    auditRow('Shorts audited', c.audited_shorts || 0, c.shorts_count || 0);
-
-  // Zero is neutral — a flat week is not a win. Uses theme.css's .pos/.neg/
-  // .neutral instead of an inline colour, so the meaning lives in one place.
-  const d = c.delta_views_7d || 0;
-  const dCls = d > 0 ? 'pos' : d < 0 ? 'neg' : 'neutral';
-  $('ov-stats').innerHTML = `
-    <div>
-      <div class="ov-stat-v">${fmt(c.applied_total || 0)}</div>
-      <div class="ov-stat-l">Applied · total</div>
-      <div class="ov-stat-sub">${fmt(c.applied_today || 0)} today · ${fmt(c.applied_7d || 0)} this week</div>
-    </div>
-    <div>
-      <div class="ov-stat-v ${dCls}">${d > 0 ? '+' : ''}${fmt(d)}</div>
-      <div class="ov-stat-l">Δ views · 7d</div>
-    </div>`;
+  $('ap-coverage').innerHTML =
+    coverageRow('Videos rewritten', c.audited_regular || 0, c.regular_count || 0) +
+    coverageRow('Shorts rewritten', c.audited_shorts || 0, c.shorts_count || 0);
 
   syncApplyButton();
 }
-// Shares the '/dashboard' cache key with the home page, so arriving here after
-// the dashboard (or vice-versa) paints the KPIs with zero wait. In-flight
-// coalescing means loadOverview + a concurrent dashboard visit hit the network
-// once, not twice.
-function loadOverview() {
-  SWR.swr('/dashboard', renderOverview, {
+// The board offers exactly one action per state; landing here must offer the
+// same one, in the same place, or clicking through changes what you're being
+// asked to do. Whatever unblocks the channel takes the primary slot — putting
+// finished rewrites live matters less than getting the channel running at all.
+function renderStateAction(action, pausedReason) {
+  const host = $('ap-state-action');
+  host.innerHTML = '';
+  // 'Sync' already has a button; promote that one rather than adding a twin.
+  $('sync-btn').classList.toggle('btn-primary', action === 'Sync');
+  $('apply-pending-btn').classList.toggle('btn-primary', !action);
+  if (!action || action === 'Sync') return;
+  // Resume can't clear an expired sign-in — offering it would fail every time.
+  // The Right now card carries the reconnect link instead.
+  if (action === 'Resume' && pausedReason === 'token_expired') return;
+
+  const b = document.createElement('button');
+  b.className = 'btn-primary';
+  b.textContent = action === 'Resume' ? 'Resume autopilot' : 'Start autopilot';
+  b.onclick = () => (action === 'Resume' ? resumeAutopilot() : startAutopilot(b));
+  host.appendChild(b);
+}
+
+// Deliberately only flips the switch: the daily limit and everything else on
+// this page keep whatever they were set to. Starting is one decision.
+async function startAutopilot(btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/auth/channels/${channelId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autopilot_enabled: true }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Autopilot started.', 'ok');
+    await refreshChannelState();
+  } catch (e) {
+    toast('Could not start: ' + escapeHtml(String(e)), 'err');
+    btn.disabled = false;
+  }
+}
+
+// Both caches carry the autopilot switch, so both have to be dropped or the
+// lede repaints from the copy that still says "off".
+async function refreshChannelState() {
+  SWR.invalidate('/auth/channels');
+  SWR.invalidate('/dashboard');
+  await Promise.all([loadChannel(), loadAutopilotLog()]);
+  loadChannelState();
+}
+
+// Shares the '/dashboard' cache key with the board, so arriving here from it
+// (or vice-versa) paints with zero wait. In-flight coalescing means this and a
+// concurrent board visit hit the network once, not twice.
+function loadChannelState() {
+  SWR.swr('/dashboard', renderChannelState, {
     onError: () => {
       if (SWR.get('/dashboard') === undefined) {
-        $('ov-audit').innerHTML = '<em class="muted">Could not load.</em>';
+        $('ap-coverage').innerHTML = '<em class="muted">Could not load.</em>';
       }
     },
   });
 }
 
 // ── Autopilot ──────────────────────────────────────────────────────────
+// "24s ago" / "3h ago" — a raw seconds count is only readable for the first
+// minute, and this number is usually hours old.
+function ago(iso) {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 90) return `${s}s ago`;
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 172800) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+// Today's throughput against today's limit. The state itself is the lede's job
+// — repeating it as a pill here made the same sentence appear twice, once in
+// plain words and once in jargon.
 function renderAutopilotLog(j) {
-    let pill;
-    let resumeBtn = '';
-    if (j.paused_reason === 'token_expired') {
-      pill = `<span class="pill pill--err">Paused · OAuth token expired</span>`;
-      resumeBtn = `<a href="/auth/login" style="margin-left:.5rem"><button>Reconnect Google account</button></a>`;
-    } else if (j.paused_reason) {
-      pill = `<span class="pill pill--err">Paused · ${escapeHtml(j.paused_reason)}</span>`;
-      resumeBtn = `<button onclick="resumeAutopilot()" style="margin-left:.5rem">Resume</button>`;
-    } else if (j.enabled) {
-      pill = `<span class="pill pill--ok">Running</span>`;
-    } else {
-      pill = `<span class="pill">Disabled</span>`;
-    }
     const cap = j.daily_cap || 0;
     const pct = cap > 0 ? Math.max(0, Math.min(100, (j.applies_today / cap) * 100)) : 0;
-    $('ap-summary').innerHTML = `${pill}
-      <span class="muted" style="margin-left:.5rem">Today: ${j.applies_today}/${cap}</span>
-      <span class="pace-bar" style="margin-left:.5rem"><i style="width:${pct}%"></i></span>
-      ${resumeBtn}`;
+    $('ap-summary').innerHTML =
+      `<span class="cov-val"><b>${fmt(j.applies_today)}</b> / ${fmt(cap)}</span>
+       <span class="muted" style="margin-left:.4rem">put live today</span>
+       <span class="meter" style="width:120px; display:inline-block; margin-left:.6rem; vertical-align:middle"><i style="width:${pct}%"></i></span>`;
 
-    // ETA: last_tick + AUTOPILOT_TICK_SECONDS estimate (we don't expose that, so show last tick + activity)
-    const lastTick = channelMeta.autopilot_last_tick_at;
-    if (lastTick) {
-      const ago = Math.round((Date.now() - new Date(lastTick).getTime()) / 1000);
-      $('ap-eta').textContent = j.enabled ? `Last tick ${ago}s ago — next tick within ~60s.` : `Last tick ${ago}s ago. Autopilot is off.`;
-    } else {
-      $('ap-eta').textContent = j.enabled ? 'Has not ticked yet — first run is imminent.' : 'Autopilot is off.';
-    }
+    // An expired token is the one stop the Resume button can't clear, so it
+    // gets the only action offered here — everything else is handled by the
+    // state action above.
+    const lastRun = channelMeta.autopilot_last_tick_at;
+    const when = lastRun ? `Last run ${ago(lastRun)}.` : 'Has not run yet.';
+    $('ap-eta').innerHTML = j.paused_reason === 'token_expired'
+      ? `${when} <b>Google sign-in expired</b> — <a href="/auth/login">reconnect the account</a> to start it again.`
+      : j.enabled ? `${when} Checks again within a minute.`
+      : `${when} Autopilot is off.`;
 
     if (!j.items.length) {
       $('ap-activity').innerHTML = '<em class="muted">No activity yet.</em>';
@@ -681,7 +701,7 @@ function pollAutopilotLog() {
 async function resumeAutopilot() {
   await fetch(`/channels/${channelId}/autopilot/resume`, { method: 'POST' });
   toast('Autopilot resumed.', 'ok');
-  await loadAutopilotLog();
+  await refreshChannelState();
 }
 
 $('ap-save').onclick = async () => {
@@ -695,8 +715,8 @@ $('ap-save').onclick = async () => {
     });
     if (!r.ok) throw new Error(await r.text());
     toast('Autopilot settings saved.', 'ok');
-    SWR.invalidate('/auth/channels'); // drop stale channel meta so the form can't repaint old caps
-    await Promise.all([loadChannel(), loadAutopilotLog()]);
+    // The switch lives in this form, so the lede above it can change here too.
+    await refreshChannelState();
   } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
 };
 
@@ -843,7 +863,7 @@ let sortDir = 'desc';
 
 // Drop the caches an audit/apply/sync just invalidated, so the reload that
 // follows fetches fresh instead of flashing pre-mutation data. /dashboard is
-// shared with the home page and the Overview tab; invalidating it here means
+// shared with the board and the Autopilot section; invalidating it here means
 // the next visit to either re-derives the changed counts.
 function bustChannelData() {
   SWR.invalidate(`/channels/${channelId}/videos`);
@@ -940,7 +960,7 @@ function renderVideos() {
   rqBtn.disabled = quarantinedCount === 0;
   rqBtn.textContent = `Re-audit bad output (${quarantinedCount})`;
   if (!allVideos.length) {
-    $('videos').innerHTML = '<div class="dt"><div class="dt-empty muted">No videos yet — run a sync from the Overview tab.</div></div>';
+    $('videos').innerHTML = '<div class="dt"><div class="dt-empty muted">No videos yet — get the latest from YouTube on the Autopilot page.</div></div>';
     return;
   }
   if (!sorted.length) {
@@ -1354,7 +1374,7 @@ async function revertAudit(auditId, videoId) {
   } catch (e) { toast('Revert failed: ' + escapeHtml(String(e)), 'err'); }
 }
 
-// ── Sync + Apply All Pending (Overview tab) ───────────────────────────
+// ── Get latest + put pending live (Autopilot section) ────────────────
 $('sync-btn').onclick = async () => {
   $('sync-btn').disabled = true; $('sync-status').textContent = ' Syncing…';
   try {
@@ -1374,7 +1394,7 @@ $('sync-btn').onclick = async () => {
     toast(`Synced ${j.synced} new video(s); refreshed stats.`, 'ok');
     bustChannelData();
     SWR.invalidate('/auth/channels'); // last_synced_at / counts changed
-    await loadVideos(); await loadChannel(); await loadOverview();
+    await loadVideos(); await loadChannel(); await loadChannelState();
   } catch (e) {
     $('sync-status').textContent = ' Sync failed';
     toast('Sync failed: ' + escapeHtml(String(e)), 'err');
@@ -1408,7 +1428,7 @@ $('apply-pending-btn').onclick = async () => {
     }
     bustChannelData();
     SWR.invalidate('/auth/channels');
-    await loadVideos(); await loadChannel(); await loadOverview();
+    await loadVideos(); await loadChannel(); await loadChannelState();
   } catch (e) {
     $('apply-pending-status').textContent = ' Failed';
     toast('Apply failed: ' + escapeHtml(String(e)), 'err');
@@ -1421,7 +1441,7 @@ let plStatus = null;
 let plAction = '';            // '' = all; otherwise 'add' | 'remove'
 const plSelected = new Set();
 
-// The section's focal line, matching Overview: the count that implies work,
+// The section's focal line, matching Autopilot: the count that implies work,
 // with the rest of the figures demoted to context beneath it.
 function renderPlLede() {
   const n = plProposals.length;
@@ -1565,9 +1585,9 @@ $('pl-refresh-btn').onclick = loadProposals;
 function renderPlaylistStatus(s) {
   const pct = s.total_videos ? Math.round(s.embedded / s.total_videos * 100) : 0;
   $('pl-embed-progress').innerHTML = `
-    <div class="ov-row-head">
+    <div class="cov-head">
       <span>Videos embedded</span>
-      <span class="ov-row-val"><b>${fmt(s.embedded)}</b> / ${fmt(s.total_videos)} <span class="muted">· ${pct}%</span></span>
+      <span class="cov-val"><b>${fmt(s.embedded)}</b> / ${fmt(s.total_videos)} <span class="muted">· ${pct}%</span></span>
     </div>
     <div class="meter"><i style="width:${pct}%"></i></div>`;
   plStatus = s;
@@ -1738,7 +1758,7 @@ $('pl-health-evaluate-btn').onclick = async () => {
 // before loading the visible tab — everything paints from cache on this tick.
 loadChannel();
 tabsReady = true;
-ensureTabLoaded(document.querySelector('.snav.active')?.dataset.tab || 'overview');
+ensureTabLoaded(document.querySelector('.snav.active')?.dataset.tab || 'autopilot');
 
 // ── Reflection ────────────────────────────────────────────────────────────
 

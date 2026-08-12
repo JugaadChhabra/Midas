@@ -401,11 +401,6 @@ def channel_page():
     return FileResponse(STATIC_DIR / "channel.html")
 
 
-@app.get("/performance")
-def performance_page():
-    return FileResponse(STATIC_DIR / "performance.html")
-
-
 @app.get("/health")
 def health():
     return {"ok": True, "dry_run": settings.DRY_RUN}

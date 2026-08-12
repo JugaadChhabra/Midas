@@ -28,7 +28,7 @@
 
   /* Neutrals — alpha greys (one value works light & dark) */
   --surface-tint:  #8882;   /* pill / hover / track / code backgrounds */
-  --border:        #8884;   /* card, nav, kpi borders */
+  --border:        #8884;   /* card and nav borders */
   --border-soft:   #8883;   /* table rows, subtle dividers */
   --border-strong: #8886;   /* buttons */
   --btn-bg:        #fff1;
@@ -310,21 +310,6 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
            text-align:left; cursor:pointer; user-select:none; }
 .dt-sort:hover { color:var(--color-accent); background:none; }
 .truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-/* ── KPI grid ───────────────────────────────────────────────────────── */
-/* Single definition. Channel and Performance each carried a near-identical
-   denser override while these (looser) values went unused — index.html doesn't
-   use .kpi at all. The dense metrics were what actually shipped, so they live
-   here now and the page-level copies are gone. */
-.kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:.6rem; }
-.kpi { border:1px solid var(--border); border-radius:var(--radius); padding:.65rem .8rem; }
-.kpi .v { font-size:1.3rem; font-weight:700; line-height:1.1; }
-.kpi .l { font-size:.74rem; opacity:.65; text-transform:uppercase; letter-spacing:.04em; margin-top:.2rem; }
-
-/* ── Deltas ─────────────────────────────────────────────────────────── */
-.pos { color:var(--color-ok); font-weight:600; }
-.neg { color:var(--color-err); font-weight:600; }
-.neutral { color:var(--color-neutral); }
 
 /* ── Toasts ─────────────────────────────────────────────────────────── */
 #toasts { position:fixed; bottom:1rem; right:1rem; z-index:9999; display:flex; flex-direction:column; gap:.5rem; max-width:360px; }

@@ -31,7 +31,6 @@
   const ICONS = {
     home:        () => stroke('<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'),
     videos:      () => stroke('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8.5 5.5 3.5L10 15.5z"/>'),
-    performance: () => stroke('<path d="M3 17.5 9.5 11l4 4L21 7.5"/><path d="M16.5 7.5H21v4.5"/>'),
     autopilot:   () => stroke('<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/>'),
     playlists:   () => stroke('<path d="M3 6h11M3 12h11M3 18h7"/><path d="m16.5 12.5 4.5 2.75-4.5 2.75z"/>'),
     settings:    () => stroke('<circle cx="12" cy="12" r="3"/><path d="M19.1 14.4a1.5 1.5 0 0 0 .3 1.7l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.5 1.5 0 0 0-2.6 1.1v.2a2 2 0 1 1-4 0v-.1a1.5 1.5 0 0 0-2.6-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.5 1.5 0 0 0-1.1-2.6h-.2a2 2 0 1 1 0-4h.1a1.5 1.5 0 0 0 1.1-2.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.5 1.5 0 0 0 2.6-1.1V3a2 2 0 1 1 4 0v.1a1.5 1.5 0 0 0 2.6 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.5 1.5 0 0 0 1.1 2.6h.2a2 2 0 1 1 0 4h-.1a1.5 1.5 0 0 0-1.4.9z"/>'),
@@ -84,9 +83,7 @@
   // location.hash across so you'd stay on the same section, but the hrefs are
   // built once at render time, so they froze the hash you happened to arrive
   // with and then dragged it into every channel you opened afterwards.
-  // A whole-page override (channelHref) is still honoured — that's how
-  // performance.html keeps you on Performance when you switch channel.
-  const defaultChannelHref = (id) => `/channel?id=${encodeURIComponent(id)}`;
+  const channelHref = (id) => `/channel?id=${encodeURIComponent(id)}`;
 
   function mount(opts) {
     cfg = opts || {};
@@ -248,13 +245,12 @@
       els.trigger.title = 'All channels — switch channel (/)';
     }
 
-    const hrefFor = cfg.channelHref || defaultChannelHref;
     const rows = channels.map(ch => {
       const label = shortLabel(ch.name || ch.id, prefixLen);
       return `
         <a class="chan-opt${ch.id === currentId ? ' current' : ''}" role="option"
            aria-selected="${ch.id === currentId}" title="${esc(ch.name || ch.id)}"
-           href="${esc(hrefFor(ch.id))}">
+           href="${esc(channelHref(ch.id))}">
           <span class="chan-avatar sm">${esc(initials(label))}</span>
           <span class="chan-opt-name">${esc(label || ch.id)}</span>
         </a>`;
