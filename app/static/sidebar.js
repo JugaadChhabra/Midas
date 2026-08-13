@@ -277,5 +277,13 @@
 
   // shortLabel/commonWordPrefix are shared with the Running board, so channel
   // names are shortened the same way everywhere.
-  window.Sidebar = { mount, setChannels, shortLabel, commonWordPrefix };
+  // The divider names the channel the four items below it act on. It's a
+  // placeholder until the channel loads, so the page fills it in rather than
+  // passing a name mount() cannot know yet.
+  function setSection(label) {
+    const el = document.querySelector('.nav-sec > span');
+    if (el) el.textContent = label;
+  }
+
+  window.Sidebar = { mount, setChannels, setSection, shortLabel, commonWordPrefix };
 })();

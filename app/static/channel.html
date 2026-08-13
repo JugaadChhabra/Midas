@@ -121,6 +121,9 @@
 
   <!-- ─── VIDEOS ─── -->
   <div class="tab-panel" data-panel="videos">
+    <p class="page-lede" id="v-lede">—</p>
+    <p class="page-meta" id="v-meta"></p>
+
     <div class="card">
       <!-- Audit state moved from a <select> to chips: the states double as a
            breakdown, since each carries its own live count. -->
@@ -171,6 +174,7 @@
         <span id="ap-state-action"></span>
         <button id="sync-btn">Get latest from YouTube</button>
         <span id="sync-status" class="muted"></span>
+        <button class="btn-link" type="button" data-goto="settings">Change the daily limit →</button>
       </div>
       <div id="ap-eta" class="muted" style="margin-top:.6rem; font-size:.8rem"></div>
     </div>
@@ -200,19 +204,6 @@
       <div class="cov-rows" id="ap-coverage">Loading…</div>
     </div>
 
-    <div class="card">
-      <div class="sec-head"><h3>What it writes</h3></div>
-      <p class="note">Autopilot rewrites titles, descriptions and tags on its own, oldest and least-watched first, and stops for the day once it hits the limit below.</p>
-      <label class="field-check"><input type="checkbox" id="ap-enabled" /> <span>Let autopilot rewrite videos on its own</span></label>
-      <div class="field" style="margin-top:.9rem">
-        <label for="ap-cap">Videos per day</label>
-        <input id="ap-cap" type="number" min="1" max="200" value="10" style="width:6rem" />
-        <span class="hint">Autopilot stops after this many each day, then picks up again tomorrow.</span>
-      </div>
-      <div class="act-bar">
-        <button id="ap-save" class="btn-primary">Save</button>
-      </div>
-    </div>
 
     <!-- The run log. Answers "when did it last do anything, and did it work?"
          — which is the question that brought you to the channel. -->
@@ -277,6 +268,9 @@
 
   <!-- ─── SETTINGS ─── -->
   <div class="tab-panel" data-panel="settings">
+    <p class="page-lede">Settings</p>
+    <p class="page-meta" id="set-meta"></p>
+
     <div class="card">
       <div class="sec-head"><h3>Channel</h3></div>
       <p class="note">Every video Midas publishes is set to <b>Education</b>, <b>made for kids</b>, and tagged with the language below.</p>
@@ -285,7 +279,14 @@
         <div id="lang-select" data-dropdown data-label="Content language"
              data-options='[{"value": "", "label": "\u2014 not set \u2014"}, {"value": "en", "label": "English"}, {"value": "hi", "label": "Hindi"}, {"value": "mr", "label": "Marathi"}, {"value": "bn", "label": "Bengali"}, {"value": "pa", "label": "Punjabi"}, {"value": "gu", "label": "Gujarati"}, {"value": "ta", "label": "Tamil"}, {"value": "te", "label": "Telugu"}, {"value": "kn", "label": "Kannada"}, {"value": "ml", "label": "Malayalam"}, {"value": "or", "label": "Odia"}, {"value": "ur", "label": "Urdu"}]'></div>
       </div>
-      <label class="field-check"><input type="checkbox" id="sync-shorts" />
+      <div class="field">
+        <label for="ap-cap">Videos per day</label>
+        <input id="ap-cap" type="number" min="1" max="200" value="10" style="width:6rem" />
+        <span class="hint">Autopilot stops after this many each day, then picks up again tomorrow.</span>
+      </div>
+      <label class="field-check"><input type="checkbox" id="ap-enabled" />
+        <span>Let autopilot rewrite videos on its own</span></label>
+      <label class="field-check" style="margin-top:.5rem"><input type="checkbox" id="sync-shorts" />
         <span>Include Shorts — videos of 3 minutes or less get rewritten too</span></label>
       <div class="act-bar">
         <button id="lang-save" class="btn-primary">Save</button>
@@ -488,9 +489,10 @@ if (initialTab) switchTab(initialTab);
 Sidebar.mount({
   items: [
     { id: 'running', label: 'Running', icon: 'home', href: '/' },
-    // The divider carries the channel's name, so the four items below it are
-    // visibly scoped to one channel rather than reading as peers of the board.
-    { section: 'This channel' },
+    // Filled with the channel's name once it loads (Sidebar.setSection), so the
+    // four items below are visibly scoped to one channel rather than reading as
+    // peers of the board.
+    { section: '' },
     { id: 'autopilot',   label: 'Autopilot',   icon: 'autopilot' },
     { id: 'videos',      label: 'Videos',      icon: 'videos' },
     { id: 'playlists',   label: 'Playlists',   icon: 'playlists' },
@@ -510,7 +512,14 @@ async function applyChannel(all) {
   const c = all.find(x => x.id === channelId) || {};
   channelMeta = c;
   Sidebar.setChannels(all, channelId);
-  $('title').textContent = c.name || channelId;
+  // All 13 channels share the prefix "Taarak Mehta Ka Ooltah Chashmah", so the
+  // full name as a page eyebrow is 30 characters of the same words on every
+  // page of every channel. Same stripping the rail and the board apply.
+  const prefixLen = Sidebar.commonWordPrefix(all.map(x => x.name));
+  const short = Sidebar.shortLabel(c.name || channelId, prefixLen);
+  $('title').textContent = short;
+  Sidebar.setSection(short);
+  renderSettingsMeta();
   // No subtitle: the switcher already shows the handle, freshness lives in the
   // Autopilot meta line, and the raw channel id was developer detail taking
   // header space.
@@ -530,6 +539,21 @@ async function applyChannel(all) {
 // still await a confirmed-fresh channelMeta if they need it.
 function loadChannel() {
   return SWR.swr('/auth/channels', applyChannel).fresh;
+}
+
+// Settings' own header line. Facts about how this channel is configured, so
+// the page states its own configuration before you scroll into the forms.
+function renderSettingsMeta() {
+  const c = channelMeta;
+  const lang = ($('lang-select').dd && $('lang-select').dd.value) || c.default_language;
+  const langName = lang
+    ? ($('lang-select').querySelector(`.dd-opt[data-value="${lang}"] span`) || {}).textContent
+    : null;
+  $('set-meta').textContent = [
+    langName || 'no language set',
+    c.autopilot_daily_cap ? `limit ${fmt(c.autopilot_daily_cap)} a day` : null,
+    c.nas_folder ? `cutting Shorts from ${c.nas_folder}` : null,
+  ].filter(Boolean).join(' · ');
 }
 
 // ── Channel state (Autopilot landing) ──────────────────────────────────
@@ -639,10 +663,10 @@ function renderWhy(st, c) {
 function renderStateAction(action, pausedReason) {
   const host = $('ap-state-action');
   host.innerHTML = '';
-  // 'Sync' already has a button; promote that one rather than adding a twin.
-  $('sync-btn').classList.toggle('btn-primary', action === 'Sync');
+  // 'Update' already has a button; promote that one rather than adding a twin.
+  $('sync-btn').classList.toggle('btn-primary', action === 'Update');
   $('apply-pending-btn').classList.toggle('btn-primary', !action);
-  if (!action || action === 'Sync') return;
+  if (!action || action === 'Update') return;
   // Resume can't clear an expired sign-in — offering it would fail every time.
   // The Right now card carries the reconnect link instead.
   if (action === 'Resume' && pausedReason === 'token_expired') return;
@@ -795,21 +819,6 @@ async function resumeAutopilot() {
   await refreshChannelState();
 }
 
-$('ap-save').onclick = async () => {
-  try {
-    const r = await fetch(`/auth/channels/${channelId}`, {
-      method: 'PATCH', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        autopilot_enabled: $('ap-enabled').checked,
-        autopilot_daily_cap: parseInt($('ap-cap').value || '10', 10),
-      }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    toast('Autopilot settings saved.', 'ok');
-    // The switch lives in this form, so the lede above it can change here too.
-    await refreshChannelState();
-  } catch (e) { toast('Save failed: ' + escapeHtml(String(e)), 'err'); }
-};
 
 // ── Shorts (NAS) card ─────────────────────────────────────────────────
 let nasLangs = [];   // [{language, uncut}] from GET /shorts/languages
@@ -895,11 +904,16 @@ $('lang-save').onclick = async () => {
       body: JSON.stringify({
         default_language: $('lang-select').dd.value || null,
         sync_shorts: $('sync-shorts').checked,
+        autopilot_enabled: $('ap-enabled').checked,
+        autopilot_daily_cap: parseInt($('ap-cap').value || '10', 10),
       }),
     });
     if (!r.ok) throw new Error(await r.text());
-    SWR.invalidate('/auth/channels');
     toast('Saved.', 'ok');
+    // The switch and the limit live here now, so the Autopilot lede and its
+    // header line both have to be re-derived after a save.
+    await refreshChannelState();
+    renderSettingsMeta();
   } catch (e) { toast('Could not save: ' + escapeHtml(String(e)), 'err'); }
 };
 
@@ -1043,7 +1057,28 @@ function renderChips() {
   }
 }
 
+// Videos' own header. The lede says how much of the channel Midas has been
+// through; the meta says when its work last reached YouTube — which is the
+// date you carry over to Studio's chart, and the reason this page exists.
+function renderVideoHeader() {
+  const total = allVideos.length;
+  const rewritten = allVideos.filter(v => v.audit_status && v.audit_status !== 'none').length;
+  const waiting = allVideos.filter(v => v.audit_status === 'pending').length;
+  const bad = allVideos.filter(v => v.audit_status === 'quarantined').length;
+  const last = allVideos.reduce(
+    (m, v) => (v.audit_applied_at && v.audit_applied_at > m ? v.audit_applied_at : m), '');
+
+  $('v-lede').innerHTML = `Videos <span class="u">${fmt(total)} on this channel · `
+    + `${fmt(rewritten)} rewritten so far</span>`;
+  $('v-meta').textContent = [
+    last ? `last change went live ${last.slice(0, 10)}` : 'nothing has gone live yet',
+    waiting ? `${fmt(waiting)} waiting to go live` : null,
+    bad ? `${fmt(bad)} unusable` : null,
+  ].filter(Boolean).join(' · ');
+}
+
 function renderVideos() {
+  renderVideoHeader();
   const q = ($('v-search').value || '').toLowerCase().trim();
   const state = videoState;
   const privacy = $('v-privacy').dd.value;

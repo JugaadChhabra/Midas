@@ -107,7 +107,7 @@ document.addEventListener('click', (e) => {
   e.preventDefault();          // the row is a link; the button inside it isn't
   e.stopPropagation();
   const { runAction, channel } = act.dataset;
-  if (runAction === 'Sync') {
+  if (runAction === 'Update') {
     toast('Fetching the latest from YouTube…');
     fetch(`/channels/${encodeURIComponent(channel)}/sync`, { method: 'POST' })
       .then(r => r.json())

@@ -35,14 +35,14 @@
     if (!c.video_count) {
       return { key: 'setup', group: 'attention', lamp: 'lamp--warn',
                why: '<b>Never set up</b> — no videos fetched from YouTube yet',
-               action: 'Sync' };
+               action: 'Update' };
     }
     // Stale outranks off: turning autopilot on against a 12-day-old copy of the
     // channel doesn't make it running, it makes it wrong.
     if (hours == null || hours > STALE_HOURS) {
       return { key: 'stale', group: 'attention', lamp: 'lamp--warn',
                why: `<b>Channel data ${days} days old</b> — autopilot won't run`,
-               action: 'Sync' };
+               action: 'Update' };
     }
     // Bad output is the state the board could not see before: it ran, it did
     // work, and the work is unusable. Ranked below stale because the channel is
