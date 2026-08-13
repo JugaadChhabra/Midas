@@ -93,7 +93,7 @@
   .pl-why > summary { font-size:.75rem; opacity:.6; cursor:pointer; }
   .pl-why pre { font-size:.72rem; white-space:pre-wrap; margin:.35rem 0 0; max-height:11rem; overflow:auto; }
   #videos .vid-title { font-weight:600; }
-  #videos .vid-sub { font-size:.75rem; opacity:.6; margin-top:.15rem; }
+  #videos .vid-sub { font-size:.73rem; color:var(--ink-4); font-family:var(--mono); margin-top:2px; }
   /* The audit's reasoning runs to a paragraph; unclamped it triples the row
      height and destroys the table's rhythm. Two lines is enough to tell rows
      apart — the full text is in the audit panel a click away. */
@@ -157,6 +157,7 @@
         <span id="ap-state-action"></span>
         <button id="sync-btn">Get latest from YouTube</button>
         <span id="sync-status" class="muted"></span>
+        <span id="ap-stop"></span>
         <button class="btn-link" type="button" data-goto="settings">Change the daily limit →</button>
       </div>
       <div id="ap-eta" class="muted" style="margin-top:.6rem; font-size:.8rem"></div>
@@ -258,8 +259,7 @@
         <input id="ap-cap" type="number" min="1" max="200" value="10" style="width:6rem" />
         <span class="hint">Autopilot stops after this many each day, then picks up again tomorrow.</span>
       </div>
-      <label class="field-check"><input type="checkbox" id="ap-enabled" />
-        <span>Let autopilot rewrite videos on its own</span></label>
+      <input type="checkbox" id="ap-enabled" hidden />
       <div class="field">
         <label id="nas-label">Shorts folder on the office drive</label>
         <div id="nas-folder" data-dropdown data-label="Shorts folder on the office drive"
@@ -269,10 +269,10 @@
       <label class="field-check"><input type="checkbox" id="sync-shorts" />
         <span>Include Shorts</span></label>
       <label class="field-check"><input type="checkbox" id="nas-autocut" />
-        <span>Cut new videos in that folder into Shorts automatically</span></label>
+        <span>Cut new videos in that folder automatically</span></label>
       <div class="act-bar">
         <button id="lang-save" class="btn-primary">Save</button>
-        <button id="nas-cut-now" class="btn-link" type="button">Cut Shorts now</button>
+        <button id="nas-cut-now" type="button">Cut Shorts now</button>
         <span class="muted" id="nas-cut-msg" style="font-size:.78rem"></span>
       </div>
     </div>
@@ -287,12 +287,12 @@
       <p class="note">These decide every title, description and tag Midas writes. Changing them changes everything written from now on; what is already live stays as it is.</p>
       <div class="field" style="max-width:none">
         <label for="prompt">Full-length videos</label>
-        <textarea id="prompt" rows="10" placeholder="What should Midas write, and what should it avoid?"></textarea>
+        <textarea id="prompt" rows="6" placeholder="What should Midas write, and what should it avoid?"></textarea>
       </div>
       <div class="field" style="max-width:none">
         <label for="shorts-prompt">Shorts</label>
         <span class="hint">Used instead of the above for videos of 3 minutes or less. Leave empty to use the same instructions for both.</span>
-        <textarea id="shorts-prompt" rows="7" placeholder="Leave empty to use the same instructions"></textarea>
+        <textarea id="shorts-prompt" rows="4" placeholder="Leave empty to use the same instructions"></textarea>
       </div>
       <div class="act-bar">
         <button id="save-btn" class="btn-primary">Save</button>
@@ -566,6 +566,7 @@ function renderChannelState(j) {
   const st = Running.stateOf(c);
   $('ap-lede').innerHTML = st.why;
   renderStateAction(st.action, c.autopilot_paused_reason);
+  renderStopAction(!!c.autopilot_enabled && !c.autopilot_paused_reason);
 
   const f = freshness(c.hours_since_sync);
   const tracked = (c.regular_count || 0) + (c.shorts_count || 0);
@@ -629,24 +630,39 @@ function renderStateAction(action, pausedReason) {
   const b = document.createElement('button');
   b.className = 'btn-primary';
   b.textContent = action === 'Resume' ? 'Resume autopilot' : 'Start autopilot';
-  b.onclick = () => (action === 'Resume' ? resumeAutopilot() : startAutopilot(b));
+  b.onclick = () => (action === 'Resume' ? resumeAutopilot() : setAutopilot(true, b));
   host.appendChild(b);
 }
 
-// Deliberately only flips the switch: the daily limit and everything else on
-// this page keep whatever they were set to. Starting is one decision.
-async function startAutopilot(btn) {
+// Starting and stopping live on the page that reports the state, not in a
+// settings form two clicks away — Settings owns the limit, this owns the
+// switch. Without this there was no way to turn autopilot off at all.
+function renderStopAction(enabled) {
+  const host = $('ap-stop');
+  host.innerHTML = '';
+  if (!enabled) return;
+  const b = document.createElement('button');
+  b.className = 'btn-link';
+  b.type = 'button';
+  b.textContent = 'Stop autopilot';
+  b.onclick = () => setAutopilot(false, b);
+  host.appendChild(b);
+}
+
+// Deliberately only flips the switch: the daily limit and everything else
+// keeps whatever it was set to. Starting is one decision.
+async function setAutopilot(on, btn) {
   btn.disabled = true;
   try {
     const r = await fetch(`/auth/channels/${channelId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ autopilot_enabled: true }),
+      body: JSON.stringify({ autopilot_enabled: on }),
     });
     if (!r.ok) throw new Error(await r.text());
-    toast('Autopilot started.', 'ok');
+    toast(on ? 'Autopilot started.' : 'Autopilot stopped.', 'ok');
     await refreshChannelState();
   } catch (e) {
-    toast('Could not start: ' + escapeHtml(String(e)), 'err');
+    toast(`Could not ${on ? 'start' : 'stop'}: ` + escapeHtml(String(e)), 'err');
     btn.disabled = false;
   }
 }

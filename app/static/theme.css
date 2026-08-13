@@ -317,7 +317,7 @@ h1.page-title { font-size:.84rem; font-weight:600; color:var(--ink-3); margin:0 
 .dt-scroll::-webkit-scrollbar { display:none; }
 .dt-body { min-width:var(--dt-min, 0); }
 .dt-head, .dt-row { display:grid; grid-template-columns:var(--dt-cols); gap:.8rem;
-                    align-items:center; padding:.6rem .87rem; }
+                    align-items:center; padding:.4rem .87rem; }
 .dt-head { border-bottom:1px solid var(--border); font-size:.72rem; font-weight:600;
            opacity:.55; letter-spacing:.02em; position:sticky; top:0; }
 .dt-row { border-bottom:1px solid var(--border-soft); font-size:.83rem;
@@ -526,7 +526,7 @@ textarea { font-family:var(--mono); font-size:.78rem; line-height:1.55; }
 .beat--neutral > i { background:var(--text-faint); }
 
 /* ── Triage group ───────────────────────────────────────────────────── */
-.group { margin-bottom:1.6rem; }
+.group { margin-bottom:1.3rem; }
 .group-head { display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem;
               font-size:.69rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
               color:var(--ink-3); }
@@ -537,7 +537,7 @@ textarea { font-family:var(--mono); font-size:.78rem; line-height:1.55; }
 /* One channel on the Running board. A whole-row target, so the columns are
    declared here rather than on a table. */
 .frow { display:grid; grid-template-columns:9px minmax(130px,1.1fr) minmax(240px,1.6fr) 86px 78px 112px;
-        gap:.9rem; align-items:center; width:100%; padding:.7rem .75rem; text-align:left;
+        gap:.9rem; align-items:center; width:100%; padding:.42rem .75rem; text-align:left;
         background:none; border:1px solid transparent; border-radius:var(--radius-md);
         transition:background-color .12s, border-color .12s; }
 .frow, .frow:hover { text-decoration:none; color:inherit; }

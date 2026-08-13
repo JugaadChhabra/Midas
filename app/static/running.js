@@ -33,14 +33,14 @@
                action: 'Resume' };
     }
     if (!c.video_count) {
-      return { key: 'setup', group: 'attention', lamp: 'lamp--warn',
+      return { key: 'setup', group: 'setup', lamp: '',
                why: '<b>Never set up</b> — no videos fetched from YouTube yet',
                action: 'Update' };
     }
     // Stale outranks off: turning autopilot on against a 12-day-old copy of the
     // channel doesn't make it running, it makes it wrong.
     if (hours == null || hours > STALE_HOURS) {
-      return { key: 'stale', group: 'attention', lamp: 'lamp--warn',
+      return { key: 'stale', group: 'stale', lamp: 'lamp--fault',
                why: `<b>Channel data ${days} days old</b> — autopilot won't run`,
                action: 'Update' };
     }
@@ -48,7 +48,7 @@
     // work, and the work is unusable. Ranked below stale because the channel is
     // still moving — but above "running", because it is quietly wasting quota.
     if (bad) {
-      return { key: 'bad', group: 'attention', lamp: 'lamp--warn',
+      return { key: 'bad', group: 'bad', lamp: 'lamp--warn',
                why: `<b>${fmt(bad)} rewrite${bad === 1 ? '' : 's'} came back unusable</b>`
                   + ` — ${lastRun(c).toLowerCase()}`,
                action: 'Try again' };
@@ -77,10 +77,12 @@
   const reasonInWords = (r) => REASONS[r] || String(r || '').replace(/_/g, ' ');
 
   const GROUPS = [
-    ['stopped',   'Stopped'],
-    ['attention', 'Needs attention'],
-    ['run',       'Running'],
-    ['off',       'Off'],
+    ['stopped', 'Stopped'],
+    ['stale',   'Channel data too old to run'],
+    ['bad',     'Rewriting, but the output is unusable'],
+    ['setup',   'Never set up'],
+    ['run',     'Running'],
+    ['off',     'Off'],
   ];
 
   const fmt = (n) => Number(n || 0).toLocaleString();
@@ -102,7 +104,7 @@
     const beat = beatFor(c);
     const figure = c.pending_count
       ? `${fmt(c.pending_count)} waiting`
-      : (c.video_count ? `${fmt(c.video_count)} videos` : '—');
+      : (c.video_count ? `${fmt(c.video_count)} vids` : '—');
     return `<a class="frow" href="/channel?id=${encodeURIComponent(c.id)}">
       <span class="lamp ${st.lamp}"></span>
       <span class="nm" title="${escapeHtml(c.name || c.id)}">${escapeHtml(
@@ -141,8 +143,7 @@
     // A channel producing bad output IS running — it just isn't producing
     // anything usable. Counting it as "not running" would overstate the
     // headline and understate the real problem, which the meta line names.
-    const working = (buckets.run || []).length
-                  + (buckets.attention || []).filter(c => stateOf(c).key === 'bad').length;
+    const working = (buckets.run || []).length + (buckets.bad || []).length;
     const notRunning = channels.length - working;
     const badTotal = channels.reduce((n, c) => n + (c.quarantined_count || 0), 0);
     const beatMax = Math.max(1, ...channels.flatMap(
@@ -179,8 +180,7 @@
 
   function renderQuota(q, el) {
     if (q.remaining == null) { el.innerHTML = ''; return; }
-    const usable = Math.max(1, (q.limit || 0) - (q.safety_buffer || 0));
-    const pct = Math.max(0, Math.min(100, q.remaining / usable * 100));
+    const pct = Math.max(0, Math.min(100, (q.used_today || 0) / Math.max(1, q.limit || 0) * 100));
     const resetH = Math.floor((q.reset_in_seconds || 0) / 3600);
     const resetM = Math.floor(((q.reset_in_seconds || 0) % 3600) / 60);
     // A countdown alone doesn't say whether the reset lands before or after you
@@ -195,7 +195,8 @@
         <div class="quota-fig">${fmt(q.remaining)}</div>
         <div class="quota-l">YouTube quota left today</div>
       </div>
-      <div class="meter ok" data-meter data-pct="${pct.toFixed(1)}"></div>
+      <div class="meter" data-meter data-pct="${pct.toFixed(1)}"
+           title="${fmt(q.used_today)} of ${fmt(q.limit)} used"></div>
       <div style="text-align:right">
         <div class="quota-l">resets in ${resetH}h ${resetM}m · ${at}</div>
         <div class="quota-l">${fmt(q.used_today)} used today${
