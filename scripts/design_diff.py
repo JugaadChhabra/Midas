@@ -106,6 +106,24 @@ SCREENS = {
             ("row-id",      ".trow .t-sub",     "#videos .vid-sub",   "data"),
         ],
     },
+    "playlists": {
+        "design_step": 'document.querySelector(\'[data-go="play"]\').click()',
+        "live_url": "/channel?id={channel}",
+        "live_step": 'document.querySelector(\'.snav[data-tab="playlists"]\').click()',
+        "checks": [
+            ("rail",       ".rail",              ".sidebar",       "chrome"),
+            ("lede",       ".page.on .lede",     "#pl-lede",       "data"),
+            ("meta",       ".page.on .meta",     "#pl-meta",       "data"),
+            ("card",       ".page.on .card",     ".tab-panel.active .card", "geometry"),
+            ("card-head",  ".page.on .sec-head h3", ".tab-panel.active .sec-head h3", "data"),
+            ("note",       ".page.on .note",     ".tab-panel.active .note", "data"),
+            ("progress",   ".page.on .mrow",     "#pl-embed-progress .progress-top", "data"),
+            ("chip",       ".chips .chip",       "#pl-chips .chip", "data"),
+            ("action",     ".page.on .actions .btn", ".tab-panel.active .act-bar button", "chrome"),
+            ("table-head", ".thead",             "#pl-proposals .dt-head", "data"),
+            ("table-row",  ".trow",              "#pl-proposals .dt-row",  "geometry"),
+        ],
+    },
     "settings": {
         "design_step": 'document.querySelector(\'[data-go="set"]\').click()',
         "live_url": "/channel?id={channel}",
@@ -144,10 +162,33 @@ EXCEPTIONS = {
         "card height follows the real prompt text, which is longer than the "
         "design's four sample lines",
     ),
+    "playlists/card": (
+        {"w", "h", "x", "y"},
+        "card height follows the real playlist counts and proposal list",
+    ),
+    "playlists/table-row": (
+        {"w", "x", "y", "h"},
+        "row height and width follow real playlist titles",
+    ),
     "running/quota-fig": (
         {"w"},
         "figure width follows the digit count of the real remaining quota",
     ),
+}
+
+# The build's palette is a deliberate departure from the design's. The design's
+# darks and greys carry a blue bias; the build uses a neutral charcoal, because
+# across a full screen the bias reads as a cold cast rather than as black and
+# disagrees with the blue accent sitting on it. Semantic hues are unchanged.
+#
+# A map rather than a per-element exception: this recognises exactly the swap
+# that was made, so an ink that is wrong for any other reason still fails.
+INK_EQUIVALENTS = {
+    "rgb(236, 238, 241)": "rgb(237, 237, 237)",   # --ink
+    "rgb(170, 177, 186)": "rgb(179, 179, 179)",   # --ink-2
+    "rgb(125, 133, 143)": "rgb(138, 138, 138)",   # --ink-3
+    "rgb(93, 100, 109)":  "rgb(94, 94, 94)",      # --ink-4
+    "rgb(107, 114, 123)": "rgb(110, 110, 110)",   # --color-neutral
 }
 
 GEOMETRY_FIELDS = ["fs", "fw", "col", "ff", "ls", "pad", "w", "h"]
@@ -164,15 +205,17 @@ GEOMETRY_FIELDS = ["fs", "fw", "col", "ff", "ls", "pad", "w", "h"]
 # and jumps to 30% has broken; one sitting at 6% forever has not. Re-record
 # with --record after a deliberate design change, never to silence a surprise.
 BASELINE = {
-    "running/rail":        0.032,
-    "running/brand":       0.078,
-    "running/nav-item":    0.061,
-    "running/nav-section": 0.069,
-    "running/row-action":  0.120,
-    "running/lamp":        0.000,
-    "videos/rail":         0.033,
-    "videos/search":       0.057,
-    "settings/rail":       0.035,
+    "playlists/action":      0.195,
+    "playlists/rail":        0.028,
+    "running/brand":         0.078,
+    "running/lamp":          0.000,
+    "running/nav-item":      0.061,
+    "running/nav-section":   0.062,
+    "running/rail":          0.026,
+    "running/row-action":    0.118,
+    "settings/rail":         0.028,
+    "videos/rail":           0.028,
+    "videos/search":         0.056,
 }
 BASELINE_SLACK = 0.05   # how far above its baseline a check may drift
 
@@ -336,12 +379,26 @@ async def run_screen(name, spec, channel, write_images):
                 continue
 
             # Geometry and typography, for every kind.
-            diffs = [f"{f}: {d[f]} vs {l[f]}" for f in GEOMETRY_FIELDS
-                     if str(d[f]) != str(l[f]) and not allowed(key, f)]
+            diffs = []
+            for f in GEOMETRY_FIELDS:
+                dv, lv = str(d[f]), str(l[f])
+                if dv == lv or allowed(key, f):
+                    continue
+                if f == "col" and INK_EQUIVALENTS.get(dv) == lv:
+                    continue          # the recorded charcoal swap, not drift
+                diffs.append(f"{f}: {dv} vs {lv}")
             checked += len(GEOMETRY_FIELDS)
             failed += len(diffs)
 
             note = ""
+            if kind == "chrome" and min(d["w"], d["h"], l["w"], l["h"]) < 1:
+                # Collapsed or off-screen on one side. Say so rather than
+                # crashing on a zero-width capture, and let the geometry diff
+                # above report the size that is actually wrong.
+                rows.append((key, kind, "zero-size", "; ".join(diffs)))
+                failed += 1
+                checked += 1
+                continue
             if kind == "chrome":
                 da, la = await dp.shot(d), await lp.shot(l)
                 drift, img = pixel_drift(da, la)

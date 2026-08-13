@@ -42,6 +42,7 @@
   /* Popover surfaces — opaque panels that sit over content (toast, modal).
      Can't be alpha greys, so they carry explicit light/dark values (dark
      override below). */
+  --ground:    #f4f4f4;   /* the page behind the panels */
   --panel-bg:  #fff;
   --panel-fg:  #000;
   --backdrop:  #0006;
@@ -83,17 +84,24 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Panel and ink taken from the design. #222 was a guess and #fff was the
-       browser default — pure white on a dark panel is harsher than anything
-       the design uses, and it was the single most-repeated wrong value on the
-       page, inherited by every element that didn't override it. */
-    --panel-bg: #16191c; --panel-fg: #eceef1;
-    --ink: #eceef1;
+    /* Charcoal, and deliberately neutral: red, green and blue equal at every
+       step. The design's darks carry a blue bias (#0f1113 is B19 R15) and the
+       ink a matching one, which on a large screen reads as a cold cast rather
+       than as black — and next to the blue accent it reads as two blues that
+       don't agree. Hue belongs to the semantic colours, which mean something;
+       the ground is the one surface that should mean nothing. */
+    --ground:   #0d0d0d;
+    --panel-bg: #171717; --panel-fg: #ededed;
+    --ink:      #ededed;
+    --ink-2:    #b3b3b3;
+    --ink-3:    #8a8a8a;
+    --ink-4:    #5e5e5e;
+    --color-neutral: #6e6e6e;
+    /* Semantic hues stay: green/amber/red/blue are the only colours here that
+       carry meaning, and neutralising them would take the meaning with them. */
     --color-accent: #6aa9ff;
     --color-ok: #3ecf8e; --color-warn: #e2a03f; --color-err: #f0685a;
-    --color-neutral: #6b727b;
-    --ink-2: #aab1ba; --ink-3: #7d858f; --ink-4: #5d646d;
-    --sunken: #090b0d;
+    --sunken: #080808;
     --groove: inset 0 1px 2px #00000087, inset 0 0 0 1px #ffffff0f;
     --raised: inset 0 1px 0 #ffffff33, inset 0 -1px 1px #00000052;
     --hold-fill: #f0685a47;
@@ -499,7 +507,7 @@ h1.page-title { font-size:12.5px; font-weight:600; color:var(--ink-3); margin:0 
 /* ── Explanatory note ───────────────────────────────────────────────── */
 /* Plain English, under a card heading. Carries facts about this channel —
    never instructions, and never an explanation of the design. */
-.note { font-size:.85rem; color:var(--ink-2); margin:.35rem 0 .9rem; max-width:64ch; line-height:1.5; }
+.note { font-size:12.5px; color:var(--ink-3); margin:0 0 14px; max-width:62ch; line-height:1.5; }
 
 /* ── Labelled field ─────────────────────────────────────────────────── */
 .field { display:grid; gap:5px; margin-bottom:14px; max-width:420px; }
