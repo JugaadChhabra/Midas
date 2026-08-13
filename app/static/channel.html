@@ -209,24 +209,7 @@
         <input id="ap-cap" type="number" min="1" max="200" value="10" style="width:6rem" />
         <span class="hint">Autopilot stops after this many each day, then picks up again tomorrow.</span>
       </div>
-
-      <div class="sec-head" style="margin-top:1.4rem; padding-top:1.1rem; border-top:1px solid var(--border-soft)">
-        <h3>Shorts</h3>
-      </div>
-      <p class="note">Cuts every video in this channel's folder on the office drive into Shorts, saved back to the same drive. Nothing is uploaded to YouTube.</p>
-      <div class="field">
-        <label id="nas-label">Folder on the drive</label>
-        <div id="nas-folder" data-dropdown data-label="Folder on the drive"
-             data-options='[{"value":"","label":"— none —"}]'></div>
-        <span class="hint" id="nas-status"></span>
-      </div>
-      <label class="field-check"><input type="checkbox" id="nas-autocut" /> <span>Cut new videos in this folder automatically</span></label>
       <div class="act-bar">
-        <button id="nas-cut-now">Cut them now</button>
-        <span class="muted" id="nas-cut-msg" style="font-size:.8rem"></span>
-      </div>
-
-      <div class="act-bar" style="margin-top:1.4rem; padding-top:1.1rem; border-top:1px solid var(--border-soft)">
         <button id="ap-save" class="btn-primary">Save</button>
       </div>
     </div>
@@ -308,6 +291,25 @@
         <button id="lang-save" class="btn-primary">Save</button>
       </div>
     </div>
+    <!-- Shorts cutting is a separate product that happens to live here. It sits
+         in Settings, not on the landing page: it has nothing to do with whether
+         autopilot is running, which is the question that page answers. -->
+    <div class="card">
+      <div class="sec-head"><h3>Cutting Shorts from the office drive</h3></div>
+      <p class="note">Cuts every video in this channel's folder on the office drive into Shorts, saved back to the same drive. Nothing is uploaded to YouTube, and none of this affects the rewriting above.</p>
+      <div class="field">
+        <label id="nas-label">Folder on the drive</label>
+        <div id="nas-folder" data-dropdown data-label="Folder on the drive"
+             data-options='[{"value":"","label":"— none —"}]'></div>
+        <span class="hint" id="nas-status"></span>
+      </div>
+      <label class="field-check"><input type="checkbox" id="nas-autocut" /> <span>Cut new videos in this folder automatically</span></label>
+      <div class="act-bar">
+        <button id="nas-cut-now">Cut them now</button>
+        <span class="muted" id="nas-cut-msg" style="font-size:.8rem"></span>
+      </div>
+    </div>
+
     <div class="card">
       <div class="sec-head"><h3>Instructions</h3></div>
       <p class="note">These decide every title, description and tag Midas writes. Changing them changes everything written from now on; what's already live stays as it is.</p>

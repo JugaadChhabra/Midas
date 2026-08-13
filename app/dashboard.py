@@ -94,6 +94,12 @@ def _aggregate_rpc() -> tuple[dict, int, int]:
         if cid is None:
             continue
         stats[cid] = {k: (row.get(k) or 0) for k in _STAT_KEYS}
+        # Seven daily counts, oldest first. Deliberately outside _STAT_KEYS:
+        # that set is the scalar contract the RPC/legacy parity test walks, and
+        # the legacy path has no cheap way to produce this. Absent means "no
+        # history", which the board renders as no strip rather than as zeros.
+        if row.get("applied_by_day"):
+            stats[cid]["applied_by_day"] = row["applied_by_day"]
     shorts = summary.get("shorts") or {}
     return stats, int(shorts.get("cut_total") or 0), int(shorts.get("uploaded_total") or 0)
 
@@ -262,6 +268,8 @@ def _compute_dashboard():
             "applied_total": s["applied_total"],
             "delta_views_7d": s["delta_views_7d"],
             "hours_since_sync": hours_since_sync,
+            # Only present on the RPC path; the board checks before drawing.
+            **({"applied_by_day": s["applied_by_day"]} if "applied_by_day" in s else {}),
         })
 
     # ── System health ─────────────────────────────────────────────────────

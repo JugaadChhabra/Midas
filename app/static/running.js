@@ -88,15 +88,18 @@
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /* ── Rows ────────────────────────────────────────────────────────── */
-  // Daily history isn't exposed per channel yet, so the strip carries what we
-  // do have: today's applies. It still answers "did anything happen today?"
-  // across 13 rows, and gains six days of shape when the API grows one.
+  // Seven real days from the API, or nothing. The earlier version padded
+  // today's count with six zeros, which drew six days of "nothing happened"
+  // that had never been measured — the same fabrication as any other number we
+  // don't have. An absent strip is honest; an invented flatline is not.
   function beatFor(c) {
-    return [0, 0, 0, 0, 0, 0, c.applied_today || 0].join(',');
+    const days = c.applied_by_day;
+    return Array.isArray(days) && days.length ? days.join(',') : '';
   }
 
   function rowHTML(c, beatMax, prefixLen) {
     const st = stateOf(c);
+    const beat = beatFor(c);
     const figure = c.pending_count
       ? `${fmt(c.pending_count)} waiting`
       : (c.video_count ? `${fmt(c.video_count)} videos` : '—');
@@ -105,8 +108,9 @@
       <span class="nm" title="${escapeHtml(c.name || c.id)}">${escapeHtml(
         Sidebar.shortLabel(c.name || c.id, prefixLen))}</span>
       <span class="why">${st.why}</span>
-      <span class="beat" data-spark data-values="${beatFor(c)}" data-max="${beatMax}"
-            data-label="rewrites put live, last 7 days"></span>
+      ${beat ? `<span class="beat" data-spark data-values="${beat}" data-max="${beatMax}"
+            data-label="rewrites put live, last ${beat.split(',').length} days"></span>`
+              : '<span></span>'}
       <span class="fig">${figure}</span>
       <span class="act">${!st.action ? ''
         : st.action === 'Try again'
@@ -141,7 +145,8 @@
                   + (buckets.attention || []).filter(c => stateOf(c).key === 'bad').length;
     const notRunning = channels.length - working;
     const badTotal = channels.reduce((n, c) => n + (c.quarantined_count || 0), 0);
-    const beatMax = Math.max(1, ...channels.map(c => c.applied_today || 0));
+    const beatMax = Math.max(1, ...channels.flatMap(
+      c => Array.isArray(c.applied_by_day) ? c.applied_by_day : [c.applied_today || 0]));
     // These channels are one show in many languages, so the distinguishing part
     // is the tail — same treatment the switcher gives them.
     const prefixLen = Sidebar.commonWordPrefix(channels.map(c => c.name));
