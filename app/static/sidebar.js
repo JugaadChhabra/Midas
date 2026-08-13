@@ -29,7 +29,7 @@
           stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
 
   const ICONS = {
-    home:        () => stroke('<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'),
+    running:     () => stroke('<path d="M3 12h4l2.5-6 4 12L16 12h5"/>'),
     videos:      () => stroke('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8.5 5.5 3.5L10 15.5z"/>'),
     autopilot:   () => stroke('<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/>'),
     playlists:   () => stroke('<path d="M3 6h11M3 12h11M3 18h7"/><path d="m16.5 12.5 4.5 2.75-4.5 2.75z"/>'),

@@ -1,0 +1,753 @@
+<title>Midas — new shape</title>
+<style>
+/* ── Tokens ─────────────────────────────────────────────────────────────
+   Console neutrals with a cool bias; lamps carried over from theme.css so
+   this reads as the same product. */
+:root{
+  --console:#f6f7f8; --panel:#fff; --rail:#f6f7f8;
+  --ink:#14161a; --ink-2:#4a4f57; --ink-3:#767c86; --ink-4:#9aa0aa;
+  --line:#14161a1a; --line-soft:#14161a12; --line-strong:#14161a2e;
+  --lamp-run:#1c8c5f; --lamp-warn:#b47000; --lamp-fault:#c0392b; --lamp-idle:#9aa0aa;
+  --accent:#2b6fd6;
+  --run-bg:#1c8c5f1f; --warn-bg:#b470001f; --fault-bg:#c0392b1a; --accent-bg:#2b6fd61a;
+  --shadow:0 0 0 1px #14161a0f,0 1px 2px -1px #14161a14,0 2px 6px #14161a0d;
+  --r:10px; --r-sm:6px; --r-pill:999px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --groove-bg:#e8eaee;
+  --groove:inset 0 1px 2px #14161a26, inset 0 0 0 1px #14161a14;
+  --raised:inset 0 1px 0 #ffffff59, inset 0 -1px 1px #00000024;
+  --hold-fill:#c0392b30;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --console:#0f1113; --panel:#16191c; --rail:#0f1113;
+    --ink:#eceef1; --ink-2:#aab1ba; --ink-3:#7d858f; --ink-4:#5d646d;
+    --line:#ffffff16; --line-soft:#ffffff0e; --line-strong:#ffffff2b;
+    --lamp-run:#3ecf8e; --lamp-warn:#e2a03f; --lamp-fault:#f0685a; --lamp-idle:#6b727b;
+    --accent:#6aa9ff;
+    --run-bg:#3ecf8e1f; --warn-bg:#e2a03f1f; --fault-bg:#f0685a1a; --accent-bg:#6aa9ff1a;
+    --shadow:0 0 0 1px #ffffff14;
+    --groove-bg:#090b0d;
+    --groove:inset 0 1px 2px #00000087, inset 0 0 0 1px #ffffff0f;
+    --raised:inset 0 1px 0 #ffffff33, inset 0 -1px 1px #00000052;
+    --hold-fill:#f0685a47;
+  }
+}
+:root[data-theme="light"]{--hold-fill:#c0392b30;--groove-bg:#e8eaee;--groove:inset 0 1px 2px #14161a26, inset 0 0 0 1px #14161a14;--raised:inset 0 1px 0 #ffffff59, inset 0 -1px 1px #00000024;
+  --console:#f6f7f8; --panel:#fff; --rail:#f6f7f8;
+  --ink:#14161a; --ink-2:#4a4f57; --ink-3:#767c86; --ink-4:#9aa0aa;
+  --line:#14161a1a; --line-soft:#14161a12; --line-strong:#14161a2e;
+  --lamp-run:#1c8c5f; --lamp-warn:#b47000; --lamp-fault:#c0392b; --lamp-idle:#9aa0aa;
+  --accent:#2b6fd6;
+  --run-bg:#1c8c5f1f; --warn-bg:#b470001f; --fault-bg:#c0392b1a; --accent-bg:#2b6fd61a;
+  --shadow:0 0 0 1px #14161a0f,0 1px 2px -1px #14161a14,0 2px 6px #14161a0d;
+}
+:root[data-theme="dark"]{--hold-fill:#f0685a47;--groove-bg:#090b0d;--groove:inset 0 1px 2px #00000087, inset 0 0 0 1px #ffffff0f;--raised:inset 0 1px 0 #ffffff33, inset 0 -1px 1px #00000052;
+  --console:#0f1113; --panel:#16191c; --rail:#0f1113;
+  --ink:#eceef1; --ink-2:#aab1ba; --ink-3:#7d858f; --ink-4:#5d646d;
+  --line:#ffffff16; --line-soft:#ffffff0e; --line-strong:#ffffff2b;
+  --lamp-run:#3ecf8e; --lamp-warn:#e2a03f; --lamp-fault:#f0685a; --lamp-idle:#6b727b;
+  --accent:#6aa9ff;
+  --run-bg:#3ecf8e1f; --warn-bg:#e2a03f1f; --fault-bg:#f0685a1a; --accent-bg:#6aa9ff1a;
+  --shadow:0 0 0 1px #ffffff14;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--console);color:var(--ink);
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ── Shell ─────────────────────────────────────────────────────────── */
+.shell{display:flex;align-items:stretch;min-height:100vh;gap:6px}
+.rail{position:sticky;top:0;height:100vh;flex:0 0 244px;background:var(--rail);
+  display:flex;flex-direction:column;padding:14px 10px;border-right:1px solid var(--line-soft)}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 16px;font-weight:700;letter-spacing:-.01em}
+.brand svg{flex:none}
+.nav{display:flex;flex-direction:column;gap:1px}
+.nav-sec{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-4);padding:14px 8px 5px}
+.nav button{display:flex;align-items:center;gap:9px;width:100%;padding:7px 8px;border:0;
+  background:none;border-radius:var(--r-sm);color:var(--ink-2);text-align:left;font-size:13.5px;
+  transition:background-color .15s,color .15s}
+.nav button:hover{background:var(--line-soft);color:var(--ink)}
+.nav button[aria-current="true"]{background:var(--accent-bg);color:var(--accent);font-weight:600}
+.nav svg{flex:none;opacity:.85}
+.rail-foot{margin-top:auto;border-top:1px solid var(--line-soft);padding-top:10px}
+.chan-btn{display:flex;align-items:center;gap:9px;width:100%;padding:7px 8px;border:0;background:none;
+  border-radius:var(--r-sm);text-align:left}
+.chan-btn:hover{background:var(--line-soft)}
+.avatar{flex:none;width:26px;height:26px;display:grid;place-items:center;border:1px solid var(--line);
+  border-radius:var(--r-sm);font-size:10px;font-weight:700;font-family:var(--mono)}
+.chan-btn .nm{display:block;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chan-btn .hd{display:block;font-size:10.5px;color:var(--ink-4)}
+
+.main{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);margin:6px 6px 6px 0;padding:26px 30px 40px}
+.page{display:none}.page.on{display:block}
+
+/* ── Page header ───────────────────────────────────────────────────── */
+.eyebrow{font-size:12.5px;font-weight:600;color:var(--ink-3);margin:0 0 14px}
+.lede{font-size:29px;font-weight:700;letter-spacing:-.025em;line-height:1.12;margin:0 0 5px;text-wrap:balance}
+.lede em{font-style:normal;font-size:15px;font-weight:600;color:var(--ink-3);letter-spacing:0}
+.meta{font-size:13px;color:var(--ink-3);margin:0 0 22px}
+
+/* ── Quota ─────────────────────────────────────────────────────────── */
+.quota{display:flex;align-items:center;gap:14px;padding:11px 14px;border:1px solid var(--line);
+  border-radius:var(--r);margin-bottom:26px}
+.quota-fig{font-family:var(--mono);font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.quota-l{font-size:11px;color:var(--ink-3)}
+.quota-track{flex:1;height:10px;padding:1.5px;background:var(--groove-bg);box-shadow:var(--groove);
+  border-radius:var(--r-pill);overflow:hidden;min-width:80px}
+.quota-track i{display:block;height:100%;border-radius:var(--r-pill);background-color:var(--lamp-run);
+  background-image:linear-gradient(180deg,#ffffff2e,#00000021);box-shadow:var(--raised)}
+.spark{display:flex;align-items:flex-end;gap:2px;height:22px;padding-bottom:3px;
+  border-bottom:1px solid var(--line-soft)}
+.spark b{width:5px;background:var(--ink-4);border-radius:1px;display:block}
+.spark b.zero{height:2px;background:var(--line-strong);opacity:.5}
+
+/* ── Triage groups (signature composition) ─────────────────────────── */
+.grp{margin:0 0 8px;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.grp .n{font-family:var(--mono);color:var(--ink-4);letter-spacing:0}
+.grp-rule{flex:1;height:1px;background:var(--line-soft)}
+.group{margin-bottom:26px}
+
+.row{display:grid;grid-template-columns:9px minmax(150px,1.3fr) minmax(170px,1.1fr) 86px 78px 82px;
+  gap:14px;align-items:center;padding:11px 12px;border-radius:var(--r-sm);border:1px solid transparent;
+  width:100%;background:none;text-align:left;transition:background-color .12s,border-color .12s}
+.row:hover{background:var(--line-soft);border-color:var(--line-soft)}
+.row + .row{margin-top:2px}
+.lamp{width:9px;height:9px;border-radius:50%;background:var(--lamp-idle)}
+.lamp.run{background:var(--lamp-run);box-shadow:0 0 0 3px var(--run-bg)}
+.lamp.warn{background:var(--lamp-warn);box-shadow:0 0 0 3px var(--warn-bg)}
+.lamp.fault{background:var(--lamp-fault);box-shadow:0 0 0 3px var(--fault-bg)}
+.row .nm{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .why{font-size:12.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .why b{color:var(--ink-2);font-weight:600}
+
+/* Heartbeat — 7 days of activity. Empty bars are the signal, not the absence. */
+.beat{display:flex;align-items:flex-end;gap:3px;height:20px;padding-bottom:3px;
+  border-bottom:1px solid var(--line-soft)}
+.beat i{width:8px;border-radius:1.5px;display:block;background:var(--lamp-run)}
+.beat i.z{height:2px;background:var(--line-strong);opacity:.5}
+.beat i.today{box-shadow:0 4px 0 -1px var(--accent)}
+
+.cap{font-family:var(--mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.act{justify-self:end}
+.btn{padding:5px 11px;border:1px solid var(--line-strong);background:none;border-radius:var(--r-sm);
+  font-size:12.5px;font-weight:500;transition:background-color .12s,transform .1s}
+.btn:hover{background:var(--line-soft)}
+.btn:active{transform:scale(.97)}
+.btn-p{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn-p:hover{background:var(--accent);filter:brightness(1.07)}
+.btn-q{border-color:transparent;color:var(--ink-3)}
+.btn-q:hover{color:var(--ink)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Hold to confirm — for anything that writes to live YouTube. The fill is a
+   progress track laid under the label, so the button IS the progress bar. */
+.hold{position:relative;overflow:hidden;isolation:isolate}
+.hold .fill{position:absolute;inset:0;z-index:-1;width:0;background:var(--hold-fill);
+  transition:width 60ms linear}
+.hold[data-holding="true"]{border-color:var(--lamp-fault)}
+.hold[data-done="true"]{border-color:var(--lamp-run);color:var(--lamp-run)}
+.hold[data-done="true"] .fill{width:100%;background:var(--run-bg)}
+.hold.btn-primary[data-holding="true"]{border-color:#fff6}
+.hold.btn-primary .fill{background:#ffffff4d}
+
+/* ── Bits ──────────────────────────────────────────────────────────── */
+.pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:var(--r-pill);
+  font-size:11px;font-weight:600;border:1px solid}
+.p-run{background:var(--run-bg);color:var(--lamp-run);border-color:transparent}
+.p-warn{background:var(--warn-bg);color:var(--lamp-warn);border-color:transparent}
+.p-fault{background:var(--fault-bg);color:var(--lamp-fault);border-color:transparent}
+.p-idle{background:var(--line-soft);color:var(--ink-3);border-color:transparent}
+.p-info{background:var(--accent-bg);color:var(--accent);border-color:transparent}
+
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:16px}
+.chip{display:inline-flex;align-items:center;gap:7px;height:27px;padding:0 11px;border:1px solid transparent;
+  border-radius:var(--r-pill);background:none;color:var(--ink-3);font-size:12.5px;font-weight:500;
+  transition:background-color .18s,box-shadow .18s,color .18s}
+.chip:hover{background:var(--line-soft);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--panel);border-color:var(--line);box-shadow:var(--shadow);
+  color:var(--ink);font-weight:600}
+.dot{width:6px;height:6px;border-radius:50%}
+.chip .n{font-family:var(--mono);font-size:11px;padding:0 5px;border-radius:4px;background:var(--line-soft);color:var(--ink-3)}
+
+.card{border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-bottom:16px}
+.card h3{margin:0 0 3px;font-size:14px;font-weight:650}
+.card p.note{margin:0 0 14px;font-size:12.5px;color:var(--ink-3);max-width:62ch}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.sec-head h3{margin:0;font-size:14px;font-weight:650}
+.sec-head > :last-child{margin-left:auto}
+.meter{height:10px;padding:1.5px;background:var(--groove-bg);box-shadow:var(--groove);
+  border-radius:var(--r-pill);overflow:hidden}
+.meter i{display:block;height:100%;border-radius:var(--r-pill);background-color:var(--accent);
+  background-image:linear-gradient(180deg,#ffffff2e,#00000021);box-shadow:var(--raised)}
+.mrow{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px}
+.mrow .v{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.actions .btn-q{margin-left:auto}
+
+/* ── Table ─────────────────────────────────────────────────────────── */
+.tbl{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.tbl-scroll{overflow-x:auto}
+.thead,.trow{display:grid;gap:12px;align-items:center;padding:9px 13px}
+.thead{font-size:11px;font-weight:650;color:var(--ink-4);border-bottom:1px solid var(--line);
+  letter-spacing:.03em;text-transform:uppercase}
+.trow{border-bottom:1px solid var(--line-soft);font-size:13px;width:100%;background:none;text-align:left;
+  border-left:0;border-right:0;border-top:0;transition:background-color .12s}
+.trow:hover{background:var(--line-soft)}
+.trow:last-of-type{border-bottom:0}
+.tw{min-width:720px}
+#pg-videos .thead,#pg-videos .trow{grid-template-columns:44px minmax(200px,2fr) 92px 104px 66px 20px}
+#pg-play .thead,#pg-play .trow{grid-template-columns:74px minmax(180px,1.6fr) minmax(140px,1fr) 70px}
+.thumb{width:44px;height:25px;border-radius:3px;background:linear-gradient(135deg,var(--line-strong),var(--line-soft));
+  outline:1px solid #ffffff10;outline-offset:-1px}
+.t-name{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t-sub{display:block;font-size:11.5px;color:var(--ink-4);font-family:var(--mono);margin-top:2px}
+.caret{color:var(--ink-4);transition:transform .18s cubic-bezier(.23,1,.32,1)}
+.trow[aria-expanded="true"] .caret{transform:rotate(90deg)}
+
+/* Audit history — the drill-down that replaces the Performance page */
+.hist{background:var(--line-soft);border-bottom:1px solid var(--line-soft);padding:14px 16px 16px 58px}
+.hist[hidden]{display:none}
+.ev{display:grid;grid-template-columns:132px 1fr auto;gap:14px;align-items:start;padding:9px 0}
+.ev + .ev{border-top:1px dashed var(--line)}
+.ev-when{font-family:var(--mono);font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.ev-when .ago{display:block;color:var(--ink-4);font-size:11px}
+.ev-what{font-size:12.5px;color:var(--ink-2)}
+.ev-what .k{color:var(--ink-4)}
+.ev-what .un{color:var(--ink-4)}
+.ev-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.tag{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:4px;background:var(--line-soft);color:var(--ink-3)}
+
+/* ── Form ──────────────────────────────────────────────────────────── */
+.field{display:grid;gap:5px;margin-bottom:14px;max-width:420px}
+.field label{font-size:12.5px;font-weight:600}
+.field .hint{font-size:11.5px;color:var(--ink-4)}
+input[type=text],input[type=number],input[type=search],select,textarea{
+  font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line-strong);border-radius:var(--r-sm);
+  background:var(--console);color:var(--ink);width:100%}
+textarea{font-family:var(--mono);font-size:12px;line-height:1.55;resize:vertical}
+.switch{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;cursor:pointer}
+.search{max-width:320px;margin-bottom:14px}
+
+/* ── Log ───────────────────────────────────────────────────────────── */
+.log{font-family:var(--mono);font-size:12px;display:grid;gap:0}
+.log div{display:grid;grid-template-columns:120px 62px 1fr;gap:12px;padding:5px 0;border-bottom:1px solid var(--line-soft)}
+.log div:last-child{border-bottom:0}
+.log .t{color:var(--ink-4)}
+.log .ok{color:var(--lamp-run)}.log .wn{color:var(--lamp-warn)}.log .er{color:var(--lamp-fault)}
+
+.toast{position:fixed;bottom:18px;right:18px;background:var(--panel);border:1px solid var(--line-strong);
+  border-radius:var(--r-sm);padding:10px 14px;box-shadow:var(--shadow);font-size:13px;z-index:50;
+  animation:tin .22s cubic-bezier(.23,1,.32,1)}
+@keyframes tin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.note-bar{font-size:11.5px;color:var(--ink-4);border-top:1px solid var(--line-soft);margin-top:28px;padding-top:12px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:900px){
+  .shell{flex-direction:column}
+  .rail{position:static;height:auto;flex:none;width:auto;border-right:0;border-bottom:1px solid var(--line-soft)}
+  .main{margin:6px}
+  .row{grid-template-columns:9px 1fr auto;row-gap:6px}
+  .row .why{grid-column:2/-1}.beat,.cap{display:none}
+}
+</style>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
+        <g stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+          <path d="M12 1.8v3.4M12 18.8v3.4M22.2 12h-3.4M5.2 12H1.8"/>
+          <path d="m19.2 4.8-2.4 2.4M7.2 16.8l-2.4 2.4M19.2 19.2l-2.4-2.4M7.2 7.2 4.8 4.8"/>
+        </g>
+      </svg>Midas
+    </div>
+
+    <nav class="nav">
+      <button data-go="running" aria-current="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>
+        Running
+      </button>
+
+      <div class="nav-sec" id="chan-sec">Baalgeet Punjabi</div>
+      <button data-go="auto">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/></svg>
+        Autopilot
+      </button>
+      <button data-go="videos">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m10 9 5.5 3.5L10 16z"/></svg>
+        Videos
+      </button>
+      <button data-go="play">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h11M3 12h11M3 18h7"/><path d="m16.5 12.5 4.5 2.75-4.5 2.75z"/></svg>
+        Playlists
+      </button>
+      <button data-go="set">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.1 14.4a1.5 1.5 0 0 0 .3 1.7l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.5 1.5 0 0 0-2.6 1.1v.2a2 2 0 1 1-4 0v-.1a1.5 1.5 0 0 0-2.6-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.5 1.5 0 0 0-1.1-2.6h-.2a2 2 0 1 1 0-4h.1a1.5 1.5 0 0 0 1.1-2.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.5 1.5 0 0 0 2.6-1.1V3a2 2 0 1 1 4 0v.1a1.5 1.5 0 0 0 2.6 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.5 1.5 0 0 0 1.1 2.6h.2a2 2 0 1 1 0 4h-.1a1.5 1.5 0 0 0-1.4.9z"/></svg>
+        Settings
+      </button>
+    </nav>
+
+    <div class="rail-foot">
+      <button class="chan-btn" id="switcher">
+        <span class="avatar" id="av">BP</span>
+        <span style="flex:1;min-width:0">
+          <span class="nm" id="sw-nm">Baalgeet Punjabi</span>
+          <span class="hd" id="sw-hd">13 channels</span>
+        </span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="opacity:.45"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ══ RUNNING ══════════════════════════════════════════════════ -->
+    <section class="page on" id="pg-running">
+      <p class="eyebrow">Checked just now · 12 Aug, 20:36</p>
+      <p class="lede" id="run-lede">—</p>
+      <p class="meta" id="run-meta"></p>
+
+      <div class="quota">
+        <div>
+          <div class="quota-fig">9,352</div>
+          <div class="quota-l">YouTube quota left today</div>
+        </div>
+        <div class="quota-track" title="348 of 10,000 used"><i style="width:3.5%"></i></div>
+        <div style="text-align:right">
+          <div class="quota-l">resets in 16h 0m · 12:30 IST</div>
+          <div class="quota-l" style="color:var(--ink-4)">348 used today · none used on 6 of the last 8 days</div>
+        </div>
+        <div class="spark" id="spark" title="daily quota spend, 8 days"></div>
+      </div>
+
+      <div id="groups"></div>
+    </section>
+
+    <!-- ══ AUTOPILOT ════════════════════════════════════════════════ -->
+    <section class="page" id="pg-auto">
+      <p class="eyebrow" id="auto-eyebrow">Baalgeet Punjabi</p>
+      <p class="lede">Autopilot is off <em>and this channel's data is 12 days old</em></p>
+      <p class="meta">Last ran 11:51 today · limit 200 a day · 6 rewrites waiting to go live</p>
+
+      <div class="card">
+        <div class="sec-head">
+          <h3>Why it stopped</h3>
+          <span class="pill p-idle">Off</span>
+        </div>
+        <p class="note">Autopilot rewrites titles, descriptions and tags until it hits the daily limit, then stops. It won't run at all right now, because it would be working from a 12-day-old copy of the channel.</p>
+        <div class="mrow"><span>Put live today</span><span class="v">0 / 200</span></div>
+        <div class="meter"><i style="width:0%"></i></div>
+        <div class="actions">
+          <button class="btn btn-p" data-toast="Fetching the latest from YouTube. Autopilot starts when it finishes.">Update channel data, then start</button>
+          <button class="btn hold" data-hold data-ms="1100" data-label="Hold to start anyway"
+                  data-done-label="Started" data-confirm-toast="Autopilot started against 12-day-old data."
+          ><span class="fill"></span><span class="txt">Hold to start anyway</span></button>
+          <button class="btn btn-q" data-go="set">Change the daily limit →</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-head"><h3>Recent activity</h3><span class="quota-l">last 8 runs</span></div>
+        <div class="log">
+          <div><span class="t">11:51:34</span><span class="wn">skip</span><span>skipped — channel data 12 days old</span></div>
+          <div><span class="t">11:36:34</span><span class="wn">skip</span><span>skipped — channel data 12 days old</span></div>
+          <div><span class="t">11:21:34</span><span class="wn">skip</span><span>skipped — channel data 12 days old</span></div>
+          <div><span class="t">Jul 31 05:40</span><span class="ok">ok</span><span>11 videos rewritten · 4 went live</span></div>
+          <div><span class="t">Jul 31 04:40</span><span class="ok">ok</span><span>14 videos rewritten · 6 went live</span></div>
+          <div><span class="t">Jul 31 03:40</span><span class="er">fail</span><span>2 rewrites unusable — nothing went live</span></div>
+          <div><span class="t">Jul 31 02:40</span><span class="ok">ok</span><span>9 videos rewritten · 5 went live</span></div>
+          <div><span class="t">Jul 31 01:40</span><span class="ok">ok</span><span>8 videos rewritten · 3 went live</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-head"><h3>Not live yet</h3><span class="pill p-info">6 waiting</span></div>
+        <p class="note">Rewrites that are finished but not yet live on YouTube. The oldest has been waiting 33 days.</p>
+        <div class="actions">
+          <button class="btn btn-p hold" data-hold data-ms="900" data-label="Hold to put 6 live"
+                  data-done-label="6 are live" data-confirm-toast="6 rewrites are now live on YouTube."
+          ><span class="fill"></span><span class="txt">Hold to put 6 live</span></button>
+          <button class="btn" data-go="videos">Review them →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ VIDEOS ═══════════════════════════════════════════════════ -->
+    <section class="page" id="pg-videos">
+      <p class="eyebrow">Baalgeet Punjabi</p>
+      <p class="lede">Videos <em>5,056 on this channel · 451 rewritten so far</em></p>
+      <p class="meta">Last change went live 8 July · 6 waiting to go live · 1 unusable</p>
+
+      <input class="search" type="search" placeholder="Search title or video id…" aria-label="Search videos" oninput="filterVideos(this.value)"/>
+
+      <div class="chips" id="v-chips"></div>
+
+      <div class="tbl"><div class="tbl-scroll"><div class="tw">
+        <div class="thead">
+          <span></span><span>Video</span><span>State</span><span>Changed ↓</span><span>Changes</span><span></span>
+        </div>
+        <div id="v-rows"></div>
+      </div></div></div>
+    </section>
+
+    <!-- ══ PLAYLISTS ════════════════════════════════════════════════ -->
+    <section class="page" id="pg-play">
+      <p class="eyebrow">Baalgeet Punjabi</p>
+      <p class="lede">778 playlist changes <em>to review</em></p>
+      <p class="meta">26 playlists · 599 videos sorted · 401 in no playlist at all</p>
+
+      <div class="card">
+        <div class="sec-head"><h3>Sorting videos into playlists</h3></div>
+        <p class="note">Midas has to read a video once before it can suggest which playlists it belongs in. It has read 22 of them so far.</p>
+        <div class="mrow"><span>Videos read</span><span class="v">22 / 1,000 · 2%</span></div>
+        <div class="meter"><i style="width:2%"></i></div>
+        <div class="actions">
+          <button class="btn" data-toast="Updating playlists now.">Update playlists now</button>
+          <button class="btn" data-toast="Reading every video. This runs once and takes a while.">Read every video</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-head"><h3>Suggested changes</h3><button class="btn btn-q" data-toast="Refreshed.">Refresh</button></div>
+        <div class="chips">
+          <button class="chip" aria-pressed="true">All<span class="n">778</span></button>
+          <button class="chip"><span class="dot" style="background:var(--lamp-run)"></span>Add<span class="n">776</span></button>
+          <button class="chip"><span class="dot" style="background:var(--lamp-fault)"></span>Remove<span class="n">2</span></button>
+        </div>
+        <div class="actions" style="margin:0 0 12px">
+          <button class="btn btn-p hold" data-hold data-ms="900" data-label="Hold to approve 2"
+                  data-done-label="2 approved" data-confirm-toast="2 playlist changes approved."
+          ><span class="fill"></span><span class="txt">Hold to approve 2</span></button>
+          <button class="btn" data-toast="2 playlist changes rejected.">Reject 2 selected</button>
+        </div>
+        <div class="tbl"><div class="tbl-scroll"><div class="tw" style="min-width:600px">
+          <div class="thead"><span>Action</span><span>Video</span><span>Playlist</span><span>Match</span></div>
+          <div id="p-rows"></div>
+        </div></div></div>
+      </div>
+    </section>
+
+    <!-- ══ SETTINGS ═════════════════════════════════════════════════ -->
+    <section class="page" id="pg-set">
+      <p class="eyebrow">Baalgeet Punjabi</p>
+      <p class="lede">Settings</p>
+      <p class="meta">Punjabi · limit 200 a day · instructions last changed 8 July</p>
+
+      <div class="card">
+        <div class="sec-head"><h3>Channel</h3></div>
+        <div class="field">
+          <label for="lang">Content language</label>
+          <select id="lang"><option>Punjabi</option><option>Hindi</option><option>English</option></select>
+        </div>
+        <div class="field">
+          <label for="cap">Videos per day</label>
+          <input id="cap" type="number" value="200"/>
+          <span class="hint">Autopilot stops after this many videos each day.</span>
+        </div>
+        <div class="field">
+          <label for="nas">NAS folder</label>
+          <input id="nas" type="text" value="/tmkoc/punjabi"/>
+        </div>
+        <label class="switch"><input type="checkbox" checked/> Include Shorts</label>
+      </div>
+
+      <div class="card">
+        <div class="sec-head">
+          <h3>Instructions</h3>
+          <span class="quota-l mono">version 12 · 8 July</span>
+        </div>
+        <p class="note">These instructions decide every title, description and tag Midas writes. Version 12 has written 451 of them. Older versions stay on record, so you can tell which instructions produced which title.</p>
+        <textarea rows="7">You are optimising metadata for a Punjabi children's rhymes channel.
+Rewrite the title to lead with the actual rhyme in Punjabi script, followed by
+one English keyword. Purge spam tags (TMKOC, unrelated show names) and rebuild
+12–15 tags blending Punjabi script with strategic English keywords…</textarea>
+        <div class="actions">
+          <button class="btn btn-p" data-toast="Saved. Everything Midas writes from now on uses version 13.">Save as v13</button>
+          <button class="btn btn-q" data-toast="Showing what changed between version 11 and 12.">Compare with v11</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* Real figures from the live account on 2026-08-12. Per-channel 7-day history
+   is illustrative — the API exposes today's counts, not a daily series yet. */
+const CH = [
+  {n:"Baalgeet Haryanvi",  s:"BH", vids:4393, aud:79,   pend:4, cap:10,  today:0, on:true,  sync:6.02,  tick:"13:15", beat:[0,0,1,2,1,0,3]},
+  {n:"Baalgeet Marathi",   s:"BM", vids:5040, aud:1558, pend:0, cap:200, today:2, on:false, sync:295.9, tick:"14:30", beat:[0,0,0,0,0,0,2]},
+  {n:"Baalgeet Punjabi",   s:"BP", vids:5056, aud:451,  pend:6, cap:200, today:0, on:false, sync:297.3, tick:"11:51", beat:[0,0,0,0,0,0,0]},
+  {n:"Baalgeet Bhojpuri",  s:"BB", vids:4962, aud:6,    pend:0, cap:10,  today:0, on:false, sync:295.8, tick:"13:45", beat:[0,0,0,0,0,0,0]},
+  {n:"Rhymes / Baalgeet",  s:"RB", vids:5998, aud:0,    pend:0, cap:10,  today:0, on:false, sync:295.9, tick:"14:15", beat:[0,0,0,0,0,0,0]},
+  {n:"Baalgeet Gujarati",  s:"BG", vids:5932, aud:0,    pend:0, cap:10,  today:0, on:false, sync:295.0, tick:"12:06", beat:[0,0,0,0,0,0,0]},
+  {n:"English Rhymes",     s:"ER", vids:5348, aud:0,    pend:0, cap:10,  today:0, on:false, sync:295.9, tick:"14:00", beat:[0,0,0,0,0,0,0]},
+  {n:"Baalgeet Malayalam", s:"BM2",vids:4237, aud:0,    pend:0, cap:10,  today:0, on:false, sync:294.2, tick:"11:21", beat:[0,0,0,0,0,0,0]},
+  {n:"Baalgeet Tamil",     s:"BT", vids:4066, aud:0,    pend:0, cap:10,  today:0, on:false, sync:295.6, tick:"13:30", beat:[0,0,0,0,0,0,0]},
+  {n:"3D Animated Series", s:"3A", vids:2372, aud:0,    pend:0, cap:10,  today:0, on:false, sync:294.6, tick:"11:36", beat:[0,0,0,0,0,0,0]},
+  {n:"Balgeet Rajasthani", s:"BR", vids:1401, aud:0,    pend:0, cap:200, today:0, on:false, sync:293.2, tick:"14:45", beat:[0,0,0,0,0,0,0]},
+  {n:"Kannada Rhymes",     s:"KR", vids:0,    aud:0,    pend:0, cap:10,  today:0, on:false, sync:null,  tick:null,    beat:[0,0,0,0,0,0,0]},
+  {n:"Telugu Rhymes",      s:"TR", vids:0,    aud:0,    pend:0, cap:10,  today:0, on:false, sync:null,  tick:null,    beat:[0,0,0,0,0,0,0]},
+];
+
+const fmt = n => n.toLocaleString();
+const days = h => h == null ? null : Math.round(h / 24);
+
+/* One state per channel, worst-first. Stale beats off: turning autopilot on
+   against a 12-day-old mirror doesn't make it running, it makes it wrong. */
+function stateOf(c){
+  if (c.vids === 0)              return {k:"setup", lamp:"", why:"<b>Never set up</b> — no videos fetched from YouTube yet", act:"Update"};
+  if (c.sync > 48)               return {k:"stale", lamp:"fault", why:`<b>Channel data ${days(c.sync)} days old</b> — autopilot won't run`, act:"Update"};
+  if (!c.on)                     return {k:"off",   lamp:"", why:"Autopilot off · data is current", act:"Enable"};
+  return {k:"run", lamp:"run", why:`Ran ${c.tick} · ${c.today} of ${c.cap} rewritten today`, act:""};
+}
+
+const BEAT_MAX = Math.max(1, ...CH.flatMap(c => c.beat));   // shared, so rows compare
+function beatHTML(b){
+  const max = BEAT_MAX;
+  return `<span class="beat">${b.map((v,i)=>{
+    const h = v ? Math.max(4, Math.round(v/max*17)) : 0;
+    const cls = (v ? "on" : "z") + (i===6 ? " today" : "");
+    return `<i class="${cls}" style="${v?`height:${h}px`:""}" title="${v} applied"></i>`;
+  }).join("")}</span>`;
+}
+
+function rowHTML(c){
+  const st = stateOf(c);
+  return `<button class="row" data-chan="${c.n}">
+    <span class="lamp ${st.lamp}"></span>
+    <span class="nm">${c.n}</span>
+    <span class="why">${st.why}</span>
+    ${beatHTML(c.beat)}
+    <span class="cap">${c.pend ? c.pend + " waiting" : c.vids ? fmt(c.vids) + " vids" : "—"}</span>
+    <span class="act">${st.act ? `<span class="btn" data-toast="Fetching the latest from YouTube for ${c.n}.">${st.act}</span>` : ""}</span>
+  </button>`;
+}
+
+function renderRunning(){
+  const grouped = {stale:[], setup:[], off:[], run:[]};
+  CH.forEach(c => grouped[stateOf(c).k].push(c));
+  const notRunning = grouped.stale.length + grouped.setup.length + grouped.off.length;
+
+  document.getElementById("run-lede").innerHTML =
+    `${notRunning} of 13 channels <em>aren't running</em>`;
+  document.getElementById("run-meta").textContent =
+    `10 finished rewrites waiting to go live · 1 video rewritten today · oldest channel data 12 days old`;
+
+  const grp = (title, list, n) => list.length
+    ? `<div class="group"><div class="grp">${title}<span class="n">${list.length}</span><span class="grp-rule"></span></div>${list.map(rowHTML).join("")}</div>`
+    : "";
+
+  document.getElementById("groups").innerHTML =
+      grp("Channel data too old to run", grouped.stale)
+    + grp("Never set up", grouped.setup)
+    + grp("Off", grouped.off)
+    + grp("Running", grouped.run);
+
+  document.getElementById("spark").innerHTML =
+    [216,931,0,0,0,0,0,0].map((v,i)=>{
+      const h = v ? Math.max(3, Math.round(v/931*18)) : 2;
+      return `<b style="height:${h}px" class="${v?'':'zero'}" title="${v} units"></b>`;
+    }).join("");
+}
+
+/* ── Videos ─────────────────────────────────────────────────────────── */
+const VIDS = [
+  {t:"ਤਿੰਨ ਤੋਤੇ | Punjabi Nursery Rhyme", id:"4eSWx3AjUpc", st:"applied", when:"2026-07-08", n:2,
+   hist:[
+     {d:"2026-07-08 15:22", ago:"35 days ago", s:"applied",  v:"v12", ch:["title","description","tags"], un:[]},
+     {d:"2026-06-14 09:10", ago:"2 months ago", s:"reverted", v:"v11", ch:["title","tags"], un:["description"]},
+   ]},
+  {t:"ਮੰਮੀ ਦੀ ਰੋਟੀ ਗੋਲ ਗੋਲ - TMKOC ਪੰਜਾਬੀ ਬਾਲਗੀਤ", id:"gFxkWMgiVJY", st:"applied", when:"2026-07-08", n:1,
+   hist:[{d:"2026-07-08 15:19", ago:"35 days ago", s:"applied", v:"v12", ch:["title","description","tags"], un:[]}]},
+  {t:"ਦਾਦਾਜੀ ਦੀ ਛੜੀ | Family Songs | Punjabi Balgeet", id:"n2FZXvY4HBM", st:"pending", when:"—", n:2,
+   hist:[
+     {d:"2026-07-10 04:02", ago:"33 days ago", s:"pending",  v:"v12", ch:["title","description","tags"], un:[]},
+     {d:"2026-05-02 11:40", ago:"3 months ago", s:"applied",  v:"v9",  ch:["description"], un:["title","tags"]},
+   ]},
+  {t:"ਗੁਬਾਰੇ ਤੇ A B C D Song | Gubbare", id:"W6f4SCIIc6o", st:"pending", when:"—", n:1,
+   hist:[{d:"2026-07-10 03:58", ago:"33 days ago", s:"pending", v:"v12", ch:["title","description","tags"], un:[]}]},
+  {t:"ਤਿਤਲੀ ਬਸ 'ਤੇ ਚੜ੍ਹੀ | ਮਜ਼ੇਦਾਰ ਬੱਚਿਆਂ ਦਾ ਗੀਤ", id:"jUZqMAbXpPE", st:"quarantined", when:"—", n:3,
+   hist:[
+     {d:"2026-07-09 22:14", ago:"34 days ago", s:"quarantined", v:"v12", ch:[], un:["title","description","tags"]},
+     {d:"2026-06-30 08:03", ago:"43 days ago", s:"applied", v:"v11", ch:["title","tags"], un:["description"]},
+     {d:"2026-04-18 16:20", ago:"4 months ago", s:"reverted", v:"v8", ch:["title"], un:["description","tags"]},
+   ]},
+  {t:"ਕੇਕ ਬਣਾਈਏ | ਬੱਚਿਆਂ ਦੀ ਮਜ਼ੇਦਾਰ ਕਹਾਣੀ", id:"SFlLIXPvXkw", st:"applied", when:"2026-06-30", n:1,
+   hist:[{d:"2026-06-30 07:58", ago:"43 days ago", s:"applied", v:"v11", ch:["title","description"], un:["tags"]}]},
+];
+const V_STATE = {applied:["p-run","Live"], pending:["p-info","Waiting"],
+                 quarantined:["p-warn","Bad output"], reverted:["p-idle","Undone"]};
+let vFilter = "", vQuery = "";
+
+function renderVideoChips(){
+  const counts = {};
+  VIDS.forEach(v => counts[v.st] = (counts[v.st]||0)+1);
+  const c = (k,label,cls) => `<button class="chip" data-vf="${k}" aria-pressed="${vFilter===k}">
+      ${cls?`<span class="dot" style="background:var(--${cls})"></span>`:""}${label}<span class="n">${k?counts[k]||0:VIDS.length}</span></button>`;
+  document.getElementById("v-chips").innerHTML =
+      c("","All","")
+    + c("applied","Live","lamp-run")
+    + c("pending","Waiting","accent")
+    + c("quarantined","Bad output","lamp-warn");
+}
+
+function renderVideos(){
+  const list = VIDS.filter(v =>
+    (!vFilter || v.st === vFilter) &&
+    (!vQuery || (v.t+" "+v.id).toLowerCase().includes(vQuery)));
+  document.getElementById("v-rows").innerHTML = list.length ? list.map((v,i) => {
+    const [cls,label] = V_STATE[v.st];
+    return `<button class="trow" data-hist="${i}" aria-expanded="false">
+        <span class="thumb"></span>
+        <span><span class="t-name">${v.t}</span><span class="t-sub">${v.id}</span></span>
+        <span><span class="pill ${cls}">${label}</span></span>
+        <span class="mono">${v.when}</span>
+        <span class="mono">${v.n}</span>
+        <span class="caret">›</span>
+      </button>
+      <div class="hist" id="h-${i}" hidden>${v.hist.map(h => `
+        <div class="ev">
+          <div class="ev-when">${h.d}<span class="ago">${h.ago}</span></div>
+          <div class="ev-what">
+            <span class="pill ${V_STATE[h.s][0]}">${V_STATE[h.s][1]}</span>
+            <span class="k" style="margin-left:6px">prompt ${h.v}</span>
+            <div class="ev-tags">
+              ${h.ch.map(f=>`<span class="tag">${f} changed</span>`).join("")}
+              ${h.un.map(f=>`<span class="tag un">${f} untouched</span>`).join("")}
+              ${!h.ch.length && !h.un.length ? '<span class="tag">nothing written</span>' : ""}
+            </div>
+          </div>
+          <div>${h.s==="applied"
+            ? `<button class="btn hold" data-hold data-ms="800" data-label="Hold to undo"
+                       data-done-label="Undone"
+                       data-confirm-toast="Put back the title, description and tags from before ${h.d}."
+               ><span class="fill"></span><span class="txt">Hold to undo</span></button>`
+            : ""}</div>
+        </div>`).join("")}</div>`;
+  }).join("") : `<div style="padding:26px;text-align:center;color:var(--ink-3)">No videos match.</div>`;
+}
+function filterVideos(q){ vQuery = q.toLowerCase().trim(); renderVideos(); initHolds(); }
+
+/* ── Playlists ──────────────────────────────────────────────────────── */
+const PROPS = [
+  ["add","ਬੱਚਿਆਂ ਦੇ ਪਿਆਰੇ ਪੰਜਾਬੀ ਗੀਤ","Nonstop Loop Punjabi Rhymes","87.1%"],
+  ["add","ਮਾਂ ਮਾਂ ਚੰਦਾ ਮਾਮਾ | Bedtime Songs","Nonstop Loop Punjabi Rhymes","87.6%"],
+  ["add","ਬਾਰਿਸ਼ ਆਈ | ਬੱਚਿਆਂ ਦੇ ਗਾਣੇ","Punjabi Balgeet Collection","84.3%"],
+  ["remove","ਹਾਥੀ ਰਾਜਾ + 1 ਤੋਂ 10 ਤੱਕ","English Rhymes Mix","41.2%"],
+  ["add","ਟਿਮ ਟਿਮ ਪਾਰਕ, ਨੰਨ੍ਹੀ ਬੱਦਲੀ","Nonstop Loop Punjabi Rhymes","88.4%"],
+];
+function renderPlaylists(){
+  document.getElementById("p-rows").innerHTML = PROPS.map(([a,v,p,m]) => `
+    <div class="trow" style="cursor:default">
+      <span><span class="pill ${a==="add"?"p-run":"p-fault"}">${a==="add"?"Add":"Remove"}</span></span>
+      <span class="t-name">${v}</span>
+      <span class="t-name" style="font-weight:400;color:var(--ink-3)">${p}</span>
+      <span class="mono">${m}</span>
+    </div>`).join("");
+}
+
+/* ── Hold to confirm ────────────────────────────────────────────────── */
+// Applied only to actions that change something on YouTube. A click can be a
+// slip; a deliberate 0.8s press can't.
+function initHolds(root = document){
+  root.querySelectorAll("[data-hold]:not([data-wired])").forEach(btn => {
+    btn.dataset.wired = "1";
+    const ms = Number(btn.dataset.ms || 800);
+    const fill = btn.querySelector(".fill");
+    const txt  = btn.querySelector(".txt");
+    let raf = null, start = 0;
+
+    const stop = () => { cancelAnimationFrame(raf); raf = null;
+                         btn.dataset.holding = "false"; fill.style.width = "0"; };
+    const finish = () => {
+      stop();
+      btn.dataset.done = "true";
+      if (txt) txt.textContent = btn.dataset.doneLabel || "Done";
+      toast(btn.dataset.confirmToast || (btn.dataset.doneLabel + "."));
+      setTimeout(() => { btn.dataset.done = "false";
+                         if (txt) txt.textContent = btn.dataset.label; }, 1900);
+    };
+    const tick = now => {
+      const p = Math.min(1, (now - start) / ms);
+      fill.style.width = (p * 100) + "%";
+      if (p >= 1) finish(); else raf = requestAnimationFrame(tick);
+    };
+    const begin = e => {
+      if (btn.dataset.done === "true" || raf) return;
+      if (e.type === "keydown" && e.key !== " " && e.key !== "Enter") return;
+      if (e.type === "keydown") e.preventDefault();
+      e.stopPropagation();
+      btn.dataset.holding = "true"; start = performance.now();
+      raf = requestAnimationFrame(tick);
+    };
+    btn.addEventListener("pointerdown", begin);
+    btn.addEventListener("keydown", begin);
+    ["pointerup","pointerleave","pointercancel","keyup","blur"].forEach(ev =>
+      btn.addEventListener(ev, stop));
+    btn.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); });
+    btn.setAttribute("aria-description",
+      `Press and hold for ${(ms/1000).toFixed(1)} seconds to confirm`);
+  });
+}
+
+/* ── Nav ────────────────────────────────────────────────────────────── */
+function go(id){
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.id === "pg-"+id));
+  document.querySelectorAll(".nav button").forEach(b =>
+    b.setAttribute("aria-current", String(b.dataset.go === id)));
+  window.scrollTo({top:0});
+}
+function toast(msg){
+  document.querySelector(".toast")?.remove();
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg; t.setAttribute("role","status");
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+document.addEventListener("click", e => {
+  const toastEl = e.target.closest("[data-toast]");
+  if (toastEl){ e.stopPropagation(); toast(toastEl.dataset.toast); return; }
+
+  const nav = e.target.closest("[data-go]");
+  if (nav){ go(nav.dataset.go); return; }
+
+  const chan = e.target.closest("[data-chan]");
+  if (chan){
+    const c = CH.find(x => x.n === chan.dataset.chan);
+    document.getElementById("chan-sec").textContent = c.n;
+    document.getElementById("auto-eyebrow").textContent = c.n;
+    document.getElementById("sw-nm").textContent = c.n;
+    document.getElementById("av").textContent = c.s;
+    document.querySelectorAll(".eyebrow").forEach(el => {
+      if (el.id !== "run-lede" && el.closest(".page").id !== "pg-running") el.textContent = c.n;
+    });
+    go("auto"); return;
+  }
+
+  const hist = e.target.closest("[data-hist]");
+  if (hist){
+    const panel = document.getElementById("h-"+hist.dataset.hist);
+    const open = !panel.hidden;
+    panel.hidden = open;
+    hist.setAttribute("aria-expanded", String(!open));
+    return;
+  }
+
+  const chip = e.target.closest("[data-vf]");
+  if (chip){ vFilter = chip.dataset.vf; renderVideoChips(); renderVideos(); initHolds(); }
+});
+
+document.getElementById("switcher").onclick = () => toast("Channel switcher — 13 channels.");
+
+renderRunning(); renderVideoChips(); renderVideos(); renderPlaylists(); initHolds();
+</script>

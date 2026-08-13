@@ -253,3 +253,4 @@ backups/
 migration_export/
 
 local_snapshots/
+.design-diff/

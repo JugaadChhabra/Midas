@@ -134,7 +134,8 @@ h1 { margin-bottom: .25rem; }
 
 .sidebar { position:sticky; top:0; box-sizing:border-box;
            flex:0 0 var(--sidebar-w); width:var(--sidebar-w); height:100vh;
-           display:flex; flex-direction:column; padding:14px 10px; }
+           display:flex; flex-direction:column; padding:14px 10px;
+           border-right:1px solid var(--border-soft); }
 
 .app-main { flex:1; min-width:0; box-sizing:border-box; margin:6px 6px 6px 0;
             padding:26px 30px 40px; background:var(--panel-bg);
@@ -142,7 +143,7 @@ h1 { margin-bottom: .25rem; }
 
 /* Header — brand and the collapse toggle */
 .sidebar-head { display:flex; align-items:center; justify-content:space-between;
-                gap:.5rem; padding:.15rem .3rem 1.1rem; }
+                gap:9px; padding:4px 8px 16px; font-weight:700; letter-spacing:-.01em; }
 .sidebar-brand { display:flex; align-items:center; gap:.55rem; min-width:0;
                  text-decoration:none; color:inherit; font-weight:700; font-size:1rem; }
 .sidebar-brand svg { flex:0 0 auto; }
@@ -230,10 +231,10 @@ h1 { margin-bottom: .25rem; }
 }
 
 /* ── Card ───────────────────────────────────────────────────────────── */
-.card { border:1px solid var(--border); border-radius:var(--radius); padding:1.05rem 1.2rem; margin:1.05rem 0; }
+.card { border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin:16px 0; }
 
 /* ── Buttons ────────────────────────────────────────────────────────── */
-button, .btn { font:inherit; font-size:12.5px; font-weight:500; line-height:1.25;
+button, .btn { font:inherit; font-size:12.5px; font-weight:500; line-height:1.2;
                padding:5px 11px; border-radius:var(--radius-sm);
                border:1px solid var(--border-strong); background:var(--btn-bg); cursor:pointer;
                text-decoration:none; color:inherit; display:inline-block; }
@@ -285,11 +286,11 @@ code { background:var(--surface-tint); padding:0 .3rem; border-radius:var(--radi
    a label — the sidebar already says where you are — so the title is small and
    the lede below it carries the focal point: the state that implies work. */
 .page-head { margin-bottom:1.25rem; }
-h1.page-title { font-size:.84rem; font-weight:600; color:var(--ink-3); margin:0 0 .9rem; }
-.page-lede { font-size:1.95rem; font-weight:750; letter-spacing:-.022em; line-height:1.15;
-             margin:0 0 .3rem; text-wrap:balance; font-variant-numeric:tabular-nums; }
+h1.page-title { font-size:12.5px; font-weight:600; color:var(--ink-3); margin:0 0 14px; }
+.page-lede { font-size:29px; font-weight:700; letter-spacing:-.025em; line-height:1.12;
+             margin:0 0 5px; text-wrap:balance; font-variant-numeric:tabular-nums; }
 .page-lede .u { font-size:1rem; font-weight:600; opacity:.55; letter-spacing:0; }
-.page-meta { font-size:.85rem; opacity:.75; margin:0 0 .9rem; font-variant-numeric:tabular-nums; }
+.page-meta { font-size:13px; color:var(--ink-3); margin:0 0 22px; font-variant-numeric:tabular-nums; }
 
 /* ── Filter chips ───────────────────────────────────────────────────── */
 /* A row of toggles that filter the list beneath them. The selected chip is
@@ -298,10 +299,10 @@ h1.page-title { font-size:.84rem; font-weight:600; color:var(--ink-3); margin:0 
 .chip-bar { display:flex; align-items:center; gap:.25rem; overflow-x:auto;
             padding:.25rem; margin:-.25rem -.25rem .4rem; scrollbar-width:none; }
 .chip-bar::-webkit-scrollbar { display:none; }
-.chip { display:inline-flex; align-items:center; gap:.42rem; flex:0 0 auto;
-        height:1.7rem; padding:0 .6rem; border:1px solid transparent;
+.chip { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto;
+        height:27px; padding:0 11px; border:1px solid transparent;
         border-radius:var(--radius-pill); background:none; color:inherit;
-        font:inherit; font-size:.76rem; font-weight:500; opacity:.62; cursor:pointer;
+        font:inherit; font-size:12.5px; font-weight:500; opacity:.62; cursor:pointer;
         transition:background-color .2s, box-shadow .2s, opacity .2s; }
 .chip:hover { background:var(--surface-tint); opacity:1; }
 .chip[aria-pressed="true"] { background:var(--panel-bg); border-color:var(--border);
@@ -326,11 +327,11 @@ h1.page-title { font-size:.84rem; font-weight:600; color:var(--ink-3); margin:0 
 .dt-scroll { overflow-x:auto; scrollbar-width:none; }
 .dt-scroll::-webkit-scrollbar { display:none; }
 .dt-body { min-width:var(--dt-min, 0); }
-.dt-head, .dt-row { display:grid; grid-template-columns:var(--dt-cols); gap:.8rem;
-                    align-items:center; padding:.4rem .87rem; }
-.dt-head { border-bottom:1px solid var(--border); font-size:.72rem; font-weight:600;
-           opacity:.55; letter-spacing:.02em; position:sticky; top:0; }
-.dt-row { border-bottom:1px solid var(--border-soft); font-size:.83rem;
+.dt-head, .dt-row { display:grid; grid-template-columns:var(--dt-cols); gap:12px;
+                    align-items:center; padding:9px 13px; }
+.dt-head { border-bottom:1px solid var(--border); font-size:11px; font-weight:650;
+           color:var(--ink-4); letter-spacing:.03em; position:sticky; top:0; }
+.dt-row { border-bottom:1px solid var(--border-soft); font-size:13px;
           transition:background-color .1s; }
 .dt-row:hover { background:var(--surface-tint); }
 .dt-row.selected { background:var(--color-accent-faint); }
@@ -501,9 +502,9 @@ h1.page-title { font-size:.84rem; font-weight:600; color:var(--ink-3); margin:0 
 .note { font-size:.85rem; color:var(--ink-2); margin:.35rem 0 .9rem; max-width:64ch; line-height:1.5; }
 
 /* ── Labelled field ─────────────────────────────────────────────────── */
-.field { display:grid; gap:.3rem; margin-bottom:.9rem; max-width:26rem; }
-.field > label { font-size:.8rem; font-weight:600; }
-.field .hint { font-size:.72rem; color:var(--ink-3); }
+.field { display:grid; gap:5px; margin-bottom:14px; max-width:420px; }
+.field > label { font-size:12.5px; font-weight:600; }
+.field .hint { font-size:11.5px; color:var(--ink-4); }
 /* A checkbox whose label is a sentence, not a word — the click target has to
    cover the sentence, and the box must not drift as the text wraps. */
 .field-check { display:flex; align-items:flex-start; gap:.55rem; cursor:pointer;
@@ -539,8 +540,7 @@ textarea { font-family:var(--mono); font-size:.78rem; line-height:1.55; }
 .group { margin-bottom:1.3rem; }
 .group-head { display:flex; align-items:center; gap:8px; margin:0 0 8px;
              font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
-              font-size:.69rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
-              color:var(--ink-3); }
+             color:var(--ink-3); }
 .group-head .n { font-variant-numeric:tabular-nums; letter-spacing:0; color:var(--ink-3); }
 .group-head .rule { flex:1; height:1px; background:var(--border-soft); }
 
@@ -565,8 +565,9 @@ textarea { font-family:var(--mono); font-size:.78rem; line-height:1.55; }
 /* ── Quota strip ────────────────────────────────────────────────────── */
 .quota { display:flex; align-items:center; gap:.9rem; padding:.7rem .9rem; margin-bottom:1.6rem;
          border:1px solid var(--border); border-radius:var(--radius); flex-wrap:wrap; }
-.quota-fig { font-size:1.1rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
-.quota-l { font-size:.7rem; color:var(--ink-3); }
+.quota-fig { font-family:var(--mono); font-size:17px; font-weight:700;
+             font-variant-numeric:tabular-nums; line-height:1.5; }
+.quota-l { font-size:11px; color:var(--ink-3); }
 .quota .meter { flex:1; min-width:110px; }
 
 @media (max-width: 860px) {

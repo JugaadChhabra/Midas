@@ -55,7 +55,7 @@ const $ = (id) => document.getElementById(id);
 // re-points the links once /dashboard tells us which channels exist.
 let railChannel = Sidebar.lastChannel();
 Sidebar.mount({
-  items: [{ id: 'running', label: 'Running', icon: 'home', href: '/' }]
+  items: [{ id: 'running', label: 'Running', icon: 'running', href: '/' }]
     .concat([{ section: '' }])
     .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
   activeId: 'running',
