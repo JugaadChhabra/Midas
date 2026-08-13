@@ -84,6 +84,14 @@
   .sec-note { font-size:.82rem; margin:.35rem 0 .6rem; max-width:62ch; }
   .sec-toggle { display:flex; align-items:center; gap:.5rem; cursor:pointer; font-weight:600; font-size:.88rem; }
 
+  /* The two instruction sets, as alternatives rather than a sequence. Stacks
+     below 900px, where two columns leave neither wide enough to read a line
+     of prompt without wrapping mid-thought. */
+  .prompt-pair { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+  .prompt-pair .field { margin-bottom:0; }
+  .prompt-pair textarea { resize:vertical; }
+  @media (max-width: 900px) { .prompt-pair { grid-template-columns:1fr; } }
+
   /* Playlist tables. Same grid contract as #videos — columns declared once. */
   #pl-proposals .dt { --dt-cols: 1.1rem 5.5rem minmax(200px,1.6fr) minmax(150px,1.1fr) 5rem 7rem; --dt-min: 760px; }
   #pl-health .dt   { --dt-cols: 7.5rem minmax(200px,1.7fr) 4.5rem 4.5rem 4.5rem 6rem 6.5rem; --dt-min: 900px; }
@@ -128,7 +136,7 @@
     <input type="search" id="v-search" class="v-search"
            placeholder="Search title or video id…" aria-label="Search videos" />
     <div class="chip-bar" id="v-chips" role="group" aria-label="Filter by state"></div>
-    <div id="videos">No videos yet.</div>
+    <div id="videos"><div class="skel" data-skeleton data-rows="8"></div></div>
   </div>
 
   <!-- ─── AUTOPILOT ─── -->
@@ -220,7 +228,7 @@
         <button id="pl-approve-all-btn" class="btn-primary" disabled>Approve selected</button>
         <button id="pl-reject-all-btn" disabled>Reject selected</button>
       </div>
-      <div id="pl-proposals">Loading…</div>
+      <div id="pl-proposals"><div class="skel" data-skeleton data-rows="5"></div></div>
     </div>
 
     <div class="card" id="pl-health-card">
@@ -238,7 +246,7 @@
         <button id="pl-health-evaluate-btn">Score them now</button>
       </div>
       <div id="pl-health-status" class="muted sec-note"></div>
-      <div id="pl-health">Loading…</div>
+      <div id="pl-health"><div class="skel" data-skeleton data-rows="4"></div></div>
     </div>
   </div>
 
@@ -285,14 +293,17 @@
         <span class="quota-l mono" id="prompt-meta"></span>
       </div>
       <p class="note">These decide every title, description and tag Midas writes. Changing them changes everything written from now on; what is already live stays as it is.</p>
-      <div class="field" style="max-width:none">
-        <label for="prompt">Full-length videos</label>
-        <textarea id="prompt" rows="6" placeholder="What should Midas write, and what should it avoid?"></textarea>
-      </div>
-      <div class="field" style="max-width:none">
-        <label for="shorts-prompt">Shorts</label>
-        <span class="hint">Used instead of the above for videos of 3 minutes or less. Leave empty to use the same instructions for both.</span>
-        <textarea id="shorts-prompt" rows="4" placeholder="Leave empty to use the same instructions"></textarea>
+      <div class="prompt-pair">
+        <div class="field" style="max-width:none">
+          <label for="prompt">Full-length videos</label>
+          <span class="hint">Used for anything over 3 minutes.</span>
+          <textarea id="prompt" rows="14" placeholder="What should Midas write, and what should it avoid?"></textarea>
+        </div>
+        <div class="field" style="max-width:none">
+          <label for="shorts-prompt">Shorts</label>
+          <span class="hint">Used for 3 minutes or less. Leave empty to use the same instructions for both.</span>
+          <textarea id="shorts-prompt" rows="14" placeholder="Leave empty to use the same instructions"></textarea>
+        </div>
       </div>
       <div class="act-bar">
         <button id="save-btn" class="btn-primary">Save</button>
@@ -944,7 +955,9 @@ function bustChannelData() {
   SWR.invalidate('/dashboard');
 }
 
+let videosLoaded = false;
 function renderVideosData(vids) {
+  videosLoaded = true;
   allVideos = vids || [];
   allVideos.forEach(v => currentVideos[v.id] = v);
   renderVideos();
@@ -1015,6 +1028,11 @@ function renderStateFilter() {
 // through; the meta says when its work last reached YouTube — which is the
 // date you carry over to Studio's chart, and the reason this page exists.
 function renderVideoHeader() {
+  if (!videosLoaded) {
+    $('v-lede').innerHTML = 'Videos';
+    $('v-meta').textContent = 'counting…';
+    return;
+  }
   const total = allVideos.length;
   const rewritten = allVideos.filter(v => v.audit_status && v.audit_status !== 'none').length;
   const waiting = allVideos.filter(v => v.audit_status === 'pending').length;
@@ -1037,6 +1055,11 @@ function renderVideos() {
   const q = ($('v-search').value || '').toLowerCase().trim();
   const filtered = allVideos.filter(v => videoMatches(v, q, videoState));
   const sorted = sortVideos(filtered);
+  if (!videosLoaded) {
+    $('videos').innerHTML = '<div class="skel" data-skeleton data-rows="8"></div>';
+    Components.init($('videos'));
+    return;
+  }
   if (!allVideos.length) {
     $('videos').innerHTML = '<div class="dt"><div class="dt-empty muted">No videos yet — get the latest from YouTube on the Autopilot page.</div></div>';
     return;
@@ -1458,8 +1481,14 @@ const plSelected = new Set();
 
 // The section's focal line, matching Autopilot: the count that implies work,
 // with the rest of the figures demoted to context beneath it.
+let plProposalsLoaded = false;
 function renderPlLede() {
   const n = plProposals.length;
+  if (!plProposalsLoaded) {
+    $('pl-lede').textContent = 'Playlists';
+    $('pl-meta').textContent = 'counting…';
+    return;
+  }
   $('pl-lede').innerHTML = n
     ? `${fmt(n)} playlist change${n === 1 ? '' : 's'} <span class="u">to review</span>`
     : 'Nothing to review <span class="u">every video is where it should be</span>';
@@ -1501,8 +1530,13 @@ function renderProposals() {
   renderPlLede();
   renderPlChips();
 
+  if (!plProposalsLoaded) {
+    $('pl-proposals').innerHTML = '<div class="skel" data-skeleton data-rows="5"></div>';
+    Components.init($('pl-proposals'));
+    return;
+  }
   if (!plProposals.length) {
-    $('pl-proposals').innerHTML = '<div class="dt"><div class="dt-empty muted">No pending proposals.</div></div>';
+    $('pl-proposals').innerHTML = '<div class="dt"><div class="dt-empty muted">Nothing to review — every video is where it should be.</div></div>';
     updatePlBtns();
     return;
   }
@@ -1565,6 +1599,7 @@ function updatePlBtns() {
 
 function loadProposals() {
   SWR.swr(`/channels/${channelId}/playlists/proposals`, (data) => {
+    plProposalsLoaded = true;
     plProposals = data;
     plSelected.clear();
     renderProposals();
@@ -1733,7 +1768,10 @@ function renderHealth(envelope) {
 
 function loadHealth() {
   const healthUrl = `/channels/${channelId}/playlists/health`;
-  if (SWR.get(healthUrl) === undefined) $('pl-health').innerHTML = 'Loading…';
+  if (SWR.get(healthUrl) === undefined) {
+    $('pl-health').innerHTML = '<div class="skel" data-skeleton data-rows="4"></div>';
+    Components.init($('pl-health'));
+  }
   SWR.swr(healthUrl, renderHealth, {
     onError: () => {
       if (SWR.get(healthUrl) === undefined) {
