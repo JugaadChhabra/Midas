@@ -94,6 +94,18 @@ services:
       SUPABASE_URL: http://rest
       # pg_dump target for the nightly NAS snapshot (app/backup.py).
       DATABASE_URL: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-midas}
+      # Bare names, resolved on the image's PATH — where the Dockerfile installed
+      # postgresql-client-16 and asserted its major version at build time.
+      #
+      # These are overridden for the same reason as the two URLs above: .env is
+      # written for the host, where these may legitimately be absolute paths to
+      # that machine's install (a Mac's Homebrew prefix, say), and the container
+      # inherits the whole file via env_file. An absolute host path breaks the
+      # restore immediately and the nightly snapshot silently at midnight — and
+      # the snapshot is the entire disaster-recovery story, so that second one
+      # loses data rather than uptime.
+      BACKUP_PG_DUMP: pg_dump
+      RESTORE_PSQL: psql
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
       # Host bind mounts (not named volumes) so each job's artifacts stay
