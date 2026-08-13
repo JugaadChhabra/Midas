@@ -44,18 +44,22 @@
                why: `<b>Channel data ${days} days old</b> — autopilot won't run`,
                action: 'Update' };
     }
+    if (!c.autopilot_enabled) {
+      return { key: 'off', group: 'off', lamp: '',
+               why: bad
+                 ? `Autopilot off · <b>${fmt(bad)} rewrite${bad === 1 ? '' : 's'} still unusable</b>`
+                 : 'Autopilot off · data is current',
+               action: 'Start' };
+    }
     // Bad output is the state the board could not see before: it ran, it did
     // work, and the work is unusable. Ranked below stale because the channel is
     // still moving — but above "running", because it is quietly wasting quota.
+    // Only reachable while autopilot is on: this describes what it is doing.
     if (bad) {
       return { key: 'bad', group: 'bad', lamp: 'lamp--warn',
                why: `<b>${fmt(bad)} rewrite${bad === 1 ? '' : 's'} came back unusable</b>`
                   + ` — ${lastRun(c).toLowerCase()}`,
                action: 'Try again' };
-    }
-    if (!c.autopilot_enabled) {
-      return { key: 'off', group: 'off', lamp: '',
-               why: 'Autopilot off · data is current', action: 'Start' };
     }
     return { key: 'run', group: 'run', lamp: 'lamp--run',
              why: `${lastRun(c)} · ${fmt(c.applied_today || 0)} of ${fmt(c.autopilot_daily_cap || 0)} rewritten today`,

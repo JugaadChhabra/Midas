@@ -49,6 +49,19 @@ _dashboard_lock = threading.Lock()
 _dashboard_cache: dict = {"at": 0.0, "payload": None}
 
 
+def invalidate_dashboard_cache() -> None:
+    """Drop the cached payload so the next read recomputes.
+
+    The 30s TTL is right for polling and wrong for writes. A settings change is
+    the one moment the operator is watching for the board to agree with what
+    they just did, and without this it disagreed for up to half a minute —
+    pressing Stop, watching the page refetch, and being told the channel was
+    still running."""
+    with _dashboard_lock:
+        _dashboard_cache["payload"] = None
+        _dashboard_cache["at"] = 0.0
+
+
 @router.get("/dashboard")
 def dashboard():
     """Cached wrapper around _compute_dashboard(). Double-checked locking so a

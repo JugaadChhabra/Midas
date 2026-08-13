@@ -10,6 +10,7 @@ from app.db import supabase
 from app.status_vocab import PausedReason
 from app.reach import certify
 from app.shorts.nas_source import list_source_languages
+from app.dashboard import invalidate_dashboard_cache
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -195,4 +196,7 @@ def update_channel(channel_id: str, body: ChannelSettings):
     if not patch:
         return {"ok": True, "noop": True}
     supabase().table("channels").update(patch).eq("id", channel_id).execute()
+    # These fields are on the board, which caches for 30s. Without this the
+    # page that made the change is told the old answer until the TTL lapses.
+    invalidate_dashboard_cache()
     return {"ok": True}

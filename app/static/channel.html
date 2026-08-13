@@ -786,7 +786,7 @@ function renderAutopilotLog(j) {
     $('ap-eta').innerHTML = j.paused_reason === 'token_expired'
       ? `${when} <b>Google sign-in expired</b> — <a href="/auth/login">reconnect the account</a> to start it again.`
       : j.enabled ? `${when} Checks again within a minute.`
-      : `${when} Autopilot is off.`;
+      : when;
 
     const items = j.items.slice(0, 15);
     $('ap-activity-count').textContent = items.length
