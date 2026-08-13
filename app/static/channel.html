@@ -56,20 +56,21 @@
   .act-bar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin:1.15rem 0 .25rem; }
   .act-bar .btn-link { margin-left:auto; }
 
-  /* Coverage: a stack of data-progress rows. */
-  .cov-rows { display:grid; gap:1rem; }
 
   /* Diff highlighting */
   .diff-add { background:var(--color-ok-border); padding:0 .15em; border-radius:3px; }
   .diff-del { background:var(--color-err-border); padding:0 .15em; border-radius:3px; text-decoration:line-through; opacity:.8; }
 
   .filter-bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin:.5rem 0; }
+  /* Search leads and is capped: at full width it dominated a row whose real
+     content is the chips underneath it. */
+  .v-search { display:block; width:100%; max-width:20rem; margin:0 0 .8rem; }
 
   /* Videos table column track. Declared once; .dt-head and every .dt-row read
      it, so the header can't drift out of step with the rows. --dt-min forces a
      horizontal scroll rather than letting 11 columns crush each other. */
-  #videos .dt { --dt-cols: 88px minmax(240px, 3fr) 7rem 6.4rem 4.6rem 2.2rem;
-                --dt-min: 620px; }
+  #videos .dt { --dt-cols: 44px minmax(200px, 2fr) 6.2rem 7rem 4.4rem 1.4rem;
+                --dt-min: 560px; }
   #videos .dt-row { align-items:start; }
 
   /* Card section headers — title left, a quiet action right. Replaces the
@@ -99,7 +100,7 @@
   #videos .vid-why { font-size:.75rem; opacity:.6; margin-top:.2rem; line-height:1.35;
                      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
                      overflow:hidden; }
-  #videos img.vid-thumb { width:88px; border-radius:6px; display:block; }
+  #videos img.vid-thumb { width:44px; height:25px; object-fit:cover; border-radius:3px; display:block; }
   /* Detail panels (audit / shorts) sit as siblings of the row, full width. */
   .dt-detail:empty { display:none; }
   .dt-detail > div:empty { display:none; }
@@ -124,13 +125,9 @@
     <p class="page-lede" id="v-lede">—</p>
     <p class="page-meta" id="v-meta"></p>
 
-    <div class="filter-bar">
-      <input type="search" id="v-search" placeholder="Search title or video id…"
-             style="flex:1; min-width:14rem; max-width:32rem" />
-      <div id="v-state" data-dropdown data-label="Show"
-           data-options='[{"value":"","label":"All videos"}]'></div>
-      <span class="muted" id="v-count"></span>
-    </div>
+    <input type="search" id="v-search" class="v-search"
+           placeholder="Search title or video id…" aria-label="Search videos" />
+    <div class="chip-bar" id="v-chips" role="group" aria-label="Filter by state"></div>
     <div id="videos">No videos yet.</div>
   </div>
 
@@ -165,6 +162,15 @@
       <div id="ap-eta" class="muted" style="margin-top:.6rem; font-size:.8rem"></div>
     </div>
 
+    <!-- The run log. Answers "when did it last do anything, and did it work?"
+         — which is the question that brought you to the channel. -->
+    <div class="card">
+      <div class="sec-head">
+        <h3>Recent activity</h3>
+        <span class="muted" style="font-size:.75rem" id="ap-activity-count"></span>
+      </div>
+      <div id="ap-activity"><span class="muted">Loading…</span></div>
+    </div>
     <!-- Finished work that hasn't reached YouTube. Separate from the state
          above because it's true whether or not autopilot is running, and it's
          the one thing on this page you can clear by hand. -->
@@ -183,23 +189,6 @@
       <div id="apply-pending-results" style="margin-top:.5rem"></div>
     </div>
 
-    <!-- How far through the channel Midas has got. Its own throughput, not
-         YouTube's numbers — nothing else reports it. -->
-    <div class="card">
-      <div class="sec-head"><h3>How far through this channel</h3></div>
-      <div class="cov-rows" id="ap-coverage">Loading…</div>
-    </div>
-
-
-    <!-- The run log. Answers "when did it last do anything, and did it work?"
-         — which is the question that brought you to the channel. -->
-    <div class="card">
-      <div class="sec-head">
-        <h3>Recent activity</h3>
-        <span class="muted" style="font-size:.75rem" id="ap-activity-count"></span>
-      </div>
-      <div id="ap-activity"><span class="muted">Loading…</span></div>
-    </div>
   </div>
 
   <!-- ─── PLAYLISTS ─── -->
@@ -259,7 +248,6 @@
 
     <div class="card">
       <div class="sec-head"><h3>Channel</h3></div>
-      <p class="note">Every video Midas publishes is set to <b>Education</b>, <b>made for kids</b>, and tagged with the language below.</p>
       <div class="field">
         <label id="lang-label">Content language</label>
         <div id="lang-select" data-dropdown data-label="Content language"
@@ -272,77 +260,71 @@
       </div>
       <label class="field-check"><input type="checkbox" id="ap-enabled" />
         <span>Let autopilot rewrite videos on its own</span></label>
-      <label class="field-check" style="margin-top:.5rem"><input type="checkbox" id="sync-shorts" />
-        <span>Include Shorts — videos of 3 minutes or less get rewritten too</span></label>
-      <div class="act-bar">
-        <button id="lang-save" class="btn-primary">Save</button>
-      </div>
-    </div>
-    <!-- Shorts cutting is a separate product that happens to live here. It sits
-         in Settings, not on the landing page: it has nothing to do with whether
-         autopilot is running, which is the question that page answers. -->
-    <div class="card">
-      <div class="sec-head"><h3>Cutting Shorts from the office drive</h3></div>
-      <p class="note">Cuts every video in this channel's folder on the office drive into Shorts, saved back to the same drive. Nothing is uploaded to YouTube, and none of this affects the rewriting above.</p>
       <div class="field">
-        <label id="nas-label">Folder on the drive</label>
-        <div id="nas-folder" data-dropdown data-label="Folder on the drive"
+        <label id="nas-label">Shorts folder on the office drive</label>
+        <div id="nas-folder" data-dropdown data-label="Shorts folder on the office drive"
              data-options='[{"value":"","label":"— none —"}]'></div>
         <span class="hint" id="nas-status"></span>
       </div>
-      <label class="field-check"><input type="checkbox" id="nas-autocut" /> <span>Cut new videos in this folder automatically</span></label>
+      <label class="field-check"><input type="checkbox" id="sync-shorts" />
+        <span>Include Shorts</span></label>
+      <label class="field-check"><input type="checkbox" id="nas-autocut" />
+        <span>Cut new videos in that folder into Shorts automatically</span></label>
       <div class="act-bar">
-        <button id="nas-cut-now">Cut them now</button>
-        <span class="muted" id="nas-cut-msg" style="font-size:.8rem"></span>
+        <button id="lang-save" class="btn-primary">Save</button>
+        <button id="nas-cut-now" class="btn-link" type="button">Cut Shorts now</button>
+        <span class="muted" id="nas-cut-msg" style="font-size:.78rem"></span>
       </div>
     </div>
-
+    <!-- Everything about what Midas writes, in one card. This was four: the
+         prompts, the self-improvement switch, the draft comparison and the
+         version list — each with its own border, for one subject. -->
     <div class="card">
-      <div class="sec-head"><h3>Instructions</h3></div>
-      <p class="note">These decide every title, description and tag Midas writes. Changing them changes everything written from now on; what's already live stays as it is.</p>
+      <div class="sec-head">
+        <h3>Instructions</h3>
+        <span class="quota-l mono" id="prompt-meta"></span>
+      </div>
+      <p class="note">These decide every title, description and tag Midas writes. Changing them changes everything written from now on; what is already live stays as it is.</p>
       <div class="field" style="max-width:none">
         <label for="prompt">Full-length videos</label>
-        <textarea id="prompt" rows="12" placeholder="What should Midas write, and what should it avoid?"></textarea>
+        <textarea id="prompt" rows="10" placeholder="What should Midas write, and what should it avoid?"></textarea>
       </div>
       <div class="field" style="max-width:none">
         <label for="shorts-prompt">Shorts</label>
-        <span class="hint">Used instead of the above for videos of 3 minutes or less. Leave it empty to use the same instructions for both.</span>
-        <textarea id="shorts-prompt" rows="10" placeholder="Leave empty to use the same instructions"></textarea>
+        <span class="hint">Used instead of the above for videos of 3 minutes or less. Leave empty to use the same instructions for both.</span>
+        <textarea id="shorts-prompt" rows="7" placeholder="Leave empty to use the same instructions"></textarea>
       </div>
       <div class="act-bar">
         <button id="save-btn" class="btn-primary">Save</button>
       </div>
-    </div>
-    <div class="card">
-      <div class="sec-head"><h3>Letting Midas improve its own instructions</h3></div>
-      <p class="note">Midas can draft a better version of the instructions above by looking at what it has written so far. Either it shows you the draft first, or it tries it live and puts the old one back if things get worse.</p>
-      <div class="field">
-        <label id="reflection-label">When it has a new draft</label>
-        <div id="reflectionMode" data-dropdown data-label="When it has a new draft" data-options='[
-          {"value":"shadow","label":"Show me first","hint":"nothing changes until I say so"},
-          {"value":"auto","label":"Try it live","hint":"undone if results get worse"}]'></div>
-      </div>
-      <div class="act-bar" style="margin-top:0">
-        <button onclick="triggerReflection(this)">Draft one now</button>
-      </div>
 
-      <!-- The draft, side by side with what's live. -->
-      <div id="shadowPanel" class="hidden" style="margin-top:1.2rem">
-        <div class="sec-head"><h3>The draft, next to what's live</h3></div>
-        <p class="note">Nothing here has been used on a real video. Compare the two, and switch if the draft is better.</p>
-        <div id="shadowComparisons"></div>
-        <div id="shadowPromoteBtn" class="hidden act-bar">
-          <button class="btn-primary" onclick="promoteCandidate()">Use the draft from now on</button>
+      <!-- Self-improvement, folded in as a footer rather than a second card:
+           it is a setting about these instructions, not a separate subject. -->
+      <div style="margin-top:1.3rem; padding-top:1.1rem; border-top:1px solid var(--border-soft)">
+        <div class="field">
+          <label for="reflectionMode">When Midas drafts better instructions</label>
+          <div id="reflectionMode" data-dropdown data-label="When Midas drafts better instructions" data-options='[
+            {"value":"shadow","label":"Show me first","hint":"nothing changes until I say so"},
+            {"value":"auto","label":"Try it live","hint":"undone if results get worse"}]'></div>
         </div>
-      </div>
+        <div class="act-bar" style="margin-top:0">
+          <button onclick="triggerReflection(this)">Draft one now</button>
+        </div>
 
-      <div id="reflectionHistory" class="hidden" style="margin-top:1.2rem">
-        <div class="sec-head"><h3>Earlier versions</h3></div>
-        <div id="reflectionHistoryList" style="font-size:.8rem"></div>
+        <details id="shadowPanel" class="hidden" style="margin-top:.9rem">
+          <summary class="muted" style="font-size:.8rem; cursor:pointer">The draft, next to what's live</summary>
+          <div id="shadowComparisons" style="margin-top:.5rem"></div>
+          <div id="shadowPromoteBtn" class="hidden act-bar">
+            <button class="btn-primary" onclick="promoteCandidate()">Use the draft from now on</button>
+          </div>
+        </details>
+
+        <details id="reflectionHistory" class="hidden" style="margin-top:.5rem">
+          <summary class="muted" style="font-size:.8rem; cursor:pointer">Earlier versions</summary>
+          <div id="reflectionHistoryList" style="font-size:.78rem; margin-top:.5rem"></div>
+        </details>
       </div>
     </div>
-  </div>
-
   </main>
   </div>
 
@@ -574,14 +556,6 @@ function freshness(hours) {
   return { cls: 'fresh-old', text: `updated ${Math.round(hours / 24)}d ago` };
 }
 
-// A ratio says what two separate counts couldn't: how far along this is.
-// data-progress owns the label, the value and the percentage arithmetic, so
-// the three can't drift — this page used to round its own.
-function coverageRow(label, done, total) {
-  return `<div data-progress data-label="${escapeHtml(label)}"
-               data-done="${done}" data-total="${total}"></div>`;
-}
-
 function renderChannelState(j) {
   const c = (j.channels || []).find(x => x.id === channelId) || {};
   pendingCount = c.pending_count || 0;
@@ -601,11 +575,6 @@ function renderChannelState(j) {
     pendingCount ? `${fmt(pendingCount)} finished rewrites waiting` : null,
     `${fmt(c.applied_total || 0)} put live all time`,
   ].filter(Boolean).join(' · ');
-
-  $('ap-coverage').innerHTML =
-    coverageRow('Videos rewritten', c.audited_regular || 0, c.regular_count || 0) +
-    coverageRow('Shorts rewritten', c.audited_shorts || 0, c.shorts_count || 0);
-  Components.init($('ap-coverage'));
 
   renderWhy(st, c);
   syncApplyButton();
@@ -698,7 +667,7 @@ function loadChannelState() {
   SWR.swr('/dashboard', renderChannelState, {
     onError: () => {
       if (SWR.get('/dashboard') === undefined) {
-        $('ap-coverage').innerHTML = '<em class="muted">Could not load.</em>';
+        $('ap-note').textContent = 'Could not load this channel.';
       }
     },
   });
@@ -749,7 +718,8 @@ function renderAutopilotLog(j) {
     const cap = j.daily_cap || 0;
     $('ap-today').innerHTML =
       `<div data-progress data-label="Put live today"
-            data-done="${j.applies_today || 0}" data-total="${cap}"></div>`;
+            data-done="${j.applies_today || 0}" data-total="${cap}"
+            data-value-text="${fmt(j.applies_today || 0)} / ${fmt(cap)}"></div>`;
     Components.init($('ap-today'));
 
     // An expired sign-in is the one stop the Resume button can't clear, so it
@@ -1003,28 +973,29 @@ let videoState = '';   // '' = all
 const VIDEO_PAGE = 40;
 let videoPage = VIDEO_PAGE;
 
-// The state filter. A dropdown, not a bar of buttons: on this page state is a
-// way to narrow a search, not something you come here to read. Each option
-// carries its own count, so the breakdown is still there when you open it.
+// The state filter. Chips, not a dropdown or a bar: five short labels with
+// their counts, all visible at once, one click to apply and one to clear. A
+// dropdown hides the breakdown behind an interaction; a segmented bar turned
+// the filter into a chart you had to interpret first.
 //
 // Driven by status.js rather than a list kept here: a state appears the moment
-// it exists in the data, and never as an option that would return nothing.
+// it exists in the data, and never as a filter that would return nothing.
 function renderStateFilter() {
   const counts = {};
   allVideos.forEach(v => { const k = v.audit_status || 'none'; counts[k] = (counts[k] || 0) + 1; });
 
-  const opts = [{ value: '', label: 'All videos', hint: fmt(allVideos.length) }].concat(
-    Object.entries(Status.AUDIT_STATUS)
-      .filter(([key]) => counts[key] || videoState === key)
-      .map(([key, meta]) => ({ value: key, label: meta.label, hint: fmt(counts[key] || 0) })));
+  const chip = (key, label, role, n) => `
+    <button type="button" class="chip" data-state="${key}" aria-pressed="${videoState === key}">
+      ${role ? `<span class="chip-dot dot--${role}"></span>` : ''}${escapeHtml(label)}
+      <span class="chip-count">${fmt(n)}</span>
+    </button>`;
 
-  const el = $('v-state');
-  // Only rebuild when the options actually changed — refilling on every
-  // keystroke would close the menu under the operator's cursor.
-  const sig = JSON.stringify(opts);
-  if (el.dataset.sig === sig) return;
-  el.dataset.sig = sig;
-  el.dd.setOptions(opts, true);
+  const el = $('v-chips');
+  el.innerHTML = chip('', 'All', '', allVideos.length)
+    + Object.entries(Status.AUDIT_STATUS)
+        .filter(([key]) => counts[key] || videoState === key)
+        .map(([key, meta]) =>
+          chip(key, meta.label, meta.cls.replace('pill--', ''), counts[key] || 0)).join('');
 }
 
 // Videos' own header. The lede says how much of the channel Midas has been
@@ -1053,17 +1024,6 @@ function renderVideos() {
   const q = ($('v-search').value || '').toLowerCase().trim();
   const filtered = allVideos.filter(v => videoMatches(v, q, videoState));
   const sorted = sortVideos(filtered);
-  $('v-count').innerHTML = (q || videoState)
-    ? `${fmt(sorted.length)} of ${fmt(allVideos.length)}`
-      + ` <button type="button" class="btn-link" id="v-clear">Show all</button>`
-    : `${fmt(sorted.length)} videos`;
-  // Wired here, above the empty-list early returns: a filter matching nothing
-  // is precisely when this button has to work.
-  const clr = $('v-clear');
-  if (clr) clr.onclick = () => {
-    videoState = ''; $('v-search').value = ''; $('v-state').dd.set('', true);
-    videoPage = VIDEO_PAGE; renderVideos();
-  };
   if (!allVideos.length) {
     $('videos').innerHTML = '<div class="dt"><div class="dt-empty muted">No videos yet — get the latest from YouTube on the Autopilot page.</div></div>';
     return;
@@ -1145,8 +1105,10 @@ function renderVideos() {
 // second way to do things the Autopilot page and the board already do for the
 // whole channel, and it cost this page its only job: finding one video.
 $('v-search').oninput = () => { videoPage = VIDEO_PAGE; renderVideos(); };
-$('v-state').addEventListener('change', (e) => {
-  videoState = e.detail.value;
+$('v-chips').addEventListener('click', (e) => {
+  const b = e.target.closest('.chip');
+  if (!b) return;
+  videoState = b.dataset.state;
   videoPage = VIDEO_PAGE;
   renderVideos();
 });

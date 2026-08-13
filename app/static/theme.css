@@ -93,6 +93,13 @@
 }
 
 /* ── Base ───────────────────────────────────────────────────────────── */
+/* Density. The system is sized in rem; the design was drawn at a 13px base
+   with explicit pixel sizes, so every shipped element came out 15-20% larger
+   than intended. Moving the root moves all of it at once, in proportion,
+   rather than re-tuning forty rules and losing the relationships between
+   them. */
+html { font-size: 15px; }
+
 body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
        line-height: 1.5; }
 h1 { margin-bottom: .25rem; }
@@ -214,7 +221,7 @@ h1 { margin-bottom: .25rem; }
 }
 
 /* ── Card ───────────────────────────────────────────────────────────── */
-.card { border:1px solid var(--border); border-radius:var(--radius); padding:1.1rem 1.25rem; margin:1rem 0; }
+.card { border:1px solid var(--border); border-radius:var(--radius); padding:1.05rem 1.2rem; margin:1.05rem 0; }
 
 /* ── Buttons ────────────────────────────────────────────────────────── */
 button, .btn { font:inherit; padding:.55rem 1rem; border-radius:var(--radius-md);
@@ -268,7 +275,7 @@ code { background:var(--surface-tint); padding:0 .3rem; border-radius:var(--radi
    a label — the sidebar already says where you are — so the title is small and
    the lede below it carries the focal point: the state that implies work. */
 .page-head { margin-bottom:1.25rem; }
-h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
+h1.page-title { font-size:.84rem; font-weight:600; color:var(--ink-3); margin:0 0 .9rem; }
 .page-lede { font-size:1.95rem; font-weight:750; letter-spacing:-.022em; line-height:1.15;
              margin:0 0 .3rem; text-wrap:balance; font-variant-numeric:tabular-nums; }
 .page-lede .u { font-size:1rem; font-weight:600; opacity:.55; letter-spacing:0; }
@@ -309,8 +316,8 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .dt-scroll { overflow-x:auto; scrollbar-width:none; }
 .dt-scroll::-webkit-scrollbar { display:none; }
 .dt-body { min-width:var(--dt-min, 0); }
-.dt-head, .dt-row { display:grid; grid-template-columns:var(--dt-cols); gap:.65rem;
-                    align-items:center; padding:.5rem .75rem; }
+.dt-head, .dt-row { display:grid; grid-template-columns:var(--dt-cols); gap:.8rem;
+                    align-items:center; padding:.6rem .87rem; }
 .dt-head { border-bottom:1px solid var(--border); font-size:.72rem; font-weight:600;
            opacity:.55; letter-spacing:.02em; position:sticky; top:0; }
 .dt-row { border-bottom:1px solid var(--border-soft); font-size:.83rem;
@@ -330,6 +337,7 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .dt-open:hover { color:inherit; background:var(--surface-tint); }
 .dt-open[aria-expanded="true"] { transform:rotate(90deg); color:var(--color-accent); }
 .truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
 
 /* ── Toasts ─────────────────────────────────────────────────────────── */
 #toasts { position:fixed; bottom:1rem; right:1rem; z-index:9999; display:flex; flex-direction:column; gap:.5rem; max-width:360px; }
@@ -491,6 +499,14 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .field-check { display:flex; align-items:flex-start; gap:.55rem; cursor:pointer;
                font-size:.875rem; line-height:1.45; max-width:44ch; }
 .field-check > input { margin:.2rem 0 0; flex:0 0 auto; }
+/* A checkbox followed by another field needs the same gap the fields have
+   between themselves, or the next label reads as this checkbox's caption. */
+.field-check + .field { margin-top:.9rem; }
+.field-check + .field-check { margin-top:.4rem; }
+
+/* Instruction text is written to be read as a block, not as prose in the page
+   voice — monospace and small, the way it will be handed to the model. */
+textarea { font-family:var(--mono); font-size:.78rem; line-height:1.55; }
 
 /* ── Status lamp ────────────────────────────────────────────────────── */
 /* State as form, not only as text — readable down a column of 13 rows. */
