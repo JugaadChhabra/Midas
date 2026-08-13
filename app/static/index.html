@@ -141,6 +141,15 @@ document.addEventListener('click', (e) => {
       .then(r => r.json())
       .then(j => { toast(`${j.synced ?? 0} new videos.`, 'ok'); SWR.invalidate('/dashboard'); load(); })
       .catch(() => toast('Could not fetch from YouTube.', 'err'));
+  } else if (runAction === 'Stop') {
+    fetch(`/auth/channels/${encodeURIComponent(channel)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autopilot_enabled: false }),
+    }).then(r => {
+      if (!r.ok) throw new Error();
+      toast('Autopilot stopped.', 'ok');
+      SWR.invalidate('/auth/channels'); SWR.invalidate('/dashboard'); load();
+    }).catch(() => toast('Could not stop it.', 'err'));
   } else if (runAction === 'Try again') {
     return;   // gated by hold — see the confirm listener below
   } else {

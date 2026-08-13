@@ -59,7 +59,7 @@
     }
     return { key: 'run', group: 'run', lamp: 'lamp--run',
              why: `${lastRun(c)} · ${fmt(c.applied_today || 0)} of ${fmt(c.autopilot_daily_cap || 0)} rewritten today`,
-             action: '' };
+             action: 'Stop' };
   }
 
   const lastRun = (c) => c.autopilot_last_tick_at

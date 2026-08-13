@@ -594,6 +594,7 @@ function renderChannelState(j) {
 // different sentences — a single generic paragraph would be true of neither.
 const WHY_PILL = {
   run:    ['pill--ok',      'Running'],
+  bad:    ['pill--warn',    'Running · bad output'],
   off:    ['pill--neutral', 'Off'],
   paused: ['pill--err',     'Stopped'],
   stale:  ['pill--err',     'Not running'],
@@ -617,6 +618,10 @@ function renderWhy(st, c) {
        + 'YouTube since. Getting the latest clears it.',
     setup: 'Midas has not fetched this channel\'s videos yet, so there is '
        + 'nothing to rewrite. Getting the latest is the first step.',
+    bad: 'Autopilot is running, but the last rewrites came back in a state '
+       + 'Midas will not publish. It keeps going and keeps spending the daily '
+       + 'limit on them, so they are worth another try or a look at the '
+       + 'instructions.',
   }[st.key] || '';
   $('ap-note').textContent = note;
 }
@@ -630,16 +635,44 @@ function renderStateAction(action, pausedReason) {
   // 'Update' already has a button; promote that one rather than adding a twin.
   $('sync-btn').classList.toggle('btn-primary', action === 'Update');
   $('apply-pending-btn').classList.toggle('btn-primary', !action);
-  if (!action || action === 'Update') return;
+  if (!action || action === 'Update' || action === 'Stop') return;
   // Resume can't clear an expired sign-in — offering it would fail every time.
   // The Right now card carries the reconnect link instead.
   if (action === 'Resume' && pausedReason === 'token_expired') return;
 
   const b = document.createElement('button');
   b.className = 'btn-primary';
-  b.textContent = action === 'Resume' ? 'Resume autopilot' : 'Start autopilot';
-  b.onclick = () => (action === 'Resume' ? resumeAutopilot() : setAutopilot(true, b));
+  if (action === 'Try again') {
+    b.textContent = 'Rewrite the unusable ones';
+    b.onclick = () => reauditQuarantined(b);
+  } else if (action === 'Resume') {
+    b.textContent = 'Resume autopilot';
+    b.onclick = () => resumeAutopilot();
+  } else {
+    b.textContent = 'Start autopilot';
+    b.onclick = () => setAutopilot(true, b);
+  }
   host.appendChild(b);
+}
+
+// Re-runs every video whose latest rewrite was rejected. Writes nothing to
+// YouTube — it only asks the model again — so it is a plain button here, where
+// the board gates it behind a hold because the board acts on a whole channel
+// you are not looking at.
+async function reauditQuarantined(btn) {
+  Components.busy(btn, 'Rewriting');
+  try {
+    const r = await fetch(`/channels/${channelId}/audits/reaudit-quarantined`,
+                          { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || 'failed');
+    toast(`${j.reaudited} rewritten again, ${j.skipped} skipped, ${j.failed} failed.`,
+          j.failed ? 'warn' : 'ok');
+    bustChannelData();
+    await refreshChannelState();
+  } catch (e) {
+    toast('Could not start them again: ' + escapeHtml(String(e)), 'err');
+  } finally { Components.done(btn); }
 }
 
 // Starting and stopping live on the page that reports the state, not in a
@@ -650,7 +683,6 @@ function renderStopAction(enabled) {
   host.innerHTML = '';
   if (!enabled) return;
   const b = document.createElement('button');
-  b.className = 'btn-link';
   b.type = 'button';
   b.textContent = 'Stop autopilot';
   b.onclick = () => setAutopilot(false, b);
