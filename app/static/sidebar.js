@@ -230,7 +230,11 @@
   // ── Switcher contents ────────────────────────────────────────────────
   // Callers pass a channel list they already have (the dashboard payload, or
   // the shared /auth/channels cache), so the rail costs no extra request.
-  function setChannels(all, currentId) {
+  // `open` distinguishes "this channel's page is on screen" from "the rail is
+  // merely pointed here" — the board is the second, and shows the fleet count
+  // rather than a handle belonging to a page you are not on.
+  function setChannels(all, currentId, opts) {
+    const open = !opts || opts.open !== false;
     if (!els) return;
     const channels = (all || []).slice()
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
@@ -241,13 +245,17 @@
       const label = shortLabel(current.name || current.id, prefixLen);
       els.avatar.textContent = initials(label);
       els.name.textContent = label || current.id;
-      els.handle.textContent = current.handle || '';
+      // On the board no channel is open, so the second line counts the fleet
+      // instead of naming a handle that belongs to the page you aren't on.
+      els.handle.textContent = open ? (current.handle || '')
+        : `${channels.length} channel${channels.length === 1 ? '' : 's'}`;
       els.trigger.title = `${current.name || current.id} — switch channel (/)`;
+      setSection(label);
     } else {
       els.avatar.textContent = '◆';
       els.name.textContent = 'All channels';
       els.handle.textContent = channels.length
-        ? `${channels.length} connected`
+        ? `${channels.length} channel${channels.length === 1 ? '' : 's'}`
         : 'none connected';
       els.trigger.title = 'All channels — switch channel (/)';
     }
@@ -285,5 +293,27 @@
     if (el) el.textContent = label;
   }
 
-  window.Sidebar = { mount, setChannels, setSection, shortLabel, commonWordPrefix };
+  // The four channel sections, in order. The rail is identical on every screen
+  // — including the board, where they point into whichever channel you last
+  // had open — so this list lives here rather than being retyped per page.
+  const CHANNEL_ITEMS = [
+    { id: 'autopilot', label: 'Autopilot', icon: 'autopilot' },
+    { id: 'videos',    label: 'Videos',    icon: 'videos' },
+    { id: 'playlists', label: 'Playlists', icon: 'playlists' },
+    { id: 'settings',  label: 'Settings',  icon: 'settings' },
+  ];
+
+  // Which channel the board's rail points at. Remembered so that arriving from
+  // a channel and going back keeps the rail pointing where you were, instead of
+  // resetting to whichever channel happens to sort first.
+  const LAST_KEY = 'midas.lastChannel';
+  function rememberChannel(id) {
+    try { localStorage.setItem(LAST_KEY, id); } catch { /* private mode */ }
+  }
+  function lastChannel() {
+    try { return localStorage.getItem(LAST_KEY) || ''; } catch { return ''; }
+  }
+
+  window.Sidebar = { mount, setChannels, setSection, shortLabel, commonWordPrefix,
+                     CHANNEL_ITEMS, rememberChannel, lastChannel };
 })();

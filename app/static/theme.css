@@ -148,6 +148,7 @@ h1 { margin-bottom: .25rem; }
         padding:.55rem .6rem; border:0; background:none; border-radius:var(--radius-md);
         font:inherit; font-size:.925rem; color:inherit; opacity:.72;
         text-align:left; cursor:pointer; }
+.snav, .snav:hover { text-decoration:none; }
 .snav:hover { background:var(--surface-tint); opacity:1; }
 .snav.active { background:var(--color-accent-bg); color:var(--color-accent); opacity:1; font-weight:600; }
 .snav svg { flex:0 0 auto; }

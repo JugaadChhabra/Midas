@@ -349,6 +349,9 @@ function showMissingId(what) {
     + `Missing ${what} — open a channel from the <a href="/">dashboard</a>.</p></div>`;
 }
 
+// The board's rail points at whichever channel you last had open.
+Sidebar.rememberChannel(channelId);
+
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (s) => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = (n) => (n ?? 0).toLocaleString();
@@ -455,17 +458,11 @@ if (initialTab) switchTab(initialTab);
 // occasional. Overview duplicated all of them, and Performance restated
 // YouTube Studio.
 Sidebar.mount({
-  items: [
-    { id: 'running', label: 'Running', icon: 'home', href: '/' },
-    // Filled with the channel's name once it loads (Sidebar.setSection), so the
-    // four items below are visibly scoped to one channel rather than reading as
-    // peers of the board.
-    { section: '' },
-    { id: 'autopilot',   label: 'Autopilot',   icon: 'autopilot' },
-    { id: 'videos',      label: 'Videos',      icon: 'videos' },
-    { id: 'playlists',   label: 'Playlists',   icon: 'playlists' },
-    { id: 'settings',    label: 'Settings',    icon: 'settings' },
-  ],
+  // Same rail as the board — one list, in Sidebar. Here the four sections are
+  // in-page panels, so they get onSelect rather than hrefs. The divider label
+  // is filled in by setChannels once the channel's name is known.
+  items: [{ id: 'running', label: 'Running', icon: 'home', href: '/' },
+          { section: '' }].concat(Sidebar.CHANNEL_ITEMS),
   activeId: initialTab || 'autopilot',
   onSelect: switchTab,
 });

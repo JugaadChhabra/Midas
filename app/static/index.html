@@ -47,12 +47,41 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
-// The rail here is global — this page isn't scoped to a channel, so the only
-// section is the board itself and the switcher is how you drop into a channel.
+// The rail is the same on every screen, including here. The four channel
+// sections stay put and point into whichever channel you last had open, so
+// getting from the board into a specific section is one click rather than
+// "open the channel, then find the section". They are hrefs, not panels,
+// because on this page they lead somewhere else.
+//
+// Mounted with placeholders; setChannels fills in the divider label and
+// re-points the links once /dashboard tells us which channels exist.
+let railChannel = Sidebar.lastChannel();
 Sidebar.mount({
-  items: [{ id: 'running', label: 'Running', icon: 'home', href: '/' }],
+  items: [{ id: 'running', label: 'Running', icon: 'home', href: '/' }]
+    .concat([{ section: '' }])
+    .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
   activeId: 'running',
 });
+
+function railHref(section) {
+  return railChannel
+    ? `/channel?id=${encodeURIComponent(railChannel)}#${section}`
+    : '/';
+}
+
+// Re-point the channel links once we know the channels. Until a channel has
+// been opened there is nothing to point at, so the items stay but lead to the
+// first channel rather than dead-ending.
+function pointRailAt(channels) {
+  if (!railChannel || !channels.some(c => c.id === railChannel)) {
+    railChannel = (channels[0] || {}).id || '';
+  }
+  document.querySelectorAll('.sidebar-nav a.snav').forEach(a => {
+    const id = a.dataset.tab;
+    if (id !== 'running') a.setAttribute('href', railHref(id));
+  });
+  return railChannel;
+}
 
 function toast(msg, kind = 'ok', timeout = 3200) {
   const el = document.createElement('div');
@@ -70,11 +99,12 @@ const els = {
 
 function paint(payload) {
   Running.render(payload, els);
+  const pointed = pointRailAt(payload.channels || []);
   const now = new Date();
   $('run-checked').textContent = 'Checked ' + now.toLocaleTimeString([],
     { hour: '2-digit', minute: '2-digit' }) + ' · ' + now.toLocaleDateString([],
     { day: 'numeric', month: 'short' });
-  Sidebar.setChannels(payload.channels, null);
+  Sidebar.setChannels(payload.channels, pointed, { open: false });
 
   const paused = (payload.health || {}).autopilot_paused || 0;
   const banner = $('attention');
