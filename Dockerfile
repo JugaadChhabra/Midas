@@ -53,6 +53,14 @@ RUN pip install --no-cache-dir torch==2.12.1 torchvision==0.27.1 torchaudio==2.1
 
 COPY app ./app
 
+# app/provision.py applies these around the empty-database restore: 000_roles.sql
+# before it (a pg_dump carries no roles, but the dump's GRANTs name anon and
+# service_role) and the rest after. It resolves them at /app/supabase/bootstrap,
+# so the image has to carry them — without this the self-restore dies on a bare
+# FileNotFoundError and the app never starts. Migrations are deliberately NOT
+# copied; those are applied from the host by scripts/apply_migrations.py.
+COPY supabase/bootstrap ./supabase/bootstrap
+
 RUN mkdir -p /app/storage/keyframes /app/shorts_cache /app/logs
 
 EXPOSE 8000
