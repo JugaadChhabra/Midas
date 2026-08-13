@@ -73,7 +73,7 @@ def dashboard():
 # so _compute_dashboard's enrichment/KPI/pipeline code is path-agnostic.
 _STAT_KEYS = (
     "video_count", "regular_count", "shorts_count",
-    "audited_regular", "audited_shorts", "pending_count",
+    "audited_regular", "audited_shorts", "pending_count", "quarantined_count",
     "applied_latest", "applied_today", "applied_7d", "applied_total",
     "delta_views_7d",
 )
@@ -173,6 +173,8 @@ def _aggregate_legacy() -> tuple[dict, int, int]:
             s["audited_regular"] += 1
         if a["status"] == "pending":
             s["pending_count"] += 1
+        elif a["status"] == "quarantined":
+            s["quarantined_count"] += 1
         elif a["status"] == "applied":
             s["applied_latest"] += 1
 
@@ -254,6 +256,7 @@ def _compute_dashboard():
             "audited_regular": s["audited_regular"],
             "audited_shorts": s["audited_shorts"],
             "pending_count": s["pending_count"],
+            "quarantined_count": s["quarantined_count"],
             "applied_today": s["applied_today"],
             "applied_7d": s["applied_7d"],
             "applied_total": s["applied_total"],

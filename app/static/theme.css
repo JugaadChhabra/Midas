@@ -513,7 +513,7 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 /* ── Fleet row ──────────────────────────────────────────────────────── */
 /* One channel on the Running board. A whole-row target, so the columns are
    declared here rather than on a table. */
-.frow { display:grid; grid-template-columns:9px minmax(140px,1.3fr) minmax(165px,1.1fr) 86px 78px 84px;
+.frow { display:grid; grid-template-columns:9px minmax(130px,1.1fr) minmax(240px,1.6fr) 86px 78px 112px;
         gap:.9rem; align-items:center; width:100%; padding:.7rem .75rem; text-align:left;
         background:none; border:1px solid transparent; border-radius:var(--radius-md);
         transition:background-color .12s, border-color .12s; }
@@ -525,6 +525,7 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .frow .why b { color:var(--ink-2); font-weight:600; }
 .frow .fig { font-variant-numeric:tabular-nums; font-size:.76rem; color:var(--ink-3); }
 .frow .act { justify-self:end; }
+.frow .act > * { white-space:nowrap; }
 
 /* ── Quota strip ────────────────────────────────────────────────────── */
 .quota { display:flex; align-items:center; gap:.9rem; padding:.7rem .9rem; margin-bottom:1.6rem;

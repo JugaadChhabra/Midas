@@ -22,38 +22,65 @@
   function stateOf(c) {
     const hours = c.hours_since_sync;
     const days = hours == null ? null : Math.round(hours / 24);
+    const bad = c.quarantined_count || 0;
 
+    // Stopped: it will not start again by itself. This is its own group and
+    // leads, because it is the only state where nothing at all is happening
+    // and only a person can change that.
+    if (c.autopilot_paused_reason) {
+      return { key: 'paused', group: 'stopped', lamp: 'lamp--fault',
+               why: `<b>Stopped</b> — ${escapeHtml(reasonInWords(c.autopilot_paused_reason))}`,
+               action: 'Resume' };
+    }
     if (!c.video_count) {
-      return { key: 'setup', group: 'setup', lamp: '',
+      return { key: 'setup', group: 'attention', lamp: 'lamp--warn',
                why: '<b>Never set up</b> — no videos fetched from YouTube yet',
                action: 'Sync' };
     }
+    // Stale outranks off: turning autopilot on against a 12-day-old copy of the
+    // channel doesn't make it running, it makes it wrong.
     if (hours == null || hours > STALE_HOURS) {
-      return { key: 'stale', group: 'stale', lamp: 'lamp--fault',
+      return { key: 'stale', group: 'attention', lamp: 'lamp--warn',
                why: `<b>Channel data ${days} days old</b> — autopilot won't run`,
                action: 'Sync' };
     }
-    if (c.autopilot_paused_reason) {
-      return { key: 'paused', group: 'stale', lamp: 'lamp--warn',
-               why: `<b>Stopped</b> — ${escapeHtml(c.autopilot_paused_reason)}`,
-               action: 'Resume' };
+    // Bad output is the state the board could not see before: it ran, it did
+    // work, and the work is unusable. Ranked below stale because the channel is
+    // still moving — but above "running", because it is quietly wasting quota.
+    if (bad) {
+      return { key: 'bad', group: 'attention', lamp: 'lamp--warn',
+               why: `<b>${fmt(bad)} rewrite${bad === 1 ? '' : 's'} came back unusable</b>`
+                  + ` — ${lastRun(c).toLowerCase()}`,
+               action: 'Try again' };
     }
     if (!c.autopilot_enabled) {
       return { key: 'off', group: 'off', lamp: '',
                why: 'Autopilot off · data is current', action: 'Start' };
     }
-    const tick = c.autopilot_last_tick_at
-      ? c.autopilot_last_tick_at.slice(11, 16) : '—';
     return { key: 'run', group: 'run', lamp: 'lamp--run',
-             why: `Ran ${tick} · ${fmt(c.applied_today || 0)} of ${fmt(c.autopilot_daily_cap || 0)} rewritten today`,
+             why: `${lastRun(c)} · ${fmt(c.applied_today || 0)} of ${fmt(c.autopilot_daily_cap || 0)} rewritten today`,
              action: '' };
   }
 
+  const lastRun = (c) => c.autopilot_last_tick_at
+    ? `Ran ${c.autopilot_last_tick_at.slice(11, 16)}` : 'Has not run';
+
+  // Pause reasons are persisted enum-ish strings written for the log. On the
+  // board they are the whole explanation, so they get read out in words.
+  const REASONS = {
+    token_expired:    'Google sign-in expired',
+    quota_exhausted:  'ran out of YouTube quota',
+    daily_cap:        'hit the daily limit',
+    daily_cap_hit:    'hit the daily limit',
+    consecutive_failures: 'too many failures in a row',
+  };
+  const reasonInWords = (r) => REASONS[r] || String(r || '').replace(/_/g, ' ');
+
   const GROUPS = [
-    ['stale', 'Not running'],
-    ['setup', 'Never set up'],
-    ['off',   'Off'],
-    ['run',   'Running'],
+    ['stopped',   'Stopped'],
+    ['attention', 'Needs attention'],
+    ['run',       'Running'],
+    ['off',       'Off'],
   ];
 
   const fmt = (n) => Number(n || 0).toLocaleString();
@@ -81,9 +108,14 @@
       <span class="beat" data-spark data-values="${beatFor(c)}" data-max="${beatMax}"
             data-label="rewrites put live, last 7 days"></span>
       <span class="fig">${figure}</span>
-      <span class="act">${st.action
-        ? `<span class="btn btn-sm" data-run-action="${st.action}" data-channel="${escapeHtml(c.id)}">${st.action}</span>`
-        : ''}</span>
+      <span class="act">${!st.action ? ''
+        : st.action === 'Try again'
+        ? `<button type="button" class="btn btn-sm hold" data-hold data-ms="900"
+                   data-label="Hold to retry" data-done-label="Started"
+                   data-run-action="${st.action}" data-channel="${escapeHtml(c.id)}"
+             ><span class="fill"></span><span class="txt">Hold to retry</span></button>`
+        : `<span class="btn btn-sm" data-run-action="${st.action}" data-channel="${escapeHtml(c.id)}">${st.action}</span>`
+      }</span>
     </a>`;
   }
 
@@ -102,7 +134,13 @@
     Object.values(buckets).forEach(list =>
       list.sort((a, b) => (b.hours_since_sync || 0) - (a.hours_since_sync || 0)));
 
-    const notRunning = channels.length - (buckets.run || []).length;
+    // A channel producing bad output IS running — it just isn't producing
+    // anything usable. Counting it as "not running" would overstate the
+    // headline and understate the real problem, which the meta line names.
+    const working = (buckets.run || []).length
+                  + (buckets.attention || []).filter(c => stateOf(c).key === 'bad').length;
+    const notRunning = channels.length - working;
+    const badTotal = channels.reduce((n, c) => n + (c.quarantined_count || 0), 0);
     const beatMax = Math.max(1, ...channels.map(c => c.applied_today || 0));
     // These channels are one show in many languages, so the distinguishing part
     // is the tail — same treatment the switcher gives them.
@@ -116,6 +154,7 @@
     els.meta.textContent = [
       `${fmt(kpis.pending_total)} finished rewrites waiting to go live`,
       `${fmt(kpis.audited_today)} rewritten today`,
+      badTotal ? `${fmt(badTotal)} came back unusable` : null,
       worst ? `oldest channel data ${Math.round(worst / 24)} days old` : null,
     ].filter(Boolean).join(' · ');
 
@@ -139,6 +178,10 @@
     const pct = Math.max(0, Math.min(100, q.remaining / usable * 100));
     const resetH = Math.floor((q.reset_in_seconds || 0) / 3600);
     const resetM = Math.floor(((q.reset_in_seconds || 0) % 3600) / 60);
+    // A countdown alone doesn't say whether the reset lands before or after you
+    // stop looking at this; the clock time does.
+    const at = new Date(Date.now() + (q.reset_in_seconds || 0) * 1000)
+      .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const spark = (q.sparkline || []).map(d => d.units);
     const dead = spark.filter(u => !u).length;
 
@@ -149,7 +192,7 @@
       </div>
       <div class="meter ok" data-meter data-pct="${pct.toFixed(1)}"></div>
       <div style="text-align:right">
-        <div class="quota-l">resets in ${resetH}h ${resetM}m</div>
+        <div class="quota-l">resets in ${resetH}h ${resetM}m · ${at}</div>
         <div class="quota-l">${fmt(q.used_today)} used today${
           dead ? ` · none used on ${dead} of the last ${spark.length} days` : ''}</div>
       </div>

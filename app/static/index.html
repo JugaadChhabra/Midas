@@ -22,7 +22,7 @@
   <div class="app-shell" id="app-shell">
   <main class="app-main">
     <header class="page-head">
-      <h1 class="page-title">Running</h1>
+      <h1 class="page-title" id="run-checked">Running</h1>
     </header>
 
     <p class="page-lede" id="run-lede">Checking…</p>
@@ -70,6 +70,10 @@ const els = {
 
 function paint(payload) {
   Running.render(payload, els);
+  const now = new Date();
+  $('run-checked').textContent = 'Checked ' + now.toLocaleTimeString([],
+    { hour: '2-digit', minute: '2-digit' }) + ' · ' + now.toLocaleDateString([],
+    { day: 'numeric', month: 'short' });
   Sidebar.setChannels(payload.channels, null);
 
   const paused = (payload.health || {}).autopilot_paused || 0;
@@ -108,11 +112,36 @@ document.addEventListener('click', (e) => {
     fetch(`/channels/${encodeURIComponent(channel)}/sync`, { method: 'POST' })
       .then(r => r.json())
       .then(j => { toast(`${j.synced ?? 0} new videos.`, 'ok'); SWR.invalidate('/dashboard'); load(); })
-      .catch(() => toast('Sync failed.', 'err'));
+      .catch(() => toast('Could not fetch from YouTube.', 'err'));
+  } else if (runAction === 'Try again') {
+    return;   // gated by hold — see the confirm listener below
   } else {
     // Starting and resuming change what the machine does on its own, so they
     // happen on the channel page where the reason it stopped is in view.
     location.href = `/channel?id=${encodeURIComponent(channel)}#autopilot`;
+  }
+});
+
+// Trying the bad ones again writes nothing to YouTube, but it calls the model
+// once per video and runs to completion before answering — hence the hold, and
+// hence the clock on the button while it works.
+document.addEventListener('confirm', async (e) => {
+  const btn = e.target.closest('[data-run-action="Try again"]');
+  if (!btn) return;
+  const channel = btn.dataset.channel;
+  Components.busy(btn, 'Rewriting');
+  try {
+    const r = await fetch(`/channels/${encodeURIComponent(channel)}/audits/reaudit-quarantined`,
+                          { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || 'failed');
+    toast(`${j.reaudited} rewritten again, ${j.skipped} skipped, ${j.failed} failed `
+        + `(of ${j.total_quarantined}).`, j.failed ? 'warn' : 'ok');
+    SWR.invalidate('/dashboard');
+    load();
+  } catch (err) {
+    Components.done(btn);
+    toast('Could not start them again: ' + err, 'err');
   }
 });
 
