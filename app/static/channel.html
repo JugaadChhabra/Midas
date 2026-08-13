@@ -68,8 +68,8 @@
   /* Videos table column track. Declared once; .dt-head and every .dt-row read
      it, so the header can't drift out of step with the rows. --dt-min forces a
      horizontal scroll rather than letting 11 columns crush each other. */
-  #videos .dt { --dt-cols: 1.1rem 88px minmax(220px, 2fr) 7rem 4.2rem 6.4rem 4.6rem 7.6rem;
-                --dt-min: 920px; }
+  #videos .dt { --dt-cols: 88px minmax(240px, 3fr) 7rem 6.4rem 4.6rem 2.2rem;
+                --dt-min: 620px; }
   #videos .dt-row { align-items:start; }
 
   /* Card section headers — title left, a quiet action right. Replaces the
@@ -124,28 +124,14 @@
     <p class="page-lede" id="v-lede">—</p>
     <p class="page-meta" id="v-meta"></p>
 
-    <div class="card">
-      <!-- Audit state moved from a <select> to chips: the states double as a
-           breakdown, since each carries its own live count. -->
-      <div id="v-chips" data-label="What state each video is in"></div>
-      <div class="filter-bar">
-        <input type="search" id="v-search" placeholder="Search title or id…" style="min-width: 220px"/>
-        <div id="v-privacy" data-dropdown data-label="Visibility" data-options='[
-          {"value":"","label":"Any visibility"},
-          {"value":"public","label":"Public"},
-          {"value":"unlisted","label":"Unlisted"},
-          {"value":"private","label":"Private"}]'></div>
-        <span class="muted" style="margin-left:auto" id="v-count"></span>
-      </div>
-      <div class="filter-bar">
-        <button id="bulk-audit-btn" disabled>Rewrite selected</button>
-        <button id="bulk-apply-btn" disabled>Put selected live</button>
-        <button id="reaudit-quarantined-btn" disabled style="display:none">Try the bad ones again</button>
-        <button id="select-clear-btn" disabled>Clear selection</button>
-        <span id="selection-count" class="muted"></span>
-      </div>
-      <div id="videos">No videos yet — run a sync.</div>
+    <div class="filter-bar">
+      <input type="search" id="v-search" placeholder="Search title or video id…"
+             style="flex:1; min-width:14rem; max-width:32rem" />
+      <div id="v-state" data-dropdown data-label="Show"
+           data-options='[{"value":"","label":"All videos"}]'></div>
+      <span class="muted" id="v-count"></span>
     </div>
+    <div id="videos">No videos yet.</div>
   </div>
 
   <!-- ─── AUTOPILOT ─── -->
@@ -963,7 +949,6 @@ $('save-btn').onclick = async () => {
 // ── Videos table ──────────────────────────────────────────────────────
 let allVideos = [];
 const currentVideos = {};
-const selected = new Set();
 let sortKey = 'published_at';
 let sortDir = 'desc';
 
@@ -987,7 +972,7 @@ function loadVideos() {
   return SWR.swr(`/channels/${channelId}/videos`, renderVideosData).fresh;
 }
 
-function videoMatches(v, q, state, privacy) {
+function videoMatches(v, q, state) {
   if (q) {
     const hay = (v.title || '').toLowerCase() + ' ' + v.id.toLowerCase();
     if (!hay.includes(q)) return false;
@@ -996,7 +981,6 @@ function videoMatches(v, q, state, privacy) {
     if (state === 'none') { if (v.audit_status) return false; }
     else { if (v.audit_status !== state) return false; }
   }
-  if (privacy && (v.privacy_status || 'public') !== privacy) return false;
   return true;
 }
 
@@ -1019,42 +1003,28 @@ let videoState = '';   // '' = all
 const VIDEO_PAGE = 40;
 let videoPage = VIDEO_PAGE;
 
-// The state breakdown is a distribution, and the shape of it is the point:
-// "439 Live · 4,724 Not rewritten" reads as two numbers, while a bar sized by
-// share reads as 8% done at a glance. Each band is also the filter for itself,
-// so the picture and the control are the same object rather than a legend
-// sitting next to a row of buttons that repeat it.
+// The state filter. A dropdown, not a bar of buttons: on this page state is a
+// way to narrow a search, not something you come here to read. Each option
+// carries its own count, so the breakdown is still there when you open it.
 //
-// Driven by status.js rather than a list kept here: every state appears the
-// moment it exists in the data, and its colour always matches the pill the
-// same status renders in the table.
-function renderChips() {
+// Driven by status.js rather than a list kept here: a state appears the moment
+// it exists in the data, and never as an option that would return nothing.
+function renderStateFilter() {
   const counts = {};
-  allVideos.forEach(v => {
-    const k = v.audit_status || 'none';
-    counts[k] = (counts[k] || 0) + 1;
-  });
+  allVideos.forEach(v => { const k = v.audit_status || 'none'; counts[k] = (counts[k] || 0) + 1; });
 
-  const segs = Object.entries(Status.AUDIT_STATUS)
-    .map(([key, meta]) => ({
-      key, label: meta.label, n: counts[key] || 0,
-      role: meta.cls.replace('pill--', ''),
-    }))
-    .filter(seg => seg.n > 0 || videoState === seg.key);
+  const opts = [{ value: '', label: 'All videos', hint: fmt(allVideos.length) }].concat(
+    Object.entries(Status.AUDIT_STATUS)
+      .filter(([key]) => counts[key] || videoState === key)
+      .map(([key, meta]) => ({ value: key, label: meta.label, hint: fmt(counts[key] || 0) })));
 
-  const el = $('v-chips');
-  // Re-render only when the composition actually changed. Rebuilding on every
-  // keystroke of the search box would restart the bar's width transition and
-  // drop focus out of the legend mid-keyboard-navigation.
-  const sig = JSON.stringify(segs) + '|' + videoState;
-  if (el.dataset.sig !== sig) {
-    el.dataset.sig = sig;
-    el.dataset.value = videoState;
-    delete el.dataset.cmpWired;
-    el.dataset.segments = JSON.stringify(segs);
-    Components.seg(el);
-    el.dataset.cmpWired = '1';
-  }
+  const el = $('v-state');
+  // Only rebuild when the options actually changed — refilling on every
+  // keystroke would close the menu under the operator's cursor.
+  const sig = JSON.stringify(opts);
+  if (el.dataset.sig === sig) return;
+  el.dataset.sig = sig;
+  el.dd.setOptions(opts, true);
 }
 
 // Videos' own header. The lede says how much of the channel Midas has been
@@ -1079,33 +1049,21 @@ function renderVideoHeader() {
 
 function renderVideos() {
   renderVideoHeader();
+  renderStateFilter();
   const q = ($('v-search').value || '').toLowerCase().trim();
-  const state = videoState;
-  const privacy = $('v-privacy').dd.value;
-  renderChips();
-  const filtered = allVideos.filter(v => videoMatches(v, q, state, privacy));
+  const filtered = allVideos.filter(v => videoMatches(v, q, videoState));
   const sorted = sortVideos(filtered);
-  const filters = [
-    videoState ? (Status.AUDIT_STATUS[videoState] || {}).label || videoState : null,
-    privacy ? privacy[0].toUpperCase() + privacy.slice(1) : null,
-    q ? `“${q}”` : null,
-  ].filter(Boolean);
-  $('v-count').innerHTML = filters.length
-    ? `${fmt(sorted.length)} of ${fmt(allVideos.length)} · ${escapeHtml(filters.join(' · '))}`
+  $('v-count').innerHTML = (q || videoState)
+    ? `${fmt(sorted.length)} of ${fmt(allVideos.length)}`
       + ` <button type="button" class="btn-link" id="v-clear">Show all</button>`
     : `${fmt(sorted.length)} videos`;
   // Wired here, above the empty-list early returns: a filter matching nothing
   // is precisely when this button has to work.
   const clr = $('v-clear');
   if (clr) clr.onclick = () => {
-    videoState = ''; $('v-search').value = ''; $('v-privacy').dd.set('', true);
+    videoState = ''; $('v-search').value = ''; $('v-state').dd.set('', true);
     videoPage = VIDEO_PAGE; renderVideos();
   };
-  const quarantinedCount = allVideos.filter(v => v.audit_status === 'quarantined').length;
-  const rqBtn = $('reaudit-quarantined-btn');
-  rqBtn.style.display = quarantinedCount > 0 ? '' : 'none';
-  rqBtn.disabled = quarantinedCount === 0;
-  rqBtn.textContent = `Re-audit bad output (${quarantinedCount})`;
   if (!allVideos.length) {
     $('videos').innerHTML = '<div class="dt"><div class="dt-empty muted">No videos yet — get the latest from YouTube on the Autopilot page.</div></div>';
     return;
@@ -1122,33 +1080,33 @@ function renderVideos() {
 
   // Detail panels are siblings of the row rather than cells inside it, so they
   // span the full width without colspan and don't disturb the column grid.
+  //
+  // Five columns, and every one of them serves finding a video and reading when
+  // it last changed. What used to be here — a select-all box, an issue count, a
+  // per-row action, and the model's reasoning clamped to two lines under every
+  // title — turned a lookup table into an instrument panel you had to read
+  // before you could use it. The reasoning is still one click away, inside the
+  // row, where it belongs with the rest of that rewrite.
   $('videos').innerHTML = `<div class="dt"><div class="dt-scroll"><div class="dt-body">
     <div class="dt-head">
-      <span><input type="checkbox" id="select-all" aria-label="Select all shown" /></span>
       <span aria-hidden="true"></span>
       <span>${sortCell('title', 'Video')}</span>
       <span>${sortCell('audit_status', 'State')}</span>
-      <span>${sortCell('issues_count', 'Issues')}</span>
       <span>${sortCell('audit_applied_at', 'Changed')}</span>
       <span>${sortCell('audit_count', 'Changes', 'How many times this video has been rewritten')}</span>
       <span aria-hidden="true"></span>
     </div>` +
-    shown.map(v => `<div id="row-${v.id}" class="dt-row${selected.has(v.id) ? ' selected' : ''}">
-      <span><input type="checkbox" class="vsel" data-id="${v.id}" ${selected.has(v.id) ? 'checked' : ''} aria-label="Select video" /></span>
+    shown.map(v => `<div id="row-${v.id}" class="dt-row">
       <span>${v.thumbnail_url ? `<img class="vid-thumb" src="${v.thumbnail_url}" loading="lazy" alt="" />` : ''}</span>
       <span>
         <div class="vid-title truncate">${escapeHtml(v.title || '')}</div>
         <div class="vid-sub"><code>${v.id}</code>${(v.privacy_status && v.privacy_status !== 'public') ? ` · <span class="pill pill--sm">${escapeHtml(v.privacy_status)}</span>` : ''}</div>
-        ${v.ai_reasoning_short ? `<div class="clamp vid-why" data-clamp data-lines="2"
-          ><div class="clamp-body"><p>${escapeHtml(v.ai_reasoning_short)}</p></div></div>` : ''}
       </span>
-      <span>${v.audit_id ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" style="text-decoration:none;color:inherit" title="Show what changed and when">${statusPill(v.audit_status)}</a>` : statusPill(v.audit_status)}</span>
-      <span>${v.issues_count > 0
-            ? `<a href="#" onclick="viewAudit('${v.id}'); return false;" title="Show issues"><span class="pill pill--warn pill--sm">${v.issues_count}</span></a>`
-            : '<span class="muted">—</span>'}</span>
+      <span>${statusPill(v.audit_status)}</span>
       <span class="dt-num">${v.audit_applied_at ? v.audit_applied_at.slice(0,10) : '<span class="muted">—</span>'}</span>
       <span class="dt-num">${v.audit_count || 0}</span>
-      <span>${auditButton(v)}</span>
+      <span><button type="button" class="dt-open" data-open="${v.id}"
+              aria-expanded="false" aria-label="Show what changed">›</button></span>
     </div><div class="dt-detail" id="audit-${v.id}"><div></div></div><div class="dt-detail" id="shorts-${v.id}"><div></div></div>`).join('') +
     '</div></div></div>'
     // 5,076 rows is a scan, not a list — render a page and let the operator ask
@@ -1171,124 +1129,37 @@ function renderVideos() {
       renderVideos();
     };
   });
-  // Selection wiring
-  document.querySelectorAll('.vsel').forEach(cb => cb.onchange = (e) => toggleSelect(cb.dataset.id, cb.checked));
-  $('select-all').onchange = (e) => {
-    if (e.target.checked) sorted.forEach(v => toggleSelect(v.id, true));
-    else { selected.clear(); renderVideos(); updateSelectionUi(); }
-  };
-  updateSelectionUi();
+  // One way in: the chevron. The row used to be four separate links to the same
+  // panel (status pill, issue count, two of them titled differently).
+  $('videos').querySelectorAll('.dt-open').forEach(b => {
+    b.onclick = () => viewAudit(b.dataset.open, b);
+  });
   // The table is re-rendered wholesale on every filter, sort and page change,
   // so the clamps and the pager have to be re-wired each time. init() marks
   // what it has already touched, so this only costs the new nodes.
   Components.init($('videos'));
 }
 
-function toggleSelect(id, on) {
-  if (on) selected.add(id); else selected.delete(id);
-  const row = document.getElementById('row-' + id);
-  if (row) row.classList.toggle('selected', on);
-  updateSelectionUi();
-}
-function updateSelectionUi() {
-  const n = selected.size;
-  $('selection-count').textContent = n ? `${n} selected` : '';
-  $('bulk-audit-btn').disabled = n === 0;
-  $('select-clear-btn').disabled = n === 0;
-  // Apply selected pending: count how many of selected are pending
-  const pendingSel = [...selected].filter(id => currentVideos[id]?.audit_status === 'pending');
-  $('bulk-apply-btn').disabled = pendingSel.length === 0;
-  $('bulk-apply-btn').textContent = pendingSel.length > 0
-    ? `Put ${pendingSel.length} live` : 'Put selected live';
-}
-
-// State is a chip now (see renderChips); these two stay as controls.
-$('v-chips').addEventListener('pick', (e) => {
-  videoState = e.detail.key;
+// Two controls, both of which narrow a search. Everything else that used to
+// live here — select-all, three bulk buttons, a selection counter — was a
+// second way to do things the Autopilot page and the board already do for the
+// whole channel, and it cost this page its only job: finding one video.
+$('v-search').oninput = () => { videoPage = VIDEO_PAGE; renderVideos(); };
+$('v-state').addEventListener('change', (e) => {
+  videoState = e.detail.value;
   videoPage = VIDEO_PAGE;
   renderVideos();
 });
 
-// Search is an <input> (oninput); the visibility filter is the dropdown
-// component, which reports through a bubbling `change`.
-$('v-search').oninput = () => { videoPage = VIDEO_PAGE; renderVideos(); };
-$('v-privacy').addEventListener('change', () => { videoPage = VIDEO_PAGE; renderVideos(); });
 
-$('select-clear-btn').onclick = () => { selected.clear(); renderVideos(); };
-
-$('reaudit-quarantined-btn').onclick = async () => {
-  const count = allVideos.filter(v => v.audit_status === 'quarantined').length;
-  if (!count) return;
-  if (!await confirmDialog(`Re-audit ${count} video(s) with bad output? Each calls the LLM (no YouTube quota).`)) return;
-  $('reaudit-quarantined-btn').disabled = true;
-  toast(`Re-auditing ${count} videos with bad output…`, 'warn', 6000);
-  try {
-    const r = await fetch(`/channels/${channelId}/audits/reaudit-quarantined`, { method: 'POST' });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-    toast(`Re-audited ${j.reaudited}, skipped ${j.skipped}, failed ${j.failed} (of ${j.total_quarantined}).`,
-      j.failed ? 'warn' : 'ok');
-    bustChannelData();
-    await loadVideos();
-  } catch (e) {
-    toast('Re-audit failed: ' + escapeHtml(String(e)), 'err');
-  } finally {
-    $('reaudit-quarantined-btn').disabled = false;
-  }
-};
-
-$('bulk-audit-btn').onclick = async () => {
-  const ids = [...selected];
-  if (!ids.length) return;
-  if (!await confirmDialog(`Audit ${ids.length} selected video(s)? Each audit calls the LLM (no YouTube quota).`)) return;
-  $('bulk-audit-btn').disabled = true;
-  toast(`Auditing ${ids.length} videos…`, 'warn', 5000);
-  try {
-    const r = await fetch(`/channels/${channelId}/audits/run-bulk`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ video_ids: ids }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-    toast(`Audited ${j.audited}, failed ${j.failed} (of ${j.total}).`, j.failed ? 'warn' : 'ok');
-    bustChannelData();
-    await loadVideos();
-  } catch (e) { toast('Bulk audit failed: ' + escapeHtml(String(e)), 'err'); }
-  finally { $('bulk-audit-btn').disabled = false; updateSelectionUi(); }
-};
-
-$('bulk-apply-btn').onclick = async () => {
-  const ids = [...selected].filter(id => currentVideos[id]?.audit_status === 'pending');
-  if (!ids.length) return;
-  // Quota cost preview
-  const pv = await (await fetch(`/quota-cost-preview?action=apply&n=${ids.length}`)).json();
-  if (!pv.can_afford) {
-    toast(`Cannot afford: needs ${pv.cost} units, ${pv.remaining} remaining today.`, 'err', 6000);
-    return;
-  }
-  if (!await confirmDialog(`Apply ${ids.length} pending audits? Estimated quota: ${pv.cost} units (${pv.pct_of_remaining}% of today's remaining).`)) return;
-  $('bulk-apply-btn').disabled = true;
-  toast(`Applying ${ids.length}…`, 'warn', 5000);
-  try {
-    // Same server endpoint as "Apply all pending", narrowed to the selected ids.
-    const r = await fetch(`/channels/${channelId}/audits/apply-pending`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ video_ids: ids }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-    toast(`Applied ${j.applied}, skipped ${j.skipped}, failed ${j.failed}.`, (j.failed || j.skipped) ? 'warn' : 'ok');
-    bustChannelData();
-    await loadVideos();
-  } catch (e) { toast('Could not publish: ' + escapeHtml(String(e)), 'err'); }
-  finally { $('bulk-apply-btn').disabled = false; updateSelectionUi(); }
-};
-
+// Lives inside the expanded row now, not in a column. As a column it was 40
+// identical buttons competing with the data they sat beside; here it is the
+// obvious next thing to do once you have read what the last rewrite did.
 function auditButton(v) {
   // "Rewrite again" only when there's something to replace — otherwise the
   // button implies work already happened on a video Midas has never touched.
   const done = v.audit_status && v.audit_status !== 'none';
-  return `<button onclick="audit('${v.id}')">${done ? 'Rewrite again' : 'Rewrite'}</button>`;
+  return `<button onclick="audit('${v.id}')">${done ? 'Rewrite again' : 'Rewrite this video'}</button>`;
 }
 
 
@@ -1304,13 +1175,16 @@ async function ensureVideoDetail(videoId) {
   } catch (e) { /* non-fatal — the diff just renders an empty description */ }
 }
 
-async function viewAudit(videoId) {
+async function viewAudit(videoId, btn) {
   const cell = $('audit-' + videoId).firstElementChild;
+  const setOpen = (on) => btn && btn.setAttribute('aria-expanded', String(on));
   // Toggle: if already showing, collapse it.
   if (cell.innerHTML && cell.dataset && cell.dataset.shown === videoId) {
     cell.innerHTML = ''; cell.dataset.shown = '';
+    setOpen(false);
     return;
   }
+  setOpen(true);
   cell.innerHTML = '<div class="audit muted">Loading history…</div>';
   try {
     const [arr] = await Promise.all([
@@ -1318,14 +1192,16 @@ async function viewAudit(videoId) {
       ensureVideoDetail(videoId),
     ]);
     if (!arr || !arr.length) {
-      cell.innerHTML = '<div class="audit muted">Never rewritten — click Audit to run one.</div>';
+      cell.innerHTML = '<div class="audit">Never rewritten. '
+        + auditButton({ id: videoId }) + '</div>';
       return;
     }
     // Every audit, newest first. The endpoint has always returned the full
     // history; the page used to render arr[0] and discard the rest, which made
     // "when did this change?" unanswerable and "put the previous one back"
     // impossible for the 60 videos with more than one.
-    cell.innerHTML = renderHistory(arr) + renderAudit(arr[0]);
+    cell.innerHTML = renderHistory(arr) + renderAudit(arr[0])
+      + `<div class="act-bar" style="margin:.6rem 0 0">${auditButton({ id: videoId, audit_status: arr[0].status })}</div>`;
     cell.dataset.shown = videoId;
     Components.init(cell);
   } catch (e) {

@@ -322,6 +322,13 @@ h1.page-title { font-size:1.05rem; font-weight:600; opacity:.85; margin:0; }
 .dt-sort { background:none; border:0; padding:0; font:inherit; color:inherit;
            text-align:left; cursor:pointer; user-select:none; }
 .dt-sort:hover { color:var(--color-accent); background:none; }
+/* Row expander. One target, at the end of the row, that turns as it opens —
+   the row used to offer four different links into the same panel. */
+.dt-open { border:0; background:none; color:var(--ink-3); font-size:1.05rem; line-height:1;
+           padding:.2rem .35rem; border-radius:var(--radius-sm); cursor:pointer;
+           transition:transform .18s cubic-bezier(.23,1,.32,1), color .12s; }
+.dt-open:hover { color:inherit; background:var(--surface-tint); }
+.dt-open[aria-expanded="true"] { transform:rotate(90deg); color:var(--color-accent); }
 .truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* ── Toasts ─────────────────────────────────────────────────────────── */
