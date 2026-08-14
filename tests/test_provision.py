@@ -62,7 +62,7 @@ def test_table_with_rows_is_populated(conn):
 # ── ensure_database_populated ─────────────────────────────────────────────
 
 def _run(tmp_path, *, populated_before, populated_after=True, nas=None,
-         dump=GOOD_DUMP):
+         dump=GOOD_DUMP, has_stats=True):
     """Drive the whole path with the database and NAS mocked out."""
     states = iter([populated_before, populated_after, populated_after])
     nas = nas or MagicMock()
@@ -92,6 +92,9 @@ def _run(tmp_path, *, populated_before, populated_after=True, nas=None,
                       side_effect=lambda p: order.append("restore")) as restore, \
          patch.object(provision, "_reload_postgrest",
                       side_effect=lambda c: order.append("reload")) as reload_, \
+         patch.object(provision, "_analyze",
+                      side_effect=lambda c: order.append("analyze")), \
+         patch.object(provision, "has_planner_stats", lambda c: has_stats), \
          patch("app.services.nas_service.NASService", return_value=nas):
         connect.return_value.__enter__.return_value = MagicMock()
         result = provision.ensure_database_populated()
@@ -121,7 +124,38 @@ def test_bootstrap_runs_before_the_restore(tmp_path):
     pre-creating the storage schema collides with the dump's own CREATE SCHEMA
     and stops the restore dead."""
     *_, order = _run(tmp_path, populated_before=False)
-    assert order == ["roles", "restore", "shim", "reload"]
+    assert order == ["roles", "restore", "shim", "analyze", "reload"]
+
+
+def test_a_restore_is_analyzed_before_postgrest_serves_it(tmp_path):
+    """A psql restore carries no planner statistics, so the planner guesses and
+    every read seq-scans the indexes the dump just built. Nothing errors; the app
+    is simply slow until autovacuum catches up hours later. ANALYZE has to land
+    before the schema reload, because that is when traffic starts."""
+    *_, order = _run(tmp_path, populated_before=False)
+    assert order.index("analyze") < order.index("reload")
+
+
+def test_a_populated_database_with_no_statistics_is_analyzed(tmp_path):
+    """The repair path for machines already restored by an older image.
+
+    Those never re-enter the restore branch — they have the data — so analyzing
+    only after a restore would leave them permanently slow.
+    """
+    result, _b, restore, _r, nas, order = _run(
+        tmp_path, populated_before=True, has_stats=False)
+    assert result == {"restored": False, "reason": "already_populated",
+                      "analyzed": True}
+    assert order == ["analyze"]
+    restore.assert_not_called()             # the data is fine; only stats are missing
+    nas.copy_to_local.assert_not_called()   # and no NAS round-trip to fix them
+
+
+def test_a_populated_database_with_statistics_is_left_alone(tmp_path):
+    """ANALYZE takes minutes on 1.5M rows — it must not run on every boot."""
+    result, *_rest, order = _run(tmp_path, populated_before=True, has_stats=True)
+    assert result == {"restored": False, "reason": "already_populated"}
+    assert order == []
 
 
 def test_unreachable_nas_stops_the_app(tmp_path):

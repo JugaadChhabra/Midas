@@ -118,6 +118,43 @@ def _bootstrap_rest(conn) -> None:
     _apply_sql(conn, *rest)
 
 
+def has_planner_stats(conn) -> bool:
+    """True if the sentinel table has been analyzed at least once.
+
+    A psql restore replays INSERTs and CREATE INDEXes but carries no planner
+    statistics — those are computed, not dumped. Until something analyzes the
+    tables, `pg_statistic` is empty and the planner falls back to hardcoded
+    guesses, which on tables this size means sequential scans over the indexes
+    the dump just built. Every read is slow, nothing is broken, and no error is
+    logged anywhere — the failure presents as "the app is inexplicably sluggish".
+
+    Autovacuum does get there eventually, which is why it looks fine on a machine
+    that has been up for days and terrible on one restored an hour ago.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "select coalesce(last_analyze, last_autoanalyze) is not null "
+            "from pg_stat_user_tables where relname = %s",
+            (SENTINEL_TABLE,),
+        )
+        row = cur.fetchone()
+    return bool(row and row[0])
+
+
+def _analyze(conn) -> None:
+    """ANALYZE the whole database, so the planner has numbers to work with.
+
+    Minutes on a 1.5M-row database, once. Deliberately not VACUUM ANALYZE: the
+    rows are freshly inserted so there is nothing dead to reclaim, and VACUUM
+    cannot run inside the transaction this connection is already in.
+    """
+    log.warning("provision: no planner statistics — running ANALYZE (minutes, once)")
+    with conn.cursor() as cur:
+        cur.execute("analyze")
+    conn.commit()
+    log.info("provision: ANALYZE complete")
+
+
 def _restore(dump: Path) -> None:
     """Replay `dump` into DATABASE_URL with psql."""
     binary = settings.RESTORE_PSQL
@@ -184,6 +221,15 @@ def ensure_database_populated() -> dict:
 
     with _connect() as conn:
         if is_populated(conn):
+            # Not just "nothing to do": a database restored by an earlier boot of
+            # an older image, or by hand from a host checkout, has the data and no
+            # statistics. Checking here rather than only after a restore is what
+            # repairs those machines — the restore branch below never runs again
+            # once the data is in.
+            if not has_planner_stats(conn):
+                _analyze(conn)
+                return {"restored": False, "reason": "already_populated",
+                        "analyzed": True}
             log.info("provision: database already has data; nothing to do")
             return {"restored": False, "reason": "already_populated"}
 
@@ -226,6 +272,11 @@ def ensure_database_populated() -> dict:
                     "restore reported success but the database is still empty"
                 )
             _bootstrap_rest(conn)
+            # Before PostgREST is told to serve it: the app starts taking traffic
+            # the moment the schema reloads, and the first thing it does is the
+            # dashboard's whole-table reads. Analyzing after that point means the
+            # first minutes of every fresh deploy run on guessed plans.
+            _analyze(conn)
             _reload_postgrest(conn)
     finally:
         local.unlink(missing_ok=True)
