@@ -61,6 +61,21 @@ COPY app ./app
 # copied; those are applied from the host by scripts/apply_migrations.py.
 COPY supabase/bootstrap ./supabase/bootstrap
 
+# The deploy machine has no git checkout — only .env, docker-compose.yml, and the
+# .bat files, hand-carried. So it had no way to apply a migration to a database
+# that already has data: its schema had only ever arrived via a NAS restore, and
+# that path is skipped once the database is populated. Shipping the migrations and
+# scripts makes the container able to migrate itself:
+#
+#   docker compose exec midas python -m scripts.apply_migrations --status
+#   docker compose exec midas python -m scripts.apply_migrations
+#
+# apply_migrations records each file in schema_migrations by name + sha256, so
+# doing it this way keeps the bookkeeping honest — piping the .sql in by hand
+# would apply the change and leave the ledger claiming it never happened.
+COPY supabase/migrations ./supabase/migrations
+COPY scripts ./scripts
+
 RUN mkdir -p /app/storage/keyframes /app/shorts_cache /app/logs
 
 EXPOSE 8000

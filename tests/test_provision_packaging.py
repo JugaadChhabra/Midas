@@ -40,6 +40,31 @@ def test_bootstrap_sql_is_copied_into_the_image():
     )
 
 
+def test_the_image_can_migrate_itself():
+    """The deploy machine has no checkout, so the container is the only thing that
+    can reach its database. Without these, a populated deploy database has no way to
+    receive a migration at all: its schema only ever arrived via a NAS restore, and
+    that path is skipped once there is data."""
+    sources = {s.rstrip("/") for s in _copied_sources()}
+    for needed in ("supabase/migrations", "scripts"):
+        assert needed in sources, (
+            f"Dockerfile does not COPY {needed}, so "
+            f"`docker compose exec midas python -m scripts.apply_migrations` "
+            f"cannot run on a machine without a git checkout. "
+            f"Copied sources: {sorted(sources)}"
+        )
+
+
+def test_apply_migrations_is_runnable_as_a_module():
+    """The documented invocation is `python -m scripts.apply_migrations`, which needs
+    the package marker and a main()."""
+    from pathlib import Path as _P
+
+    src = (REPO / "scripts" / "apply_migrations.py").read_text()
+    assert "def main(" in src
+    assert _P(REPO / "scripts" / "apply_migrations.py").exists()
+
+
 def test_bootstrap_dir_resolves_under_the_copied_tree():
     """The path provision.py builds must match where the Dockerfile puts it.
 
