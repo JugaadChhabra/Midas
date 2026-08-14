@@ -22,7 +22,6 @@ from app.openrouter import chat_json
 from app.transcripts import fetch_transcript, lang_display_name
 from app.youtube_client import (
     youtube_for_channel,
-    yt_videos_list_stats,
     yt_videos_update,
     TokenExpiredError,
 )
@@ -487,21 +486,17 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     except TokenExpiredError:
         raise ApplyError(ApplyOutcome.TOKEN_EXPIRED)
 
-    # Fresh stats for an accurate apply-time baseline (1 quota unit).
-    baseline_patch: dict = {}
-    try:
-        stats_items = yt_videos_list_stats(yt, video["channel_id"], [video["id"]])
-        if stats_items:
-            stats = stats_items[0].get("statistics", {})
-            baseline_patch = {
-                "view_count_at_apply": int(stats.get("viewCount") or 0),
-                "like_count_at_apply": int(stats.get("likeCount") or 0),
-                "comment_count_at_apply": int(stats.get("commentCount") or 0),
-            }
-    except TokenExpiredError:
-        raise ApplyError(ApplyOutcome.TOKEN_EXPIRED)
-    except Exception as e:
-        log.warning("Failed to fetch baseline stats for %s: %s", video["id"], e)
+    # No apply-time stats baseline. This used to spend a YouTube round trip (and a
+    # quota unit) capturing view/like/comment counts so the performance page could
+    # report "views gained since we changed it". That baseline is no longer
+    # collected, so view_count_at_apply is NULL on every audit from here on and the
+    # readers report no delta rather than inventing one from zero — see
+    # tests/test_unmeasured_baseline.py. Rows applied before this keep their stored
+    # baselines and still show real deltas.
+    #
+    # Loop 1's CTR measurement is untouched: it reads Reporting-API impressions over
+    # symmetric pre/post windows, not these counters, which is the whole reason it
+    # replaced view-velocity in the first place.
 
     # Classify YouTube's failure ONCE here (the only place the raw error exists) and
     # raise a typed ApplyError; callers switch on .outcome, not on the error text.
@@ -515,13 +510,12 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
             supabase().table("audits").update({
                 "status": AuditStatus.BLOCKED_TEST_AND_COMPARE,
                 **before_patch,
-                **baseline_patch,
             }).eq("id", audit_id).execute()
             raise ApplyError(ApplyOutcome.TEST_AND_COMPARE)
         if "quotaExceeded" in err_str:
             # Leave audit as-is (pending) so it retries when quota resets.
             raise ApplyError(ApplyOutcome.QUOTA_EXCEEDED)
-        supabase().table("audits").update({"status": AuditStatus.FAILED, **before_patch, **baseline_patch}).eq("id", audit_id).execute()
+        supabase().table("audits").update({"status": AuditStatus.FAILED, **before_patch}).eq("id", audit_id).execute()
         raise ApplyError(ApplyOutcome.FAILED, f"YouTube update failed: {e}")
 
     now = datetime.now(timezone.utc).isoformat()
@@ -540,7 +534,6 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         "status": AuditStatus.APPLIED,
         "applied_at": now,
         **before_patch,
-        **baseline_patch,
         **measurement_patch,
     }).eq("id", audit_id).execute()
     supabase().table("videos").update({

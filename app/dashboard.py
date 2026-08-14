@@ -45,6 +45,26 @@ def _parse_iso(s: str | None) -> datetime | None:
 # underlying data changes slowly (audits apply on a schedule), so every poll
 # within the TTL is served from one computed result.
 _DASHBOARD_TTL_SECONDS = 30.0
+def _delta_views_7d(*, audits: list[dict], current_views: dict) -> int:
+    """Views gained since apply, summed over audits that actually have a baseline.
+
+    Apply-time stats are no longer collected, so `view_count_at_apply` is NULL on
+    new audits. Coalescing that to 0 made the subtraction `views_now - 0` — the
+    video's entire lifetime view count — so a single freshly-applied back-catalogue
+    video could dominate the fleet's 7-day figure and read as a huge win.
+
+    Skipped, not zeroed: an unmeasured audit contributes nothing rather than
+    contributing a wrong number. A stored 0 is a real baseline and still counts.
+    """
+    total = 0
+    for a in audits:
+        base = a.get("view_count_at_apply")
+        if base is None:
+            continue
+        total += current_views.get(a["video_id"], 0) - base
+    return total
+
+
 _dashboard_lock = threading.Lock()
 _dashboard_cache: dict = {"at": 0.0, "payload": None}
 
@@ -212,8 +232,9 @@ def _aggregate_legacy() -> tuple[dict, int, int]:
             s["applied_today"] += 1
         if ap and ap >= seven_d_ago:
             s["applied_7d"] += 1
-            base = a.get("view_count_at_apply") or 0
-            s["delta_views_7d"] += cur_views.get(a["video_id"], 0) - base
+            s["delta_views_7d"] += _delta_views_7d(
+                audits=[a], current_views=cur_views
+            )
 
     # Shorts totals (paginated; table can exceed the 1000-row cap).
     shorts_clips = all_rows(

@@ -31,8 +31,14 @@ def _days_since(iso: str | None) -> float | None:
     return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400.0, 2)
 
 
-def _pct(delta: float, base: float) -> float | None:
-    if base <= 0:
+def _pct(delta: float | None, base: float | None) -> float | None:
+    """None when there is nothing to divide, or nothing to divide by.
+
+    `base is None` means the apply-time baseline was never collected (see
+    _build_rows); `base <= 0` means dividing by it would be meaningless. Both
+    render as a blank cell rather than a fabricated percentage.
+    """
+    if delta is None or base is None or base <= 0:
         return None
     return round(100.0 * delta / base, 2)
 
@@ -102,13 +108,18 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
         view_now = v.get("view_count") or 0
         like_now = v.get("like_count") or 0
         comment_now = v.get("comment_count") or 0
-        view_at = a.get("view_count_at_apply") or 0
-        like_at = a.get("like_count_at_apply") or 0
-        comment_at = a.get("comment_count_at_apply") or 0
+        # `is None`, not falsiness: apply-time stats are no longer collected, so
+        # these are NULL on new audits — but a genuine 0 (a video with no views yet
+        # when it was applied) is a measured baseline whose delta is real. Coalescing
+        # to 0 would report the video's entire lifetime view count as growth the
+        # audit earned.
+        view_at = a.get("view_count_at_apply")
+        like_at = a.get("like_count_at_apply")
+        comment_at = a.get("comment_count_at_apply")
 
-        d_views = view_now - view_at
-        d_likes = like_now - like_at
-        d_comments = comment_now - comment_at
+        d_views = None if view_at is None else view_now - view_at
+        d_likes = None if like_at is None else like_now - like_at
+        d_comments = None if comment_at is None else comment_now - comment_at
         days = _days_since(a.get("applied_at"))
 
         moved = verdicts.levers(a)
@@ -118,13 +129,18 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
         tags_before = a.get("tags_before") or []
         tags_after = a.get("suggested_tags") or []
 
-        # Engagement ratios
-        eng_at = ((like_at + comment_at) / view_at * 100.0) if view_at > 0 else None
+        # Engagement ratios. eng_at needs all three apply-time counters, so it goes
+        # blank for unmeasured audits along with the deltas; eng_now is computed from
+        # the live video row and is unaffected.
+        eng_at = None
+        if None not in (view_at, like_at, comment_at) and view_at > 0:
+            eng_at = (like_at + comment_at) / view_at * 100.0
         eng_now = ((like_now + comment_now) / view_now * 100.0) if view_now > 0 else None
 
-        # Views/day since apply (if applied)
+        # Views/day since apply — needs both an elapsed window and a baseline to
+        # measure from. Unmeasured audits have no "since" to divide by.
         views_per_day = None
-        if days and days > 0:
+        if days and days > 0 and d_views is not None:
             views_per_day = round(d_views / days, 1)
 
         # Loop 1's verdict for this audit, if the measurement window has closed.
