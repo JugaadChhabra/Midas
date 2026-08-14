@@ -6,6 +6,28 @@ from app.config import settings
 EMBED_MODEL = "google/gemini-embedding-2-preview"
 
 
+def _extract_json_object(content: str) -> str:
+    """The outermost {...} span, or `content` unchanged if there isn't one.
+
+    `response_format={"type":"json_object"}` is a request, not a guarantee, and the
+    `:online` web-search variants ignore it: a live probe of
+    claude-opus-5:online returned a spoken preamble, then a ```json fence, then
+    the object, then more prose after it. Checking `startswith("```")` misses that
+    shape, so the parse used to fall through to json_repair and get rescued by
+    luck.
+
+    Slice to the LAST closing brace rather than the first — the audit payload nests
+    comparisons/issues several levels deep, and stopping at the first `}` would
+    truncate it mid-object. Returning `content` untouched when there is no object
+    keeps the caller's error message quoting what the model actually said.
+    """
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end <= start:
+        return content
+    return content[start:end + 1]
+
+
 def embed(texts: list[str]) -> list[list[float]]:
     """Embed a batch of texts via OpenRouter. Returns one vector per input."""
     if not settings.OPENROUTER_API_KEY:
@@ -69,10 +91,10 @@ def chat_json(prompt: str, model: str | None = None, system: str | None = None,
     if "choices" not in data:
         raise RuntimeError(f"OpenRouter unexpected response: {data}")
     content = data["choices"][0]["message"]["content"]
-    # Some models wrap JSON in ```json fences when response_format isn't honored
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.strip("`").lstrip("json").strip()
+    # response_format is a request, not a guarantee — models wrap JSON in fences,
+    # and the `:online` search variants narrate before and after the object. Take
+    # the outermost {...} span rather than pattern-matching each way of missing.
+    content = _extract_json_object(content.strip())
     try:
         return json.loads(content)
     except json.JSONDecodeError:
