@@ -173,8 +173,10 @@ def _snippet_start(s) -> float:
     return float(getattr(s, "start", None) or (s.get("start") if isinstance(s, dict) else 0.0) or 0.0)
 
 
-def fetch_transcript(video_id: str, channel_id: str | None = None) -> tuple[str | None, str | None]:
-    """Return (text, detected_language_code). Both None when unavailable.
+def _fetch_from_youtube(video_id: str, channel_id: str | None = None) -> tuple[str | None, str | None]:
+    """Download from YouTube. Return (text, detected_language_code), both None when
+    unavailable. Two network calls: list, then fetch. Callers should go through
+    fetch_transcript() so the result is cached.
 
     Tries youtube-transcript-api first. On IP block, falls back to the YouTube
     Data API captions endpoints (requires channel_id for OAuth credentials).
@@ -245,4 +247,98 @@ def fetch_transcript(video_id: str, channel_id: str | None = None) -> tuple[str 
         video_id, len(text), lang, getattr(transcript, "is_generated", None),
         dropped_preroll, dropped_ad,
     )
+    return text, lang
+
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+# A transcript is immutable content, but _fetch_from_youtube costs two network
+# calls, and every path that touches a video wanted its own copy: the audit, the
+# embedding pass, each re-audit of a quarantined row, and one per shadow audit.
+# Shadow audits are the worst offender by construction — they replay a candidate
+# prompt over videos that have already been audited, so the text was certainly
+# fetched before.
+#
+# Table, not a column on `videos`: audit_video() reads that row with select("*"),
+# so widening it would pull up to 8 KB of transcript into every read that does not
+# want it. See supabase/migrations/20260814000000_video_transcripts.sql.
+
+#: How long a "no transcript" verdict stands before we look again. A video can gain
+#: auto-captions after publish, so the negative cache has to expire — but not so
+#: fast that captions-disabled videos are re-probed on every audit, which is the
+#: cost this exists to remove.
+NEGATIVE_CACHE_DAYS = 14
+
+
+def _cache_read(video_id: str) -> Optional[dict]:
+    from app.db import supabase
+
+    res = (
+        supabase().table("video_transcripts")
+        .select("video_id,text,lang,available,fetched_at")
+        .eq("video_id", video_id)
+        .execute()
+    )
+    return (res.data or [None])[0]
+
+
+def _cache_write(row: dict) -> None:
+    from app.db import supabase
+
+    supabase().table("video_transcripts").upsert(row).execute()
+
+
+def _negative_is_stale(fetched_at: str | None) -> bool:
+    from datetime import datetime, timedelta, timezone
+
+    if not fetched_at:
+        return True
+    try:
+        when = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when < datetime.now(timezone.utc) - timedelta(days=NEGATIVE_CACHE_DAYS)
+
+
+def fetch_transcript(video_id: str, channel_id: str | None = None) -> tuple[str | None, str | None]:
+    """(text, language_code) for a video, from cache when we already have it.
+
+    Read-through: cache hit returns immediately, a miss downloads and stores. Both
+    outcomes are stored — a video with no transcript records that fact, or it gets
+    re-probed on every audit forever.
+
+    Every cache operation is best-effort. This is an optimisation, and an
+    unmigrated database or a write racing another worker must degrade to the old
+    behaviour rather than stop auditing.
+    """
+    try:
+        row = _cache_read(video_id)
+    except Exception as e:
+        log.warning("Transcript cache read failed for %s (%s); fetching live", video_id, e)
+        row = None
+
+    if row is not None:
+        if row.get("available"):
+            return row.get("text"), row.get("lang")
+        if not _negative_is_stale(row.get("fetched_at")):
+            return None, None
+        log.info("Transcript for %s was unavailable %d+ days ago; re-probing",
+                 video_id, NEGATIVE_CACHE_DAYS)
+
+    text, lang = _fetch_from_youtube(video_id, channel_id)
+
+    from datetime import datetime, timezone
+
+    try:
+        _cache_write({
+            "video_id": video_id,
+            "text": text,
+            "lang": lang,
+            "available": text is not None,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        log.warning("Transcript cache write failed for %s (%s); continuing", video_id, e)
+
     return text, lang
