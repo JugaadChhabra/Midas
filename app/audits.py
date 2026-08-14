@@ -31,6 +31,23 @@ log = logging.getLogger("midas.audits")
 
 router = APIRouter(tags=["audits"])
 
+#: YouTube's audience declaration, sent with every metadata write.
+#:
+#: Not really optional: `selfDeclaredMadeForKids` lives on `status`, and both write
+#: paths send parts="snippet,status", so every apply and every revert restates it
+#: — overwriting whatever the video carried. There is no "leave it alone" value.
+#: Omitting the key does not help either; YouTube treats the absent field on a
+#: status update as a change.
+#:
+#: So it is one fleet-wide setting, and it was previously inconsistent: the shorts
+#: uploader declared False while both audit paths declared True, leaving a video's
+#: audience flag dependent on which subsystem wrote last. Now one constant, with
+#: tests/test_made_for_kids.py asserting the two subsystems agree.
+#:
+#: This is a compliance declaration to the FTC, not a preference — changing it is
+#: a decision about the catalogue, not a code cleanup.
+SELF_DECLARED_MADE_FOR_KIDS = False
+
 
 DEFAULT_PROMPT = """\
 You are a YouTube SEO expert for nursery-rhyme / kids 3D-rhyme channels.
@@ -455,7 +472,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         "id": video["id"],
         "snippet": snippet,
         "status": {
-            "selfDeclaredMadeForKids": True,
+            "selfDeclaredMadeForKids": SELF_DECLARED_MADE_FOR_KIDS,
         },
     }
 
@@ -758,7 +775,8 @@ def revert_audit(audit_id: int):
     if lang:
         snippet["defaultLanguage"] = lang
         snippet["defaultAudioLanguage"] = lang
-    payload = {"id": video["id"], "snippet": snippet, "status": {"selfDeclaredMadeForKids": True}}
+    payload = {"id": video["id"], "snippet": snippet,
+               "status": {"selfDeclaredMadeForKids": SELF_DECLARED_MADE_FOR_KIDS}}
 
     if settings.DRY_RUN:
         log.warning("[DRY_RUN] would revert video %s with %s", video["id"], payload)
