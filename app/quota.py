@@ -3,6 +3,7 @@ import math
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 
 from app.config import settings
@@ -82,11 +83,54 @@ def calls_for(n_ids: int) -> int:
     return max(1, math.ceil(max(1, n_ids) / IDS_PER_CALL))
 
 
+# ── The quota day ─────────────────────────────────────────────────────────
+#
+# Google's counter resets at midnight Pacific, and this module owns that
+# boundary because two places need it and they must not each derive it.
+#
+# This used to sum the ledger from midnight UTC with a comment calling it a
+# close-enough approximation. It was not close enough, and the error ran the
+# wrong way: from 00:00 UTC until the true boundary, Google's current day had
+# already been running for up to 17 hours, and every unit spent in it was
+# excluded from `units_used_today`. The nightly playlist walk — by far the
+# heaviest spender, thousands of units — falls entirely inside that window, so
+# each morning the meter reported the whole night's spend as free quota while
+# the API was already returning quotaExceeded. Meanwhile dashboard.py counted
+# down to a hardcoded `QUOTA_RESET_HOUR_UTC = 7` in the same response payload:
+# one response, two disagreeing definitions of the same instant.
+#
+# Derived from the zone rather than fixed at 07:00 UTC because the offset moves:
+# PDT resets at 07:00 UTC, PST at 08:00. A hardcoded hour is wrong from November
+# to March.
+
+#: Where YouTube's quota clock lives.
+QUOTA_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def quota_day_start(now: datetime | None = None) -> datetime:
+    """The instant Google's current quota day began, in UTC."""
+    local = (now or _now()).astimezone(QUOTA_TZ)
+    midnight = datetime.combine(local.date(), datetime.min.time(), tzinfo=QUOTA_TZ)
+    return midnight.astimezone(timezone.utc)
+
+
+def seconds_until_reset(now: datetime | None = None) -> int:
+    """How long until the counter resets. Always positive: at the boundary
+    itself the answer is a full day, not zero."""
+    now = now or _now()
+    local = now.astimezone(QUOTA_TZ)
+    next_midnight = datetime.combine(
+        local.date() + timedelta(days=1), datetime.min.time(), tzinfo=QUOTA_TZ
+    )
+    return int((next_midnight.astimezone(timezone.utc) - now).total_seconds())
+
+
 def _today_start_iso() -> str:
-    # YouTube quota resets at midnight Pacific. We use UTC date here as a close-enough
-    # approximation; tightening this is a future improvement.
-    today = datetime.now(timezone.utc).date()
-    return datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    return quota_day_start().isoformat()
 
 
 def units_used_today() -> int:

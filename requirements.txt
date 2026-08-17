@@ -25,3 +25,11 @@ smbprotocol
 # and scripts/make_service_key.py.
 psycopg[binary]==3.2.3
 PyJWT==2.10.1
+
+# The IANA zone database, for app/quota.py's ZoneInfo("America/Los_Angeles") —
+# the YouTube quota-day boundary. zoneinfo reads /usr/share/zoneinfo first and
+# only falls back to this package, so on a host that has tzdata it changes
+# nothing. It is here because python:3.13-slim installs apt packages with
+# --no-install-recommends and the app would raise ZoneInfoNotFoundError at
+# import — a boot failure — if the system copy ever went missing.
+tzdata

@@ -7,6 +7,7 @@ the preview endpoint, PAGE_COST = 1 in playlists_sync. Five copies of arithmetic
 derived from a table nobody could consult.
 """
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -112,6 +113,67 @@ def test_a_failed_call_is_still_charged():
     assert budget.spent == 100
 
 
+# ── the quota day ─────────────────────────────────────────────────────────
+#
+# YouTube resets at midnight Pacific. The meter used to sum the ledger from
+# midnight UTC and call it "close enough", which it was not: between 00:00 UTC
+# and the real boundary, Google's current day had already been running for up to
+# 17 hours, and every unit spent in it was excluded from used_today. The nightly
+# playlist walk — the heaviest spender there is — lands squarely in that window,
+# so the dashboard reported a whole night's spend as free quota every morning
+# while the API returned quotaExceeded.
+
+def _utc(y, m, d, h, mi=0):
+    return datetime(y, m, d, h, mi, tzinfo=timezone.utc)
+
+
+def test_the_quota_day_starts_at_midnight_pacific_not_midnight_utc():
+    """03:00 UTC is still yesterday in California, so the day began at 07:00
+    UTC *yesterday* — the 17 hours of spend that midnight-UTC threw away."""
+    assert quota.quota_day_start(_utc(2026, 8, 17, 3)) == _utc(2026, 8, 16, 7)
+
+
+def test_the_quota_day_rolls_over_at_the_pacific_boundary_not_before():
+    # 06:59 UTC: still the previous quota day.
+    assert quota.quota_day_start(_utc(2026, 8, 17, 6, 59)) == _utc(2026, 8, 16, 7)
+    # 07:00 UTC: the counter has reset.
+    assert quota.quota_day_start(_utc(2026, 8, 17, 7)) == _utc(2026, 8, 17, 7)
+
+
+def test_the_boundary_follows_pacific_daylight_saving():
+    """A hardcoded UTC hour is wrong for four months of the year: PDT resets at
+    07:00 UTC, PST at 08:00."""
+    assert quota.quota_day_start(_utc(2026, 8, 17, 12)).hour == 7   # PDT
+    assert quota.quota_day_start(_utc(2026, 1, 17, 12)).hour == 8   # PST
+
+
+def test_units_used_today_counts_from_the_pacific_boundary():
+    """The filter the meter actually sends — the bug lived here, not in a
+    helper nobody called."""
+    sb = MagicMock()
+    with patch.object(quota, "supabase", return_value=sb), \
+         patch.object(quota, "all_rows", return_value=[]), \
+         patch.object(quota, "_now", return_value=_utc(2026, 8, 17, 3)):
+        quota.units_used_today()
+    field, since = sb.table.return_value.select.return_value.gte.call_args[0]
+    assert field == "occurred_at"
+    assert datetime.fromisoformat(since) == _utc(2026, 8, 16, 7)
+
+
+def test_the_countdown_and_the_meter_share_one_boundary():
+    """They disagreed for months: dashboard.py counted down to 07:00 UTC while
+    quota.py summed from 00:00 UTC, in the same response payload."""
+    now = _utc(2026, 8, 17, 3)
+    reset = now + timedelta(seconds=quota.seconds_until_reset(now))
+    assert reset == quota.quota_day_start(_utc(2026, 8, 17, 7))
+    assert quota.seconds_until_reset(now) == 4 * 3600
+
+
+def test_the_reset_is_always_in_the_future():
+    for hour in range(24):
+        assert quota.seconds_until_reset(_utc(2026, 8, 17, hour)) > 0
+
+
 # ── nobody re-solves it ───────────────────────────────────────────────────
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -124,6 +186,10 @@ _OWN_COST_CONST = re.compile(r"^\s*[A-Z_]*COST[A-Z_]*\s*=\s*\d+", re.M)
 #: A module deriving the daily ceiling itself instead of asking units_remaining.
 _OWN_REMAINING = re.compile(
     r"settings\.YT_DAILY_QUOTA\s*-\s*settings\.YT_QUOTA_SAFETY_BUFFER\s*-")
+#: A module fixing the reset hour itself: QUOTA_RESET_HOUR_UTC = 7 in
+#: dashboard.py, which was both a second copy of the boundary and wrong from
+#: November to March. Ask quota.seconds_until_reset / quota_day_start.
+_OWN_RESET_HOUR = re.compile(r"^\s*[A-Z_]*RESET_HOUR[A-Z_]*\s*=", re.M)
 
 
 def _app_sources():
@@ -147,4 +213,12 @@ def test_no_module_computes_the_remaining_ceiling_itself(path):
     assert not _OWN_REMAINING.search(path.read_text()), (
         f"{path.name} derives the daily ceiling itself — call "
         "app.quota.units_remaining()"
+    )
+
+
+@pytest.mark.parametrize("path", list(_app_sources()), ids=lambda p: p.name)
+def test_no_module_fixes_the_quota_reset_hour_itself(path):
+    assert not _OWN_RESET_HOUR.search(path.read_text()), (
+        f"{path.name} hardcodes the quota reset hour — call "
+        "app.quota.seconds_until_reset(); the UTC hour moves with Pacific DST"
     )

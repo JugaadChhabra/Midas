@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from fastapi import APIRouter
 
 from app.config import settings
@@ -36,6 +36,15 @@ def _parse_iso(s: str | None) -> datetime | None:
         return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _quota_date(dt: datetime) -> date:
+    """Which of Google's quota days `dt` falls in. Naive input is read as UTC
+    rather than as the host's zone: this runs on a machine set to IST, where
+    astimezone() on a naive value would quietly shift the answer 5.5 hours."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(quota_mod.QUOTA_TZ).date()
 
 
 # Short TTL cache for /dashboard. The endpoint scans the entire videos + audits
@@ -329,12 +338,12 @@ def _compute_dashboard():
     progress_pct = round(100.0 * total_audited_global / total_videos_global, 1) if total_videos_global > 0 else 0
     apply_pct_of_audited = round(100.0 * total_applied_global / total_audited_global, 1) if total_audited_global > 0 else 0
 
-    # ── Quota reset countdown (YouTube resets midnight Pacific = 07:00 UTC PDT) ─
-    QUOTA_RESET_HOUR_UTC = 7
-    reset_time = now.replace(hour=QUOTA_RESET_HOUR_UTC, minute=0, second=0, microsecond=0)
-    if reset_time <= now:
-        reset_time += timedelta(days=1)
-    quota_reset_in_seconds = int((reset_time - now).total_seconds())
+    # ── Quota reset countdown ─────────────────────────────────────────────
+    # From app.quota, which owns the boundary. This used to hardcode 07:00 UTC
+    # while quota.py summed the ledger from 00:00 UTC — the same payload
+    # shipping two definitions of the same instant, and the countdown was the
+    # one that happened to be right.
+    quota_reset_in_seconds = quota_mod.seconds_until_reset(now)
 
     # ── Activity feed (cross-channel, last 8 events) ──────────────────────
     recent_audits = (
@@ -445,17 +454,22 @@ def _compute_dashboard():
         .order("occurred_at", desc=False)
         .execute()
     ).data or []
+    # Bucketed by Pacific date, not UTC date, so a bar means the same 24 hours
+    # Google's counter means — and so the last bar agrees with `used_today`
+    # above. Bucketing by UTC date would split every night's walk across two
+    # bars and leave the chart contradicting the headline beside it.
     by_day: dict[str, int] = {}
     for r in quota_log:
         dt = _parse_iso(r.get("occurred_at"))
         if not dt:
             continue
         u = r.get("units") or 0
-        day = dt.date().isoformat()
+        day = _quota_date(dt).isoformat()
         by_day[day] = by_day.get(day, 0) + u
     spark: list[dict] = []
+    today_pt = _quota_date(now)
     for i in range(7, -1, -1):
-        d = (now.date() - timedelta(days=i)).isoformat()
+        d = (today_pt - timedelta(days=i)).isoformat()
         spark.append({"date": d, "units": by_day.get(d, 0)})
 
     quota_block = {
