@@ -86,7 +86,7 @@ Committed separately as a bounded fix, because it was stopping waste every week:
 
 ## Scope
 
-Three pieces, in dependency order.
+Four pieces, in dependency order.
 
 ### 1. Reconnect the loop
 
@@ -114,7 +114,50 @@ accepted, not fixed.
 have audits in `awaiting_window`. Within roughly 3 weeks (`window_for` plus
 `ROLLOVER_SLOP_DAYS` plus report lag) the first verdicts should appear.
 
-### 2. Phoenix and instrumentation
+### 2. Feed the loop measurable work
+
+Resolved 2026-08-23. `_next_video_for_channel` walks the catalogue
+newest-first with no regard for whether a video gets any traffic, and the
+consequence shows up in the 381 dormant verdicts:
+
+- **184** videos were published *during or after* their own pre-change window.
+  Autopilot edits videos shortly after upload, so no "before" period exists.
+  Structurally unmeasurable — not a bug in measurement.
+- **197** were published well before and genuinely had zero impressions.
+
+Their median *post*-change impressions was **45**, against a
+`MIN_IMPRESSIONS` floor of 500. These videos fail at both ends: no before, and
+not enough after either. Roughly 7 in 10 audits therefore cost an LLM call and
+YouTube quota while being incapable of producing evidence.
+
+The decision is **not** to stop auditing them. Good metadata on a video nobody
+finds is plausibly the highest-upside edit available; it simply cannot be
+proven by a before/after comparison. Instead, **ring-fence a share of each
+channel's daily cap for videos that are measurable**, so the learning loop is
+fed every day regardless of what the newest-first walk happens to surface.
+
+Design constraints:
+
+- **"Measurable" is not a new rule.** The picker must ask the same question
+  `measurement` asks — impressions over the trailing window at or above
+  `settings.MIN_IMPRESSIONS`. Inventing a second threshold would let the picker
+  and the measurer disagree about which videos count, which is the class of
+  drift `app/verdicts.py`'s guard tests exist to prevent.
+- **The picker exists twice.** `next_audit_candidate` (Postgres RPC, the fast
+  path) and the in-app fallback in `_next_video_for_channel`. Both must change
+  together; `tests/test_autopilot_picker_parity_live.py` asserts they agree,
+  and that test is the contract.
+- **New split, new setting.** A per-channel reserved share (default: 3 of a
+  10-video cap) rather than a hardcoded ratio, so it can be tuned per channel
+  without a deploy.
+- Requires a migration. Per `CLAUDE.md`, refresh the NAS snapshot after it
+  lands and is verified.
+
+Expected effect: measurable audits per month rise from roughly 18 to roughly
+the reserved share, since nearly every reserved-slot audit produces a verdict.
+That is what shortens the wait on the deferred LLM judge below.
+
+### 3. Phoenix and instrumentation
 
 **Service.** `phoenix` in the existing `docker-compose.yml`, using the `db`
 service already running, with `PHOENIX_SQL_DATABASE_URL` pointed at a **separate
@@ -170,7 +213,7 @@ forensic dig to find. Specifically:
 - `_should_reflect`'s decision and reason, so a stuck trigger is obvious at a
   glance instead of after three months.
 
-### 3. Tier 1 deterministic scorers
+### 4. Tier 1 deterministic scorers
 
 An eval suite run against a **frozen, stratified** sample of videos. Frozen is
 load-bearing: comparing two prompt versions on different videos is not a
@@ -207,8 +250,8 @@ Deferred with re-entry criteria, so the decision is revisited on evidence rather
 than forgotten:
 
 - **LLM-as-judge scorer.** Blocked on labels. Revisit when there are at least 30
-  `regression` verdicts fleet-wide — roughly 6–9 months after step 1 lands at
-  current volume. Design as pairwise with position-swapping and abstention, and
+  `regression` verdicts fleet-wide — dependent on step 2 — at the unreserved rate that is 6–9 months, and
+  materially sooner with a reserved share. Design as pairwise with position-swapping and abstention, and
   calibrate against known win/regression pairs before trusting it. Pre-register
   thresholds — ≥70% agreement, ≥80% swap-consistency — *before* seeing a result.
   If calibration fails, the judge gets no authority. Failing is an acceptable
@@ -221,7 +264,7 @@ than forgotten:
 - **Tool-using audits.** The audit model currently receives a hand-assembled
   context block and cannot ask for more. Giving it tools is the only change in
   the original brief that can plausibly move audit quality, and it is unsafe to
-  attempt before steps 2 and 3 can detect a regression.
+  attempt before steps 3 and 4 can detect a regression.
 - **LangGraph.** `autopilot.tick()` should **not** become a graph: 613 lines of
   readable, testable, single-video-per-beat Python would gain indirection and
   nothing else. LangGraph's defensible homes in Midas are the tool-using audit
@@ -249,19 +292,28 @@ than forgotten:
 - Tier 1 scorers: table-driven tests per rule, including a description with 22
   hashtags that must score as a failure **despite** `cap_description_hashtags`
   normalising it.
+- Picker split (step 2): `test_autopilot_picker_parity_live.py` must still pass
+  — it is the contract between the RPC and the in-app fallback, and a change
+  that only lands in one of them is the failure mode it exists to catch. Plus
+  offline tests that a reserved slot prefers a measurable video, and that the
+  reserved share degrades to the normal walk when no measurable candidate
+  exists rather than idling the channel.
 - Existing guard tests in `tests/test_verdicts.py` continue to enforce that no
   module computes its own win rate, median, or lever taxonomy.
 - Live-integration tests remain `@pytest.mark.live` and skip without creds.
 
 ## Open questions
 
-1. **Why did all 381 evaluated audits have exactly 0 pre-window impressions?**
-   Zero, not "below the 500 floor". Hypothesis: missing reach coverage in the
-   pre-window, not 381 genuinely dormant videos. Alternative: autopilot picks
-   `_next_video_for_channel` from a back catalogue of zero-traffic videos, in
-   which case audits are being spent on videos that can never produce evidence —
-   a selection problem, not a measurement one. This materially affects the yield
-   estimate in step 1 and should be resolved early.
+1. ~~**Why did all 381 evaluated audits have exactly 0 pre-window
+   impressions?**~~ **Resolved 2026-08-23.** Not a coverage gap: the dormant
+   branch in `measurement.py` is only reached *after* `missing_days` comes back
+   empty, so the reach data was present and genuinely read zero. The cause is
+   video selection — 184 of the 381 were published during or after their own
+   pre-change window (autopilot edits shortly after upload, so no "before"
+   exists), and the other 197 are old videos with real zero traffic. Their
+   median post-change impressions was 45 against a 500 floor, so they fail on
+   both sides. Addressed by step 2.
+
 2. **Why does `UCr5-YUqBiW7PUmeAtxUWuRg` own 5 of 6 prompt versions with zero
    verdicts in the export,** when `_should_reflect` requires `_MIN_DATA_POINTS`
    = 10? Likely those predate the CTR-based report — the velocity-metric era
