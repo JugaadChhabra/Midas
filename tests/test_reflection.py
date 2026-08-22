@@ -97,13 +97,24 @@ def test_audit_video_uses_prompt_override():
         assert used_system == "MY CUSTOM PROMPT"
 
 
-def _make_perf_report(win_rate=70.0, regression_count=0, count=15):
+def _make_perf_report(win_rate=70.0, regression_count=0, count=15,
+                      wins=10, neutrals=4, regressions=1,
+                      median_delta=12.0, levers=None):
     return {
         "count": count,
         "win_rate": win_rate,
         "regression_count": regression_count,
-        "median_ctr_delta_pct": 12.0,
-        "levers": {"title": 15.0, "description": 8.0, "tags": 20.0},
+        # The population _should_reflect actually judges on. Same statuses as
+        # win_rate's denominator, but as counts, so "mostly neutral" and
+        # "mostly regression" are distinguishable — win_rate alone cannot tell
+        # them apart.
+        "distribution": {
+            "win": wins, "neutral": neutrals, "regression": regressions,
+            "total": wins + neutrals + regressions,
+        },
+        "median_ctr_delta_pct": median_delta,
+        "levers": levers if levers is not None
+                  else {"title": 15.0, "description": 8.0, "tags": 20.0},
         "worst_audits": [],
         "best_audits": [],
     }
@@ -120,37 +131,81 @@ def test_should_reflect_skips_without_measured_outcomes():
     assert reason == "no_measured_outcomes"
 
 
-def test_should_reflect_skips_high_win_rate():
+def _should_reflect_on(report):
     with patch("app.reflection.supabase") as mock_sb, \
-         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=70.0, regression_count=1)):
+         patch("app.reflection._build_perf_report", return_value=report):
         mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
             .order.return_value.limit.return_value.execute.return_value.data = []
         from app.reflection import _should_reflect
-        should, reason = _should_reflect("ch1")
+        return _should_reflect("ch1")
+
+
+def test_should_reflect_skips_when_neutral_dominates():
+    """A mostly-neutral channel is not a failing one.
+
+    The regression test for the 2026-08-23 finding: the fleet's real
+    distribution was 147 neutral / 21 win / 3 regression, which is a win_rate
+    of 12.3% because verdicts.win_rate counts neutral in the denominator. The
+    old rule (`win_rate < 50 -> reflect`) therefore fired every cooldown from
+    2026-05 to 2026-08 and produced five candidate prompts, none promoted,
+    each diagnosing a "core failure" it had been handed as a premise.
+
+    Neutral is what a metadata rewrite does to CTR most of the time. Wins
+    outnumbering regressions 7:1 is a prompt that helps when it does anything.
+    """
+    should, reason = _should_reflect_on(
+        _make_perf_report(win_rate=12.3, wins=21, neutrals=147, regressions=3,
+                          median_delta=0.4)
+    )
     assert should is False
     assert reason == "performing_well"
 
 
-def test_should_reflect_fires_low_win_rate():
-    with patch("app.reflection.supabase") as mock_sb, \
-         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=40.0)):
-        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
-            .order.return_value.limit.return_value.execute.return_value.data = []
-        from app.reflection import _should_reflect
-        should, reason = _should_reflect("ch1")
+def test_should_reflect_fires_when_regressions_outnumber_wins():
+    should, reason = _should_reflect_on(
+        _make_perf_report(win_rate=8.0, wins=2, neutrals=40, regressions=5)
+    )
     assert should is True
-    assert reason == "low_win_rate"
+    assert reason == "regressions_outnumber_wins"
 
 
-def test_should_reflect_fires_high_regressions():
-    with patch("app.reflection.supabase") as mock_sb, \
-         patch("app.reflection._build_perf_report", return_value=_make_perf_report(win_rate=60.0, regression_count=4)):
-        mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
-            .order.return_value.limit.return_value.execute.return_value.data = []
-        from app.reflection import _should_reflect
-        should, reason = _should_reflect("ch1")
+def test_should_reflect_fires_on_negative_median_delta():
+    """Aggregate CTR moving down is harm, even with few outright regressions."""
+    should, reason = _should_reflect_on(
+        _make_perf_report(win_rate=10.0, wins=5, neutrals=40, regressions=1,
+                          median_delta=-8.0)
+    )
     assert should is True
-    assert reason == "high_regressions"
+    assert reason == "negative_median_delta"
+
+
+def test_should_reflect_tolerates_a_flat_median():
+    """Flat is not negative. Only a real decline counts."""
+    should, reason = _should_reflect_on(
+        _make_perf_report(win_rate=10.0, wins=5, neutrals=40, regressions=1,
+                          median_delta=-0.5)
+    )
+    assert should is False
+    assert reason == "performing_well"
+
+
+def test_should_reflect_fires_on_a_consistently_negative_lever():
+    should, reason = _should_reflect_on(
+        _make_perf_report(win_rate=10.0, wins=5, neutrals=40, regressions=1,
+                          levers={"title": -9.0, "description": 2.0, "tags": None})
+    )
+    assert should is True
+    assert reason == "negative_lever_title"
+
+
+def test_should_reflect_survives_a_missing_median():
+    """median_ctr_delta_pct is None when no verdict carried a comparable delta."""
+    should, reason = _should_reflect_on(
+        _make_perf_report(win_rate=10.0, wins=5, neutrals=40, regressions=1,
+                          median_delta=None)
+    )
+    assert should is False
+    assert reason == "performing_well"
 
 
 def test_should_reflect_skips_recent_reflection():
@@ -267,12 +322,53 @@ def test_run_reflection_stores_candidate_prompt():
         mock_sb.return_value.table.side_effect = table_side
 
         from app.reflection import _run_reflection
-        version_id = _run_reflection("ch1", perf_report, "competitive ctx", "platform guidance")
+        version_id, reason = _run_reflection("ch1", perf_report, "competitive ctx", "platform guidance")
 
     assert version_id == 42
+    assert reason == "stored"
     assert len(inserted_rows) == 1
     assert inserted_rows[0]["prompt_text"] == "You are a YouTube SEO expert for regional content..."
     assert inserted_rows[0]["status"] == "shadow"
+
+
+def test_run_reflection_lets_the_model_decline_a_rewrite():
+    """An empty candidate_prompt is a verdict, not a failure.
+
+    The reflection prompt no longer presupposes underperformance, so "the
+    current prompt is fine" is a legal answer. It must be reported distinctly
+    from a failed LLM call — conflating the two is what let three months of
+    no-op cycles read as `reflection_llm_failed` in the log.
+    """
+    perf_report = _make_perf_report(wins=21, neutrals=147, regressions=3)
+    perf_report["worst_audits"] = []
+    perf_report["best_audits"] = []
+
+    inserted_rows = []
+
+    with patch("app.reflection.supabase") as mock_sb, \
+         patch("app.reflection.chat_json", return_value={
+             "reflection": "Neutral-dominant is expected; no change warranted.",
+             "changes": [],
+             "candidate_prompt": "",
+         }):
+        def table_side(name):
+            m = MagicMock()
+            if name == "prompt_versions":
+                m.insert.side_effect = lambda row: inserted_rows.append(row) or MagicMock(
+                    execute=lambda: MagicMock(data=[{"id": 99}])
+                )
+            m.select.return_value.eq.return_value.execute.return_value.data = [
+                {"generated_prompt": "CURRENT", "reflection_mode": "shadow"}
+            ]
+            return m
+        mock_sb.return_value.table.side_effect = table_side
+
+        from app.reflection import _run_reflection
+        version_id, reason = _run_reflection("ch1", perf_report, "ctx", "guidance")
+
+    assert version_id is None
+    assert reason == "no_change_warranted"
+    assert inserted_rows == [], "declining a rewrite must not store a candidate"
 
 
 def test_run_shadow_audits_uses_candidate_prompt():
@@ -543,7 +639,7 @@ def _run_reflection_in_mode(mode, current_live_id=None):
             mode, recorder, current_live_id
         )
         from app.reflection import _run_reflection
-        version_id = _run_reflection("ch1", perf_report, "ctx", "guidance")
+        version_id, _reason = _run_reflection("ch1", perf_report, "ctx", "guidance")
     return version_id, recorder
 
 

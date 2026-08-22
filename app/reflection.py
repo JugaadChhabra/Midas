@@ -12,6 +12,7 @@ from app.audits import audit_video
 from app.status_vocab import (
     AuditStatus,
     MEASURED_STATUSES,
+    MeasurementStatus,
     PromptVersionStatus,
     PROMOTING_REFLECTION_MODES,
     ReflectionMode,
@@ -21,9 +22,31 @@ log = logging.getLogger("midas.reflection")
 
 router = APIRouter(tags=["reflection"])
 
-_WIN_RATE_THRESHOLD = 65.0
-_REGRESSION_THRESHOLD = 3
+#: Reflection fires on evidence of HARM, never on an absence of wins.
+#:
+#: The rule this replaces was `win_rate < 50 -> reflect`, and it could not do
+#: anything else. `verdicts.win_rate` counts neutral in its denominator — by
+#: design, because neutral is a measured outcome — and neutral is what a
+#: metadata rewrite does to CTR most of the time. Measured over the 171 verdicts
+#: that existed on 2026-08-23 the fleet ran 147 neutral / 21 win / 3 regression,
+#: a win rate of 12.3%. So the trigger returned `low_win_rate` every cooldown
+#: from 2026-05 onward: five candidate prompts, none promoted, each opening its
+#: diagnosis with a "core failure" it had been handed as a premise by a prompt
+#: that asked it to explain underperformance it was told to assume.
+#:
+#: Wins outnumbering regressions 7:1 is a prompt that helps when it does
+#: anything at all. What warrants a rewrite is the prompt doing damage:
+#: regressions outnumbering wins, the median delta actually negative, or one
+#: lever consistently harmful. Absence of movement is not damage.
+#:
+#: The 65%-win-rate "performing well" ceiling is gone with it. It was
+#: unreachable for the same reason — no neutral-dominant channel can clear it —
+#: and an unreachable early-return only hid the branches below it.
 _MIN_DATA_POINTS = 10
+#: Median CTR delta below this counts as a real decline rather than flat noise.
+_NEGATIVE_MEDIAN_PCT = -2.0
+#: A single lever's average delta below this is consistently harmful.
+_NEGATIVE_LEVER_PCT = -5.0
 _REFLECT_COOLDOWN_DAYS = 7
 
 # Loop 1 verdicts that count as evidence. `not_applicable` is excluded on
@@ -100,6 +123,11 @@ def _build_perf_report(channel_id: str) -> dict | None:
         return None
 
     win_rate = verdicts.win_rate(r["measurement_status"] for r in enriched)
+    # The same population as win_rate's denominator, kept as counts. A win rate
+    # alone cannot tell "mostly neutral" from "mostly regression" — both read
+    # low — and the trigger below has to distinguish them, so the counts travel
+    # with it. Owned by app.verdicts for the same reason the rate is.
+    dist = verdicts.distribution(r["measurement_status"] for r in enriched)
     regression_count = sum(
         1 for r in enriched if r["is_recent"] and r["measurement_status"] == "regression"
     )
@@ -119,6 +147,7 @@ def _build_perf_report(channel_id: str) -> dict | None:
     return {
         "count": len(enriched),
         "win_rate": win_rate,
+        "distribution": dist,
         "regression_count": regression_count,
         "median_ctr_delta_pct": median_delta,
         "levers": {
@@ -158,18 +187,19 @@ def _should_reflect(channel_id: str) -> tuple[bool, str]:
     if report is None:
         return False, "no_measured_outcomes"
 
-    if report["win_rate"] > _WIN_RATE_THRESHOLD and report["regression_count"] <= _REGRESSION_THRESHOLD - 1:
-        return False, "performing_well"
+    # Three ways the evidence can show harm. Note what is NOT here: a low win
+    # rate. See the threshold block at the top of this module for why — a
+    # neutral-dominant channel is the normal case, not a failing one.
+    dist = report["distribution"]
+    if dist[MeasurementStatus.REGRESSION] > dist[MeasurementStatus.WIN]:
+        return True, "regressions_outnumber_wins"
 
-    if report["win_rate"] < 50.0:
-        return True, "low_win_rate"
-    if report["regression_count"] > _REGRESSION_THRESHOLD:
-        return True, "high_regressions"
+    median = report["median_ctr_delta_pct"]
+    if median is not None and median < _NEGATIVE_MEDIAN_PCT:
+        return True, "negative_median_delta"
 
-    # Check if any single lever is consistently negative
-    levers = report["levers"]
-    for lever, lift in levers.items():
-        if lift is not None and lift < -5.0:
+    for lever, lift in report["levers"].items():
+        if lift is not None and lift < _NEGATIVE_LEVER_PCT:
             return True, f"negative_lever_{lever}"
 
     return False, "performing_well"
@@ -305,11 +335,20 @@ def _fmt_delta(a: dict) -> str:
 
 def _format_perf_report(report: dict) -> str:
     median = report.get("median_ctr_delta_pct")
+    dist = report.get("distribution") or {}
     lines = [
         f"CHANNEL PERFORMANCE REPORT (measured click-through rate, "
         f"pre vs post change over matched windows):",
         f"- Audits with a measured CTR verdict: {report['count']}",
-        f"- Win rate (CTR verdict = win): {report['win_rate']}%",
+        # Spell out the split, not just the rate. The rate counts neutral in its
+        # denominator, so a healthy neutral-dominant channel reads as ~12% and a
+        # model shown only that number concludes catastrophe. The counts, plus
+        # the note below, are what stop it inventing one.
+        f"- Verdict split: {dist.get(MeasurementStatus.WIN, 0)} win / "
+        f"{dist.get(MeasurementStatus.NEUTRAL, 0)} neutral / "
+        f"{dist.get(MeasurementStatus.REGRESSION, 0)} regression",
+        f"- Win rate (wins as a share of ALL measured verdicts, neutral "
+        f"included in the denominator): {report['win_rate']}%",
         f"- Regression count (last 14 days): {report['regression_count']}",
         f"- Median CTR change: {median if median is not None else 'n/a'}%",
         f"- Lever performance (mean CTR change where the field was rewritten):",
@@ -331,6 +370,14 @@ def _format_perf_report(report: dict) -> str:
             lines.append(f'  Before: "{a.get("title_before", "")}"')
             lines.append(f'  After:  "{a.get("title_after", "")}"')
             lines.append(f'  CTR change: {_fmt_delta(a)}')
+    lines.append(
+        "\nHOW TO READ THIS: neutral is the ordinary result of a metadata "
+        "rewrite — most title and description edits do not move CTR "
+        "measurably, and a high neutral share is NOT evidence that the prompt "
+        "is failing. Judge the prompt on whether it does harm (regressions "
+        "outnumbering wins, a negative median, a consistently negative lever), "
+        "not on how many verdicts came back flat."
+    )
     return "\n".join(lines)
 
 
@@ -365,8 +412,16 @@ def _run_reflection(
     perf_report: dict,
     competitive_ctx: str,
     platform_guidance: str,
-) -> int | None:
-    """Call Sonnet with full context. Store candidate in prompt_versions. Returns new version id."""
+) -> tuple[int | None, str]:
+    """Call Sonnet with full context. Returns (version_id, reason).
+
+    `version_id` is None when nothing was stored, and `reason` says which of the
+    two very different causes applied: `no_change_warranted` (the model read the
+    evidence and judged the current prompt fine — a legitimate verdict, now that
+    the prompt no longer presupposes underperformance) or `llm_failed` /
+    `empty_insert` (the call or the write broke). Collapsing both into a bare
+    None is what let three months of no-op cycles log as a failure.
+    """
     cfg_rows = (
         supabase().table("audit_configs")
         .select("generated_prompt,reflection_mode")
@@ -409,22 +464,37 @@ def _run_reflection(
         f"CURRENT YOUTUBE PLATFORM GUIDANCE:\n{platform_guidance}\n\n"
         f"{house_format}\n\n"
         f"CURRENT AUDIT PROMPT:\n{current_prompt}\n\n"
-        "Based on all of the above, diagnose why the current prompt underperforms and write "
-        "an improved version that still enforces the HOUSE FORMAT above exactly. Return JSON:\n"
-        '{"reflection": "2-3 sentence diagnosis", "changes": ["change1", "change2"], '
-        '"candidate_prompt": "full improved prompt text"}'
+        # Do NOT ask it to explain underperformance. That phrasing was the
+        # premise, not the question: handed a 12% win rate and told to diagnose
+        # why the prompt underperforms, the model dutifully produced five
+        # confident "core failure" diagnoses of a prompt that was working. Ask
+        # first whether there IS a problem, and make "no" a first-class answer.
+        "Based on all of the above, first judge whether the evidence actually "
+        "shows a problem with the current prompt. A high neutral share is not a "
+        "problem — do not invent a diagnosis to justify a rewrite.\n"
+        "If the evidence does show harm or clear headroom, diagnose it and write "
+        "an improved version that still enforces the HOUSE FORMAT above exactly. "
+        "If it does not, say so and return an empty candidate_prompt.\n"
+        "Return JSON:\n"
+        '{"reflection": "2-3 sentence assessment", "changes": ["change1", "..."], '
+        '"candidate_prompt": "full improved prompt text, or \\"\\" if no change is warranted"}'
     )
 
     try:
         result = chat_json(user, model=settings.REFLECTION_MODEL, system=system)
     except Exception as e:
         log.error("Reflection LLM call failed for %s: %s", channel_id, e)
-        return None
+        return None, "llm_failed"
 
     candidate_prompt = (result.get("candidate_prompt") or "").strip()
     if not candidate_prompt:
-        log.warning("Reflection returned empty candidate_prompt for %s", channel_id)
-        return None
+        # Expected outcome, not an error: the model was explicitly allowed to
+        # conclude the current prompt is fine.
+        log.info(
+            "Reflection for %s judged no change warranted: %s",
+            channel_id, (result.get("reflection") or "")[:200],
+        )
+        return None, "no_change_warranted"
 
     # Find current live version for parent linkage
     live_rows = (
@@ -459,7 +529,7 @@ def _run_reflection(
         log.info("%s mode: promoted candidate %s to live for %s",
                  reflection_mode, version_id, channel_id)
 
-    return version_id
+    return version_id, ("stored" if version_id else "empty_insert")
 
 
 # ── Shadow audit runner ───────────────────────────────────────────────────────
@@ -707,9 +777,13 @@ def reflect(channel_id: str) -> dict:
     niche_desc = ", ".join(niche_queries[:2]) if niche_queries else "general"
     platform_guidance = _get_platform_guidance(niche_desc)
 
-    version_id = _run_reflection(channel_id, perf_report, competitive_ctx, platform_guidance)
+    version_id, run_reason = _run_reflection(
+        channel_id, perf_report, competitive_ctx, platform_guidance
+    )
     if version_id is None:
-        return {"reflected": False, "reason": "reflection_llm_failed"}
+        # `no_change_warranted` is a healthy outcome; the others are faults.
+        # Surfaced verbatim so the two stop looking alike in the log.
+        return {"reflected": False, "reason": run_reason}
 
     cfg_rows = (
         supabase().table("audit_configs")

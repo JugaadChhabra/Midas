@@ -82,6 +82,24 @@ def test_neutral_without_a_delta_still_counts_as_measured():
     assert r["median_ctr_delta_pct"] is not None   # median over the 5 that have one
 
 
+def test_report_carries_the_full_verdict_distribution():
+    """`distribution` is what _should_reflect judges on.
+
+    win_rate collapses win/neutral/regression into one number, so it cannot
+    distinguish "mostly neutral" (expected) from "mostly regression" (harm).
+    Both read as a low win rate. The counts have to travel alongside it.
+    """
+    rows = (
+        [_audit(i, "win", 0.40) for i in range(3)]
+        + [_audit(10 + i, "neutral", 0.01) for i in range(6)]
+        + [_audit(20 + i, "regression", -0.30) for i in range(1)]
+    )
+    r = _report(rows)
+    assert r["distribution"] == {"win": 3, "neutral": 6, "regression": 1, "total": 10}
+    # Same population as the win rate's denominator — not a second definition.
+    assert r["distribution"]["total"] == r["count"]
+
+
 def test_regression_count_is_recent_only():
     recent = [_audit(i, "regression", -0.4, applied_at="2099-01-01T00:00:00+00:00")
               for i in range(4)]
