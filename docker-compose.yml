@@ -47,9 +47,13 @@ services:
         condition: service_healthy
     environment:
       PHOENIX_SQL_DATABASE_URL: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/phoenix
-      # Trace retention. Start conservative on a machine whose disk is shared
-      # with the operational database; see docs/OBSERVABILITY.md before raising
-      # it, and measure a real span size rather than guessing.
+      # No Prometheus exporter: nothing scrapes it, and it would open a second
+      # port on a box that publishes everything on loopback only.
+      #
+      # There is deliberately NO retention cap here. Phoenix does not prune by
+      # default and this disk is shared with the operational database — see
+      # docs/OBSERVABILITY.md §Retention before adding one, and measure real
+      # span volume first rather than guessing a number.
       PHOENIX_ENABLE_PROMETHEUS: "false"
     ports:
       # Loopback only, like every other service here. 6006 is the UI and the

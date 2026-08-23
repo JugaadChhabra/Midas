@@ -101,11 +101,19 @@ def _preview(cur) -> tuple[bool, int]:
         print(f"  id={vid} {created} ch={cid[:12]} velocity_lift={lift}")
 
     # Anything in shadow WITHOUT the velocity key is CTR-era and must survive.
+    #
+    # `performance_snapshot IS NOT NULL` is load-bearing: on a NULL snapshot the
+    # jsonb `?` operator yields NULL, so `? 'median_velocity_lift'` and
+    # `NOT (? ...)` are BOTH not-true and the row fell out of the preview
+    # entirely — while the preview reads as if it accounts for every shadow row.
+    # It is listed separately below rather than folded in here, because a NULL
+    # snapshot is neither era: it cannot be dated from its shape at all.
     cur.execute(
         """
         SELECT id, channel_id, created_at::date
           FROM prompt_versions
          WHERE status = 'shadow'
+           AND performance_snapshot IS NOT NULL
            AND NOT (performance_snapshot ? 'median_velocity_lift')
          ORDER BY created_at
         """
@@ -115,6 +123,25 @@ def _preview(cur) -> tuple[bool, int]:
         print(f"\nCTR-era shadow candidates ({len(keep)}) — these are NOT touched:")
         for vid, cid, created in keep:
             print(f"  id={vid} {created} ch={cid[:12]}")
+
+    cur.execute(
+        """
+        SELECT id, channel_id, created_at::date
+          FROM prompt_versions
+         WHERE status = 'shadow'
+           AND performance_snapshot IS NULL
+         ORDER BY created_at
+        """
+    )
+    unsnapshotted = cur.fetchall()
+    if unsnapshotted:
+        print(f"\nshadow candidates with NO performance_snapshot ({len(unsnapshotted)}) "
+              "— also NOT touched:")
+        for vid, cid, created in unsnapshotted:
+            print(f"  id={vid} {created} ch={cid[:12]}")
+        print("  (a NULL snapshot cannot be dated by its JSON shape, so the "
+              "retirement predicate deliberately skips these. Left in shadow is "
+              "the safe direction: a row wrongly retired loses its lineage.)")
 
     return (not measurement_enabled), len(velocity)
 
@@ -141,10 +168,15 @@ def main() -> None:
                 sys.exit(
                     f"\nABORT: expected {args.expect_velocity} velocity-era "
                     f"candidates, found {n_velocity}.\n"
-                    "A higher count means a candidate was written since this was "
-                    "drafted. Inspect it before retiring anything — if it is "
-                    "CTR-era it must survive, and if it is velocity-era pass "
-                    "--expect-velocity to confirm you have looked."
+                    "HIGHER means a candidate was written since this was drafted: "
+                    "inspect it before retiring anything — if it is CTR-era it "
+                    "must survive.\n"
+                    "LOWER means something already changed these rows — a partial "
+                    "earlier run, a manual edit, or the wrong database. Retiring "
+                    "the remainder would finish a job whose first half nobody has "
+                    "looked at.\n"
+                    "Either way: look, then pass --expect-velocity to confirm you "
+                    "have."
                 )
 
             if needs_channel_write:
