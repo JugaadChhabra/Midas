@@ -1,7 +1,10 @@
 # Observability and the evidence loop
 
 Date: 2026-08-23
-Status: approved, not started
+Status: **step 3 built and merged** (2026-08-23, `main` @ 82f5fc8). Steps 1, 2
+and 4 outstanding — steps 1 and 2 need the office machine. See
+`docs/superpowers/2026-08-23-observability-execution-record.md` for what was
+decided during the build and what is left to run.
 Supersedes nothing. Precedes a later phase on tool-using audits and LangGraph
 orchestration, which this document deliberately does not design.
 
