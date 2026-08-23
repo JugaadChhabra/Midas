@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app import eligibility, quota
+from app import eligibility, quota, tracing
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
 from app.performance import router as performance_router
@@ -363,12 +363,16 @@ async def lifespan(app: FastAPI):
         reap_stuck_jobs()
     except Exception:
         log.exception("Startup reap of stuck shorts jobs failed")
+    tracing.configure()
     scheduler.start()
     log.info("Autopilot scheduler started (every %ds, DRY_RUN=%s)",
              settings.AUTOPILOT_TICK_SECONDS, settings.DRY_RUN)
     try:
         yield
     finally:
+        # Before the scheduler stops: the spans worth having at shutdown are the
+        # ones its jobs just produced, and BatchSpanProcessor holds them.
+        tracing.flush()
         scheduler.shutdown(wait=False)
 
 

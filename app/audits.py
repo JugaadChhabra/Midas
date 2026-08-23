@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app import tracing
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
@@ -304,6 +305,24 @@ def _live_prompt_version_id(channel_id: str) -> int | None:
         return None
 
 
+def _record_apply_measurability(rec: tracing.Recorder, channel: dict | None) -> None:
+    """Record whether this apply can ever produce evidence.
+
+    The single most important attribute in the whole instrumentation. The apply
+    path only stamps `awaiting_window` when the channel has
+    `measurement_enabled`, and on 2026-08-23 the only channel with autopilot on
+    was the one channel with that flag off — 57 applies in a month, every one
+    landing on the `not_applicable` default with no result, nothing in the logs
+    saying so. It took reading an NDJSON export to find. With this attribute it
+    is a one-day question.
+    """
+    enabled = bool((channel or {}).get("measurement_enabled"))
+    rec.set(**{
+        "apply.measurement_enabled": enabled,
+        "apply.will_be_measured": enabled,
+    })
+
+
 def audit_video(
     video_id: str,
     prompt_override: str | None = None,
@@ -317,72 +336,93 @@ def audit_video(
     version). Left None with no override, the channel's live version is resolved
     here, so every caller gets attribution without stamping it themselves.
     """
-    _ensure_strategy_row()
-    v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
-    if not v:
-        raise HTTPException(404, "Video not found")
-    if (v.get("privacy_status") or "public") != "public":
-        raise HTTPException(
-            400,
-            f"Skipping audit: video is {v.get('privacy_status')} (only public videos are audited)",
+    with tracing.span("audit_video", video_id=video_id) as rec:
+        _ensure_strategy_row()
+        v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
+        if not v:
+            raise HTTPException(404, "Video not found")
+        if (v.get("privacy_status") or "public") != "public":
+            raise HTTPException(
+                400,
+                f"Skipping audit: video is {v.get('privacy_status')} (only public videos are audited)",
+            )
+
+        cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
+        cfg_row = cfg[0] if cfg else {}
+        # `used_generated` gates prompt attribution below: prompt_version_id must
+        # name the prompt that ACTUALLY ran. An empty generated_prompt silently
+        # falls back to DEFAULT_PROMPT, and stamping the live version there labels
+        # the audit with a prompt the model never saw.
+        used_generated = False
+        if prompt_override:
+            audit_prompt = prompt_override
+        elif v.get("is_short") and cfg_row.get("shorts_prompt"):
+            audit_prompt = cfg_row["shorts_prompt"]
+        elif cfg_row.get("generated_prompt"):
+            audit_prompt = cfg_row["generated_prompt"]
+            used_generated = True
+        else:
+            audit_prompt = DEFAULT_PROMPT
+
+        if prompt_version_id is None and used_generated:
+            prompt_version_id = _live_prompt_version_id(v["channel_id"])
+
+        rec.set(**{
+            "channel_id": v["channel_id"],
+            "audit.is_short": bool(v.get("is_short")),
+            "audit.prompt_source": (
+                "override" if prompt_override
+                else "shorts" if (v.get("is_short") and cfg_row.get("shorts_prompt"))
+                else "generated" if cfg_row.get("generated_prompt")
+                else "default"
+            ),
+            "audit.prompt_version_id": prompt_version_id,
+        })
+
+        channel = supabase().table("channels").select("default_language").eq(
+            "id", v["channel_id"]
+        ).single().execute().data or {}
+        channel_language = channel.get("default_language") or "en"
+
+        transcript, transcript_lang = fetch_transcript(video_id, channel_id=v["channel_id"])
+        rec.set(**{
+            "audit.transcript_available": transcript is not None,
+            "audit.transcript_lang": transcript_lang,
+        })
+
+        user = _build_user_block(
+            video=v,
+            transcript=transcript,
+            transcript_lang=transcript_lang,
+            channel_language=channel_language,
         )
+        result = chat_json(user, system=audit_prompt)
 
-    cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
-    cfg_row = cfg[0] if cfg else {}
-    # `used_generated` gates prompt attribution below: prompt_version_id must
-    # name the prompt that ACTUALLY ran. An empty generated_prompt silently
-    # falls back to DEFAULT_PROMPT, and stamping the live version there labels
-    # the audit with a prompt the model never saw.
-    used_generated = False
-    if prompt_override:
-        audit_prompt = prompt_override
-    elif v.get("is_short") and cfg_row.get("shorts_prompt"):
-        audit_prompt = cfg_row["shorts_prompt"]
-    elif cfg_row.get("generated_prompt"):
-        audit_prompt = cfg_row["generated_prompt"]
-        used_generated = True
-    else:
-        audit_prompt = DEFAULT_PROMPT
-
-    if prompt_version_id is None and used_generated:
-        prompt_version_id = _live_prompt_version_id(v["channel_id"])
-
-    channel = supabase().table("channels").select("default_language").eq(
-        "id", v["channel_id"]
-    ).single().execute().data or {}
-    channel_language = channel.get("default_language") or "en"
-
-    transcript, transcript_lang = fetch_transcript(video_id, channel_id=v["channel_id"])
-
-    user = _build_user_block(
-        video=v,
-        transcript=transcript,
-        transcript_lang=transcript_lang,
-        channel_language=channel_language,
-    )
-    result = chat_json(user, system=audit_prompt)
-
-    # Decode + normalise (incl. the hashtag cap) behind one constructor. An
-    # invalid suggestion still builds and still gets persisted — the apply path
-    # quarantines it, and reaudit_quarantined reprocesses it later.
-    suggestion = AuditSuggestion.from_llm(result)
-    if not suggestion.is_valid:
-        log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
-    row = {
-        "video_id": video_id,
-        "status": status_override or AuditStatus.PENDING,
-        **suggestion.to_audit_row(),
-        "transcript_available": transcript is not None,
-        "transcript_lang": transcript_lang,
-        # CIL §3.1: stamp every audit with the strategy that produced it so
-        # measured outcomes stay attributable when Loop 3 arrives. Same reason
-        # for prompt_version_id — stamped here, at the single insert site, so no
-        # caller can forget it (_cohort_median_ctr_delta silently ignores NULLs).
-        "strategy_version": settings.STRATEGY_VERSION,
-        "prompt_version_id": prompt_version_id,
-    }
-    inserted = supabase().table("audits").insert(row).execute()
-    return inserted.data[0] if inserted.data else row
+        # Decode + normalise (incl. the hashtag cap) behind one constructor. An
+        # invalid suggestion still builds and still gets persisted — the apply path
+        # quarantines it, and reaudit_quarantined reprocesses it later.
+        suggestion = AuditSuggestion.from_llm(result)
+        rec.set(**{
+            "audit.suggestion_valid": suggestion.is_valid,
+            "audit.rejection": suggestion.rejection(),
+        })
+        if not suggestion.is_valid:
+            log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
+        row = {
+            "video_id": video_id,
+            "status": status_override or AuditStatus.PENDING,
+            **suggestion.to_audit_row(),
+            "transcript_available": transcript is not None,
+            "transcript_lang": transcript_lang,
+            # CIL §3.1: stamp every audit with the strategy that produced it so
+            # measured outcomes stay attributable when Loop 3 arrives. Same reason
+            # for prompt_version_id — stamped here, at the single insert site, so no
+            # caller can forget it (_cohort_median_ctr_delta silently ignores NULLs).
+            "strategy_version": settings.STRATEGY_VERSION,
+            "prompt_version_id": prompt_version_id,
+        }
+        inserted = supabase().table("audits").insert(row).execute()
+        return inserted.data[0] if inserted.data else row
 
 
 def validate_audit(audit: dict) -> tuple[bool, str | None]:
@@ -524,24 +564,26 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     # not_applicable rule, and the verdict all live in app/measurement.py's
     # daily eval (reach CSVs for the apply date arrive days later anyway, so
     # nothing more CAN be decided at apply time).
-    measurement_patch: dict = {}
-    if (channel or {}).get("measurement_enabled"):
-        measurement_patch = {
-            "measurement_status": MeasurementStatus.AWAITING_WINDOW,
-            "measurement_started_at": now,
-        }
-    supabase().table("audits").update({
-        "status": AuditStatus.APPLIED,
-        "applied_at": now,
-        **before_patch,
-        **measurement_patch,
-    }).eq("id", audit_id).execute()
-    supabase().table("videos").update({
-        "title": new_title,
-        "description": new_description,
-        "tags": new_tags,
-        "last_fetched_at": now,
-    }).eq("id", video["id"]).execute()
+    with tracing.span("apply_audit", video_id=video["id"], audit_id=audit_id) as rec:
+        _record_apply_measurability(rec, channel)
+        measurement_patch: dict = {}
+        if (channel or {}).get("measurement_enabled"):
+            measurement_patch = {
+                "measurement_status": MeasurementStatus.AWAITING_WINDOW,
+                "measurement_started_at": now,
+            }
+        supabase().table("audits").update({
+            "status": AuditStatus.APPLIED,
+            "applied_at": now,
+            **before_patch,
+            **measurement_patch,
+        }).eq("id", audit_id).execute()
+        supabase().table("videos").update({
+            "title": new_title,
+            "description": new_description,
+            "tags": new_tags,
+            "last_fetched_at": now,
+        }).eq("id", video["id"]).execute()
 
     return {"status": AuditStatus.APPLIED, "payload": payload}
 

@@ -9,7 +9,7 @@ from fastapi import APIRouter
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel
-from app import eligibility, quota
+from app import eligibility, quota, tracing
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
@@ -456,110 +456,126 @@ def tick():
     gate → resync → cap → pick video → audit → validate → apply). The steps live
     in helpers above and below; the failure-accounting rule is _record_failure()."""
     try:
-        if _quota_dormant():
-            return
+        # Inside the existing handler, never around it: a crashing tick must stay
+        # swallowed exactly as before, and now also carries an ERROR span.
+        with tracing.span("tick") as rec:
+            if _quota_dormant():
+                rec.set(**{"tick.outcome": "quota_dormant"})
+                return
 
-        ch = _pick_next_channel()
-        if not ch:
-            return
-        channel_id = ch["id"]
+            ch = _pick_next_channel()
+            if not ch:
+                rec.set(**{"tick.outcome": "no_channel"})
+                return
+            channel_id = ch["id"]
+            rec.set(channel_id=channel_id)
 
-        # Shorts autopilot — fully decoupled from the metadata-audit path. It runs
-        # before (and regardless of) the audit pause/resync gating: NAS cutting
-        # needs no YouTube token or freshly-synced video stats, so an audit-side
-        # pause or a stale-sync must never silence it. Enqueues at most one cut per
-        # tick, gated by active_job_count vs the concurrency cap.
-        if ch.get("autopilot_shorts_enabled"):
-            try:
-                _run_shorts_action(ch)
-            except Exception as e:
-                log.exception("Shorts autopilot failed for %s: %s", channel_id, e)
-
-        # The metadata-audit path runs only for channels whose audit path is open.
-        # (A channel can be picked purely for shorts while audit-paused, so this
-        # is re-checked here, not just at pick — same predicate, one owner.)
-        if not eligibility.can_audit(ch):
-            _touch_tick(channel_id)
-            return
-
-        if not _resync_if_stale(ch):
-            return
-
-        # 4. Daily cap check
-        cap = ch.get("autopilot_daily_cap") or 10
-        applies = _applies_today(channel_id)
-        if applies >= cap:
-            log.info("Channel %s at daily cap (%d/%d)", channel_id, applies, cap)
-            _touch_tick(channel_id)
-            return
-
-        # 5. Pick next video
-        video = _next_video_for_channel(channel_id)
-        if not video:
-            log.info("Channel %s has no remaining unaudited videos", channel_id)
-            _touch_tick(channel_id)
-            return
-
-        # 6. Model safety gate
-        if _is_unsafe_model(settings.AUDIT_MODEL):
-            _pause(channel_id, PausedReason.UNSAFE_MODEL)
-            return
-
-        # 7. Run audit
-        try:
-            audit_row = audit_video(video["id"])
-        except TokenExpiredError:
-            log.warning("OAuth token expired or revoked for %s during audit; pausing", channel_id)
-            _pause(channel_id, PausedReason.TOKEN_EXPIRED)
-            return
-        except httpx.TimeoutException as e:
-            vid = video["id"]
-            _video_timeout_counts[vid] += 1
-            if _video_timeout_counts[vid] >= 2:
-                log.warning(
-                    "Audit timed out for %s %d times; marking failed to skip",
-                    vid, _video_timeout_counts[vid],
-                )
-                _video_timeout_counts[vid] = 0
+            # Shorts autopilot — fully decoupled from the metadata-audit path. It runs
+            # before (and regardless of) the audit pause/resync gating: NAS cutting
+            # needs no YouTube token or freshly-synced video stats, so an audit-side
+            # pause or a stale-sync must never silence it. Enqueues at most one cut per
+            # tick, gated by active_job_count vs the concurrency cap.
+            if ch.get("autopilot_shorts_enabled"):
                 try:
-                    supabase().table("audits").insert({
-                        "video_id": vid,
-                        "status": AuditStatus.FAILED,
-                        "ai_reasoning": f"[autopilot] repeated read timeouts from OpenRouter",
-                    }).execute()
-                except Exception:
-                    pass
-            else:
-                log.warning("Audit timed out for %s (%s); skipping without penalty", vid, e)
+                    _run_shorts_action(ch)
+                except Exception as e:
+                    log.exception("Shorts autopilot failed for %s: %s", channel_id, e)
+
+            # The metadata-audit path runs only for channels whose audit path is open.
+            # (A channel can be picked purely for shorts while audit-paused, so this
+            # is re-checked here, not just at pick — same predicate, one owner.)
+            if not eligibility.can_audit(ch):
+                rec.set(**{"tick.outcome": "audit_paused"})
+                _touch_tick(channel_id)
+                return
+
+            if not _resync_if_stale(ch):
+                rec.set(**{"tick.outcome": "stale_sync"})
+                return
+
+            # 4. Daily cap check
+            cap = ch.get("autopilot_daily_cap") or 10
+            applies = _applies_today(channel_id)
+            if applies >= cap:
+                log.info("Channel %s at daily cap (%d/%d)", channel_id, applies, cap)
+                rec.set(**{"tick.outcome": "daily_cap"})
+                _touch_tick(channel_id)
+                return
+
+            # 5. Pick next video
+            video = _next_video_for_channel(channel_id)
+            if not video:
+                log.info("Channel %s has no remaining unaudited videos", channel_id)
+                rec.set(**{"tick.outcome": "no_video"})
+                _touch_tick(channel_id)
+                return
+
+            # 6. Model safety gate
+            if _is_unsafe_model(settings.AUDIT_MODEL):
+                rec.set(**{"tick.outcome": "unsafe_model"})
+                _pause(channel_id, PausedReason.UNSAFE_MODEL)
+                return
+
+            # 7. Run audit
+            try:
+                audit_row = audit_video(video["id"])
+            except TokenExpiredError:
+                log.warning("OAuth token expired or revoked for %s during audit; pausing", channel_id)
+                rec.set(**{"tick.outcome": "token_expired"})
+                _pause(channel_id, PausedReason.TOKEN_EXPIRED)
+                return
+            except httpx.TimeoutException as e:
+                vid = video["id"]
+                _video_timeout_counts[vid] += 1
+                if _video_timeout_counts[vid] >= 2:
+                    log.warning(
+                        "Audit timed out for %s %d times; marking failed to skip",
+                        vid, _video_timeout_counts[vid],
+                    )
+                    _video_timeout_counts[vid] = 0
+                    try:
+                        supabase().table("audits").insert({
+                            "video_id": vid,
+                            "status": AuditStatus.FAILED,
+                            "ai_reasoning": f"[autopilot] repeated read timeouts from OpenRouter",
+                        }).execute()
+                    except Exception:
+                        pass
+                else:
+                    log.warning("Audit timed out for %s (%s); skipping without penalty", vid, e)
+                rec.set(**{"tick.outcome": "audit_timeout"})
+                _touch_tick(channel_id)
+                return
+            except Exception as e:
+                log.exception("Audit failed for %s: %s", video["id"], e)
+                rec.set(**{"tick.outcome": "audit_failed"})
+                _record_failure(channel_id)
+                _touch_tick(channel_id)
+                return
+
+            # (Prompt-version attribution is stamped by audit_video at the insert.)
+
+            # 8. Validate
+            ok, reason = validate_audit(audit_row)
+            if not ok:
+                log.warning("Quarantining audit %s: %s", audit_row.get("id"), reason)
+                supabase().table("audits").update({
+                    "status": AuditStatus.QUARANTINED,
+                    "ai_reasoning": (audit_row.get("ai_reasoning") or "") + f"\n[autopilot] quarantined: {reason}",
+                }).eq("id", audit_row["id"]).execute()
+                rec.set(**{"tick.outcome": "quarantined"})
+                _touch_tick(channel_id)
+                return
+
+            # 9. No pre-apply quota re-check: YouTube's own quotaExceeded is the
+            # signal (see _quota_dormant / _next_yt_quota_reset above). To restore
+            # one, gate on quota.can_afford(quota.cost_of(*quota.APPLY)) — the price
+            # lives in app.quota now, not in a constant here.
+
+            # 10. Apply and react to the typed outcome.
+            _apply_audit_and_handle(audit_row, video, channel_id)
+            rec.set(**{"tick.outcome": "applied"})
             _touch_tick(channel_id)
-            return
-        except Exception as e:
-            log.exception("Audit failed for %s: %s", video["id"], e)
-            _record_failure(channel_id)
-            _touch_tick(channel_id)
-            return
-
-        # (Prompt-version attribution is stamped by audit_video at the insert.)
-
-        # 8. Validate
-        ok, reason = validate_audit(audit_row)
-        if not ok:
-            log.warning("Quarantining audit %s: %s", audit_row.get("id"), reason)
-            supabase().table("audits").update({
-                "status": AuditStatus.QUARANTINED,
-                "ai_reasoning": (audit_row.get("ai_reasoning") or "") + f"\n[autopilot] quarantined: {reason}",
-            }).eq("id", audit_row["id"]).execute()
-            _touch_tick(channel_id)
-            return
-
-        # 9. No pre-apply quota re-check: YouTube's own quotaExceeded is the
-        # signal (see _quota_dormant / _next_yt_quota_reset above). To restore
-        # one, gate on quota.can_afford(quota.cost_of(*quota.APPLY)) — the price
-        # lives in app.quota now, not in a constant here.
-
-        # 10. Apply and react to the typed outcome.
-        _apply_audit_and_handle(audit_row, video, channel_id)
-        _touch_tick(channel_id)
 
     except Exception as e:
         log.exception("Autopilot tick crashed: %s", e)

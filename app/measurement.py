@@ -62,7 +62,7 @@ from app.status_vocab import (
     MeasurementStatus,
     OutcomeDecision,
 )
-from app import reach, verdicts
+from app import reach, tracing, verdicts
 from app.verdicts import Verdict
 
 log = logging.getLogger("midas.measurement")
@@ -319,77 +319,84 @@ def eval_measurements() -> dict:
     channel's measurement_enabled flag was flipped off afterwards — the flag
     gates ENTRY (at apply), not evaluation of in-flight measurements.
     """
-    audits = all_rows(
-            supabase().table("audits")
-            .select("id,video_id,applied_at,measurement_started_at,measurement_status")
-            .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
-            # Only still-applied audits: a human revert mid-window takes the
-            # video off the new metadata, so the post window would measure
-            # post-REVERT exposure — and _finalize would clobber the
-            # operator's outcome_decision='reverted'. revert_audit parks the
-            # measurement state; this filter is the belt to that suspender.
-            .eq("status", AuditStatus.APPLIED)
-            .order("id")
-    )
-    if not audits:
-        log.info("measurement_eval: nothing in flight")
-        return {"evaluated": 0}
+    with tracing.span("eval_measurements") as rec:
+        audits = all_rows(
+                supabase().table("audits")
+                .select("id,video_id,applied_at,measurement_started_at,measurement_status")
+                .in_("measurement_status", list(ACTIVE_MEASUREMENT_STATUSES))
+                # Only still-applied audits: a human revert mid-window takes the
+                # video off the new metadata, so the post window would measure
+                # post-REVERT exposure — and _finalize would clobber the
+                # operator's outcome_decision='reverted'. revert_audit parks the
+                # measurement state; this filter is the belt to that suspender.
+                .eq("status", AuditStatus.APPLIED)
+                .order("id")
+        )
+        if not audits:
+            log.info("measurement_eval: nothing in flight")
+            rec.set(**{"measurement.audits_in_flight": 0})
+            return {"evaluated": 0}
 
-    # Resolve channel per audit (audits carry no channel_id), chunked.
-    video_ids = list({a["video_id"] for a in audits})
-    videos: dict[str, dict] = {}
-    for i in range(0, len(video_ids), 100):
-        for v in (
-            supabase().table("videos")
-            .select("id,channel_id")
-            .in_("id", video_ids[i : i + 100])
-            .execute()
-            .data or []
-        ):
-            videos[v["id"]] = v
+        # Resolve channel per audit (audits carry no channel_id), chunked.
+        video_ids = list({a["video_id"] for a in audits})
+        videos: dict[str, dict] = {}
+        for i in range(0, len(video_ids), 100):
+            for v in (
+                supabase().table("videos")
+                .select("id,channel_id")
+                .in_("id", video_ids[i : i + 100])
+                .execute()
+                .data or []
+            ):
+                videos[v["id"]] = v
 
-    today = datetime.now(timezone.utc).date()
-    coverage: dict[str, set[str]] = {}
-    #: channel_id -> days behind, for channels whose reach ingestion has stalled.
-    stalled_channels: dict[str, int | None] = {}
-    counts: dict[str, int] = {}
-    errors = 0
-    for audit in audits:
-        try:
-            video = videos.get(audit["video_id"])
-            if not video:
-                _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
-                          {"rationale": "video row no longer exists"})
-                counts[MeasurementStatus.NOT_APPLICABLE] = counts.get(MeasurementStatus.NOT_APPLICABLE, 0) + 1
-                continue
-            cid = video["channel_id"]
-            if cid not in coverage:
-                coverage[cid] = reach.coverage(cid)
-                # Say it once per channel, not once per audit: a stalled poller
-                # is a property of the channel, and this pass is the only place
-                # that reads coverage often enough to notice. Without it, an
-                # ingestion outage looks exactly like a quiet fleet — audits sit
-                # in `measuring` and nothing anywhere says why.
-                if reach.is_stale(coverage[cid], today):
-                    stalled_channels[cid] = reach.days_behind(coverage[cid], today)
-                    log.warning(
-                        "measurement_eval: %s reach is %s days behind (frontier %s) — "
-                        "audits will hold in measuring, not be judged, until it catches up",
-                        cid, stalled_channels[cid], reach.frontier(coverage[cid]),
-                    )
-            status = _eval_audit(audit, video, coverage[cid], today)
-            counts[status] = counts.get(status, 0) + 1
-        except Exception as e:
-            errors += 1
-            log.exception("measurement_eval failed for audit %s: %s", audit.get("id"), e)
+        today = datetime.now(timezone.utc).date()
+        coverage: dict[str, set[str]] = {}
+        #: channel_id -> days behind, for channels whose reach ingestion has stalled.
+        stalled_channels: dict[str, int | None] = {}
+        counts: dict[str, int] = {}
+        errors = 0
+        for audit in audits:
+            try:
+                video = videos.get(audit["video_id"])
+                if not video:
+                    _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
+                              {"rationale": "video row no longer exists"})
+                    counts[MeasurementStatus.NOT_APPLICABLE] = counts.get(MeasurementStatus.NOT_APPLICABLE, 0) + 1
+                    continue
+                cid = video["channel_id"]
+                if cid not in coverage:
+                    coverage[cid] = reach.coverage(cid)
+                    # Say it once per channel, not once per audit: a stalled poller
+                    # is a property of the channel, and this pass is the only place
+                    # that reads coverage often enough to notice. Without it, an
+                    # ingestion outage looks exactly like a quiet fleet — audits sit
+                    # in `measuring` and nothing anywhere says why.
+                    if reach.is_stale(coverage[cid], today):
+                        stalled_channels[cid] = reach.days_behind(coverage[cid], today)
+                        log.warning(
+                            "measurement_eval: %s reach is %s days behind (frontier %s) — "
+                            "audits will hold in measuring, not be judged, until it catches up",
+                            cid, stalled_channels[cid], reach.frontier(coverage[cid]),
+                        )
+                status = _eval_audit(audit, video, coverage[cid], today)
+                counts[status] = counts.get(status, 0) + 1
+            except Exception as e:
+                errors += 1
+                log.exception("measurement_eval failed for audit %s: %s", audit.get("id"), e)
 
-    summary = {"evaluated": len(audits), "errors": errors, **counts}
-    if stalled_channels:
-        # In the summary so the fact survives the log rotation and is visible to
-        # anything that calls this directly (the ops endpoint, a future check).
-        summary["reach_stalled_channels"] = stalled_channels
-    log.info("measurement_eval: %s", summary)
-    return summary
+        summary = {"evaluated": len(audits), "errors": errors, **counts}
+        if stalled_channels:
+            # In the summary so the fact survives the log rotation and is visible to
+            # anything that calls this directly (the ops endpoint, a future check).
+            summary["reach_stalled_channels"] = stalled_channels
+        log.info("measurement_eval: %s", summary)
+        rec.set(**{
+            "measurement.audits_in_flight": len(audits),
+            "measurement.errors": errors,
+            **{f"measurement.count.{status}": n for status, n in counts.items()},
+        })
+        return summary
 
 
 # ── Endpoints (CIL §1.8, minimal slice subset) ────────────────────────────

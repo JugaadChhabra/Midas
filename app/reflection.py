@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 
-from app import verdicts
+from app import tracing, verdicts
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
@@ -164,6 +164,32 @@ def _build_perf_report(channel_id: str) -> dict | None:
 
 def _should_reflect(channel_id: str) -> tuple[bool, str]:
     """Return (should_reflect, reason)."""
+    with tracing.span("should_reflect", channel_id=channel_id) as rec:
+        should, reason, report = _should_reflect_inner(channel_id)
+        rec.set(**{
+            "reflection.should": should,
+            "reflection.reason": reason,
+        })
+        if report is not None:
+            dist = report["distribution"]
+            rec.set(**{
+                "reflection.win_rate": report["win_rate"],
+                "reflection.wins": dist[MeasurementStatus.WIN],
+                "reflection.neutrals": dist[MeasurementStatus.NEUTRAL],
+                "reflection.regressions": dist[MeasurementStatus.REGRESSION],
+                "reflection.median_ctr_delta_pct": report["median_ctr_delta_pct"],
+                "reflection.verdict_count": report["count"],
+            })
+        return should, reason
+
+
+def _should_reflect_inner(channel_id: str) -> tuple[bool, str, dict | None]:
+    """The decision itself, plus the report it was made on.
+
+    The report travels out as a third element purely so the span wrapper can
+    describe the evidence without issuing a second `_build_perf_report` query —
+    it is the expensive part of this function.
+    """
     # Check cooldown — did we reflect in the last N days?
     last_rows = (
         supabase().table("prompt_versions")
@@ -176,7 +202,7 @@ def _should_reflect(channel_id: str) -> tuple[bool, str]:
     if last_rows:
         last_dt = datetime.fromisoformat(last_rows[0]["created_at"].replace("Z", "+00:00"))
         if (datetime.now(timezone.utc) - last_dt) < timedelta(days=_REFLECT_COOLDOWN_DAYS):
-            return False, "reflected_recently"
+            return False, "reflected_recently", None
 
     # The ONLY signal the prompt loop may act on is measured CTR. No verdicts
     # (or too few) means no reflection — a prompt rewrite is expensive and
@@ -185,24 +211,24 @@ def _should_reflect(channel_id: str) -> tuple[bool, str]:
     # reported a 0.4% win rate every week and drove four prompt versions.
     report = _build_perf_report(channel_id)
     if report is None:
-        return False, "no_measured_outcomes"
+        return False, "no_measured_outcomes", None
 
     # Three ways the evidence can show harm. Note what is NOT here: a low win
     # rate. See the threshold block at the top of this module for why — a
     # neutral-dominant channel is the normal case, not a failing one.
     dist = report["distribution"]
     if dist[MeasurementStatus.REGRESSION] > dist[MeasurementStatus.WIN]:
-        return True, "regressions_outnumber_wins"
+        return True, "regressions_outnumber_wins", report
 
     median = report["median_ctr_delta_pct"]
     if median is not None and median < _NEGATIVE_MEDIAN_PCT:
-        return True, "negative_median_delta"
+        return True, "negative_median_delta", report
 
     for lever, lift in report["levers"].items():
         if lift is not None and lift < _NEGATIVE_LEVER_PCT:
-            return True, f"negative_lever_{lever}"
+            return True, f"negative_lever_{lever}", report
 
-    return False, "performing_well"
+    return False, "performing_well", report
 
 
 # ── Niche extraction ──────────────────────────────────────────────────────────
@@ -240,7 +266,9 @@ def derive_niche_queries(channel_id: str) -> list[str]:
         f"Be specific to the actual content niche, not the broad category. "
         f'Return JSON: {{"queries": ["query1", "query2"]}}'
     )
-    result = chat_json(prompt, model="anthropic/claude-haiku-4.5")
+    result = chat_json(
+        prompt, model="anthropic/claude-haiku-4.5", label="derive_niche_queries"
+    )
     queries = result.get("queries") or []
     queries = [q for q in queries if isinstance(q, str) and q.strip()][:3]
 
@@ -319,7 +347,7 @@ def _get_platform_guidance(niche_description: str) -> str:
         f"Focus on what drives search discovery and click-through rate. Be specific and practical."
     )
     try:
-        return chat_text(query, model="perplexity/sonar")
+        return chat_text(query, model="perplexity/sonar", label="platform_guidance")
     except Exception as e:
         log.warning("platform_guidance: Perplexity call failed: %s", e)
         return "(platform guidance unavailable)"
@@ -481,7 +509,10 @@ def _run_reflection(
     )
 
     try:
-        result = chat_json(user, model=settings.REFLECTION_MODEL, system=system)
+        result = chat_json(
+            user, model=settings.REFLECTION_MODEL, system=system,
+            label="reflection_candidate",
+        )
     except Exception as e:
         log.error("Reflection LLM call failed for %s: %s", channel_id, e)
         return None, "llm_failed"
@@ -759,6 +790,18 @@ def reflect(channel_id: str) -> dict:
 
     Returns dict describing what happened.
     """
+    with tracing.span("reflect", channel_id=channel_id) as rec:
+        result = _reflect_inner(channel_id)
+        rec.set(**{
+            "reflect.reflected": result.get("reflected"),
+            "reflect.reason": result.get("reason"),
+            "reflect.version_id": result.get("version_id"),
+            "reflect.shadow_audits_created": result.get("shadow_audits_created"),
+        })
+        return result
+
+
+def _reflect_inner(channel_id: str) -> dict:
     log.info("Reflection tick for channel %s", channel_id)
 
     should, reason = _should_reflect(channel_id)
