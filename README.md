@@ -25,7 +25,7 @@ Postgres is self-hosted (cut over 2026-08-11 — see `docs/SELF_HOSTED_DB.md`), 
 Supabase project. `SUPABASE_URL` is set for you by `docker-compose.yml`; don't hand-set it.
 ```bash
 docker compose up -d db postgrest
-DATABASE_URL="postgresql://midas:$POSTGRES_PASSWORD@localhost:5432/midas" \
+DATABASE_URL="postgresql://midas:$POSTGRES_PASSWORD@localhost:55432/midas" \
   python scripts/apply_migrations.py
 ```
 
