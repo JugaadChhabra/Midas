@@ -28,6 +28,35 @@ services:
       retries: 5
       start_period: 10s
 
+  # ── Phoenix (LLM + evidence-loop tracing) ────────────────────────────────
+  # Its own database in the same cluster, NOT its own volume. Two reasons:
+  # app/backup.py runs pg_dump against a single DSN rather than pg_dumpall, so
+  # a separate database keeps trace data out of the NAS snapshot by
+  # construction — traces are telemetry, losing them is not a DR event, and
+  # they must not bloat the snapshot CLAUDE.md is built around. And a bind
+  # mount whose source is missing on the office machine silently becomes a
+  # directory, which is a failure mode this deployment has already hit once.
+  phoenix:
+    # Pinned, like postgrest and pgvector above. `version-20.3.0` was the
+    # latest published tag on 2026-08-23; verify it still exists before
+    # deploying and bump deliberately, never track `latest`.
+    image: arizephoenix/phoenix:version-20.3.0
+    container_name: midas-phoenix
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/phoenix
+      # Trace retention. Start conservative on a machine whose disk is shared
+      # with the operational database; see docs/OBSERVABILITY.md before raising
+      # it, and measure a real span size rather than guessing.
+      PHOENIX_ENABLE_PROMETHEUS: "false"
+    ports:
+      # Loopback only, like every other service here. 6006 is the UI and the
+      # OTLP/HTTP collector; the app reaches it in-network as http://phoenix:6006.
+      - "127.0.0.1:6006:6006"
+    restart: unless-stopped
+
   # ── PostgREST (the API the app actually speaks) ──────────────────────────
   # Every one of the app's ~190 call sites uses the postgrest fluent builder
   # (`supabase().table(...).select(...)`), not SQL. Postgres alone is not
@@ -106,6 +135,8 @@ services:
       # loses data rather than uptime.
       BACKUP_PG_DUMP: pg_dump
       RESTORE_PSQL: psql
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_ENDPOINT: ${OTEL_ENDPOINT:-http://phoenix:6006/v1/traces}
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
       # Host bind mounts (not named volumes) so each job's artifacts stay
