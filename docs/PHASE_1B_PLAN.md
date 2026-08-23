@@ -1,6 +1,8 @@
 # Phase 1B — Playlist Inventory + Health (Recommend-Only) — Planning Doc
 
-**Status:** DRAFT — to be reviewed before any implementation work begins.
+**Status:** SHIPPED — all three steps landed (`f3ccb4f` step 2 health scorer,
+`dc18cdf` step B tier-2 traffic-source, `d669b74` step 3 evaluate/health endpoints
++ UI card). Kept as the planning record; steps below read as history, not TODO.
 **Spec sources of record:** `docs/plan.md` §Phase 1 (1B), `docs/PLAYLIST_OPTIMIZATION.md`
 §Sensor / §Control loop / §Data model summary, `docs/PHASE_0_GAPS.md` (Gaps 5, 6, 9).
 **Substrate already shipped:** Phase 0 sensor (`analytics_client.py`, `metrics_poll.py`,

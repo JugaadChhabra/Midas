@@ -16,14 +16,17 @@ For the local shorts cutter (heavy ML deps, local runs only — not needed in Do
 ### 2. Configure env
 ```bash
 cp .env.example .env
-# fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENROUTER_API_KEY
+# fill in SUPABASE_SERVICE_KEY, OPENROUTER_API_KEY
 ```
 Your Google OAuth `client_secret_*.json` is already in the repo root and referenced by `CLIENT_SECRETS_FILE`.
 
-### 3. Push schema to Supabase
-Project is already linked via `supabase link`. Push the migration:
+### 3. Start Postgres and apply the schema
+Postgres is self-hosted (cut over 2026-08-11 — see `docs/SELF_HOSTED_DB.md`), not a hosted
+Supabase project. `SUPABASE_URL` is set for you by `docker-compose.yml`; don't hand-set it.
 ```bash
-supabase db push
+docker compose up -d db postgrest
+DATABASE_URL="postgresql://midas:$POSTGRES_PASSWORD@localhost:5432/midas" \
+  python scripts/apply_migrations.py
 ```
 
 ### 4. Run

@@ -1,6 +1,9 @@
 # Phase 2 · Track 1 — Unlock + Protect the Metadata Loop — Implementation Checklist
 
-**Status:** DRAFT — to be reviewed before any implementation work begins.
+**Status:** SHIPPED — both pieces landed in `8ec68db` (Piece 1, reach-warmup
+certification gate: `app/reach.py:certify`, `app/auth.py`) and `facafd1` (Piece 2,
+autopilot excludes in-measurement videos: `app/autopilot.py`). Kept as the
+implementation record; steps below read as history, not TODO.
 **Spec sources of record:** `docs/CONTINUOUS_IMPROVEMENT_LOOP.md` §0 (Sensor) / §1
 (Per-video control loop, esp. §1.3, §1.7), `docs/PHASE_0_GAPS.md` §Gap 1 +
 §"Verification recipe for the Phase 0 exit gate".

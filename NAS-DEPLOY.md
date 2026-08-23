@@ -34,7 +34,9 @@ NAS_SOURCE_ROOT_PATH=Animations/SHORTS CUTTER/RHYMES        # MUST directly cont
 NAS_DESTINATION_ROOT_PATH=Animations/SHORTS CUTTER/COMPLETED
 
 # --- rest of the stack ---
-SUPABASE_URL=...
+# SUPABASE_URL is NOT set here — docker-compose.yml hardcodes it to the local
+# PostgREST proxy (http://rest) for the midas service and ignores any value in
+# .env. See docs/SELF_HOSTED_DB.md.
 SUPABASE_SERVICE_KEY=...
 # + OpenRouter / YouTube / etc. keys as usual
 

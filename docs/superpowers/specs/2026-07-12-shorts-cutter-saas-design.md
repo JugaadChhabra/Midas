@@ -2,6 +2,9 @@
 
 **Date:** 2026-07-12
 **Status:** Approved direction, pre-implementation
+**Superseded (intake model only) by:** `2026-08-01-shorts-cutter-standalone-design.md`,
+which locks the stack this doc left open. Kept as the historical record of the
+original product framing.
 
 ## The product in one line
 
