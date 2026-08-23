@@ -33,3 +33,10 @@ PyJWT==2.10.1
 # --no-install-recommends and the app would raise ZoneInfoNotFoundError at
 # import — a boot failure — if the system copy ever went missing.
 tzdata
+
+# OpenTelemetry, for app/tracing.py only — no other module may import it
+# (tests/test_tracing.py enforces that). Traces go to a self-hosted Phoenix over
+# OTLP/HTTP. Both pins move together: the SDK and the exporter share a version
+# lockstep and a mismatched pair fails at import, not at export time.
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0

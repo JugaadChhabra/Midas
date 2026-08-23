@@ -30,6 +30,13 @@ class Settings:
     PROMPT_GEN_MODEL = os.getenv("PROMPT_GEN_MODEL") or "google/gemini-2.0-flash-001"
     REFLECTION_MODEL = os.getenv("REFLECTION_MODEL") or "anthropic/claude-sonnet-4-6"
 
+    # Tracing. Defaults to OFF so merging the instrumentation changes nothing
+    # until an environment opts in. OTEL_ENDPOINT is the Phoenix collector's
+    # OTLP/HTTP traces path; inside docker-compose that host is the service name.
+    OTEL_ENABLED = os.getenv("OTEL_ENABLED", "false").lower() == "true"
+    OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://phoenix:6006/v1/traces")
+    OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "midas")
+
     SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret-change-me")
     # Defaults to false: audits are APPLIED to YouTube live unless DRY_RUN=true is
     # set explicitly in the env. Set DRY_RUN=true to preview without pushing.
