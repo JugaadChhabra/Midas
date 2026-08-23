@@ -49,7 +49,13 @@ def _record_usage(rec: tracing.Recorder, data: dict, requested: str) -> None:
     OpenRouter can reroute, and nothing in this app read that field before —
     an audit attributed to haiku may not have been produced by haiku.
     """
-    usage = data.get("usage") or {}
+    # isinstance, not `or {}`: a provider that returns `usage` as a list or a
+    # string still has `.get` blow up here, and the AttributeError would escape
+    # this function, escape chat_json, and fail the AUDIT over token accounting.
+    # `Recorder.set`'s own try cannot help — these arguments are evaluated first.
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
     rec.set(**{
         tracing.MODEL_NAME: requested,
         "llm.model_served": data.get("model"),

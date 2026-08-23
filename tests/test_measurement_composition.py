@@ -320,3 +320,95 @@ def test_only_still_applied_audits_are_evaluated():
     select.in_.assert_called_once_with(
         "measurement_status", list(m.ACTIVE_MEASUREMENT_STATUSES))
     select.in_.return_value.eq.assert_called_once_with("status", m.AuditStatus.APPLIED)
+
+
+# ── the cause behind not_applicable ───────────────────────────────────────
+#
+# Four branches land on the same terminal status, so `measurement_status` alone
+# cannot say whether we are looking at dormant videos (a fact about the
+# audience, nothing to fix) or at coverage we lost (our own ingestion outage).
+# The investigation that motivated this loop had to read a database export to
+# answer that. These pin the split.
+
+def _covered_up_to(pre, post, frontier_day, missing):
+    """Coverage of both windows minus `missing`, extended to `frontier_day`."""
+    from datetime import timedelta
+
+    days = _covered(pre, post) - set(missing)
+    cursor = date.fromisoformat(post[1])
+    end = date.fromisoformat(frontier_day)
+    while cursor <= end:
+        days.add(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return days - set(missing)
+
+
+def test_the_three_not_applicable_causes_are_counted_separately(writes):
+    """The distinction the terminal status throws away, made countable.
+
+    All three of these persist `not_applicable`; a counter keyed on status
+    alone reports "3" and answers nothing.
+    """
+    pre, post = reach.window_for(APPLIED)
+    reasons: dict[str, int] = {}
+
+    # awaiting_window with no apply timestamp — a data bug, not an outcome.
+    m._eval_audit(_audit(applied_at=None), VIDEO, set(), date(2026, 7, 1),
+                  MagicMock(), reasons=reasons)
+    # Reach days inside the window that ingestion has now moved past.
+    lost = _covered_up_to(pre, post, "2026-07-10", {post[1]})
+    m._eval_audit(_audit(), VIDEO, lost, date(2026, 7, 20),
+                  MagicMock(), reasons=reasons)
+    # A dormant video: measured, but under the pre-window impressions floor.
+    m._eval_audit(_audit(), VIDEO, _covered(pre, post), date(2026, 7, 1),
+                  _reader(pre=(10, 0.0), post=(5000, 0.05)), reasons=reasons)
+
+    assert reasons == {m.REASON_NO_TIMESTAMP: 1,
+                       m.REASON_COVERAGE_LOST: 1,
+                       m.REASON_DORMANT: 1}
+    # The premise: without the cause tag these are indistinguishable.
+    assert [c.args[1] for c in writes["finalize"].call_args_list] == \
+        [MeasurementStatus.NOT_APPLICABLE] * 3
+
+
+def test_the_cause_is_structural_not_the_rationale_prose(writes):
+    """A reworded rationale must not silently zero the chart, so the tag is a
+    key of its own rather than something a matcher digs out of the prose."""
+    pre, post = reach.window_for(APPLIED)
+    m._eval_audit(_audit(), VIDEO, _covered(pre, post), date(2026, 7, 1),
+                  _reader(pre=(10, 0.0), post=(5000, 0.05)))
+
+    result = writes["finalize"].call_args.args[3]
+    assert result[m.verdicts.REASON] == m.REASON_DORMANT
+    # Counting reads the key, so rewording this sentence changes nothing.
+    reworded = dict(result, rationale="not enough pre-change exposure to judge")
+    tally: dict[str, int] = {}
+    m._count_reason(tally, reworded)
+    assert tally == {m.REASON_DORMANT: 1}
+
+
+def test_the_sweep_puts_each_cause_on_the_span_separately():
+    """End to end: three causes, one pass, three distinguishable counters."""
+    from app import tracing
+
+    audits = [{"id": 1, "video_id": "gone",
+               "measurement_status": MeasurementStatus.AWAITING_WINDOW},
+              {"id": 2, "video_id": "v2", "applied_at": None,
+               "measurement_status": MeasurementStatus.AWAITING_WINDOW}]
+    videos = [{"id": "v2", "channel_id": "c1"}]
+    sb, _ = _eval_sb(audits, videos)
+
+    exporter = tracing._reset_for_tests()
+    try:
+        with patch.object(m, "supabase", return_value=sb), \
+             patch.object(m.reach, "coverage", return_value=set()), \
+             patch.object(m, "_finalize"):
+            m.eval_measurements()
+        attrs = exporter.get_finished_spans()[0].attributes
+    finally:
+        tracing._reset_for_tests(disable=True)
+
+    assert attrs[f"measurement.reason.{m.REASON_VIDEO_GONE}"] == 1
+    assert attrs[f"measurement.reason.{m.REASON_NO_TIMESTAMP}"] == 1
+    # Both are not_applicable; the status counter alone cannot separate them.
+    assert attrs[f"measurement.count.{MeasurementStatus.NOT_APPLICABLE}"] == 2

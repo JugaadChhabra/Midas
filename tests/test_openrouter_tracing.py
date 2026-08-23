@@ -158,3 +158,25 @@ def test_missing_usage_block_does_not_break_the_call(_isolated_tracer):
 
     attrs = _only_span(_isolated_tracer).attributes
     assert tracing.TOKEN_TOTAL not in attrs
+
+
+@pytest.mark.parametrize("usage", [["prompt_tokens", 3], "n/a", 7])
+def test_malformed_usage_block_does_not_break_the_call(_isolated_tracer, usage):
+    """`or {}` only covers absent, not wrong-typed.
+
+    A provider returning `usage` as a list or a string used to raise
+    AttributeError out of _record_usage, out of chat_json, and fail the audit —
+    on a telemetry problem. Recorder.set's own try does not help: these
+    arguments are evaluated before it is entered.
+    """
+    from app.openrouter import chat_json
+
+    body = {"choices": [{"message": {"content": '{"ok": 1}'}}],
+            "model": "m", "usage": usage}
+    with patch("app.openrouter.httpx.post", return_value=httpx.Response(200, json=body)), \
+         patch("app.openrouter.settings") as s:
+        s.OPENROUTER_API_KEY = "k"
+        s.AUDIT_MODEL = "m"
+        assert chat_json("prompt") == {"ok": 1}
+
+    assert tracing.TOKEN_TOTAL not in _only_span(_isolated_tracer).attributes

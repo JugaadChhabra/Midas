@@ -212,7 +212,12 @@ def _llm_judge(video_id: str, playlist: dict, member_video_ids: list[str]) -> bo
         f'Answer JSON: {{"belong": true/false, "reason": "one sentence"}}'
     )
     try:
-        result = chat_json(prompt, model=JUDGE_MODEL)
+        # Labelled because this call runs under no operation span — it emits a
+        # root span, so nothing above it says what the model was asked. It also
+        # runs once per candidate video, making it the highest-volume LLM span
+        # in the app, and playlist_discovery uses the same JUDGE_MODEL: unlabelled,
+        # the two would share one span name and be impossible to tell apart.
+        result = chat_json(prompt, model=JUDGE_MODEL, label="playlist_membership_judge")
         return bool(result.get("belong", False))
     except Exception as e:
         log.warning("LLM judge failed for video %s / playlist %s: %s", video_id, playlist["id"], e)

@@ -39,6 +39,11 @@ CTR_DELTA = "ctr_delta_relative"
 PRE_WINDOW = "pre_window"
 POST_WINDOW = "post_window"
 RATIONALE = "rationale"
+#: Machine-stable tag for WHY a verdict landed where it did, written next to
+#: RATIONALE on the branches that share a terminal status. `rationale` is prose
+#: for a human reading one row and will be reworded; anything aggregating causes
+#: reads this instead, so a rewording cannot silently stop the counting.
+REASON = "reason_code"
 
 #: The canonical levers an audit can move. Response keys at the edges differ
 #: (`description_changed` in the performance API, `desc_changed` in reflection's
@@ -65,6 +70,11 @@ class Verdict:
         fell under the impressions floor is neutral with nothing to compare.
         """
         return self.result.get(CTR_DELTA)
+
+    @property
+    def reason_code(self) -> str | None:
+        """The stable cause tag, or None on a branch that needs no disambiguation."""
+        return self.result.get(REASON)
 
     @property
     def pre_ctr(self) -> float | None:

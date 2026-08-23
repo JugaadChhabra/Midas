@@ -370,10 +370,15 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # Before the scheduler stops: the spans worth having at shutdown are the
-        # ones its jobs just produced, and BatchSpanProcessor holds them.
-        tracing.flush()
+        # Scheduler first, telemetry second — deliberately. The spans worth
+        # having at shutdown are the ones the jobs just produced and
+        # BatchSpanProcessor is still holding, but `wait=False` means stopping
+        # the scheduler does not wait on them, while a flush against a dead
+        # Phoenix does wait (bounded, see tracing.FLUSH_TIMEOUT_MS). Flushing
+        # first put a telemetry outage between the process and a clean scheduler
+        # stop; this ordering cannot.
         scheduler.shutdown(wait=False)
+        tracing.flush()
 
 
 app = FastAPI(title="Midas", lifespan=lifespan)

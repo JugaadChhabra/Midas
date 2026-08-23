@@ -140,7 +140,9 @@ def _propose_playlist(video_ids: list[str]) -> dict | None:
         f'Answer JSON: {{"title": "...", "description": "..."}}'
     )
     try:
-        return chat_json(prompt, model=JUDGE_MODEL)
+        # Labelled for the same reason as playlists._judge: root span, no parent
+        # to explain it, and the same JUDGE_MODEL would otherwise collide with it.
+        return chat_json(prompt, model=JUDGE_MODEL, label="playlist_proposal")
     except Exception as e:
         log.warning("Playlist proposal LLM call failed: %s", e)
         return None

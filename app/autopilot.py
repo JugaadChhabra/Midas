@@ -448,7 +448,13 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> st
         # `dry_run` on a DRY_RUN deploy, `applied` otherwise — the distinction is
         # already in the payload, and conflating them makes a rehearsal look like
         # a month of real writes.
-        return result.get("status") or AuditStatus.APPLIED
+        # isinstance, not result.get: a YouTube write that SUCCEEDED must never
+        # be able to penalise the channel. If apply_audit_internal ever grows a
+        # bare `return`, `.get` raises inside this try, lands in `except
+        # Exception` below, and calls _record_failure() — three of which pause
+        # the channel — for a video that was in fact rewritten.
+        status = result.get("status") if isinstance(result, dict) else None
+        return status or AuditStatus.APPLIED
     except ApplyError as e:
         if e.outcome is ApplyOutcome.TEST_AND_COMPARE:
             log.info("Skipping video %s: active Test & Compare experiment on YouTube", video["id"])

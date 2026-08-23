@@ -149,6 +149,22 @@ FINALIZE = "finalize"              # terminal, decided without reading reach
 MEASURE = "measure"                # go read the reach windows, then judge
 
 
+#: Stable cause tags. FOUR different branches land on `not_applicable`, so the
+#: terminal status alone cannot answer the question this whole loop exists to
+#: answer: of the audits we never measured, how many were dormant videos (a fact
+#: about the audience, nothing to fix) versus coverage we lost (a fact about our
+#: ingestion, very much something to fix)? The investigation that motivated the
+#: measurement rework had to read a database export to learn "381 dormant, of
+#: which 184 published inside their own pre-window"; these make that a chart.
+#:
+#: Written into `measurement_result` next to `rationale`, and counted from there
+#: — never by matching the rationale prose, which is written to be reworded.
+REASON_NO_TIMESTAMP = "no_timestamp"      # awaiting_window with no apply date
+REASON_COVERAGE_LOST = "coverage_lost"    # reach days inside the window never arrived
+REASON_DORMANT = "dormant"                # pre-window under the impressions floor
+REASON_VIDEO_GONE = "video_gone"          # the videos row was deleted under us
+
+
 @dataclass(frozen=True)
 class Plan:
     """What to do with an audit *before* any reach data is read."""
@@ -170,7 +186,8 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
         # feeds Loop 2's counts; this was never measured).
         return Plan(
             FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
-            {"rationale": "no applied_at/measurement_started_at timestamp; cannot window"},
+            {"rationale": "no applied_at/measurement_started_at timestamp; cannot window",
+             verdicts.REASON: REASON_NO_TIMESTAMP},
         )
 
     pre, post = reach.window_for(applied)
@@ -207,6 +224,7 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
             return Plan(FINALIZE, MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, {
                 "rationale": "reach coverage never completed; ingestion has moved "
                              "past this window, so the missing days will not arrive",
+                verdicts.REASON: REASON_COVERAGE_LOST,
                 "missing_days": missing[:14],
                 "frontier": frontier,
                 verdicts.PRE_WINDOW: pre, verdicts.POST_WINDOW: post,
@@ -242,6 +260,7 @@ def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
     # mean different things to Loop 2, and a dormant video fails both floors.
     if pre_imp < settings.MIN_IMPRESSIONS:
         result["rationale"] = f"dormant pre-change ({pre_imp} impressions < {settings.MIN_IMPRESSIONS} floor)"
+        result[verdicts.REASON] = REASON_DORMANT
         return Verdict(MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, result)
     if post_imp < settings.MIN_IMPRESSIONS:
         result["rationale"] = f"insufficient post-change impressions ({post_imp} < {settings.MIN_IMPRESSIONS})"
@@ -262,8 +281,19 @@ def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
     return Verdict(status, OutcomeDecision.NONE, result)
 
 
+def _count_reason(reasons: dict[str, int], result: dict) -> None:
+    """Tally the CAUSE behind a result, if it carries one.
+
+    Structural: reads the REASON tag the branch wrote, never the human-readable
+    rationale beside it. A prose edit must not be able to silently zero a chart.
+    """
+    code = (result or {}).get(verdicts.REASON)
+    if code:
+        reasons[code] = reasons.get(code, 0) + 1
+
+
 def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
-                read_reach=reach.aggregate) -> str:
+                read_reach=reach.aggregate, reasons: dict[str, int] | None = None) -> str:
     """Evaluate one audit. Returns the (possibly unchanged) measurement_status.
 
     Plumbing only: decide, fetch what the decision asked for, decide again,
@@ -276,12 +306,19 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
     order, or judging before the baseline is written. Both are now assertable at
     this interface instead of only observable in production three weeks later.
     """
+    # `reasons` is an out-parameter, not a decision input: the sweep needs the
+    # cause of each terminal state and only this composition sees both stages'
+    # results. Optional so every existing caller and test is unaffected.
+    if reasons is None:
+        reasons = {}
+
     plan = plan_measurement(audit, today, covered)
 
     if plan.action == HOLD:
         return plan.status
     if plan.action == FINALIZE:
         _finalize(audit["id"], plan.status, plan.outcome, plan.result)
+        _count_reason(reasons, plan.result)
         return plan.status
     if plan.action == MARK_MEASURING:
         # Only if it isn't already parked there: re-stamping every pass would
@@ -300,6 +337,10 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
                           pre_imp=pre_imp, pre_ctr=pre_ctr,
                           post_imp=post_imp, post_ctr=post_ctr)
     _finalize(audit["id"], verdict.status, verdict.outcome, verdict.result)
+    # The dormant verdict is the highest-volume cause of not_applicable there is
+    # (381 of 381 in the investigation that motivated this loop), so leaving the
+    # MEASURE path uncounted would leave the tally answering nothing.
+    _count_reason(reasons, verdict.result)
 
     if verdict.status == MeasurementStatus.REGRESSION:
         log.warning(
@@ -355,14 +396,22 @@ def eval_measurements() -> dict:
         #: channel_id -> days behind, for channels whose reach ingestion has stalled.
         stalled_channels: dict[str, int | None] = {}
         counts: dict[str, int] = {}
+        #: cause -> n, for the branches that share a terminal status. Kept beside
+        #: `counts` rather than folded into it because the two answer different
+        #: questions: how many landed where, and why.
+        reasons: dict[str, int] = {}
         errors = 0
         for audit in audits:
             try:
                 video = videos.get(audit["video_id"])
                 if not video:
-                    _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE,
-                              {"rationale": "video row no longer exists"})
+                    gone = {"rationale": "video row no longer exists",
+                            verdicts.REASON: REASON_VIDEO_GONE}
+                    _finalize(audit["id"], MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, gone)
                     counts[MeasurementStatus.NOT_APPLICABLE] = counts.get(MeasurementStatus.NOT_APPLICABLE, 0) + 1
+                    # Same tally as the branches inside _eval_audit: this one
+                    # finalizes here, but it is the same question being asked.
+                    _count_reason(reasons, gone)
                     continue
                 cid = video["channel_id"]
                 if cid not in coverage:
@@ -379,7 +428,7 @@ def eval_measurements() -> dict:
                             "audits will hold in measuring, not be judged, until it catches up",
                             cid, stalled_channels[cid], reach.frontier(coverage[cid]),
                         )
-                status = _eval_audit(audit, video, coverage[cid], today)
+                status = _eval_audit(audit, video, coverage[cid], today, reasons=reasons)
                 counts[status] = counts.get(status, 0) + 1
             except Exception as e:
                 errors += 1
@@ -395,6 +444,10 @@ def eval_measurements() -> dict:
             "measurement.audits_in_flight": len(audits),
             "measurement.errors": errors,
             **{f"measurement.count.{status}": n for status, n in counts.items()},
+            # Terminal status alone conflates four branches into not_applicable.
+            # This is the split the evidence loop was designed to answer — a
+            # dormant video is nothing to fix, lost coverage is our own outage.
+            **{f"measurement.reason.{code}": n for code, n in reasons.items()},
         })
         return summary
 

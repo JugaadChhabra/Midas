@@ -183,7 +183,10 @@ Embed the creator's preferences and priorities directly into the prompt so the a
 knows what they care about, but never at the expense of the house format above. Be
 specific. Do not lose the creator's voice.
 """
-    result = chat_json(elaboration_prompt, model=settings.PROMPT_GEN_MODEL)
+    # Labelled: this runs from an operator-triggered endpoint, not inside an
+    # operation span, so the span name is all the context a reader gets.
+    result = chat_json(elaboration_prompt, model=settings.PROMPT_GEN_MODEL,
+                       label="elaborate_audit_prompt")
     generated = result.get("generated_prompt", "").strip()
     if not generated:
         raise HTTPException(500, "Elaboration returned no prompt")

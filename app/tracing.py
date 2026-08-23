@@ -182,8 +182,19 @@ def span(name: str, kind: str = CHAIN, **attributes: Any) -> Iterator[Recorder]:
             log.debug("could not close span %s", name, exc_info=True)
 
 
+#: Milliseconds `flush()` will wait for the exporter, and no longer.
+#
+# `TracerProvider.force_flush` defaults to 30_000ms, and the OTLP/HTTP exporter
+# retries with backoff inside that window — so with Phoenix down, an unbounded
+# flush blocks for half a minute. The `midas` service declares no
+# `stop_grace_period`, so Docker's default is 10s: the container would be
+# SIGKILLed mid-flush and everything queued after `flush()` in the shutdown path
+# would never run. A telemetry outage must not change how the app shuts down.
+FLUSH_TIMEOUT_MS = 2000
+
+
 def flush() -> None:
-    """Best-effort flush of pending spans. Never raises.
+    """Best-effort flush of pending spans. Never raises, never blocks long.
 
     For process shutdown and for tests that need the export path to run before
     assertions rather than at interpreter exit.
@@ -191,7 +202,7 @@ def flush() -> None:
     if _provider is None:
         return
     try:
-        _provider.force_flush()
+        _provider.force_flush(FLUSH_TIMEOUT_MS)
     except Exception:
         log.debug("span flush failed", exc_info=True)
 
@@ -218,7 +229,13 @@ def _reset_for_tests(exporter: Any = None, disable: bool = False) -> Any:
     )
 
     exporter = exporter if exporter is not None else InMemorySpanExporter()
-    _provider = TracerProvider()
+    # No atexit hook. TracerProvider registers its own `shutdown` at exit, and
+    # this function is called ~40+ times a run — each call would leak a provider
+    # AND a fresh hook, all of which fire at interpreter exit, long after the
+    # test that installed the exporter. The deliberately-exploding exporter in
+    # tests/test_tracing.py then raised there, ending an all-green suite's
+    # stderr in a traceback indistinguishable from a real failure.
+    _provider = TracerProvider(shutdown_on_exit=False)
     # Simple, not batched: tests assert on spans immediately after the block.
     _provider.add_span_processor(SimpleSpanProcessor(exporter))
     # `trace.set_tracer_provider` refuses to overwrite, so hold the tracer

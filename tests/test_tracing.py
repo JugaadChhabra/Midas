@@ -105,18 +105,84 @@ def test_set_with_a_none_value_is_dropped_not_crashed(_isolated_tracer):
     assert "absent" not in attrs
 
 
-def test_configure_is_idempotent(monkeypatch):
-    """Two calls must not double-register a provider or raise.
+def test_flush_cannot_block_past_the_container_grace_period(monkeypatch):
+    """An unbounded force_flush is a shutdown hazard, not just slow telemetry.
 
-    Resetting _configured is the point: without it the autouse fixture has
-    already marked configuration done and both calls hit the early return,
-    which is a test that cannot fail.
+    TracerProvider.force_flush defaults to 30s and the OTLP exporter retries
+    inside that window; the container's stop grace is 10s. Flushing without a
+    bound means SIGKILL before the rest of the shutdown path runs.
     """
+    seen = []
+
+    class RecordingProvider:
+        def force_flush(self, timeout_millis=None):
+            seen.append(timeout_millis)
+            return True
+
+    monkeypatch.setattr(tracing, "_provider", RecordingProvider())
+    tracing.flush()
+
+    assert seen, "flush() did not call force_flush at all"
+    timeout = seen[0]
+    assert timeout is not None, "force_flush was left to its 30s default"
+    assert 0 < timeout <= 5000, f"flush timeout {timeout}ms is not a usable bound"
+
+
+def test_configure_does_not_build_a_second_provider(monkeypatch):
+    """Idempotency, on the path where it can actually go wrong.
+
+    With OTEL_ENABLED false configure() returns on line 2, so a test written
+    that way asserts nothing. Here the enabled path really runs — with a
+    collectorless exporter, so no socket and no live Phoenix is needed — and the
+    second call must reuse what the first built rather than stacking another
+    provider and another BatchSpanProcessor onto the process.
+    """
+    from opentelemetry.exporter.otlp.proto.http import trace_exporter
+    from opentelemetry.sdk import trace as sdk_trace
+
+    built = []
+
+    class _Collectorless:
+        """Stands in for the OTLP exporter: no socket, no retry loop."""
+
+        def export(self, spans):
+            return None
+
+        def shutdown(self):
+            return None
+
+        def force_flush(self, timeout_millis=None):
+            return True
+
+    class _CountingProvider(sdk_trace.TracerProvider):
+        def __init__(self, *args, **kwargs):
+            # No atexit hook, for the same reason _reset_for_tests skips one:
+            # a provider built inside a test must not still be shutting down at
+            # interpreter exit, long after the test that made it.
+            kwargs["shutdown_on_exit"] = False
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(trace_exporter, "OTLPSpanExporter",
+                        lambda **kwargs: _Collectorless())
+    monkeypatch.setattr(sdk_trace, "TracerProvider", _CountingProvider)
+    monkeypatch.setattr(tracing.settings, "OTEL_ENABLED", True)
     monkeypatch.setattr(tracing, "_configured", False)
-    monkeypatch.setattr(tracing.settings, "OTEL_ENABLED", False)
+    monkeypatch.setattr(tracing, "_tracer", None)
+    monkeypatch.setattr(tracing, "_provider", None)
+
     tracing.configure()
+    first_tracer, first_provider = tracing._tracer, tracing._provider
     tracing.configure()
-    assert tracing._configured is True
+
+    # Guards against the vacuous version of this test: if the enabled path had
+    # silently failed open, everything below would pass on None == None.
+    assert first_tracer is not None and first_provider is not None
+    assert len(built) == 1, f"configure() built {len(built)} providers, not 1"
+    assert tracing._tracer is first_tracer
+    assert tracing._provider is first_provider
+
+    built[0].shutdown()
 
 
 APP = pathlib.Path(__file__).resolve().parents[1] / "app"
