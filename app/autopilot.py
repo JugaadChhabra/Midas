@@ -412,13 +412,28 @@ def _resync_if_stale(ch: dict) -> bool:
         return False
 
 
-def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> None:
+#: What `_apply_audit_and_handle` reports when the apply raised something that
+#: was never classified at the YouTube boundary — a broken DB write, a bug here.
+#: Kept distinct from ApplyOutcome.FAILED ("failed"), which means YouTube itself
+#: rejected the update: same accounting, different thing to go and look at.
+APPLY_UNCLASSIFIED = "apply_exception"
+
+
+def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> str:
     """Apply an audit and react to the typed ApplyError.outcome: idle on quota
     exhaustion, pause on token expiry, record a failure otherwise. Replaces a switch
-    over the HTTPException detail STRING that YouTube's error text leaked into."""
+    over the HTTPException detail STRING that YouTube's error text leaked into.
+
+    Returns what it decided, so tick() can report it. This function absorbs four
+    failures and returns normally from all of them — a quota exhaustion that just
+    put the whole fleet dormant, a token expiry that just paused the channel — so
+    a caller that infers success from the absence of an exception reports every
+    one of them as an applied video. That is the same class of silence this
+    instrumentation exists to end.
+    """
     global _yt_quota_exhausted_until
     try:
-        apply_audit_internal(audit_row["id"])
+        result = apply_audit_internal(audit_row["id"])
         _failure_counts[channel_id] = 0
         log.info("Autopilot applied audit %s for video %s", audit_row["id"], video["id"])
         if not video.get("is_short"):
@@ -430,6 +445,10 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> No
                 # join_pass(channel_id, video["id"])
             except Exception as e:
                 log.warning("Embed failed for %s: %s", video["id"], e)
+        # `dry_run` on a DRY_RUN deploy, `applied` otherwise — the distinction is
+        # already in the payload, and conflating them makes a rehearsal look like
+        # a month of real writes.
+        return result.get("status") or AuditStatus.APPLIED
     except ApplyError as e:
         if e.outcome is ApplyOutcome.TEST_AND_COMPARE:
             log.info("Skipping video %s: active Test & Compare experiment on YouTube", video["id"])
@@ -444,9 +463,11 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> No
             _pause(channel_id, PausedReason.TOKEN_EXPIRED)
         else:  # ApplyOutcome.FAILED
             _record_failure(channel_id)
+        return e.outcome.value
     except Exception as e:
         log.exception("Apply failed for %s: %s", audit_row["id"], e)
         _record_failure(channel_id)
+        return APPLY_UNCLASSIFIED
 
 
 def tick():
@@ -573,8 +594,8 @@ def tick():
             # lives in app.quota now, not in a constant here.
 
             # 10. Apply and react to the typed outcome.
-            _apply_audit_and_handle(audit_row, video, channel_id)
-            rec.set(**{"tick.outcome": "applied"})
+            outcome = _apply_audit_and_handle(audit_row, video, channel_id)
+            rec.set(**{"tick.outcome": outcome})
             _touch_tick(channel_id)
 
     except Exception as e:

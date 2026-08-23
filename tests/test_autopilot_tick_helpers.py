@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.fakes import FakeSupabase
 
 import app.autopilot as ap
@@ -141,3 +143,49 @@ def test_apply_handle_success_resets_failures_and_embeds():
     # stale by construction and the default short-circuit would keep it.
     embed.assert_called_once_with("v", force=True)
     ap._failure_counts.clear()
+
+
+# ── the outcome it returns is what tick() reports as tick.outcome ──────────────
+#
+# This function absorbs four ApplyErrors and returns normally from every one, so
+# "did not raise" is not the same question as "applied". A caller that conflated
+# them reported a quota exhaustion, a channel pause and a YouTube rejection as
+# successful applies.
+
+@pytest.mark.parametrize("outcome,expected", [
+    (ApplyOutcome.TEST_AND_COMPARE, "blocked_test_and_compare"),
+    (ApplyOutcome.QUOTA_EXCEEDED, "youtube_quota_exceeded"),
+    (ApplyOutcome.TOKEN_EXPIRED, "token_expired"),
+    (ApplyOutcome.FAILED, "failed"),
+])
+def test_apply_handle_returns_the_absorbed_outcome(outcome, expected):
+    ap._yt_quota_exhausted_until = None
+    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(outcome)), \
+         patch("app.autopilot._pause"), \
+         patch("app.autopilot._record_failure"):
+        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1") == expected
+    ap._yt_quota_exhausted_until = None
+
+
+def test_apply_handle_returns_applied_on_success():
+    with patch("app.autopilot.apply_audit_internal", return_value={"status": "applied"}), \
+         patch("app.autopilot.embed_video"):
+        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": True}, "UC1") == "applied"
+    ap._failure_counts.clear()
+
+
+def test_apply_handle_distinguishes_a_dry_run_from_a_real_write():
+    """A DRY_RUN deploy writes nothing to YouTube; reporting it as `applied`
+    makes a rehearsal indistinguishable from a month of live changes."""
+    with patch("app.autopilot.apply_audit_internal", return_value={"status": "dry_run"}), \
+         patch("app.autopilot.embed_video"):
+        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": True}, "UC1") == "dry_run"
+    ap._failure_counts.clear()
+
+
+def test_apply_handle_separates_an_unclassified_crash_from_a_youtube_failure():
+    with patch("app.autopilot.apply_audit_internal", side_effect=RuntimeError("db write blew up")), \
+         patch("app.autopilot._record_failure") as rec:
+        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1") == ap.APPLY_UNCLASSIFIED
+    rec.assert_called_once_with("UC1")
+    assert ap.APPLY_UNCLASSIFIED != ApplyOutcome.FAILED.value

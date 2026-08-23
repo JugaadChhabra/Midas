@@ -12,6 +12,24 @@ import pytest
 from app import tracing
 
 
+def _table_router(rows: dict[str, dict]) -> MagicMock:
+    """A `supabase()` double that answers `select("*").eq(...).single()` per table.
+
+    The apply path reads three different tables through the identical chain, so a
+    single MagicMock would hand all three the same row. Routing on the table name
+    is what lets a test say "this channel has measurement off".
+    """
+    tables = {}
+    for name, row in rows.items():
+        tbl = MagicMock()
+        tbl.select.return_value.eq.return_value.single.return_value \
+            .execute.return_value.data = row
+        tables[name] = tbl
+    client = MagicMock()
+    client.table.side_effect = lambda name: tables[name]
+    return client
+
+
 @pytest.fixture(autouse=True)
 def _isolated_tracer():
     exporter = tracing._reset_for_tests()
@@ -69,7 +87,8 @@ def test_should_reflect_records_the_no_evidence_case(_isolated_tracer):
 
 
 def test_audit_video_span_records_its_context(_isolated_tracer):
-    """An LLM span with no parent cannot answer 'why did this call happen'."""
+    """The span must carry the facts that make an audit explainable later —
+    which video, whose channel, and whether the model saw a transcript at all."""
     from app import audits
 
     video = {
@@ -123,6 +142,46 @@ def test_apply_span_marks_a_measurable_channel(_isolated_tracer):
 
     with tracing.span("apply_audit") as rec:
         audits._record_apply_measurability(rec, {"measurement_enabled": True})
+
+    attrs = _named(_isolated_tracer, "apply_audit").attributes
+    assert attrs["apply.will_be_measured"] is True
+
+
+def _run_real_apply(measurement_enabled: bool) -> None:
+    """Drive apply_audit_internal end to end, up to and including the write."""
+    from app import audits
+
+    client = _table_router({
+        "audits": {"id": 7, "status": "pending", "video_id": "vid1",
+                   "suggested_title": "new title", "suggested_description": "new desc",
+                   "suggested_tags": ["a"]},
+        "videos": {"id": "vid1", "channel_id": "ch1", "title": "old",
+                   "description": "old desc", "tags": []},
+        "channels": {"id": "ch1", "default_language": "en",
+                     "measurement_enabled": measurement_enabled},
+    })
+    with patch("app.audits.supabase", return_value=client), \
+         patch("app.audits.settings.DRY_RUN", False), \
+         patch("app.audits.youtube_for_channel"), \
+         patch("app.audits.yt_videos_update"):
+        audits.apply_audit_internal(7)
+
+
+def test_real_apply_path_marks_an_unmeasurable_channel(_isolated_tracer):
+    """The wiring, not the helper. Deleting the _record_apply_measurability call
+    from apply_audit_internal leaves the two tests above green — so the attribute
+    that cost a month of silent data loss needs a test that runs the real path."""
+    _run_real_apply(measurement_enabled=False)
+
+    attrs = _named(_isolated_tracer, "apply_audit").attributes
+    assert attrs["apply.will_be_measured"] is False
+    assert attrs["apply.measurement_enabled"] is False
+    assert attrs["video_id"] == "vid1"
+    assert attrs["audit_id"] == 7
+
+
+def test_real_apply_path_marks_a_measurable_channel(_isolated_tracer):
+    _run_real_apply(measurement_enabled=True)
 
     attrs = _named(_isolated_tracer, "apply_audit").attributes
     assert attrs["apply.will_be_measured"] is True
