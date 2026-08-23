@@ -45,16 +45,34 @@ returned 171 verdicts — a 31% yield, which is healthy. The real defect is that
 The channel doing the work is invisible. The channel being measured is not
 working. Nothing downstream can produce evidence until that is true.
 
-**The reflection trigger was stuck on, and had been since May.**
-`verdicts.win_rate` counts neutral in its denominator — correctly, since neutral
-is a measured outcome — so the fleet's rate was 21/171 = 12.3%. The old rule
-(`win_rate < 50 -> reflect`) therefore fired every cooldown, forever. Six
-candidates were produced, none promoted, each opening with a confident "core
-failure" diagnosis, because the prompt asked the model to *"diagnose why the
-current prompt underperforms"* — presupposing the underperformance it was handed
-as a 12% win rate. `reflection.py:154` warns about exactly this history: the
-metric was fixed, the threshold was never recalibrated to what the fixed metric
-returns.
+**The reflection trigger would have fired on a false premise, and the six
+existing candidates already did.** Two separate problems, initially conflated
+here and corrected 2026-08-23 after reading `prompt_versions.performance_snapshot`:
+
+*The six existing candidates are velocity-era artifacts.* Every one carries
+`median_velocity_lift` and no `median_ctr_delta_pct`, with lifts of −98% to
+−99.5% and win rates of 0.0–1.6% over `count` values of 502–1979. Those counts
+are *all applied audits*, not measured verdicts — the old velocity report ran on
+view counts, which every audit has, so its gate was far weaker than
+`_MIN_DATA_POINTS`. That is how a channel with zero CTR verdicts accumulated five
+candidates. The most recent is 2026-07-27; as of the 2026-08-08 export, **no
+CTR-era reflection had ever been recorded.** These five `shadow` rows were
+generated from a metric known to be broken and none should be promoted.
+
+*The CTR-era rule was primed to repeat the mistake.* `verdicts.win_rate` counts
+neutral in its denominator — correctly, since neutral is a measured outcome — so
+`UC8KjoL0Z9mTHKqB6gFutkJw`'s 171 verdicts give 21/171 = 12.3%. The old rule
+(`win_rate < 50 -> reflect`) would therefore have fired on the next eligible
+Monday and every one after, with a prompt asking the model to *"diagnose why the
+current prompt underperforms"* — presupposing underperformance that a
+neutral-dominant distribution does not show. `reflection.py:154` warns about
+exactly this history: the metric was fixed, the threshold was never recalibrated
+to what the fixed metric returns. The fix in `7fd628c` is therefore preventive
+rather than curative, and no less necessary for it.
+
+`_weekly_reflection` runs for **every** channel with no eligibility filter. Under
+CTR gating that now no-ops safely on the twelve channels below
+`_MIN_DATA_POINTS`, but it is worth knowing the fan-out is unfiltered.
 
 **A calibrated LLM judge is not buildable yet.** Three regressions means at most
 three win-vs-regression pairs — statistically empty. This is a consequence of
@@ -113,6 +131,25 @@ accepted, not fixed.
 **Verification:** within 24h of the next autopilot apply, that channel should
 have audits in `awaiting_window`. Within roughly 3 weeks (`window_for` plus
 `ROLLOVER_SLOP_DAYS` plus report lag) the first verdicts should appear.
+
+**Same trip: retire the five velocity-era candidates.** They were generated
+from the broken view-velocity metric (lifts of −98% to −99.5%) and sit in
+`shadow`, indistinguishable in the UI from a candidate a real CTR reflection
+would produce. Anyone promoting one would be adopting a prompt written to fix a
+problem that did not exist. Retire rather than delete, so the history stays
+readable:
+
+```sql
+UPDATE prompt_versions SET status = 'retired', retired_at = now()
+WHERE status = 'shadow'
+  AND performance_snapshot ? 'median_velocity_lift';
+```
+
+The `?` operator tests for a JSON key, which is what dates these rows — the
+velocity report emitted `median_velocity_lift`, the CTR report emits
+`median_ctr_delta_pct`. Verify the row count matches the five expected before
+committing the transaction; a higher count means a CTR-era candidate has since
+been written and the predicate needs narrowing by date.
 
 ### 2. Feed the loop measurable work
 
@@ -314,11 +351,13 @@ than forgotten:
    median post-change impressions was 45 against a 500 floor, so they fail on
    both sides. Addressed by step 2.
 
-2. **Why does `UCr5-YUqBiW7PUmeAtxUWuRg` own 5 of 6 prompt versions with zero
-   verdicts in the export,** when `_should_reflect` requires `_MIN_DATA_POINTS`
-   = 10? Likely those predate the CTR-based report — the velocity-metric era
-   `reflection.py:154` describes — but this is unconfirmed and worth a look,
-   since it would mean a second path into reflection.
+2. ~~**Why does `UCr5-YUqBiW7PUmeAtxUWuRg` own 5 of 6 prompt versions with zero
+   verdicts?**~~ **Resolved 2026-08-23.** No second path into reflection. All
+   six versions predate the CTR report — their `performance_snapshot` carries
+   `median_velocity_lift` — and the velocity-era `_build_perf_report` gated on
+   all applied audits (502–1979) rather than measured verdicts, so
+   `_MIN_DATA_POINTS` was trivially satisfied. See the revised finding above.
+
 3. **Trace retention.** What window, and does the office machine have the disk
    for it at current audit volume? Needs a measured span-size estimate, not a
    guess.
