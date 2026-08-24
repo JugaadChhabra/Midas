@@ -2,7 +2,7 @@
 
 > **Executed.** Channels now carry `nas_folder` and the autopilot enqueues straight from it (`app/autopilot.py`, `app/shorts/routes.py`); this same merge also removed the per-video "Make shorts" button UI from `channel.html` that phaseB1 had added.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Automate the NAS pick → cut → save flow per channel — a folder-mapped, toggle-driven auto-cut plus an on-demand "Cut now", controlled from each channel's Autopilot tab.
 

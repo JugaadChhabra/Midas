@@ -2,7 +2,7 @@
 
 > **Executed and merged to `main` on 2026-08-23.** Delivered `app/tracing.py`, LLM spans in `app/openrouter.py`, evidence-loop spans across audits/reflection/measurement/autopilot, and a self-hosted Phoenix service in `docker-compose.yml`; inert until `OTEL_ENABLED=true`. The execution record — including where the build deviated from this plan — is `docs/superpowers/2026-08-23-observability-execution-record.md`.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Make every LLM call and every evidence-loop decision in Midas visible in a self-hosted Phoenix instance, without making the app depend on Phoenix being up.
 

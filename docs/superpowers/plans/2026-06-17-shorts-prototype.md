@@ -2,7 +2,7 @@
 
 > **Executed, then fully replaced.** This shipped the WayinVideo-backed prototype described below, but three weeks later `docs/superpowers/plans/2026-07-09-local-shorts-cutter.md` deleted `wayin_client.py` and the WayinVideo pipeline outright and ported in the local RhymeShortsCutter engine instead. No WayinVideo code exists in `app/shorts/` today; read this for the `shorts_jobs`/`shorts_clips` schema it introduced, not for how clips get made.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Given a YouTube video URL (chosen by the user from a synced channel), generate sequential shorts via the WayinVideo API and upload each one back to that YouTube channel as a private video.
 

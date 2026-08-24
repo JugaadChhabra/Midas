@@ -2,7 +2,7 @@
 
 > **Executed, then it became the only path.** This landed the NAS source as an addition alongside the existing YouTube flow (`app/services/nas_service.py`, `app/shorts/nas_source.py`); the YouTube-URL download flow it left untouched was retired the following day, making NAS the sole source for shorts cutting.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Add a NAS (SMB) source path to the shorts cutter — cut every rhyme video in a language folder, write the clips and move the source to a matching COMPLETED folder — selectable per job, alongside the untouched YouTube/yt-dlp path.
 

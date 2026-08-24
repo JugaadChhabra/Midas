@@ -2,7 +2,7 @@
 
 > **Executed, then its selection logic was superseded.** The autopilot-shorts action, caps, and channel settings this plan added shipped and still run every tick, but the YouTube long-form picker it wrote (`_next_uncut_video_for_channel`) was repointed at the NAS source two weeks later (2026-07-23) and now sits unused in `app/autopilot.py` — kept, per that plan's own "delete nothing" constraint, rather than removed.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Add an autopilot action so Midas automatically cuts new long-form videos into shorts per channel, independent of the existing metadata-audit autopilot, with per-channel enable + daily/upload caps.
 

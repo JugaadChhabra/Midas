@@ -2,7 +2,7 @@
 
 > **Executed, then partially retired.** The CPU-torch ML stack this plan put in the Docker image is still what runs on the deploy machine, but the bgutil PO-token sidecar and yt-dlp HTTP-provider mode it added were stripped back out when shorts cutting went NAS-only (`docker-compose.yml` still carries a comment on how to revive them) — see `chore(shorts): retire YouTube-URL download flow; NAS-only cutting`.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Make the local shorts cutter (and autopilot shorts) run inside Midas's deployed Docker image on the dedicated Windows/amd64 machine, so `docker compose up -d` gives a working end-to-end cutter.
 

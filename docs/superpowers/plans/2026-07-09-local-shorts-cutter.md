@@ -2,7 +2,7 @@
 
 > **Executed.** `app/shorts/cutter/` is this port — still the framework-free cutting engine underneath every shorts flow in Midas today (YouTube-sourced or NAS-sourced). The WayinVideo integration it replaced is gone.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Replace the WayinVideo third-party clipping API in Midas's shorts feature with the local RhymeShortsCutter pipeline, ported in as `app/shorts/cutter/`.
 

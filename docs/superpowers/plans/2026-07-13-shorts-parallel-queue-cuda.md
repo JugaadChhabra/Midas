@@ -2,7 +2,7 @@
 
 > **Executed.** `app/shorts/dispatcher.py` and `app/shorts/worker.py` are this queue, and `app/shorts/cutter/render.py` carries the CUDA branch for YOLO — this is still the current job-dispatch architecture.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Replace the single-job `has_active_job()` gate with a DB-backed queue drained by isolated worker subprocesses (default 2 concurrent), and run YOLO detection on CUDA.
 

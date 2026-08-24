@@ -2,7 +2,7 @@
 
 > **Executed, then its UI was removed.** The `POST /videos/{id}/short` and `POST /shorts/clips/{id}/upload` endpoints this plan added are still in `app/shorts/routes.py`, but the channel-dashboard button and `shorts.html` card it built were torn out two weeks later in the per-channel NAS auto-cut merge (`a5ff46d`, "shorts UI removal") — nothing in the UI triggers these routes anymore.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Add a per-video "Make shorts" button to the channel dashboard that cuts a long-form video into shorts through the existing local cutter, mirroring the audit-flow UX, with a top-N upload cap and on-demand upload of held clips.
 

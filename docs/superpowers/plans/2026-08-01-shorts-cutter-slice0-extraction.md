@@ -2,7 +2,7 @@
 
 > **Executed in a separate repo, not this one.** All 7 tasks landed in `~/Documents/Github/shorts-cutter` (the `engine/` package, `worker/modal_app.py`, R2 wired into `api/jobs.py`), which has since moved well past slice 0 into a paid product with a credits/jobs API and payments. Nothing in Midas reflects this plan's outcome — look there, not here.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps were checkboxes; they were stripped once the plan had been executed, because nothing in this repo ever ticked them and an unticked box reads as "not done". A plan you are about to EXECUTE should reintroduce them.
 
 **Goal:** Prove *YouTube URL → vertical shorts in R2* end-to-end from a script, in a fresh `shorts-cutter` repo whose engine was extracted from Midas with full git history, and benchmark Modal's cold-start.
 
