@@ -1,5 +1,7 @@
 # NAS-Sourced Shorts Cutter Implementation Plan
 
+> **Executed, then it became the only path.** This landed the NAS source as an addition alongside the existing YouTube flow (`app/services/nas_service.py`, `app/shorts/nas_source.py`); the YouTube-URL download flow it left untouched was retired the following day, making NAS the sole source for shorts cutting.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a NAS (SMB) source path to the shorts cutter — cut every rhyme video in a language folder, write the clips and move the source to a matching COMPLETED folder — selectable per job, alongside the untouched YouTube/yt-dlp path.
@@ -47,7 +49,7 @@ Requirement: add `smbprotocol` to `requirements.txt` (folded into Task 1).
 **Interfaces:**
 - Produces: `settings.NAS_MODE`, `settings.NAS_SERVER`, `settings.NAS_SHARE`, `settings.NAS_USERNAME`, `settings.NAS_PASSWORD`, `settings.NAS_DOMAIN` (str), `settings.NAS_PORT` (int), `settings.NAS_SOURCE_ROOT_PATH`, `settings.NAS_DESTINATION_ROOT_PATH`, `settings.NAS_LOCAL_ROOT` (all str).
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```python
 # tests/test_nas_settings.py
@@ -61,12 +63,12 @@ def test_nas_settings_have_expected_defaults():
     assert s.NAS_DESTINATION_ROOT_PATH
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `venv/bin/pytest tests/test_nas_settings.py -v`
 Expected: FAIL — `AttributeError: 'Settings' object has no attribute 'NAS_MODE'`
 
-- [ ] **Step 3: Add the settings**
+- **Step 3: Add the settings**
 
 In `app/config.py`, immediately before line `settings = Settings()` (inside the class, so keep it indented with the other attrs — add just before the class ends, e.g. after the `KEYFRAME_FFMPEG_TIMEOUT` line):
 
@@ -95,12 +97,12 @@ Then add `smbprotocol` to `requirements.txt` (append a line):
 smbprotocol
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `venv/bin/pytest tests/test_nas_settings.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/config.py requirements.txt tests/test_nas_settings.py
@@ -125,7 +127,7 @@ git commit -m "feat(nas): add NAS settings and smbprotocol dependency"
   - `move(src_relative: str, dst_relative: str) -> None` — move within the share (creates dst parent dirs).
   - `makedirs(relative_dir: str) -> None`.
 
-- [ ] **Step 1: Write the failing tests (local mode against a temp dir)**
+- **Step 1: Write the failing tests (local mode against a temp dir)**
 
 ```python
 # tests/services/test_nas_service.py
@@ -183,16 +185,16 @@ def test_move_relocates_file_and_creates_dest_dir(tmp_path):
     assert (tmp_path / "COMPLETED" / "HINDI" / "song.mp4").read_bytes() == b"v"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/services/test_nas_service.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.nas_service'`
 
-- [ ] **Step 3: Create the package marker**
+- **Step 3: Create the package marker**
 
 Create `app/services/__init__.py` (empty) and `tests/services/__init__.py` (empty).
 
-- [ ] **Step 4: Implement the service**
+- **Step 4: Implement the service**
 
 ```python
 # app/services/nas_service.py
@@ -309,12 +311,12 @@ class NASService:
 nas_service = NASService()
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- **Step 5: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/services/test_nas_service.py -v`
 Expected: PASS (5 tests)
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/services/__init__.py app/services/nas_service.py tests/services/
@@ -331,7 +333,7 @@ git commit -m "feat(nas): NASService with SMB + local modes"
 **Interfaces:**
 - Produces columns consumed by Tasks 4–6: `shorts_jobs.language`, `shorts_jobs.source_nas_path`, `shorts_clips.nas_path`, `channels.nas_folder`; `shorts_jobs.channel_id` becomes nullable.
 
-- [ ] **Step 1: Write the migration**
+- **Step 1: Write the migration**
 
 ```sql
 -- supabase/migrations/20260722120000_shorts_nas_source.sql
@@ -354,7 +356,7 @@ alter table channels
     add column if not exists nas_folder text;
 ```
 
-- [ ] **Step 2: Apply the migration**
+- **Step 2: Apply the migration**
 
 Run the project's normal migration apply (Supabase). If using the Supabase CLI:
 
@@ -363,7 +365,7 @@ Expected: applies `20260722120000_shorts_nas_source.sql` with no error.
 
 (If `channel_id` has no NOT NULL constraint in this environment, the `drop not null` is a harmless no-op error — verify the column exists and is nullable before continuing.)
 
-- [ ] **Step 3: Verify columns exist**
+- **Step 3: Verify columns exist**
 
 Run (psql or Supabase SQL editor):
 ```sql
@@ -372,7 +374,7 @@ where table_name = 'shorts_jobs' and column_name in ('language','source_nas_path
 ```
 Expected: three rows; `channel_id` `is_nullable = YES`.
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add supabase/migrations/20260722120000_shorts_nas_source.sql
@@ -396,7 +398,7 @@ git commit -m "feat(nas): migration for NAS-sourced shorts columns"
   - `enqueue_language_jobs(language: str, *, channel_id: str | None = None, autopilot: bool = False, limit: int | None = None, cut_mode: str = "highlights", camera_motion: str = "calm") -> int` — inserts `CREATED` jobs; returns count. Raises `ValueError` for an unknown language.
   - Constant `WORKING_STATUSES` (in-flight set) and `MAX_SHORTS_RETRY_ATTEMPTS = 3`.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 # tests/shorts/test_nas_source.py
@@ -460,12 +462,12 @@ def test_enqueue_respects_limit():
     assert len(recorder) == 2
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/shorts/test_nas_source.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.shorts.nas_source'`
 
-- [ ] **Step 3: Implement the helper**
+- **Step 3: Implement the helper**
 
 ```python
 # app/shorts/nas_source.py
@@ -558,12 +560,12 @@ def enqueue_language_jobs(language: str, *, channel_id: str | None = None,
     return len(todo)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/shorts/test_nas_source.py -v`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/nas_source.py tests/shorts/test_nas_source.py
@@ -582,7 +584,7 @@ git commit -m "feat(nas): enqueue_language_jobs helper (scan folder -> jobs)"
 - Consumes: `enqueue_language_jobs`, `list_source_languages`, `uncut_count` (Task 4).
 - Produces: `POST /shorts/cut` → `{"language": str, "enqueued": int}`; `GET /shorts/languages` → `[{"language": str, "uncut": int}, ...]`.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 # tests/shorts/test_nas_routes.py
@@ -615,12 +617,12 @@ def test_languages_endpoint_lists_counts():
     assert resp.json() == [{"language": "HINDI", "uncut": 3}, {"language": "TAMIL", "uncut": 0}]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/shorts/test_nas_routes.py -v`
 Expected: FAIL — 404 on `/shorts/cut` (route not defined) / ImportError on patch target.
 
-- [ ] **Step 3: Add the endpoints**
+- **Step 3: Add the endpoints**
 
 In `app/shorts/routes.py`, add the import near the top (after the existing `from app.shorts...` imports):
 
@@ -656,12 +658,12 @@ def languages():
             for lang in list_source_languages()]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/shorts/test_nas_routes.py -v`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/routes.py tests/shorts/test_nas_routes.py
@@ -680,7 +682,7 @@ git commit -m "feat(nas): POST /shorts/cut and GET /shorts/languages"
 - Consumes: `nas_service` (Task 2); `settings.NAS_SOURCE_ROOT_PATH`, `settings.NAS_DESTINATION_ROOT_PATH` (Task 1); existing `_cut_video`, `_set_job`, `_notify_macos`, `safe_name`.
 - Produces: `_run_nas_shorts_job(job_id: int, job: dict) -> None`; `run_shorts_job` routes `source_nas_path` jobs to it.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 # tests/shorts/test_runner_nas.py
@@ -765,12 +767,12 @@ def test_nas_job_leaves_source_on_cut_failure(tmp_path):
     assert any(op == "update" and f.get("status") == "FAILED" for (_, op, f) in recorder)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/shorts/test_runner_nas.py -v`
 Expected: FAIL — the NAS job falls through to the legacy path (`_fetch_video` called with a NAS path, or `nas_service` not imported).
 
-- [ ] **Step 3: Add the import and branch**
+- **Step 3: Add the import and branch**
 
 In `app/shorts/runner.py`, add the import near the top imports:
 
@@ -844,17 +846,17 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
         shutil.rmtree(job_dir / "tmp", ignore_errors=True)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/shorts/test_runner_nas.py -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Run the full shorts suite (no regressions in the legacy path)**
+- **Step 5: Run the full shorts suite (no regressions in the legacy path)**
 
 Run: `venv/bin/pytest tests/shorts -v`
 Expected: PASS (all, including the pre-existing `test_runner.py` YouTube path)
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/shorts/runner.py tests/shorts/test_runner_nas.py
@@ -871,7 +873,7 @@ git commit -m "feat(nas): runner branch for NAS-sourced jobs (no upload)"
 **Interfaces:**
 - Consumes: `enqueue_language_jobs`, `list_source_languages` (Task 4).
 
-- [ ] **Step 1: Write the CLI**
+- **Step 1: Write the CLI**
 
 ```python
 # scripts/cut_language.py
@@ -908,12 +910,12 @@ if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
 ```
 
-- [ ] **Step 2: Smoke-test the help path**
+- **Step 2: Smoke-test the help path**
 
 Run: `venv/bin/python -m scripts.cut_language --help`
 Expected: prints usage, exit 0.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add scripts/cut_language.py
@@ -926,25 +928,25 @@ git commit -m "feat(nas): CLI to enqueue a language folder"
 
 **Files:** none (manual verification)
 
-- [ ] **Step 1: List languages live**
+- **Step 1: List languages live**
 
 Run: `venv/bin/python -m scripts.cut_language --list`
 Expected: prints the 11 folders (BANGLA … TAMIL).
 
-- [ ] **Step 2: Confirm the uncut count endpoint works**
+- **Step 2: Confirm the uncut count endpoint works**
 
 Start the app, then:
 Run: `curl -s localhost:8000/shorts/languages`
 Expected: JSON array of `{language, uncut}` with non-zero counts.
 
-- [ ] **Step 3: Cut a single test file end-to-end**
+- **Step 3: Cut a single test file end-to-end**
 
 Pick the smallest source file, temporarily move the rest out (or trust the one-at-a-time dispatcher), then:
 Run: `curl -s -X POST localhost:8000/shorts/cut -H 'content-type: application/json' -d '{"language":"HINDI"}'`
 Then watch: `curl -s localhost:8000/shorts/jobs | python -m json.tool`
 Expected: jobs move CREATED → DOWNLOADING → ... → DONE. Verify on the NAS that `COMPLETED/HINDI/` now holds the clips **and** the moved source, and the source is gone from `RHYMES/HINDI/`.
 
-- [ ] **Step 4: Note the result** (no commit — verification only). If anything fails, capture the job's `error_message` and stop.
+- **Step 4: Note the result** (no commit — verification only). If anything fails, capture the job's `error_message` and stop.
 
 ---
 

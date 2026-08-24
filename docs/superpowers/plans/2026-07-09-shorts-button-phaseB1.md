@@ -1,5 +1,7 @@
 # Shorts Per-Video Button (Phase B1) Implementation Plan
 
+> **Executed, then its UI was removed.** The `POST /videos/{id}/short` and `POST /shorts/clips/{id}/upload` endpoints this plan added are still in `app/shorts/routes.py`, but the channel-dashboard button and `shorts.html` card it built were torn out two weeks later in the per-channel NAS auto-cut merge (`a5ff46d`, "shorts UI removal") — nothing in the UI triggers these routes anymore.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a per-video "Make shorts" button to the channel dashboard that cuts a long-form video into shorts through the existing local cutter, mirroring the audit-flow UX, with a top-N upload cap and on-demand upload of held clips.
@@ -30,7 +32,7 @@
 **Interfaces:**
 - Produces: `shorts_jobs.upload_cap int` (nullable) and `shorts_jobs.autopilot_generated boolean default false`, used by Tasks 3-4 (upload_cap) and Phase B2 (autopilot_generated — added now to avoid a second migration).
 
-- [ ] **Step 1: Write the migration**
+- **Step 1: Write the migration**
 
 ```sql
 -- Shorts entry points (docs/superpowers/specs/2026-07-09-shorts-entrypoints-design.md).
@@ -42,14 +44,14 @@ alter table shorts_jobs add column if not exists upload_cap int;
 alter table shorts_jobs add column if not exists autopilot_generated boolean not null default false;
 ```
 
-- [ ] **Step 2: Push and verify**
+- **Step 2: Push and verify**
 
 ```bash
 cd ~/Documents/Github/Midas && supabase db push
 ```
 Verify: `venv/bin/python -c "from app.db import supabase; print(supabase().table('shorts_jobs').select('id,upload_cap,autopilot_generated').limit(1).execute().data)"` → runs without error.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260709150000_shorts_entrypoints.sql
@@ -68,7 +70,7 @@ git commit -m "feat: shorts_jobs upload_cap + autopilot_generated columns"
 - Consumes: `grades` (list from `grade_clips`, each element has a `"verdict"` key of `"PASS"`/`"CHECK"`), aligned by index to `stanzas`/clips.
 - Produces: each dict in `cut_video()`'s returned `clips` list gains `"verdict": str`. Task 3's runner reads `clip["verdict"]`.
 
-- [ ] **Step 1: Update the existing test to assert the verdict**
+- **Step 1: Update the existing test to assert the verdict**
 
 In `tests/shorts/cutter/test_pipeline_api.py`, the test already monkeypatches `grade_clips` to return `[{"verdict": "PASS", "reasons": []}, {"verdict": "PASS", "reasons": []}]`. Add an assertion after the existing clip-record assertions:
 
@@ -77,14 +79,14 @@ In `tests/shorts/cutter/test_pipeline_api.py`, the test already monkeypatches `g
     assert result["clips"][1]["verdict"] == "PASS"
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- **Step 2: Run it to verify it fails**
 
 ```bash
 venv/bin/pytest tests/shorts/cutter/test_pipeline_api.py -q
 ```
 Expected: FAIL with `KeyError: 'verdict'` (the record has no verdict yet).
 
-- [ ] **Step 3: Add verdict to the clip record**
+- **Step 3: Add verdict to the clip record**
 
 In `app/shorts/cutter/pipeline.py`, change the `clip_records.append({...})` block in the render loop to include the verdict from the aligned `grades` entry:
 
@@ -104,14 +106,14 @@ In `app/shorts/cutter/pipeline.py`, change the `clip_records.append({...})` bloc
 ```
 (The `grades` list is computed just above this loop by `grade_clips(...)` and is index-aligned to `stanzas`. The `if index-1 < len(grades)` guard keeps it safe if lengths ever diverge, defaulting to the conservative `"CHECK"`.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 ```bash
 venv/bin/pytest tests/shorts/cutter/test_pipeline_api.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/cutter/pipeline.py tests/shorts/cutter/test_pipeline_api.py
@@ -130,7 +132,7 @@ git commit -m "feat: cut_video includes grader verdict per clip record"
 - Consumes: `job["upload_cap"]` (int or None); clip records with `"verdict"` from Task 2.
 - Produces: with `upload_cap=N`, exactly N clips (PASS-first, then by rank) are uploaded and the rest are inserted as `shorts_clips` rows with `upload_status="PENDING"`; with `upload_cap=None`, all clips upload (unchanged behavior).
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Add to `tests/shorts/test_runner.py` (follows the existing `_fake_sb`/recorder house style already in that file):
 
@@ -192,14 +194,14 @@ def test_run_shorts_job_no_cap_uploads_all(tmp_path):
 ```
 Note: confirm the existing `_fake_sb` in this file records `("shorts_clips", "insert", fields)` tuples and returns a row with an `id`; the existing `test_run_shorts_job_happy_path` already relies on that, so reuse it as-is.
 
-- [ ] **Step 2: Run to verify it fails**
+- **Step 2: Run to verify it fails**
 
 ```bash
 venv/bin/pytest tests/shorts/test_runner.py -q
 ```
 Expected: FAIL (the current runner uploads every clip, ignoring `upload_cap`).
 
-- [ ] **Step 3: Rewrite the clip loop in `run_shorts_job`**
+- **Step 3: Rewrite the clip loop in `run_shorts_job`**
 
 Replace the clip-upload block (from `clips = result["clips"]` through the end of the `for clip in clips:` loop) with cap-aware logic:
 
@@ -251,14 +253,14 @@ Replace the clip-upload block (from `clips = result["clips"]` through the end of
 ```
 (Held clips are `PENDING` with a `local_path` still on disk in `shorts_cache/<job>/clips/`; Task 4's per-clip endpoint uploads them later. `all_ok` reflects only attempted uploads, so a job that holds clips still finishes `DONE`.)
 
-- [ ] **Step 4: Run tests**
+- **Step 4: Run tests**
 
 ```bash
 venv/bin/pytest tests/shorts/test_runner.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS (the new cap tests plus the pre-existing runner tests).
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/runner.py tests/shorts/test_runner.py
@@ -278,7 +280,7 @@ git commit -m "feat: runner honors upload_cap — top-N upload, hold the rest as
 - Consumes: `has_active_job`, `start_job_thread` (from `app.shorts.runner`); `upload_short` (from `app.shorts.youtube_upload`).
 - Produces: `POST /videos/{video_id}/short` → `{"job_id": int}` (404 unknown video, 409 busy); `POST /shorts/clips/{clip_id}/upload` → `{"clip_id": int, "yt_video_id": str}` (404 unknown clip, 409 if not PENDING).
 
-- [ ] **Step 1: Write the failing tests** — `tests/shorts/test_video_short_routes.py`:
+- **Step 1: Write the failing tests** — `tests/shorts/test_video_short_routes.py`:
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -351,14 +353,14 @@ def test_upload_clip_uploads_pending():
     up.assert_called_once()
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- **Step 2: Run to verify it fails**
 
 ```bash
 venv/bin/pytest tests/shorts/test_video_short_routes.py -q
 ```
 Expected: FAIL (routes/import not present).
 
-- [ ] **Step 3: Add the endpoints to `app/shorts/routes.py`**
+- **Step 3: Add the endpoints to `app/shorts/routes.py`**
 
 At the top, extend the imports:
 
@@ -430,7 +432,7 @@ def upload_clip(clip_id: int):
 ```
 (`upload_clip` lives on the existing `/shorts`-prefixed `router`, so its path is `/shorts/clips/{id}/upload`. `make_short` lives on `video_router` with no prefix → `/videos/{id}/short`.)
 
-- [ ] **Step 4: Include `video_router` in `app/main.py`**
+- **Step 4: Include `video_router` in `app/main.py`**
 
 Find the shorts router include (`app.include_router(shorts_router)`) and add the video router next to it. First read `app/main.py` to get the exact import line for the shorts router, then mirror it:
 
@@ -442,14 +444,14 @@ and after `app.include_router(shorts_router)`:
 app.include_router(shorts_video_router)
 ```
 
-- [ ] **Step 5: Run tests**
+- **Step 5: Run tests**
 
 ```bash
 venv/bin/pytest tests/shorts/test_video_short_routes.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/shorts/routes.py app/main.py tests/shorts/test_video_short_routes.py
@@ -467,7 +469,7 @@ git commit -m "feat: POST /videos/{id}/short and POST /shorts/clips/{id}/upload 
 **Interfaces:**
 - Produces: each video in `GET /channels/{id}/videos` gains `is_short` (bool), `shorts_status` (str|None — latest `shorts_jobs.status` for that `source_video_id`), `shorts_job_id` (int|None), `clips_count` (int), `clips_uploaded` (int).
 
-- [ ] **Step 1: Write the failing test** — `tests/test_list_videos_shorts.py`:
+- **Step 1: Write the failing test** — `tests/test_list_videos_shorts.py`:
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -512,14 +514,14 @@ def test_list_videos_includes_shorts_fields():
     assert v2["shorts_status"] is None and v2["clips_count"] == 0
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- **Step 2: Run to verify it fails**
 
 ```bash
 venv/bin/pytest tests/test_list_videos_shorts.py -q
 ```
 Expected: FAIL (fields absent; `is_short` not selected; shorts tables not queried).
 
-- [ ] **Step 3: Add `is_short` to the select and enrich with shorts data**
+- **Step 3: Add `is_short` to the select and enrich with shorts data**
 
 In `app/sync.py::list_videos`, add `is_short` to the `.select(...)` column string:
 
@@ -566,14 +568,14 @@ Then, after the existing audit-enrichment loop (right before `return videos`), a
 ```
 (`video_ids` is already defined earlier in the function for the audit query — reuse it.)
 
-- [ ] **Step 4: Run tests**
+- **Step 4: Run tests**
 
 ```bash
 venv/bin/pytest tests/test_list_videos_shorts.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/sync.py tests/test_list_videos_shorts.py
@@ -590,9 +592,9 @@ git commit -m "feat: enrich /channels/{id}/videos with is_short + shorts status/
 **Interfaces:**
 - Consumes: `POST /videos/{id}/short`, `GET /shorts/jobs/{job_id}`, `POST /shorts/clips/{id}/upload`; the per-video fields `is_short`, `shorts_status`, `shorts_job_id`, `clips_count`, `clips_uploaded`.
 
-- [ ] **Step 1: Read the current file** to confirm the exact anchors (the video-row template around the `row-${v.id}` / `audit-${v.id}` rows, the `STATE_META` object, `statusPill`, `escapeHtml`, `toast`, `$`). Do not guess line numbers — match the live text.
+- **Step 1: Read the current file** to confirm the exact anchors (the video-row template around the `row-${v.id}` / `audit-${v.id}` rows, the `STATE_META` object, `statusPill`, `escapeHtml`, `toast`, `$`). Do not guess line numbers — match the live text.
 
-- [ ] **Step 2: Add shorts states to `STATE_META`**
+- **Step 2: Add shorts states to `STATE_META`**
 
 Extend the `STATE_META` object (used by `statusPill`) with the shorts job statuses so the shorts pill renders with colors:
 
@@ -607,7 +609,7 @@ Extend the `STATE_META` object (used by `statusPill`) with the shorts job status
 ```
 (`FAILED` already exists in `STATE_META` and is reused.)
 
-- [ ] **Step 3: Add a `shortsButton(v)` helper** near `auditButton(v)`:
+- **Step 3: Add a `shortsButton(v)` helper** near `auditButton(v)`:
 
 ```javascript
 function shortsButton(v) {
@@ -617,7 +619,7 @@ function shortsButton(v) {
 }
 ```
 
-- [ ] **Step 4: Render the button + a shorts pill in the video row.** In the row template, add the shorts pill next to the audit pill cell and the button next to the audit button. Concretely, in the `<td>${auditButton(v)}</td>` area, change it to include both buttons:
+- **Step 4: Render the button + a shorts pill in the video row.** In the row template, add the shorts pill next to the audit pill cell and the button next to the audit button. Concretely, in the `<td>${auditButton(v)}</td>` area, change it to include both buttons:
 
 ```javascript
       <td>${auditButton(v)} ${shortsButton(v)}</td>
@@ -636,7 +638,7 @@ Because this adds one `<td>`, bump the detail row's `colspan` from `11` to `12` 
 ```
 (Also update the `<thead>` to add a "Shorts" column header so the column count matches — read the header row and add one `<th>Shorts</th>` next to the audit status header.)
 
-- [ ] **Step 5: Add the `makeShort`, `viewShort`, `pollShort`, and `uploadClip` handlers** (mirror the `audit()` pattern):
+- **Step 5: Add the `makeShort`, `viewShort`, `pollShort`, and `uploadClip` handlers** (mirror the `audit()` pattern):
 
 ```javascript
 async function makeShort(videoId) {
@@ -701,7 +703,7 @@ Note: `renderShort` reuses the `.prog`/`.prog-bar` CSS from `shorts.html`. Add t
 .prog-bar { height: 100%; background: #6af; transition: width .5s; }
 ```
 
-- [ ] **Step 6: Manual serve-check**
+- **Step 6: Manual serve-check**
 
 ```bash
 cd ~/Documents/Github/Midas
@@ -714,13 +716,13 @@ venv/bin/pytest tests/ -q   # confirm suite still green
 ```
 Then, if the app has a running channel, open `http://localhost:8127/channel?channel_id=UC...` in a browser and confirm: long-form rows show a "Make shorts" button, shorts rows do not, no console errors. (A real cut is exercised in Step 8.)
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add app/static/channel.html
 git commit -m "feat: per-video Make-shorts button with progress + per-clip upload on channel dashboard"
 ```
 
-- [ ] **Step 8: Real end-to-end check (manual, on the Mac)**
+- **Step 8: Real end-to-end check (manual, on the Mac)**
 
 Start the server, open the channel dashboard for a connected channel, click "Make shorts" on a **long-form** video, and confirm: the detail cell shows the progress bar walking DOWNLOADING→…→DONE, clips list with per-clip UPLOADED status (all clips, since the manual button uploads all), a second click on a `PENDING`/`FAILED` clip's Upload button uploads it, and a second "Make shorts" while a job runs shows a 409 error toast. This mirrors the base `/shorts` E2E that already passed, now through the dashboard button.

@@ -1,5 +1,7 @@
 # Shorts Automation Prototype Implementation Plan
 
+> **Executed, then fully replaced.** This shipped the WayinVideo-backed prototype described below, but three weeks later `docs/superpowers/plans/2026-07-09-local-shorts-cutter.md` deleted `wayin_client.py` and the WayinVideo pipeline outright and ported in the local RhymeShortsCutter engine instead. No WayinVideo code exists in `app/shorts/` today; read this for the `shorts_jobs`/`shorts_clips` schema it introduced, not for how clips get made.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Given a YouTube video URL (chosen by the user from a synced channel), generate sequential shorts via the WayinVideo API and upload each one back to that YouTube channel as a private video.
@@ -56,7 +58,7 @@
   - `shorts_jobs(id bigserial pk, channel_id text fk→channels(id), source_video_id text nullable, source_url text not null, wayinvideo_project_id text, status text default 'CREATED', error_message text, created_at timestamptz default now(), updated_at timestamptz default now())`
   - `shorts_clips(id bigserial pk, job_id bigint fk→shorts_jobs(id) on delete cascade, rank int not null, title text, description text, hashtags text[], start_s float, end_s float, source_url text, yt_video_id text, upload_status text default 'PENDING', upload_error text, local_path text, created_at timestamptz default now(), updated_at timestamptz default now(), unique(job_id, rank))`
 
-- [ ] **Step 1: Write the migration**
+- **Step 1: Write the migration**
 
 Create `supabase/migrations/20260617120000_shorts_tables.sql`:
 
@@ -106,13 +108,13 @@ create table if not exists shorts_clips (
 create index if not exists shorts_clips_job_idx on shorts_clips(job_id);
 ```
 
-- [ ] **Step 2: Apply the migration**
+- **Step 2: Apply the migration**
 
 Run: `supabase db push` (or whatever the local convention is — check existing migration runbook in repo README if unsure).
 
 Expected: `supabase` reports the migration applied. Verify in Supabase Studio that `shorts_jobs` and `shorts_clips` exist with the columns listed above.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260617120000_shorts_tables.sql
@@ -130,7 +132,7 @@ git commit -m "feat(shorts): add shorts_jobs and shorts_clips tables"
 - Consumes: nothing.
 - Produces: `settings.WAYINVIDEO_API_KEY: str`, `settings.WAYINVIDEO_BASE_URL: str` (default `https://wayinvideo-api.wayin.ai/api/v2`), `settings.SHORTS_CACHE_DIR: str` (default `./shorts_cache`).
 
-- [ ] **Step 1: Add the settings**
+- **Step 1: Add the settings**
 
 In `app/config.py`, inside `class Settings`, after the line `AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")`, append:
 
@@ -142,7 +144,7 @@ In `app/config.py`, inside `class Settings`, after the line `AUTOPILOT_TICK_SECO
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
 ```
 
-- [ ] **Step 2: Commit**
+- **Step 2: Commit**
 
 ```bash
 git add app/config.py
@@ -168,7 +170,7 @@ git commit -m "feat(shorts): add WayinVideo and cache settings"
 
 > Note for implementer: WayinVideo's public docs (March 2026) describe the lifecycle and `data` envelope but don't pin the exact JSON shape of clipping responses. Treat clip dicts as opaque and pass them through; later tasks only read `title`, `description`, `hashtags`, `start_s`/`end_s`, and a clip video URL. When the real API returns different field names, update the *clip normalization* step in Task 5, not this client.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 Create `tests/shorts/__init__.py` as an empty file.
 
@@ -229,12 +231,12 @@ def test_get_status_raises_on_http_error():
             get_status("prj_abc")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/shorts/test_wayin_client.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.shorts.wayin_client'`.
 
-- [ ] **Step 3: Write the implementation**
+- **Step 3: Write the implementation**
 
 Create `app/shorts/__init__.py` as an empty file.
 
@@ -284,12 +286,12 @@ def get_status(project_id: str) -> dict:
     return resp.json()["data"]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/shorts/test_wayin_client.py -v`
 Expected: 4 passed.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/__init__.py app/shorts/wayin_client.py tests/shorts/__init__.py tests/shorts/test_wayin_client.py
@@ -310,7 +312,7 @@ git commit -m "feat(shorts): WayinVideo API client"
   - `upload_short(channel_id: str, source: BinaryIO | str, title: str, description: str, tags: list[str]) -> str` — `source` is either a path string OR a readable binary file-like (used for the streaming case). Returns the new `yt_video_id`. Raises whatever `googleapiclient.errors.HttpError` raises on failure (caller decides what to do).
   - `class YouTubeUploadError(RuntimeError)` — raised on non-retryable errors after the resumable upload loop gives up.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 Create `tests/shorts/test_youtube_upload.py`:
 
@@ -366,12 +368,12 @@ def test_upload_short_sets_private_visibility(tmp_path):
     assert "snippet,status" == insert_kwargs["part"]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/shorts/test_youtube_upload.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.shorts.youtube_upload'`.
 
-- [ ] **Step 3: Write the implementation**
+- **Step 3: Write the implementation**
 
 Create `app/shorts/youtube_upload.py`:
 
@@ -439,12 +441,12 @@ def upload_short(
     return response["id"]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/shorts/test_youtube_upload.py -v`
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/youtube_upload.py tests/shorts/test_youtube_upload.py
@@ -470,7 +472,7 @@ git commit -m "feat(shorts): resumable private YouTube upload helper"
   - `process_job_clips(job_id: int) -> None` — reads `shorts_jobs.id = job_id`, fetches each `shorts_clips` row for the job (already inserted by the poller on SUCCEEDED), runs the upload flow per clip, updates rows in place.
   - `_upload_one_clip(channel_id: str, clip_row: dict) -> dict` — internal; returns the patch dict to apply to that clip row (`yt_video_id`, `upload_status`, `upload_error`, `local_path`).
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 Create `tests/shorts/test_pipeline.py`:
 
@@ -591,12 +593,12 @@ def test_upload_one_clip_records_failure_when_disk_retry_also_fails(tmp_path, mo
     assert patch_dict["local_path"] is not None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/shorts/test_pipeline.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.shorts.pipeline'`.
 
-- [ ] **Step 3: Write the implementation**
+- **Step 3: Write the implementation**
 
 Create `app/shorts/pipeline.py`:
 
@@ -757,12 +759,12 @@ class _IterReader:
             self._eof = True
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/shorts/test_pipeline.py -v`
 Expected: 5 passed.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/pipeline.py tests/shorts/test_pipeline.py
@@ -791,7 +793,7 @@ git commit -m "feat(shorts): per-clip stream-or-fallback upload pipeline"
     - `GET  /shorts/jobs` → list of recent jobs (latest 50)
     - `GET  /shorts/jobs/{job_id}` → job + its clips
 
-- [ ] **Step 1: Write the poller**
+- **Step 1: Write the poller**
 
 Create `app/shorts/poller.py`:
 
@@ -883,7 +885,7 @@ def poll_job(job_id: int) -> None:
     schedule_poll(job_id, _POLL_INTERVAL_SECONDS)
 ```
 
-- [ ] **Step 2: Write the routes**
+- **Step 2: Write the routes**
 
 Create `app/shorts/routes.py`:
 
@@ -951,12 +953,12 @@ def get_job(job_id: int):
     return {"job": job, "clips": clips}
 ```
 
-- [ ] **Step 3: Smoke-import the new modules**
+- **Step 3: Smoke-import the new modules**
 
 Run: `python -c "from app.shorts import poller, routes; print('ok')"`
 Expected: prints `ok`. (Confirms there are no import-time syntax errors. Circular import with `app.main.scheduler` is fine because `schedule_poll` imports lazily.)
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add app/shorts/poller.py app/shorts/routes.py
@@ -974,7 +976,7 @@ git commit -m "feat(shorts): job submission, polling, and HTTP routes"
 - Consumes: `app.shorts.routes.router`
 - Produces: HTTP endpoints registered on the FastAPI app.
 
-- [ ] **Step 1: Add import**
+- **Step 1: Add import**
 
 In `app/main.py`, find the block of `from app.<module> import router as <foo>_router` lines (around lines 9–22). After `from app.reflection import reflect as reflection_reflect, router as reflection_router`, add:
 
@@ -982,7 +984,7 @@ In `app/main.py`, find the block of `from app.<module> import router as <foo>_ro
 from app.shorts.routes import router as shorts_router
 ```
 
-- [ ] **Step 2: Register the router**
+- **Step 2: Register the router**
 
 Find where the other routers are registered (search for `app.include_router(reflection_router)` or the closest analogue). Immediately after that line, add:
 
@@ -990,12 +992,12 @@ Find where the other routers are registered (search for `app.include_router(refl
 app.include_router(shorts_router)
 ```
 
-- [ ] **Step 3: Verify the app boots and the routes are mounted**
+- **Step 3: Verify the app boots and the routes are mounted**
 
 Run: `python -c "from app.main import app; print([r.path for r in app.routes if getattr(r, 'path', '').startswith('/shorts')])"`
 Expected: prints a list containing `/shorts/jobs` and `/shorts/jobs/{job_id}`.
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add app/main.py
@@ -1014,7 +1016,7 @@ git commit -m "feat(shorts): mount /shorts router"
 - Consumes: `GET /auth/channels`, `POST /shorts/jobs`, `GET /shorts/jobs`, `GET /shorts/jobs/{id}`.
 - Produces: a page at `/static/shorts.html`.
 
-- [ ] **Step 1: Write the dashboard page**
+- **Step 1: Write the dashboard page**
 
 Create `app/static/shorts.html`:
 
@@ -1118,7 +1120,7 @@ setInterval(loadJobs, 10000);
 </html>
 ```
 
-- [ ] **Step 2: Add a nav link in `index.html`**
+- **Step 2: Add a nav link in `index.html`**
 
 Open `app/static/index.html`. Locate the existing navigation/header area (search for the first `<a href="` that points to another in-app page). Add a sibling link:
 
@@ -1132,7 +1134,7 @@ If there is no existing nav, add this somewhere near the top of `<body>`:
 <p><a href="/static/shorts.html">Shorts</a></p>
 ```
 
-- [ ] **Step 3: Manual smoke test**
+- **Step 3: Manual smoke test**
 
 Boot the app (`uvicorn app.main:app --reload`), open `http://localhost:8000/static/shorts.html`, verify:
 1. Channel dropdown populates from `/auth/channels`.
@@ -1140,7 +1142,7 @@ Boot the app (`uvicorn app.main:app --reload`), open `http://localhost:8000/stat
 3. Status transitions visibly: `CREATED → QUEUED → ONGOING → SUCCEEDED → UPLOADING → DONE` (or `FAILED`).
 4. On `DONE`, each clip row shows a `vid_*` link that opens in YouTube Studio at the new private video.
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add app/static/shorts.html app/static/index.html

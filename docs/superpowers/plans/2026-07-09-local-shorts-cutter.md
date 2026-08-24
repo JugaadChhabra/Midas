@@ -1,5 +1,7 @@
 # Local Shorts Cutter Implementation Plan
 
+> **Executed.** `app/shorts/cutter/` is this port — still the framework-free cutting engine underneath every shorts flow in Midas today (YouTube-sourced or NAS-sourced). The WayinVideo integration it replaced is gone.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the WayinVideo third-party clipping API in Midas's shorts feature with the local RhymeShortsCutter pipeline, ported in as `app/shorts/cutter/`.
@@ -33,14 +35,14 @@ The cutter repo has an uncommitted quality fix (native-resolution downloads) plu
 
 **Steps:**
 
-- [ ] **Step 1: Run the cutter's tests**
+- **Step 1: Run the cutter's tests**
 
 ```bash
 cd ~/Downloads/RhymeShortsCutter_Mac && .venv/bin/python -m pytest tests/ -q
 ```
 Expected: all pass.
 
-- [ ] **Step 2: Commit**
+- **Step 2: Commit**
 
 ```bash
 cd ~/Downloads/RhymeShortsCutter_Mac
@@ -62,7 +64,7 @@ git commit -m "feat: download at native upload quality — uncapped bv*+ba into 
 
 **Steps:**
 
-- [ ] **Step 1: Create `requirements-ml.txt`** — exact pins from the cutter's proven-working venv. torchaudio is pinned only because demucs imports it; do not upgrade it independently (this exact trio of torch pins is the combination known to work on this Mac).
+- **Step 1: Create `requirements-ml.txt`** — exact pins from the cutter's proven-working venv. torchaudio is pinned only because demucs imports it; do not upgrade it independently (this exact trio of torch pins is the combination known to work on this Mac).
 
 ```
 # Local shorts cutter ML stack — NOT installed in Docker (see Dockerfile note).
@@ -82,11 +84,11 @@ numpy==2.4.6
 bgutil-ytdlp-pot-provider
 ```
 
-- [ ] **Step 2: Bump yt-dlp in `requirements.txt`**
+- **Step 2: Bump yt-dlp in `requirements.txt`**
 
 Change the line `yt-dlp>=2024.1.0` to `yt-dlp>=2026.7.4` (PO-token/mweb support requires a current build).
 
-- [ ] **Step 3: Install and verify**
+- **Step 3: Install and verify**
 
 ```bash
 cd ~/Documents/Github/Midas
@@ -95,14 +97,14 @@ venv/bin/python -c "import torch, cv2, faster_whisper, ultralytics, demucs, yt_d
 ```
 Expected: `ok`.
 
-- [ ] **Step 4: Add a setup line to README.md** under the Install section:
+- **Step 4: Add a setup line to README.md** under the Install section:
 
 ```markdown
 For the local shorts cutter (heavy ML deps, local runs only — not needed in Docker):
 `pip install -r requirements-ml.txt`. Also requires `ffmpeg` and `node` on PATH.
 ```
 
-- [ ] **Step 5: Run suite and commit**
+- **Step 5: Run suite and commit**
 
 ```bash
 venv/bin/pytest tests/ -q
@@ -125,7 +127,7 @@ git commit -m "feat: add local shorts-cutter ML dependency set (requirements-ml.
 
 **Steps:**
 
-- [ ] **Step 1: Copy modules and tests**
+- **Step 1: Copy modules and tests**
 
 ```bash
 cd ~/Documents/Github/Midas
@@ -136,14 +138,14 @@ for m in cutplan framing grading selection structure vocals; do cp $SRC/$m.py ap
 for t in cutplan cutplan_finesse framing framing_hold grading grading_ext selection structure vocals vocals_mono; do cp $SRC/tests/test_$t.py tests/shorts/cutter/test_$t.py; done
 ```
 
-- [ ] **Step 2: Create `app/shorts/cutter/errors.py`**
+- **Step 2: Create `app/shorts/cutter/errors.py`**
 
 ```python
 class CutterError(RuntimeError):
     """Any failure inside the framework-free cutter pipeline."""
 ```
 
-- [ ] **Step 3: Rewrite flat imports to package imports**
+- **Step 3: Rewrite flat imports to package imports**
 
 The only cross-module imports are `from cutplan import …` (in `grading.py`, `selection.py`, `structure.py`). In the copied files and tests:
 
@@ -154,14 +156,14 @@ sed -i '' -E 's/^from (cutplan|framing|grading|selection|structure|vocals) impor
 ```
 Then verify no flat imports remain: `grep -rn "^from \(cutplan\|framing\|grading\|selection\|structure\|vocals\) import" app/shorts/cutter/ tests/shorts/cutter/` → no output.
 
-- [ ] **Step 4: Run the moved tests**
+- **Step 4: Run the moved tests**
 
 ```bash
 venv/bin/pytest tests/shorts/cutter/ -q
 ```
 Expected: all pass (they were green in `$SRC`; only imports changed).
 
-- [ ] **Step 5: Run full suite and commit**
+- **Step 5: Run full suite and commit**
 
 ```bash
 venv/bin/pytest tests/ -q
@@ -186,7 +188,7 @@ git commit -m "feat: port framework-free cutter pipeline modules from RhymeShort
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing test** — `tests/shorts/cutter/test_download.py`. Port the URL-regex cases from `$SRC/tests/test_jobs.py` and the options assertions from `$SRC/tests/test_main_wiring.py::test_ytdlp_options_use_mweb_and_po_token_script`:
+- **Step 1: Write the failing test** — `tests/shorts/cutter/test_download.py`. Port the URL-regex cases from `$SRC/tests/test_jobs.py` and the options assertions from `$SRC/tests/test_main_wiring.py::test_ytdlp_options_use_mweb_and_po_token_script`:
 
 ```python
 from pathlib import Path
@@ -220,21 +222,21 @@ def test_ytdlp_options_native_quality_mweb_and_po_token():
     assert Path(script).is_file()
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- **Step 2: Run it to verify it fails**
 
 ```bash
 venv/bin/pytest tests/shorts/cutter/test_download.py -q
 ```
 Expected: FAIL — `ModuleNotFoundError: app.shorts.cutter.download`.
 
-- [ ] **Step 3: Copy the bgutil PO-token tool and gitignore it**
+- **Step 3: Copy the bgutil PO-token tool and gitignore it**
 
 ```bash
 cp -R ~/Downloads/RhymeShortsCutter_Mac/tools ~/Documents/Github/Midas/tools
 ```
 Append to `.gitignore` (if not present): `tools/bgutil-pot/` and `shorts_cache/`.
 
-- [ ] **Step 4: Write `app/shorts/cutter/util.py`** — move `safe_name`, `clamp`, `even` verbatim from `$SRC/main.py:102-113`:
+- **Step 4: Write `app/shorts/cutter/util.py`** — move `safe_name`, `clamp`, `even` verbatim from `$SRC/main.py:102-113`:
 
 ```python
 from __future__ import annotations
@@ -257,7 +259,7 @@ def even(value: float) -> int:
     return max(2, int(round(value / 2) * 2))
 ```
 
-- [ ] **Step 5: Write `app/shorts/cutter/download.py`** — port `$SRC/main.py:871-915` (`BGUTIL_POT_SCRIPT`, `ytdlp_options`, `fetch_with_ytdlp`) and `$SRC/jobs.py:11-19` (URL regex), swapping `HTTPException` for `CutterError` and parameterizing the output dir:
+- **Step 5: Write `app/shorts/cutter/download.py`** — port `$SRC/main.py:871-915` (`BGUTIL_POT_SCRIPT`, `ytdlp_options`, `fetch_with_ytdlp`) and `$SRC/jobs.py:11-19` (URL regex), swapping `HTTPException` for `CutterError` and parameterizing the output dir:
 
 ```python
 """Native-quality YouTube download: yt-dlp with mweb client + bgutil PO tokens."""
@@ -336,14 +338,14 @@ def fetch_video(url: str, dest_dir: Path) -> tuple[Path, str]:
     return downloaded_path, safe_name(str(info.get("title") or "downloaded_video"))
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- **Step 6: Run tests to verify they pass**
 
 ```bash
 venv/bin/pytest tests/shorts/cutter/test_download.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add app/shorts/cutter/util.py app/shorts/cutter/download.py tests/shorts/cutter/test_download.py .gitignore
@@ -364,7 +366,7 @@ git commit -m "feat: cutter download module — native-quality yt-dlp with PO to
 
 **Steps:**
 
-- [ ] **Step 1: Copy the test and adapt its import**
+- **Step 1: Copy the test and adapt its import**
 
 ```bash
 cp ~/Downloads/RhymeShortsCutter_Mac/tests/test_transcribe_retry.py tests/shorts/cutter/test_transcribe_retry.py
@@ -372,9 +374,9 @@ sed -i '' 's/^from main import /from app.shorts.cutter.transcribe import /' test
 sed -i '' 's/^from cutplan import /from app.shorts.cutter.cutplan import /' tests/shorts/cutter/test_transcribe_retry.py
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `venv/bin/pytest tests/shorts/cutter/test_transcribe_retry.py -q` → `ModuleNotFoundError`.
+- **Step 2: Run to verify it fails** — `venv/bin/pytest tests/shorts/cutter/test_transcribe_retry.py -q` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Create `app/shorts/cutter/transcribe.py`** by moving these blocks from `$SRC/main.py` verbatim, then adjusting only imports/globals:
+- **Step 3: Create `app/shorts/cutter/transcribe.py`** by moving these blocks from `$SRC/main.py` verbatim, then adjusting only imports/globals:
 
 - `WHISPER_MODEL_NAME = "small"` (line 62), `_WHISPER_MODEL = None` + `_MODEL_LOCK = threading.Lock()` (lines 78-79 — the lock moves here; YOLO gets its own lock in Task 6)
 - `get_whisper_model` (lines 154-170) — replace its `HTTPException(status_code=500, detail=…)` raises with `CutterError(…)` keeping the same message text; keep the `faster_whisper` import inside the function (lazy)
@@ -398,9 +400,9 @@ from app.shorts.cutter.errors import CutterError
 ```
 (Check the moved bodies for any other names they reference — e.g. if `transcribe_multilingual`/`save_transcript` use `np`, add `import numpy as np`. Resolve every NameError by importing from the same module the name lived in, never by importing FastAPI.)
 
-- [ ] **Step 4: Run tests** — `venv/bin/pytest tests/shorts/cutter/test_transcribe_retry.py -q` then full suite. Expected: PASS.
+- **Step 4: Run tests** — `venv/bin/pytest tests/shorts/cutter/test_transcribe_retry.py -q` then full suite. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/cutter/transcribe.py tests/shorts/cutter/test_transcribe_retry.py
@@ -421,7 +423,7 @@ git commit -m "feat: cutter transcribe module — Whisper loading, transcription
 
 **Steps:**
 
-- [ ] **Step 1: Copy the test and adapt imports**
+- **Step 1: Copy the test and adapt imports**
 
 ```bash
 cp ~/Downloads/RhymeShortsCutter_Mac/tests/test_colour_fallback.py tests/shorts/cutter/test_colour_fallback.py
@@ -429,9 +431,9 @@ sed -i '' 's/^from main import /from app.shorts.cutter.render import /' tests/sh
 sed -i '' 's/^from framing import /from app.shorts.cutter.framing import /' tests/shorts/cutter/test_colour_fallback.py
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `ModuleNotFoundError`.
+- **Step 2: Run to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Create `app/shorts/cutter/render.py`** by moving these blocks from `$SRC/main.py` verbatim (adjusting imports/exceptions only):
+- **Step 3: Create `app/shorts/cutter/render.py`** by moving these blocks from `$SRC/main.py` verbatim (adjusting imports/exceptions only):
 
 - Constants: `ANALYSIS_FPS` (line 61), `CAMERA_SPEED_FRACS`, `DEFAULT_CAMERA_MOTION`, `MIN_BOX_AREA_RATIO` (lines 65-67); module globals `_YOLO_MODEL`, `_YOLO_MODEL_NAME`, `_YOLO_DEVICE` (lines 75-77) plus a fresh `_YOLO_LOCK = threading.Lock()`
 - Dataclasses `CropPoint`, `VisualBeat` (lines 87-99)
@@ -467,9 +469,9 @@ from app.shorts.cutter.util import clamp, even, safe_name
 ```
 Note: `cv2`/`numpy` at top level here is fine — `render.py` is only imported lazily (Task 7/8 keep it out of app startup). If YOLO weights (`yolo11m.pt`/`yolo11n.pt`) are referenced by filename in `pick_detection_setup`/`get_yolo_model`, keep the names — ultralytics auto-downloads them to the working directory on first use.
 
-- [ ] **Step 4: Run tests** — moved test + full suite. Expected: PASS.
+- **Step 4: Run tests** — moved test + full suite. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/cutter/render.py tests/shorts/cutter/test_colour_fallback.py
@@ -492,7 +494,7 @@ git commit -m "feat: cutter render module — smart-crop analysis and ffmpeg ren
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing test** — `tests/shorts/cutter/test_pipeline_api.py`. It exercises the orchestration shape with the heavy stages monkeypatched, which is exactly what the runner depends on:
+- **Step 1: Write the failing test** — `tests/shorts/cutter/test_pipeline_api.py`. It exercises the orchestration shape with the heavy stages monkeypatched, which is exactly what the runner depends on:
 
 ```python
 from pathlib import Path
@@ -540,9 +542,9 @@ def test_cut_video_returns_clip_records(tmp_path, monkeypatch):
 ```
 Note: if `Stanza`'s constructor differs (check `$SRC/cutplan.py`), build the two stanzas with its real fields — the test must construct them exactly as `cutplan.Stanza` defines.
 
-- [ ] **Step 2: Run to verify it fails** — `ModuleNotFoundError: …pipeline`.
+- **Step 2: Run to verify it fails** — `ModuleNotFoundError: …pipeline`.
 
-- [ ] **Step 3: Write `app/shorts/cutter/pipeline.py`** — this is `$SRC/main.py:645-805` (`process_video`) with: paths parameterized (`work_dir/clips`, `work_dir/tmp` instead of module-level `OUTPUT_DIR`/`TEMP_DIR`), `smart=True`/`cut_by_stanza=True` fixed (drop those params and the non-stanza early-return branch at lines 676-679), the zip/URL tail (lines 774, 795-802) dropped, and the return shape changed to clip records:
+- **Step 3: Write `app/shorts/cutter/pipeline.py`** — this is `$SRC/main.py:645-805` (`process_video`) with: paths parameterized (`work_dir/clips`, `work_dir/tmp` instead of module-level `OUTPUT_DIR`/`TEMP_DIR`), `smart=True`/`cut_by_stanza=True` fixed (drop those params and the non-stanza early-return branch at lines 676-679), the zip/URL tail (lines 774, 795-802) dropped, and the return shape changed to clip records:
 
 ```python
 """Cut a source video into vertical Shorts. Framework-free public entry point."""
@@ -630,7 +632,7 @@ def cut_video(
 ```
 The `# ---- body …` marker is an instruction to transplant `$SRC/main.py:681-766` literally (vocal analysis, transcription, highlight/coverage stanza planning, `grade_clips`, `save_transcript` — including the `song_structure.json` / `highlight_candidates.json` diagnostic writes, which now land in `clips_dir`). `MAX_CLIP_SECONDS` replaces the old `max_clip_seconds` parameter. Do not paraphrase that body; copy it.
 
-- [ ] **Step 4: Update `app/shorts/cutter/__init__.py`**
+- **Step 4: Update `app/shorts/cutter/__init__.py`**
 
 ```python
 from app.shorts.cutter.errors import CutterError
@@ -639,9 +641,9 @@ __all__ = ["CutterError"]
 ```
 (`cut_video` is deliberately NOT re-exported here — importing it pulls cv2/torch, and `__init__` must stay light so `app.main` can start without the ML stack.)
 
-- [ ] **Step 5: Run tests** — new test + full suite. Expected: PASS.
+- **Step 5: Run tests** — new test + full suite. Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/shorts/cutter/pipeline.py app/shorts/cutter/__init__.py tests/shorts/cutter/test_pipeline_api.py
@@ -660,7 +662,7 @@ git commit -m "feat: cutter pipeline — cut_video() public entry point"
 
 **Steps:**
 
-- [ ] **Step 1: Write the migration**
+- **Step 1: Write the migration**
 
 ```sql
 -- Local shorts cutter (docs/superpowers/specs/2026-07-09-local-shorts-cutter-design.md).
@@ -677,14 +679,14 @@ alter table shorts_jobs add column if not exists cut_mode text;
 alter table shorts_jobs add column if not exists camera_motion text;
 ```
 
-- [ ] **Step 2: Push and verify**
+- **Step 2: Push and verify**
 
 ```bash
 cd ~/Documents/Github/Midas && supabase db push
 ```
 Expected: migration applies cleanly. Verify: `venv/bin/python -c "from app.db import supabase; print(supabase().table('shorts_jobs').select('id,progress,progress_label,cut_mode').limit(1).execute().data)"` → no error.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260709120000_shorts_local_cutter.sql
@@ -705,7 +707,7 @@ git commit -m "feat: shorts_jobs progress columns for local cutter"
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** — `tests/shorts/test_runner.py`. Follow the house style of `tests/test_sync.py` (MagicMock supabase, recorder pattern):
+- **Step 1: Write the failing tests** — `tests/shorts/test_runner.py`. Follow the house style of `tests/test_sync.py` (MagicMock supabase, recorder pattern):
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -794,9 +796,9 @@ def test_reap_stuck_jobs():
         assert reap_stuck_jobs() == 2
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `venv/bin/pytest tests/shorts/test_runner.py -q` → `ModuleNotFoundError: app.shorts.runner`.
+- **Step 2: Run to verify they fail** — `venv/bin/pytest tests/shorts/test_runner.py -q` → `ModuleNotFoundError: app.shorts.runner`.
 
-- [ ] **Step 3: Write `app/shorts/runner.py`**
+- **Step 3: Write `app/shorts/runner.py`**
 
 ```python
 """Local shorts-cutter job orchestration. Replaces the WayinVideo poller.
@@ -938,9 +940,9 @@ def _notify_macos(title: str, body: str) -> None:
         pass  # notification is best-effort
 ```
 
-- [ ] **Step 4: Run tests** — `venv/bin/pytest tests/shorts/test_runner.py -q` then full suite. Expected: PASS.
+- **Step 4: Run tests** — `venv/bin/pytest tests/shorts/test_runner.py -q` then full suite. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/runner.py tests/shorts/test_runner.py
@@ -964,7 +966,7 @@ git commit -m "feat: shorts runner — background-thread cutter jobs with Supaba
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** — `tests/shorts/test_routes.py`:
+- **Step 1: Write the failing tests** — `tests/shorts/test_routes.py`:
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -1017,14 +1019,14 @@ def test_create_job_unknown_channel_404():
     assert r.status_code == 404
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- **Step 2: Run to verify they fail**
 
 ```bash
 venv/bin/pytest tests/shorts/test_routes.py -q
 ```
 Expected: FAIL (`has_active_job` not in routes / 409 branch missing / cut_mode not accepted).
 
-- [ ] **Step 3: Rewrite `app/shorts/routes.py`** (complete file):
+- **Step 3: Rewrite `app/shorts/routes.py`** (complete file):
 
 ```python
 import logging
@@ -1089,7 +1091,7 @@ def get_job(job_id: int):
 ```
 Note: `app.shorts.cutter.download` imports no ML libs at module level (yt_dlp is lazy inside `fetch_video`), so this keeps startup light.
 
-- [ ] **Step 4: Delete the Wayin modules and their tests**
+- **Step 4: Delete the Wayin modules and their tests**
 
 ```bash
 git rm app/shorts/wayin_client.py app/shorts/poller.py app/shorts/pipeline.py \
@@ -1097,7 +1099,7 @@ git rm app/shorts/wayin_client.py app/shorts/poller.py app/shorts/pipeline.py \
 ```
 Then remove the `WAYINVIDEO_*` settings block from `app/config.py` (the `# WayinVideo …` comment through `WAYINVIDEO_CAPTIONS`, keeping `SHORTS_CACHE_DIR`), and grep for stragglers: `grep -rn "wayin" app/ tests/ --include="*.py" -i` → only historical comments in migrations may remain.
 
-- [ ] **Step 5: Wire the reaper into `app/main.py` lifespan** — inside the `lifespan` function, immediately before `scheduler.start()`:
+- **Step 5: Wire the reaper into `app/main.py` lifespan** — inside the `lifespan` function, immediately before `scheduler.start()`:
 
 ```python
     from app.shorts.runner import reap_stuck_jobs
@@ -1107,9 +1109,9 @@ Then remove the `WAYINVIDEO_*` settings block from `app/config.py` (the `# Wayin
         log.exception("Startup reap of stuck shorts jobs failed")
 ```
 
-- [ ] **Step 6: Run tests** — `venv/bin/pytest tests/ -q`. Expected: PASS (route tests green, no import errors from deleted modules).
+- **Step 6: Run tests** — `venv/bin/pytest tests/ -q`. Expected: PASS (route tests green, no import errors from deleted modules).
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add -A app/ tests/
@@ -1128,7 +1130,7 @@ git commit -m "feat: shorts routes drive local cutter; delete WayinVideo integra
 
 **Steps:**
 
-- [ ] **Step 1: Add the cut-mode control** next to the existing URL input in the create-job form (around `app/static/shorts.html:253`'s form):
+- **Step 1: Add the cut-mode control** next to the existing URL input in the create-job form (around `app/static/shorts.html:253`'s form):
 
 ```html
 <select id="cut-mode">
@@ -1150,7 +1152,7 @@ const camera_motion = document.getElementById('camera-motion').value;
 body: JSON.stringify({ channel_id, source_url, cut_mode, camera_motion })
 ```
 
-- [ ] **Step 2: Add a progress cell to the jobs table renderer** (the row template near `app/static/shorts.html:193`). Working statuses show a bar + label; terminal statuses show the status text as today:
+- **Step 2: Add a progress cell to the jobs table renderer** (the row template near `app/static/shorts.html:193`). Working statuses show a bar + label; terminal statuses show the status text as today:
 
 ```javascript
 const WORKING = ['CREATED', 'DOWNLOADING', 'ANALYSING', 'RENDERING', 'UPLOADING'];
@@ -1169,11 +1171,11 @@ With CSS matching the page's existing look:
 ```
 (Adapt colours to the page's existing palette — read the file's `<style>` block and reuse its variables/tones rather than introducing new ones.)
 
-- [ ] **Step 3: Client-side URL check** — before the create fetch, mirror the server regex loosely: if the URL doesn't contain `youtube.com/watch`, `youtube.com/shorts/`, or `youtu.be/`, show the page's existing error style instead of posting.
+- **Step 3: Client-side URL check** — before the create fetch, mirror the server regex loosely: if the URL doesn't contain `youtube.com/watch`, `youtube.com/shorts/`, or `youtu.be/`, show the page's existing error style instead of posting.
 
-- [ ] **Step 4: Manual check** — start the server (`venv/bin/uvicorn app.main:app --port 8000`), open `http://localhost:8000/shorts`, confirm: mode dropdown renders, job list still renders, no console errors. (Job creation is exercised for real in Task 12.)
+- **Step 4: Manual check** — start the server (`venv/bin/uvicorn app.main:app --port 8000`), open `http://localhost:8000/shorts`, confirm: mode dropdown renders, job list still renders, no console errors. (Job creation is exercised for real in Task 12.)
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/static/shorts.html
@@ -1189,9 +1191,9 @@ git commit -m "feat: shorts page — cut-mode toggle and live progress bar"
 
 **Steps:**
 
-- [ ] **Step 1: Full-suite check** — `venv/bin/pytest tests/ -q` → green.
+- **Step 1: Full-suite check** — `venv/bin/pytest tests/ -q` → green.
 
-- [ ] **Step 2: Real end-to-end run** — this is the spec's definition of done. Start the server, then via the `/shorts` page (or curl) create a job with a real YouTube URL on the connected channel:
+- **Step 2: Real end-to-end run** — this is the spec's definition of done. Start the server, then via the `/shorts` page (or curl) create a job with a real YouTube URL on the connected channel:
 
 ```bash
 curl -s -X POST localhost:8000/shorts/jobs -H 'content-type: application/json' \
@@ -1207,7 +1209,7 @@ Verify, in order:
 
 If any step fails: STOP, debug, fix, re-run. Do not proceed to archiving with a failing E2E.
 
-- [ ] **Step 3: Archive the source repo** — only after Step 2 passes. The old repo has no GitHub remote, so archiving is a final marker commit:
+- **Step 3: Archive the source repo** — only after Step 2 passes. The old repo has no GitHub remote, so archiving is a final marker commit:
 
 ```bash
 cd ~/Downloads/RhymeShortsCutter_Mac
@@ -1224,4 +1226,4 @@ EOF
 git add README.md && git commit -m "docs: frozen — pipeline moved into Midas app/shorts/cutter"
 ```
 
-- [ ] **Step 4: Update project memory** — note in the Claude memory index that the cutter now lives in Midas and the RhymeShortsCutter repo is frozen.
+- **Step 4: Update project memory** — note in the Claude memory index that the cutter now lives in Midas and the RhymeShortsCutter repo is frozen.

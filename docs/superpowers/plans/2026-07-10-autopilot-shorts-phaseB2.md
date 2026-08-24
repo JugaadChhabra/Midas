@@ -1,5 +1,7 @@
 # Autopilot Shorts Action (Phase B2) Implementation Plan
 
+> **Executed, then its selection logic was superseded.** The autopilot-shorts action, caps, and channel settings this plan added shipped and still run every tick, but the YouTube long-form picker it wrote (`_next_uncut_video_for_channel`) was repointed at the NAS source two weeks later (2026-07-23) and now sits unused in `app/autopilot.py` — kept, per that plan's own "delete nothing" constraint, rather than removed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an autopilot action so Midas automatically cuts new long-form videos into shorts per channel, independent of the existing metadata-audit autopilot, with per-channel enable + daily/upload caps.
@@ -33,7 +35,7 @@
 **Interfaces:**
 - Produces: `channels.autopilot_shorts_enabled bool`, `autopilot_shorts_daily_cap int`, `autopilot_shorts_upload_cap int`, `shorts_cut_mode text`, `shorts_camera_motion text` — consumed by Tasks 2-5.
 
-- [ ] **Step 1: Write the migration**
+- **Step 1: Write the migration**
 
 ```sql
 -- Autopilot shorts (docs/superpowers/specs/2026-07-09-shorts-entrypoints-design.md, Phase B2).
@@ -46,14 +48,14 @@ alter table channels add column if not exists shorts_cut_mode              text 
 alter table channels add column if not exists shorts_camera_motion         text not null default 'calm';
 ```
 
-- [ ] **Step 2: Push and verify**
+- **Step 2: Push and verify**
 
 ```bash
 cd ~/Documents/Github/Midas && supabase db push
 ```
 Verify: `venv/bin/python -c "from app.db import supabase; print(supabase().table('channels').select('id,autopilot_shorts_enabled,autopilot_shorts_daily_cap,autopilot_shorts_upload_cap,shorts_cut_mode,shorts_camera_motion').limit(1).execute().data)"` → runs without error, defaults present.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260710120000_autopilot_shorts.sql
@@ -75,14 +77,14 @@ git commit -m "feat: channels autopilot-shorts columns (enabled, daily/upload ca
   - `_shorts_made_today(channel_id: str) -> int` — count of `shorts_jobs` with `autopilot_generated=True` created since `_today_start_iso()`.
   - `_run_shorts_action(ch: dict) -> None` — enqueue at most one autopilot cut for channel `ch`. No-op when busy, over cap, or no eligible video. Task 3 calls this from `tick()`.
 
-- [ ] **Step 1: Add the imports** at the top of `app/autopilot.py`, after the existing `from app.embeddings import embed_video` line (line 15):
+- **Step 1: Add the imports** at the top of `app/autopilot.py`, after the existing `from app.embeddings import embed_video` line (line 15):
 
 ```python
 from app.shorts.runner import has_active_job, start_job_thread
 ```
 (This is startup-safe — `app.shorts.runner` imports the cutter lazily, so no cv2/torch at import time.)
 
-- [ ] **Step 2: Write the failing tests** — `tests/test_autopilot_shorts.py`:
+- **Step 2: Write the failing tests** — `tests/test_autopilot_shorts.py`:
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -193,14 +195,14 @@ def test_run_shorts_action_noop_when_no_eligible_video():
     assert rec == [] and start.call_count == 0
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- **Step 3: Run to verify they fail**
 
 ```bash
 venv/bin/pytest tests/test_autopilot_shorts.py -q
 ```
 Expected: FAIL — `AttributeError: module 'app.autopilot' has no attribute '_next_uncut_video_for_channel'` (and the others).
 
-- [ ] **Step 4: Add the three helpers** to `app/autopilot.py`, immediately AFTER `_next_video_for_channel` (after its `return None`, ~line 146):
+- **Step 4: Add the three helpers** to `app/autopilot.py`, immediately AFTER `_next_video_for_channel` (after its `return None`, ~line 146):
 
 ```python
 def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
@@ -284,14 +286,14 @@ def _run_shorts_action(ch: dict) -> None:
     log.info("Autopilot shorts: started job %d for video %s (channel %s)", job_id, video["id"], channel_id)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- **Step 5: Run tests to verify they pass**
 
 ```bash
 venv/bin/pytest tests/test_autopilot_shorts.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/autopilot.py tests/test_autopilot_shorts.py
@@ -310,7 +312,7 @@ git commit -m "feat: autopilot shorts helpers — eligible-video selection, dail
 - Consumes: `_run_shorts_action(ch)` from Task 2.
 - Produces: `tick()` now (a) selects channels where `autopilot_enabled` OR `autopilot_shorts_enabled` (and not paused); (b) runs `_run_shorts_action(ch)` after sync when `autopilot_shorts_enabled`; (c) runs the existing audit path only when `autopilot_enabled`.
 
-- [ ] **Step 1: Widen the channel-selection query.** In `tick()`, replace the channel query (currently `.eq("autopilot_enabled", True).is_("autopilot_paused_reason", "null")`, ~lines 183-187) with an OR over both toggles:
+- **Step 1: Widen the channel-selection query.** In `tick()`, replace the channel query (currently `.eq("autopilot_enabled", True).is_("autopilot_paused_reason", "null")`, ~lines 183-187) with an OR over both toggles:
 
 ```python
         channels = (
@@ -322,7 +324,7 @@ git commit -m "feat: autopilot shorts helpers — eligible-video selection, dail
         ).data or []
 ```
 
-- [ ] **Step 2: Insert the shorts action + audit-path gate.** Immediately AFTER the sync block (after the `if needs_sync:` block ends — the line before `# 4. Daily cap check`, ~line 239) and BEFORE `# 4. Daily cap check`, insert:
+- **Step 2: Insert the shorts action + audit-path gate.** Immediately AFTER the sync block (after the `if needs_sync:` block ends — the line before `# 4. Daily cap check`, ~line 239) and BEFORE `# 4. Daily cap check`, insert:
 
 ```python
         # Shorts autopilot — independent of the metadata-audit path. Enqueues at
@@ -341,7 +343,7 @@ git commit -m "feat: autopilot shorts helpers — eligible-video selection, dail
 ```
 Everything from `# 4. Daily cap check` onward stays byte-identical.
 
-- [ ] **Step 3: Write the wiring tests** — `tests/test_autopilot_shorts_tick.py`. Read `tests/test_autopilot_full_sync.py` first and mirror its `tick()` mocking style (it already stubs the supabase channel query, sync, and the audit calls). Assert the routing:
+- **Step 3: Write the wiring tests** — `tests/test_autopilot_shorts_tick.py`. Read `tests/test_autopilot_full_sync.py` first and mirror its `tick()` mocking style (it already stubs the supabase channel query, sync, and the audit calls). Assert the routing:
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -397,7 +399,7 @@ def test_both_enabled_runs_both():
 ```
 Note: if `tick()`'s sync/quota branches consume supabase calls that this mock doesn't satisfy, mirror exactly how `tests/test_autopilot_full_sync.py` stubs them (that file is the source of truth for the tick mock shape). Do not weaken the assertions — the three routing outcomes above are the contract.
 
-- [ ] **Step 4: Run tests + startup-safety check**
+- **Step 4: Run tests + startup-safety check**
 
 ```bash
 venv/bin/pytest tests/test_autopilot_shorts_tick.py -q && venv/bin/pytest tests/ -q
@@ -405,7 +407,7 @@ venv/bin/python -c "import app.main, sys; print('startup light:', 'cv2' not in s
 ```
 Expected: tests PASS; startup light prints `True`.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/autopilot.py tests/test_autopilot_shorts_tick.py
@@ -423,7 +425,7 @@ git commit -m "feat: tick() runs autopilot shorts action independently of metada
 **Interfaces:**
 - Produces: `PATCH /auth/channels/{id}` accepts `autopilot_shorts_enabled` (bool), `autopilot_shorts_daily_cap` (int, clamped 1-20), `autopilot_shorts_upload_cap` (int, clamped 1-8), `shorts_cut_mode` (`highlights`|`coverage`), `shorts_camera_motion` (`locked`|`calm`|`follow`), persisting valid values to `channels`.
 
-- [ ] **Step 1: Write the failing test** — `tests/test_channel_settings_shorts.py`:
+- **Step 1: Write the failing test** — `tests/test_channel_settings_shorts.py`:
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -476,14 +478,14 @@ def test_patch_clamps_and_rejects_bad_enums():
     assert "shorts_camera_motion" not in p
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- **Step 2: Run to verify it fails**
 
 ```bash
 venv/bin/pytest tests/test_channel_settings_shorts.py -q
 ```
 Expected: FAIL (fields not in model / not persisted).
 
-- [ ] **Step 3: Extend `ChannelSettings`** in `app/auth.py` (after `playlist_health_enabled`, line 122):
+- **Step 3: Extend `ChannelSettings`** in `app/auth.py` (after `playlist_health_enabled`, line 122):
 
 ```python
 class ChannelSettings(BaseModel):
@@ -499,7 +501,7 @@ class ChannelSettings(BaseModel):
     shorts_camera_motion: str | None = None
 ```
 
-- [ ] **Step 4: Extend `update_channel`** — add these blocks before the `if not patch:` guard (after the `playlist_health_enabled` block, ~line 140):
+- **Step 4: Extend `update_channel`** — add these blocks before the `if not patch:` guard (after the `playlist_health_enabled` block, ~line 140):
 
 ```python
     if body.autopilot_shorts_enabled is not None:
@@ -515,14 +517,14 @@ class ChannelSettings(BaseModel):
 ```
 (Invalid enums are silently ignored — the `in (...)` guards only add valid values, and `None` never matches, so an unset field is untouched.)
 
-- [ ] **Step 5: Run tests**
+- **Step 5: Run tests**
 
 ```bash
 venv/bin/pytest tests/test_channel_settings_shorts.py -q && venv/bin/pytest tests/ -q
 ```
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/auth.py tests/test_channel_settings_shorts.py
@@ -539,9 +541,9 @@ git commit -m "feat: channel settings accept autopilot-shorts config (enabled, c
 **Interfaces:**
 - Consumes: `PATCH /auth/channels/{id}` shorts fields (Task 4); the channel's current settings (however the page currently populates `ap-enabled`/`ap-cap`).
 
-- [ ] **Step 1: Read the current file** to confirm the autopilot card block (`data-panel="autopilot"`, with `ap-enabled`/`ap-cap`/`ap-save`), the `ap-save` handler, and the function that loads current autopilot settings into `ap-enabled`/`ap-cap` (search for where `ap-enabled` `.checked` is set from a fetch — likely a `loadChannel`/`loadAutopilot` function). Match live anchors; do not guess line numbers.
+- **Step 1: Read the current file** to confirm the autopilot card block (`data-panel="autopilot"`, with `ap-enabled`/`ap-cap`/`ap-save`), the `ap-save` handler, and the function that loads current autopilot settings into `ap-enabled`/`ap-cap` (search for where `ap-enabled` `.checked` is set from a fetch — likely a `loadChannel`/`loadAutopilot` function). Match live anchors; do not guess line numbers.
 
-- [ ] **Step 2: Add shorts controls to the autopilot card.** Inside the autopilot `.card`, after the existing `.row` that holds `ap-enabled`/`ap-cap`/`ap-save` (and before `ap-summary`), add a shorts sub-section:
+- **Step 2: Add shorts controls to the autopilot card.** Inside the autopilot `.card`, after the existing `.row` that holds `ap-enabled`/`ap-cap`/`ap-save` (and before `ap-summary`), add a shorts sub-section:
 
 ```html
       <div class="row" style="margin-top:.6rem; padding-top:.6rem; border-top:1px solid #8883">
@@ -569,7 +571,7 @@ git commit -m "feat: channel settings accept autopilot-shorts config (enabled, c
 ```
 (The single existing `Save` button saves the whole card — no second button.)
 
-- [ ] **Step 3: Extend the `ap-save` handler** to include the shorts fields in the PATCH body:
+- **Step 3: Extend the `ap-save` handler** to include the shorts fields in the PATCH body:
 
 ```javascript
 $('ap-save').onclick = async () => {
@@ -593,7 +595,7 @@ $('ap-save').onclick = async () => {
 };
 ```
 
-- [ ] **Step 4: Populate the shorts controls on load.** Find where the page sets `ap-enabled.checked` / `ap-cap.value` from the loaded channel object (the same fetch that drives the autopilot card). Add, right beside those lines, using the same channel object (call it `c`/`ch` — match the file's variable):
+- **Step 4: Populate the shorts controls on load.** Find where the page sets `ap-enabled.checked` / `ap-cap.value` from the loaded channel object (the same fetch that drives the autopilot card). Add, right beside those lines, using the same channel object (call it `c`/`ch` — match the file's variable):
 
 ```javascript
   $('ap-shorts-enabled').checked = !!c.autopilot_shorts_enabled;
@@ -604,7 +606,7 @@ $('ap-save').onclick = async () => {
 ```
 If the loader fetches the channel from an endpoint that does not yet return these columns, confirm it selects `*` or add the columns to its select — the settings must round-trip (save then reload shows the saved values).
 
-- [ ] **Step 5: Serve-check**
+- **Step 5: Serve-check**
 
 ```bash
 cd ~/Documents/Github/Midas
@@ -616,11 +618,11 @@ kill %1 2>/dev/null
 venv/bin/pytest tests/ -q   # unaffected
 ```
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/static/channel.html
 git commit -m "feat: autopilot card shorts controls (enable, caps, mode, motion) wired to channel settings"
 ```
 
-- [ ] **Step 7: Real check (manual, on the Mac)** — start the server, open the channel dashboard's Autopilot tab, enable "Auto-generate shorts", set videos/day=1, save, reload, confirm the setting persisted. Then (optionally, to see it fire without waiting for the 120s tick on a fresh channel) confirm a `shorts_jobs` row with `autopilot_generated=true` appears for the newest un-cut long-form video within a tick or two. (Full autopilot behavior over time is validated in the Phase A deployed run.)
+- **Step 7: Real check (manual, on the Mac)** — start the server, open the channel dashboard's Autopilot tab, enable "Auto-generate shorts", set videos/day=1, save, reload, confirm the setting persisted. Then (optionally, to see it fire without waiting for the 120s tick on a fresh channel) confirm a `shorts_jobs` row with `autopilot_generated=true` appears for the newest un-cut long-form video within a tick or two. (Full autopilot behavior over time is validated in the Phase A deployed run.)

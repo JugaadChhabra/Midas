@@ -1,5 +1,7 @@
 # Parallel Shorts Queue + CUDA Implementation Plan
 
+> **Executed.** `app/shorts/dispatcher.py` and `app/shorts/worker.py` are this queue, and `app/shorts/cutter/render.py` carries the CUDA branch for YOLO — this is still the current job-dispatch architecture.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the single-job `has_active_job()` gate with a DB-backed queue drained by isolated worker subprocesses (default 2 concurrent), and run YOLO detection on CUDA.
@@ -46,7 +48,7 @@ Spec: `docs/superpowers/specs/2026-07-13-shorts-parallel-queue-cuda-design.md`
 **Interfaces:**
 - Produces: `settings.SHORTS_MAX_CONCURRENT_JOBS: int` (default 2), `settings.SHORTS_DISPATCH_INTERVAL_SECONDS: int` (default 5).
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Create `tests/shorts/test_runner_queue.py`:
 
@@ -57,12 +59,12 @@ def test_shorts_concurrency_settings_defaults():
     assert settings.SHORTS_DISPATCH_INTERVAL_SECONDS == 5
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/shorts/test_runner_queue.py::test_shorts_concurrency_settings_defaults -v`
 Expected: FAIL with `AttributeError: ... SHORTS_MAX_CONCURRENT_JOBS`.
 
-- [ ] **Step 3: Add the settings**
+- **Step 3: Add the settings**
 
 In `app/config.py`, immediately after the `AUTOPILOT_TICK_SECONDS = ...` line:
 
@@ -74,12 +76,12 @@ In `app/config.py`, immediately after the `AUTOPILOT_TICK_SECONDS = ...` line:
     SHORTS_DISPATCH_INTERVAL_SECONDS = int(os.getenv("SHORTS_DISPATCH_INTERVAL_SECONDS") or "5")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/shorts/test_runner_queue.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/config.py tests/shorts/test_runner_queue.py
@@ -100,7 +102,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 This task has no pytest (tests mock supabase). It ships the SQL and applies it to the live DB.
 
-- [ ] **Step 1: Write the migration file**
+- **Step 1: Write the migration file**
 
 Create `supabase/migrations/20260713120000_shorts_worker_pid.sql`:
 
@@ -112,7 +114,7 @@ alter table shorts_jobs
     add column if not exists started_at  timestamptz;
 ```
 
-- [ ] **Step 2: Apply the migration to the database**
+- **Step 2: Apply the migration to the database**
 
 Apply via your normal Supabase migration path (the SQL editor or `supabase db push`). If applying by hand, paste the file's contents into the Supabase SQL editor and run it.
 
@@ -124,7 +126,7 @@ python3 -c "from app.db import supabase; print([c for c in supabase().table('sho
 ```
 Expected: a row (or `[]`) printed with **no** error — confirms both columns exist.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260713120000_shorts_worker_pid.sql
@@ -144,7 +146,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Modifies: `pick_detection_setup() -> tuple[str, str]` — now prefers `("yolo11m.pt", "cuda")` when `torch.cuda.is_available()`.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Create `tests/shorts/test_render_device.py`:
 
@@ -179,12 +181,12 @@ def test_pick_detection_falls_back_to_cpu():
         assert pick_detection_setup() == ("yolo11s.pt", "cpu")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/shorts/test_render_device.py -v`
 Expected: `test_pick_detection_prefers_cuda` FAILS (returns mps or cpu, not cuda).
 
-- [ ] **Step 3: Add the CUDA branch**
+- **Step 3: Add the CUDA branch**
 
 In `app/shorts/cutter/render.py`, replace the body of `pick_detection_setup`:
 
@@ -202,12 +204,12 @@ def pick_detection_setup() -> tuple[str, str]:
     return "yolo11s.pt", "cpu"
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/shorts/test_render_device.py -v`
 Expected: 3 PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/cutter/render.py tests/shorts/test_render_device.py
@@ -227,7 +229,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `IN_PROGRESS_STATUSES: tuple[str, ...]`, `active_job_count() -> int` (count of rows whose status is in `WORKING_STATUSES` — i.e. queued + running).
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Append to `tests/shorts/test_runner_queue.py`:
 
@@ -253,12 +255,12 @@ def test_active_job_count_counts_working_rows():
         "status", list(runner.WORKING_STATUSES))
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/shorts/test_runner_queue.py -k "in_progress or active_job_count" -v`
 Expected: FAIL (`IN_PROGRESS_STATUSES` / `active_job_count` not defined).
 
-- [ ] **Step 3: Add the constant and function**
+- **Step 3: Add the constant and function**
 
 In `app/shorts/runner.py`, just below the existing `WORKING_STATUSES = (...)` line:
 
@@ -279,12 +281,12 @@ def active_job_count() -> int:
     return len(rows)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/shorts/test_runner_queue.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/runner.py tests/shorts/test_runner_queue.py
@@ -304,7 +306,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `_kill_pid_if_alive(pid: int | None) -> None`. `reap_stuck_jobs() -> int` now scans `IN_PROGRESS_STATUSES`, kills each job's live `worker_pid`, marks it `FAILED`, and leaves `CREATED` untouched.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Append to `tests/shorts/test_runner_queue.py`:
 
@@ -334,12 +336,12 @@ def test_kill_pid_if_alive_noop_on_falsy():
     runner._kill_pid_if_alive(0)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/shorts/test_runner_queue.py -k "reap or kill_pid" -v`
 Expected: FAIL (`_kill_pid_if_alive` missing; reap still scans `WORKING_STATUSES`).
 
-- [ ] **Step 3: Update imports and implement**
+- **Step 3: Update imports and implement**
 
 At the top of `app/shorts/runner.py`, ensure these imports exist (add `os`, `signal`, `sys`; `subprocess` is already imported):
 
@@ -394,12 +396,12 @@ def reap_stuck_jobs() -> int:
     return len(stuck)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/shorts/test_runner_queue.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/runner.py tests/shorts/test_runner_queue.py
@@ -419,7 +421,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `app.shorts.worker.main(argv: list[str] | None = None) -> int`. Runnable as `python -m app.shorts.worker <job_id>`. Sets `worker_pid`/`started_at` on the row, then calls `run_shorts_job(job_id)`.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Create `tests/shorts/test_worker.py`:
 
@@ -449,12 +451,12 @@ def test_worker_main_usage_error_without_arg():
     assert worker.main([]) == 2
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/shorts/test_worker.py -v`
 Expected: FAIL (`No module named app.shorts.worker`).
 
-- [ ] **Step 3: Implement the worker**
+- **Step 3: Implement the worker**
 
 Create `app/shorts/worker.py`:
 
@@ -500,12 +502,12 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/shorts/test_worker.py -v`
 Expected: 2 PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/worker.py tests/shorts/test_worker.py
@@ -526,7 +528,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Consumes: `settings.SHORTS_MAX_CONCURRENT_JOBS`, `supabase()`.
 - Produces: `dispatch_tick() -> None`; module-global `_running: dict[int, subprocess.Popen]`; `_spawn(job_id: int) -> subprocess.Popen`.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Create `tests/shorts/test_dispatcher.py`:
 
@@ -609,12 +611,12 @@ def test_reap_leaves_done_job_alone():
     sb.table.return_value.update.assert_not_called()  # DONE is terminal, untouched
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/shorts/test_dispatcher.py -v`
 Expected: FAIL (`No module named app.shorts.dispatcher`).
 
-- [ ] **Step 3: Implement the dispatcher**
+- **Step 3: Implement the dispatcher**
 
 Create `app/shorts/dispatcher.py`:
 
@@ -690,12 +692,12 @@ def dispatch_tick() -> None:
 
 Note for the test wiring: `_next_created_id` calls `.eq(...).order(...)` then either `.not_.in_(...).limit(1)` or `.limit(1)`; the test's `_created_query` stubs both shapes.
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/shorts/test_dispatcher.py -v`
 Expected: 4 PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/dispatcher.py tests/shorts/test_dispatcher.py
@@ -716,7 +718,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Modifies: `POST /shorts/jobs` and `POST /videos/{id}/short` now insert `status=CREATED` and return `{job_id}` with no 409 gate and no thread start.
 
-- [ ] **Step 1: Update the tests first (they encode the old behavior)**
+- **Step 1: Update the tests first (they encode the old behavior)**
 
 In `tests/shorts/test_routes.py`: replace `test_create_job_starts_thread` and delete `test_create_job_conflicts_when_job_running`:
 
@@ -757,12 +759,12 @@ def test_make_short_blocks_unknown_privacy():
 
 (The privacy-block tests keep their 409 — that gate is unrelated to the job queue.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/shorts/test_routes.py tests/shorts/test_video_short_routes.py -v`
 Expected: FAIL — routes still import/reference `has_active_job` / `start_job_thread`, and the deleted-patch tests now error or the code still returns 409.
 
-- [ ] **Step 3: Update `app/shorts/routes.py`**
+- **Step 3: Update `app/shorts/routes.py`**
 
 Change the import line (remove the gate helpers):
 
@@ -808,12 +810,12 @@ In `make_short`, delete the `if has_active_job(): ...` block and the `start_job_
     return {"job_id": job_id}
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest tests/shorts/test_routes.py tests/shorts/test_video_short_routes.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/routes.py tests/shorts/test_routes.py tests/shorts/test_video_short_routes.py
@@ -833,7 +835,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Modifies: `_run_shorts_action(ch)` skips when `active_job_count() >= settings.SHORTS_MAX_CONCURRENT_JOBS`; inserts `CREATED` with no thread start.
 
-- [ ] **Step 1: Update the tests first**
+- **Step 1: Update the tests first**
 
 In `tests/test_autopilot_shorts.py`, rewrite the four `_run_shorts_action` tests to patch `active_job_count` and drop `start_job_thread`:
 
@@ -889,12 +891,12 @@ def test_run_shorts_action_noop_when_no_eligible_video():
 
 (`test_run_shorts_action_noop_when_at_capacity` patches `app.autopilot.settings` so the gate compares against a known cap even if the default changes; the enqueue test uses the real `settings` with `active_job_count=0`, well under the cap.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_autopilot_shorts.py -v`
 Expected: FAIL — `active_job_count` not imported in autopilot; code still calls `has_active_job` / `start_job_thread`.
 
-- [ ] **Step 3: Update `app/autopilot.py`**
+- **Step 3: Update `app/autopilot.py`**
 
 Change the import (line 16):
 
@@ -931,12 +933,12 @@ In `_run_shorts_action`, replace the gate and remove the thread start:
     log.info("Autopilot shorts: queued job %d for video %s (channel %s)", job_id, video["id"], channel_id)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_autopilot_shorts.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/autopilot.py tests/test_autopilot_shorts.py
@@ -958,7 +960,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 This wires a background loop; it's validated by a live smoke run plus the full suite (imports must resolve). The existing route tests don't trigger `lifespan`, so they're unaffected.
 
-- [ ] **Step 1: Add the import**
+- **Step 1: Add the import**
 
 Near the other shorts imports in `app/main.py`:
 
@@ -966,7 +968,7 @@ Near the other shorts imports in `app/main.py`:
 from app.shorts.dispatcher import dispatch_tick
 ```
 
-- [ ] **Step 2: Register the interval job in `lifespan`**
+- **Step 2: Register the interval job in `lifespan`**
 
 In `app/main.py`'s `lifespan`, alongside the existing `scheduler.add_job(autopilot_tick, "interval", ...)` block, add:
 
@@ -981,12 +983,12 @@ In `app/main.py`'s `lifespan`, alongside the existing `scheduler.add_job(autopil
     )
 ```
 
-- [ ] **Step 3: Verify the app imports and the full suite is green**
+- **Step 3: Verify the app imports and the full suite is green**
 
 Run: `python3 -m pytest -q`
 Expected: all tests PASS (should be 189 + the new ones from this plan).
 
-- [ ] **Step 4: Live smoke test**
+- **Step 4: Live smoke test**
 
 ```bash
 source venv/bin/activate
@@ -1004,7 +1006,7 @@ pkill -f "uvicorn app.main:app --port 8137"
 ```
 Expected: a `shorts dispatch: launched worker for job <id>` line within ~1 interval, and the job row progresses past `CREATED`.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/main.py
@@ -1023,24 +1025,24 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Removes: `has_active_job()`, `start_job_thread()`. (No remaining callers after Tasks 8-9.)
 
-- [ ] **Step 1: Confirm there are no remaining references**
+- **Step 1: Confirm there are no remaining references**
 
 Run: `grep -rn "has_active_job\|start_job_thread" app/ tests/ | grep -v __pycache__`
 Expected: only the definitions in `app/shorts/runner.py` (no callers, no test patches).
 
-- [ ] **Step 2: Delete the two functions**
+- **Step 2: Delete the two functions**
 
 In `app/shorts/runner.py`, remove the `has_active_job` and `start_job_thread` function definitions. Then check whether `threading` is still referenced:
 
 Run: `grep -n "threading" app/shorts/runner.py`
 If there are no remaining uses, delete `import threading` from the imports.
 
-- [ ] **Step 3: Run the full suite**
+- **Step 3: Run the full suite**
 
 Run: `python3 -m pytest -q`
 Expected: all PASS.
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add app/shorts/runner.py

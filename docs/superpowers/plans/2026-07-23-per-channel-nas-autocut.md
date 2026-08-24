@@ -1,5 +1,7 @@
 # Per-Channel NAS Auto-Cut Implementation Plan
 
+> **Executed.** Channels now carry `nas_folder` and the autopilot enqueues straight from it (`app/autopilot.py`, `app/shorts/routes.py`); this same merge also removed the per-video "Make shorts" button UI from `channel.html` that phaseB1 had added.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Automate the NAS pick → cut → save flow per channel — a folder-mapped, toggle-driven auto-cut plus an on-demand "Cut now", controlled from each channel's Autopilot tab.
@@ -46,7 +48,7 @@
 - Consumes: `list_source_languages()` from `app.shorts.nas_source`.
 - Produces: `GET /auth/channels` rows include `nas_folder`; `PATCH /auth/channels/{id}` accepts `nas_folder` (uppercased, validated ∈ folders, empty → NULL).
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_channel_settings_shorts.py`:
+- **Step 1: Write the failing tests** — append to `tests/test_channel_settings_shorts.py`:
 
 ```python
 def test_patch_sets_valid_nas_folder():
@@ -75,31 +77,31 @@ def test_patch_clears_nas_folder_on_empty():
     assert rec[0]["nas_folder"] is None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/test_channel_settings_shorts.py -k nas_folder -v`
 Expected: FAIL — `nas_folder` not persisted / `AttributeError: app.auth has no attribute list_source_languages`.
 
-- [ ] **Step 3: Add the import** — near the top of `app/auth.py`, with the other imports:
+- **Step 3: Add the import** — near the top of `app/auth.py`, with the other imports:
 
 ```python
 from app.shorts.nas_source import list_source_languages
 ```
 
-- [ ] **Step 4: Add `nas_folder` to the select** — in `list_channels`, extend the select string (line ~114) so it ends with `nas_folder`:
+- **Step 4: Add `nas_folder` to the select** — in `list_channels`, extend the select string (line ~114) so it ends with `nas_folder`:
 
 ```python
         "autopilot_shorts_enabled,autopilot_shorts_daily_cap,autopilot_shorts_upload_cap,"
         "shorts_cut_mode,shorts_camera_motion,nas_folder"
 ```
 
-- [ ] **Step 5: Add the field to `ChannelSettings`** — add one line to the model:
+- **Step 5: Add the field to `ChannelSettings`** — add one line to the model:
 
 ```python
     nas_folder: str | None = None
 ```
 
-- [ ] **Step 6: Handle it in `update_channel`** — add before the `if not patch:` line:
+- **Step 6: Handle it in `update_channel`** — add before the `if not patch:` line:
 
 ```python
     if body.nas_folder is not None:
@@ -109,12 +111,12 @@ from app.shorts.nas_source import list_source_languages
         patch["nas_folder"] = folder or None
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- **Step 7: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/test_channel_settings_shorts.py -v`
 Expected: PASS (all — the 2 existing + 3 new).
 
-- [ ] **Step 8: Commit**
+- **Step 8: Commit**
 
 ```bash
 git add app/auth.py tests/test_channel_settings_shorts.py
@@ -133,7 +135,7 @@ git commit -m "feat(nas): channel API accepts and exposes nas_folder"
 - Consumes: `enqueue_language_jobs(language, *, channel_id, autopilot, cut_mode, camera_motion)` from `app.shorts.nas_source`; `active_job_count()` (already imported); `settings.SHORTS_MAX_CONCURRENT_JOBS`.
 - Produces: `_run_shorts_action(ch)` enqueues NAS jobs for `ch["nas_folder"]`; no-op without a folder or when the queue is at the cap.
 
-- [ ] **Step 1: Replace the 4 old tests** — in `tests/test_autopilot_shorts.py`, delete the four functions `test_run_shorts_action_enqueues_when_eligible`, `test_run_shorts_action_noop_when_at_capacity`, `test_run_shorts_action_noop_over_daily_cap`, `test_run_shorts_action_noop_when_no_eligible_video` (lines ~112-160) and add:
+- **Step 1: Replace the 4 old tests** — in `tests/test_autopilot_shorts.py`, delete the four functions `test_run_shorts_action_enqueues_when_eligible`, `test_run_shorts_action_noop_when_at_capacity`, `test_run_shorts_action_noop_over_daily_cap`, `test_run_shorts_action_noop_when_no_eligible_video` (lines ~112-160) and add:
 
 ```python
 def test_run_shorts_action_enqueues_from_nas_folder():
@@ -171,12 +173,12 @@ def test_run_shorts_action_swallows_unknown_folder():
         ap._run_shorts_action(ch)   # must not raise
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/test_autopilot_shorts.py -k run_shorts_action -v`
 Expected: FAIL — old behavior still enqueues via the videos table / signatures don't match.
 
-- [ ] **Step 3: Rewrite `_run_shorts_action`** — replace the whole function (lines ~242-271) with:
+- **Step 3: Rewrite `_run_shorts_action`** — replace the whole function (lines ~242-271) with:
 
 ```python
 def _run_shorts_action(ch: dict) -> None:
@@ -211,17 +213,17 @@ def _run_shorts_action(ch: dict) -> None:
 
 Note: the test patches `app.shorts.nas_source.enqueue_language_jobs` (the lazy import resolves it there), so patching works.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/test_autopilot_shorts.py -v`
 Expected: PASS (the 5 `_next_uncut` tests still pass; the 4 new NAS tests pass).
 
-- [ ] **Step 5: Confirm the tick tests still pass (they mock `_run_shorts_action`)**
+- **Step 5: Confirm the tick tests still pass (they mock `_run_shorts_action`)**
 
 Run: `venv/bin/pytest tests/test_autopilot_shorts_tick.py -v`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/autopilot.py tests/test_autopilot_shorts.py
@@ -240,7 +242,7 @@ git commit -m "feat(nas): autopilot shorts action enqueues from channel nas_fold
 - Produces: `derive_folder(name: str, folders: list[str]) -> str | None` — the single folder whose uppercase name appears in `name`, else `None` (0 or >1 matches).
 - `main() -> int` — sets `nas_folder` on channels where it's NULL and `derive_folder` is unambiguous.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 # tests/test_backfill_nas_folder.py
@@ -262,12 +264,12 @@ def test_derive_ambiguous_returns_none():
     assert derive_folder("Hindi + English Kids", FOLDERS) is None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- **Step 2: Run tests to verify they fail**
 
 Run: `venv/bin/pytest tests/test_backfill_nas_folder.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'scripts.backfill_nas_folder'`.
 
-- [ ] **Step 3: Write the script**
+- **Step 3: Write the script**
 
 ```python
 # scripts/backfill_nas_folder.py
@@ -308,12 +310,12 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `venv/bin/pytest tests/test_backfill_nas_folder.py -v`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add scripts/backfill_nas_folder.py tests/test_backfill_nas_folder.py
@@ -330,7 +332,7 @@ git commit -m "feat(nas): backfill script to derive channel nas_folder from name
 **Interfaces:**
 - Consumes: `GET /shorts/languages` → `[{language, uncut}]`; `GET /shorts/jobs?channel_id=` → `[{status,...}]`; `PATCH /auth/channels/{id}` with `{nas_folder}` / `{autopilot_shorts_enabled}`; `POST /shorts/cut` with `{language}`; the channel object from `/auth/channels` (now includes `nas_folder`, `autopilot_shorts_enabled`).
 
-- [ ] **Step 1: Add the card HTML** — in `app/static/channel.html`, find the autopilot settings card. Immediately **before** the `<div style="margin-top:1.1rem; display:flex; align-items:center; gap:.6rem">` that holds the `#ap-save` button, insert:
+- **Step 1: Add the card HTML** — in `app/static/channel.html`, find the autopilot settings card. Immediately **before** the `<div style="margin-top:1.1rem; display:flex; align-items:center; gap:.6rem">` that holds the `#ap-save` button, insert:
 
 ```html
       <h4 style="margin:1.1rem 0 .25rem; padding-top:1rem; border-top:1px solid #8883">Shorts (NAS)</h4>
@@ -349,7 +351,7 @@ git commit -m "feat(nas): backfill script to derive channel nas_folder from name
       </div>
 ```
 
-- [ ] **Step 2: Add the JS** — near the other autopilot JS (after the `#ap-save` handler block), add:
+- **Step 2: Add the JS** — near the other autopilot JS (after the `#ap-save` handler block), add:
 
 ```javascript
 // ── Shorts (NAS) card ─────────────────────────────────────────────────
@@ -424,7 +426,7 @@ $('nas-cut-now').onclick = async () => {
 };
 ```
 
-- [ ] **Step 3: Wire population into channel load** — find `loadChannel()` where it fills the autopilot form (the block with `$('ap-enabled').checked = ...`). Ensure the NAS languages are loaded, then populate. Add right after that block (inside the same function, where `c` is the channel object):
+- **Step 3: Wire population into channel load** — find `loadChannel()` where it fills the autopilot form (the block with `$('ap-enabled').checked = ...`). Ensure the NAS languages are loaded, then populate. Add right after that block (inside the same function, where `c` is the channel object):
 
 ```javascript
   await nasLoadLanguages();
@@ -433,7 +435,7 @@ $('nas-cut-now').onclick = async () => {
 
 (If `loadChannel` is not `async`, the existing autopilot form population implies it already awaits `/auth/channels`; add `await nasLoadLanguages();` before `nasPopulate(c);` — both are safe to call there.)
 
-- [ ] **Step 4: JS syntax check**
+- **Step 4: JS syntax check**
 
 Run:
 ```bash
@@ -441,11 +443,11 @@ node -e "const fs=require('fs');const h=fs.readFileSync('app/static/channel.html
 ```
 Expected: `channel.html JS OK`
 
-- [ ] **Step 5: Browser check** — start the app, open a channel, go to the **Autopilot** tab. Confirm: the "Shorts (NAS)" card renders; the folder dropdown lists the 11 folders; selecting one shows `N uncut · M cutting` and enables "Cut now"; toggling Auto-cut and picking a folder each show a success toast; no console errors.
+- **Step 5: Browser check** — start the app, open a channel, go to the **Autopilot** tab. Confirm: the "Shorts (NAS)" card renders; the folder dropdown lists the 11 folders; selecting one shows `N uncut · M cutting` and enables "Cut now"; toggling Auto-cut and picking a folder each show a success toast; no console errors.
 
 Run: `curl -s localhost:8000/shorts/languages` first to confirm the data is there, then verify visually.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add app/static/channel.html

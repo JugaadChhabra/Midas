@@ -1,5 +1,7 @@
 # Shorts Cutter Slice 0 — Extraction + Modal Wrapper Implementation Plan
 
+> **Executed in a separate repo, not this one.** All 7 tasks landed in `~/Documents/Github/shorts-cutter` (the `engine/` package, `worker/modal_app.py`, R2 wired into `api/jobs.py`), which has since moved well past slice 0 into a paid product with a credits/jobs API and payments. Nothing in Midas reflects this plan's outcome — look there, not here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prove *YouTube URL → vertical shorts in R2* end-to-end from a script, in a fresh `shorts-cutter` repo whose engine was extracted from Midas with full git history, and benchmark Modal's cold-start.
@@ -53,12 +55,12 @@ These need real accounts/credentials the implementer cannot create:
 **Interfaces:**
 - Produces: a local git repo containing only `app/shorts/cutter/*` and `tests/shorts/cutter/*` with full commit history/blame.
 
-- [ ] **Step 1: Install git-filter-repo**
+- **Step 1: Install git-filter-repo**
 
 Run: `pip install git-filter-repo`
 Expected: `git filter-repo --version` prints a version.
 
-- [ ] **Step 2: Make a throwaway clone of Midas (safety)**
+- **Step 2: Make a throwaway clone of Midas (safety)**
 
 ```bash
 cd /tmp
@@ -68,7 +70,7 @@ cd midas-extract
 ```
 Expected: a full clone at `/tmp/midas-extract`. The real repo is never touched by later steps.
 
-- [ ] **Step 3: Filter to only the cutter + its tests, preserving history**
+- **Step 3: Filter to only the cutter + its tests, preserving history**
 
 ```bash
 cd /tmp/midas-extract
@@ -76,12 +78,12 @@ git filter-repo --path app/shorts/cutter --path tests/shorts/cutter --force
 ```
 Expected: history now contains only those two paths.
 
-- [ ] **Step 4: Verify history/blame survived**
+- **Step 4: Verify history/blame survived**
 
 Run: `git log --oneline -- app/shorts/cutter | wc -l` and `git log --follow --oneline app/shorts/cutter/pipeline.py | head`
 Expected: multiple commits (not a single squashed commit); `pipeline.py` shows its real authored history.
 
-- [ ] **Step 5: Create the new repo directory and move the filtered tree in**
+- **Step 5: Create the new repo directory and move the filtered tree in**
 
 ```bash
 mkdir -p ~/Documents/Github/shorts-cutter
@@ -93,7 +95,7 @@ git remote remove origin
 ```
 Expected: `git log` in `shorts-cutter` shows the preserved cutter history; working tree has `app/shorts/cutter/` and `tests/shorts/cutter/`.
 
-- [ ] **Step 6: Commit the checkpoint**
+- **Step 6: Commit the checkpoint**
 
 ```bash
 git add -A && git commit -m "chore: import cutter engine from Midas (history-preserved)" --allow-empty
@@ -110,13 +112,13 @@ git add -A && git commit -m "chore: import cutter engine from Midas (history-pre
 **Interfaces:**
 - Produces: `import engine`, `from engine.pipeline import cut_video`, `from engine.download import fetch_video, is_youtube_url, refresh_pot_provider` all resolve.
 
-- [ ] **Step 1: Establish the Midas test baseline (what "green" means)**
+- **Step 1: Establish the Midas test baseline (what "green" means)**
 
 In the *Midas* repo run the cutter tests and record the pass/fail profile (Midas memory notes ~9 cv2/librosa offline failures are pre-existing):
 Run: `cd /Users/jugaadchhabra/Documents/Github/Midas && python -m pytest tests/shorts/cutter -q | tail -5`
 Expected: note the exact passed/failed counts — this is the baseline the extracted repo must match (no *new* failures).
 
-- [ ] **Step 2: Move the directories with git (preserve per-file history)**
+- **Step 2: Move the directories with git (preserve per-file history)**
 
 ```bash
 cd ~/Documents/Github/shorts-cutter
@@ -126,7 +128,7 @@ rmdir app/shorts app 2>/dev/null; rmdir tests/shorts 2>/dev/null || true
 ```
 Expected: `engine/` and `tests/` exist at repo root; `app/` gone.
 
-- [ ] **Step 3: Rewrite the import paths**
+- **Step 3: Rewrite the import paths**
 
 ```bash
 cd ~/Documents/Github/shorts-cutter
@@ -134,17 +136,17 @@ grep -rl "app.shorts.cutter" engine tests | xargs sed -i '' 's/app\.shorts\.cutt
 ```
 (Linux: use `sed -i` without the `''`.)
 
-- [ ] **Step 4: Verify no Midas namespace survives**
+- **Step 4: Verify no Midas namespace survives**
 
 Run: `grep -rn "app.shorts.cutter\|from app\b\|import app\b" engine tests`
 Expected: **no output** (empty). Any hit is a failed rename.
 
-- [ ] **Step 5: Run the extracted tests — the correctness gate**
+- **Step 5: Run the extracted tests — the correctness gate**
 
 Run: `cd ~/Documents/Github/shorts-cutter && python -m pytest tests -q | tail -5`
 Expected: pass/fail profile **matches the Task-2 Step-1 baseline** (same tests pass; only the known pre-existing cv2/librosa offline failures remain). No new failures, no import errors.
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "refactor: rename cutter package app.shorts.cutter -> engine"
@@ -160,7 +162,7 @@ git add -A && git commit -m "refactor: rename cutter package app.shorts.cutter -
 **Interfaces:**
 - Produces: a fresh venv can `pip install -r requirements-engine.txt` and `import engine` succeeds (import-only; ML model downloads happen at runtime).
 
-- [ ] **Step 1: Write `requirements-engine.txt` (copied pins from Midas requirements-ml.txt)**
+- **Step 1: Write `requirements-engine.txt` (copied pins from Midas requirements-ml.txt)**
 
 ```
 torch==2.12.1
@@ -177,14 +179,14 @@ av==18.0.0
 numpy==2.4.6
 ```
 
-- [ ] **Step 2: Write `requirements-download.txt`**
+- **Step 2: Write `requirements-download.txt`**
 
 ```
 yt-dlp==2026.6.9
 bgutil-ytdlp-pot-provider==1.3.1
 ```
 
-- [ ] **Step 3: Write `.env.example`**
+- **Step 3: Write `.env.example`**
 
 ```
 BGUTIL_POT_HTTP_BASE_URL=http://127.0.0.1:4416
@@ -195,7 +197,7 @@ R2_SECRET_ACCESS_KEY=
 R2_BUCKET=shorts-cutter-output
 ```
 
-- [ ] **Step 4: Write `.gitignore`**
+- **Step 4: Write `.gitignore`**
 
 ```
 __pycache__/
@@ -206,7 +208,7 @@ work/
 *.mp4
 ```
 
-- [ ] **Step 5: Write a minimal `pyproject.toml`**
+- **Step 5: Write a minimal `pyproject.toml`**
 
 ```toml
 [project]
@@ -218,9 +220,9 @@ requires-python = ">=3.11"
 testpaths = ["tests"]
 ```
 
-- [ ] **Step 6: Write `README.md`** — one paragraph: what it is (YouTube URL → vertical shorts), the `engine`/`worker` seam, and "engine extracted from Midas, history-preserved."
+- **Step 6: Write `README.md`** — one paragraph: what it is (YouTube URL → vertical shorts), the `engine`/`worker` seam, and "engine extracted from Midas, history-preserved."
 
-- [ ] **Step 7: Verify a clean import**
+- **Step 7: Verify a clean import**
 
 ```bash
 python -m venv /tmp/sc-venv && /tmp/sc-venv/bin/pip install -q -r requirements-engine.txt
@@ -228,7 +230,7 @@ python -m venv /tmp/sc-venv && /tmp/sc-venv/bin/pip install -q -r requirements-e
 ```
 Expected: prints `ok`.
 
-- [ ] **Step 8: Commit**
+- **Step 8: Commit**
 
 ```bash
 git add -A && git commit -m "chore: repo scaffolding + dependency split (engine vs download)"
@@ -244,7 +246,7 @@ git add -A && git commit -m "chore: repo scaffolding + dependency split (engine 
 **Interfaces:**
 - Produces: a Modal `Image` object `sc_image` with ML deps, yt-dlp, the bgutil POT provider server, a Node runtime, and ffmpeg installed; and a started POT provider reachable at `BGUTIL_POT_HTTP_BASE_URL`.
 
-- [ ] **Step 1: Define the image (Node + ffmpeg + Python deps + POT server)**
+- **Step 1: Define the image (Node + ffmpeg + Python deps + POT server)**
 
 ```python
 import modal
@@ -267,12 +269,12 @@ sc_image = (
 app = modal.App("shorts-cutter")
 ```
 
-- [ ] **Step 2: Verify the image builds**
+- **Step 2: Verify the image builds**
 
 Run: `modal run worker/modal_app.py::_noop` (add a tiny `@app.function(image=sc_image) def _noop(): return "ok"` temporarily)
 Expected: image builds and prints `ok`. Node present: extend `_noop` to `subprocess.run(["node","--version"])` and confirm it prints a v20 version.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add worker/modal_app.py && git commit -m "feat(worker): Modal image with ML + yt-dlp + POT provider + Node"
@@ -289,7 +291,7 @@ git add worker/modal_app.py && git commit -m "feat(worker): Modal image with ML 
 - Consumes: `engine.download.fetch_video(url, dest_dir) -> tuple[Path, str]`, `engine.pipeline.cut_video(source: Path, work_dir: Path, preferred_name: str, ...) -> dict` (writes clips to `work_dir/clips`), `engine.download.refresh_pot_provider(base_url=None)`.
 - Produces: `run_job.remote(youtube_url: str) -> list[bytes]` returning the rendered clip file bytes (uploaded to R2 in Task 6; returned as bytes here so this task is testable without R2).
 
-- [ ] **Step 1: Start the POT server in-container, then download + cut**
+- **Step 1: Start the POT server in-container, then download + cut**
 
 ```python
 import os, subprocess, time
@@ -316,16 +318,16 @@ def run_job(youtube_url: str) -> list[bytes]:
 ```
 (If the bgutil server binary name differs, resolve it from `npm ls -g` output during Task 4; adjust `["bgutil-pot-server", ...]` accordingly.)
 
-- [ ] **Step 2: Run end-to-end against the test URL**
+- **Step 2: Run end-to-end against the test URL**
 
 Run: `modal run worker/modal_app.py::run_job --youtube-url "<SHORT_TEST_URL>"`
 Expected: completes without "video not available"; returns a non-empty list; log shows the pipeline stages (analysing framing → separating vocals → transcribing → planning cuts → rendering).
 
-- [ ] **Step 3: Troubleshooting gate (only if Step 2 fails)**
+- **Step 3: Troubleshooting gate (only if Step 2 fails)**
 
 If "video not available": check the Modal log for `JS runtimes: none` (→ Node not on PATH in the GPU function — fix image) or token errors (→ POT server/plugin version skew or proxy needed). Add `PROXY_URL` to the `shorts-cutter` Modal secret and thread it into `ytdlp_options()` if YouTube blocks Modal IPs.
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add worker/modal_app.py && git commit -m "feat(worker): run_job GPU function (download + cut_video)"
@@ -343,7 +345,7 @@ git add worker/modal_app.py && git commit -m "feat(worker): run_job GPU function
 - Consumes: R2 secret env (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`).
 - Produces: `upload_clips(clip_paths: list[Path], job_id: str) -> list[str]` returning presigned download URLs.
 
-- [ ] **Step 1: Write the failing test for the key layout (pure function, no network)**
+- **Step 1: Write the failing test for the key layout (pure function, no network)**
 
 ```python
 # tests/test_r2_keys.py
@@ -353,12 +355,12 @@ def test_clip_key_layout():
     assert clip_key("job123", 12) == "jobs/job123/clip_012.mp4"
 ```
 
-- [ ] **Step 2: Run it, expect failure**
+- **Step 2: Run it, expect failure**
 
 Run: `python -m pytest tests/test_r2_keys.py -v`
 Expected: FAIL (`worker.r2` / `clip_key` not defined).
 
-- [ ] **Step 3: Implement `worker/r2.py`**
+- **Step 3: Implement `worker/r2.py`**
 
 ```python
 import os
@@ -388,12 +390,12 @@ def upload_clips(clip_paths: list[Path], job_id: str) -> list[str]:
     return urls
 ```
 
-- [ ] **Step 4: Run the test, expect pass**
+- **Step 4: Run the test, expect pass**
 
 Run: `python -m pytest tests/test_r2_keys.py -v`
 Expected: PASS. Add `boto3` to `requirements-download.txt`.
 
-- [ ] **Step 5: Wire into `run_job`**
+- **Step 5: Wire into `run_job`**
 
 Replace the `return [c.read_bytes() ...]` with:
 ```python
@@ -402,12 +404,12 @@ return upload_clips(clips, job_id=youtube_url.split("=")[-1][:11] or "job")
 ```
 Add `worker` to the Modal image via `.add_local_python_source("engine", "worker")`.
 
-- [ ] **Step 6: Run end-to-end → clips land in R2**
+- **Step 6: Run end-to-end → clips land in R2**
 
 Run: `modal run worker/modal_app.py::run_job --youtube-url "<SHORT_TEST_URL>"`
 Expected: returns presigned URLs; opening one downloads a playable vertical `.mp4`; the objects appear in the R2 bucket.
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add -A && git commit -m "feat(worker): upload output clips to R2, return presigned URLs"
@@ -424,7 +426,7 @@ git add -A && git commit -m "feat(worker): upload output clips to R2, return pre
 - Consumes: `run_job` (Modal function).
 - Produces: `docs/COLDSTART-RESULTS.md` — the Modal-vs-RunPod decision record (the spec's Slice-0 gate).
 
-- [ ] **Step 1: Write `scripts/run_job.py`**
+- **Step 1: Write `scripts/run_job.py`**
 
 ```python
 import sys
@@ -435,7 +437,7 @@ if __name__ == "__main__":
 ```
 Run: `python scripts/run_job.py "<SHORT_TEST_URL>"` → prints presigned URLs.
 
-- [ ] **Step 2: Write `scripts/benchmark_coldstart.py`**
+- **Step 2: Write `scripts/benchmark_coldstart.py`**
 
 Measure wall-clock for (a) a cold invocation (after Modal has scaled to zero — wait > the container idle window, or use a fresh app deploy) and (b) a warm invocation immediately after. Repeat cold measurement 3×.
 
@@ -456,18 +458,18 @@ if __name__ == "__main__":
     print(f"warm={warm:.1f}s cold_median={statistics.median(colds):.1f}s colds={colds}")
 ```
 
-- [ ] **Step 3: Run the benchmark and record results**
+- **Step 3: Run the benchmark and record results**
 
 Run: `python scripts/benchmark_coldstart.py "<SHORT_TEST_URL>"`
 Write `docs/COLDSTART-RESULTS.md` with: warm time, cold median, the 3 cold samples, and a verdict line — **"Modal cold-start acceptable for a paid product? YES/NO. If NO → switch worker to RunPod Serverless (spec fallback)."** Acceptance heuristic: cold overhead (cold − warm) under ~30s is fine; a job already takes tens of seconds and users see live progress.
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add -A && git commit -m "feat: end-to-end run script + cold-start benchmark + results"
 ```
 
-- [ ] **Step 5: Hand off to the user for repo creation**
+- **Step 5: Hand off to the user for repo creation**
 
 Slice 0 is a local, tests-green, video-in/clips-out repo. Tell the user the results and hand them the push step (they own the outward-facing GitHub remote):
 ```bash

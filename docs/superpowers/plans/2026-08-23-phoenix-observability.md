@@ -1,5 +1,7 @@
 # Phoenix Observability Implementation Plan
 
+> **Executed and merged to `main` on 2026-08-23.** Delivered `app/tracing.py`, LLM spans in `app/openrouter.py`, evidence-loop spans across audits/reflection/measurement/autopilot, and a self-hosted Phoenix service in `docker-compose.yml`; inert until `OTEL_ENABLED=true`. The execution record — including where the build deviated from this plan — is `docs/superpowers/2026-08-23-observability-execution-record.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every LLM call and every evidence-loop decision in Midas visible in a self-hosted Phoenix instance, without making the app depend on Phoenix being up.
@@ -40,7 +42,7 @@
   - Constants: `CHAIN`, `LLM`, `SPAN_KIND`, `MODEL_NAME`, `INPUT_VALUE`, `OUTPUT_VALUE`, `TOKEN_PROMPT`, `TOKEN_COMPLETION`, `TOKEN_TOTAL`, `COST_TOTAL`
   - `tracing._reset_for_tests(exporter=None) -> None` — installs an in-memory exporter; used only by tests.
 
-- [ ] **Step 1: Add the dependencies**
+- **Step 1: Add the dependencies**
 
 In `requirements.txt`, append:
 
@@ -59,7 +61,7 @@ Install:
 venv/bin/pip install opentelemetry-sdk==1.44.0 opentelemetry-exporter-otlp-proto-http==1.44.0
 ```
 
-- [ ] **Step 2: Add the settings**
+- **Step 2: Add the settings**
 
 In `app/config.py`, inside `class Settings`, immediately after the `REFLECTION_MODEL` line:
 
@@ -72,7 +74,7 @@ In `app/config.py`, inside `class Settings`, immediately after the `REFLECTION_M
     OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "midas")
 ```
 
-- [ ] **Step 3: Write the failing tests**
+- **Step 3: Write the failing tests**
 
 Create `tests/test_tracing.py`:
 
@@ -209,12 +211,12 @@ def test_only_tracing_imports_opentelemetry(path):
     )
 ```
 
-- [ ] **Step 4: Run the tests to verify they fail**
+- **Step 4: Run the tests to verify they fail**
 
 Run: `venv/bin/python -m pytest tests/test_tracing.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.tracing'`
 
-- [ ] **Step 5: Write `app/tracing.py`**
+- **Step 5: Write `app/tracing.py`**
 
 ```python
 """The one place Midas talks to OpenTelemetry.
@@ -446,17 +448,17 @@ def _reset_for_tests(exporter: Any = None, disable: bool = False) -> Any:
     return exporter
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- **Step 6: Run the tests to verify they pass**
 
 Run: `venv/bin/python -m pytest tests/test_tracing.py -v`
 Expected: PASS, all tests including the per-file `test_only_tracing_imports_opentelemetry` parametrisation.
 
-- [ ] **Step 7: Confirm nothing else broke**
+- **Step 7: Confirm nothing else broke**
 
 Run: `venv/bin/python -m pytest -q`
 Expected: the 7 pre-existing `*_live.py` failures only (they need a reachable Postgres). Everything else passes.
 
-- [ ] **Step 8: Commit**
+- **Step 8: Commit**
 
 ```bash
 git add app/tracing.py tests/test_tracing.py requirements.txt app/config.py
@@ -491,7 +493,7 @@ Defaults to off, so this changes no behaviour until an environment opts in."
 
 Why `label` rather than a `call_site` parameter: the parent operation span from Task 3 already says *what* was running, but `reflect()` makes three different LLM calls inside one operation span, so the parent alone cannot disambiguate them. `label` defaults to `None`, in which case the span is named `llm.{model}`.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 Create `tests/test_openrouter_tracing.py`:
 
@@ -658,12 +660,12 @@ def test_missing_usage_block_does_not_break_the_call(_isolated_tracer):
     assert tracing.TOKEN_TOTAL not in attrs
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- **Step 2: Run the tests to verify they fail**
 
 Run: `venv/bin/python -m pytest tests/test_openrouter_tracing.py -v`
 Expected: FAIL — no spans produced, `assert len(spans) == 1` fails with `[]`.
 
-- [ ] **Step 3: Add a shared span helper to `app/openrouter.py`**
+- **Step 3: Add a shared span helper to `app/openrouter.py`**
 
 At the top, after the existing imports, add:
 
@@ -705,7 +707,7 @@ def _record_usage(rec: tracing.Recorder, data: dict, requested: str) -> None:
     })
 ```
 
-- [ ] **Step 4: Wrap `chat_json`**
+- **Step 4: Wrap `chat_json`**
 
 Replace the body of `chat_json` from the `model = model or settings.AUDIT_MODEL` line onward. The signature gains `label`:
 
@@ -789,7 +791,7 @@ def chat_json(prompt: str, model: str | None = None, system: str | None = None,
                 )
 ```
 
-- [ ] **Step 5: Wrap `chat_text`**
+- **Step 5: Wrap `chat_text`**
 
 ```python
 def chat_text(prompt: str, model: str | None = None, system: str | None = None,
@@ -834,17 +836,17 @@ def chat_text(prompt: str, model: str | None = None, system: str | None = None,
         return out
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- **Step 6: Run the tests to verify they pass**
 
 Run: `venv/bin/python -m pytest tests/test_openrouter_tracing.py -v`
 Expected: PASS (8 tests)
 
-- [ ] **Step 7: Confirm the existing OpenRouter tests still pass**
+- **Step 7: Confirm the existing OpenRouter tests still pass**
 
 Run: `venv/bin/python -m pytest tests/ -q -k "openrouter or audit or reflection"`
 Expected: PASS. `label` is a new trailing keyword with a default, so no existing caller changes.
 
-- [ ] **Step 8: Commit**
+- **Step 8: Commit**
 
 ```bash
 git add app/openrouter.py tests/test_openrouter_tracing.py
@@ -884,7 +886,7 @@ LLM calls inside one operation span and the parent cannot disambiguate them."
 - Consumes: `tracing.span`, `tracing.Recorder.set`, `tracing.configure`, constants from Task 1; the `label` keyword from Task 2.
 - Produces: no new callable signatures. Span names: `tick`, `audit_video`, `apply_audit`, `reflect`, `eval_measurements`.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 Create `tests/test_evidence_loop_tracing.py`:
 
@@ -1019,12 +1021,12 @@ def test_apply_span_marks_a_measurable_channel(_isolated_tracer):
     assert attrs["apply.will_be_measured"] is True
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- **Step 2: Run the tests to verify they fail**
 
 Run: `venv/bin/python -m pytest tests/test_evidence_loop_tracing.py -v`
 Expected: FAIL — no span named `should_reflect`; `_record_apply_measurability` does not exist.
 
-- [ ] **Step 3: Instrument `_should_reflect` in `app/reflection.py`**
+- **Step 3: Instrument `_should_reflect` in `app/reflection.py`**
 
 Add `from app import tracing` to the imports. Then wrap the body of `_should_reflect`. Keep every existing branch and return value; only the span is new:
 
@@ -1052,7 +1054,7 @@ def _should_reflect(channel_id: str) -> tuple[bool, str]:
 
 Rename the existing function body to `_should_reflect_inner(channel_id) -> tuple[bool, str, dict | None]`, returning the report as a third element so the span can read it without a second query. Each existing `return False, "reflected_recently"` becomes `return False, "reflected_recently", None`; the ones after the report is built return the report. The final line becomes `return False, "performing_well", report`.
 
-- [ ] **Step 4: Label the three reflection LLM calls**
+- **Step 4: Label the three reflection LLM calls**
 
 In `app/reflection.py`, add the `label` keyword at each call site so the three calls inside one `reflect()` span are distinguishable:
 
@@ -1060,7 +1062,7 @@ In `app/reflection.py`, add the `label` keyword at each call site so the three c
 - `_get_platform_guidance`: `chat_text(query, model="perplexity/sonar", label="platform_guidance")`
 - `_run_reflection`: `chat_json(user, model=settings.REFLECTION_MODEL, system=system, label="reflection_candidate")`
 
-- [ ] **Step 5: Wrap `reflect`**
+- **Step 5: Wrap `reflect`**
 
 At the top of `reflect(channel_id)`, wrap the whole body:
 
@@ -1083,7 +1085,7 @@ def reflect(channel_id: str) -> dict:
 
 Rename the existing body to `_reflect_inner`.
 
-- [ ] **Step 6: Instrument `audit_video` and the apply path in `app/audits.py`**
+- **Step 6: Instrument `audit_video` and the apply path in `app/audits.py`**
 
 Add `from app import tracing` to the imports. Add the helper above `audit_video`:
 
@@ -1142,7 +1144,7 @@ In the apply function, wrap the write in a span and call the helper where `chann
         # ... existing measurement_patch and update, unchanged
 ```
 
-- [ ] **Step 7: Instrument `eval_measurements` in `app/measurement.py`**
+- **Step 7: Instrument `eval_measurements` in `app/measurement.py`**
 
 Add `from app import tracing`. Wrap the sweep and record the outcome mix, so the dormant/coverage/hold split is a chart rather than a hypothesis:
 
@@ -1156,7 +1158,7 @@ Add `from app import tracing`. Wrap the sweep and record the outcome mix, so the
         })
 ```
 
-- [ ] **Step 8: Instrument `tick` in `app/autopilot.py`**
+- **Step 8: Instrument `tick` in `app/autopilot.py`**
 
 Add `from app import tracing`. Wrap the existing body of `tick()`. The outer `try/except` stays exactly as it is — the span is inside it, so a crashing tick is still swallowed by the existing handler and still recorded:
 
@@ -1176,7 +1178,7 @@ def tick():
 
 Set `tick.outcome` at each exit: `quota_dormant`, `no_channel`, `audit_paused`, `stale_sync`, `daily_cap`, `no_video`, `unsafe_model`, `token_expired`, `audit_timeout`, `audit_failed`, `quarantined`, `applied`. Also set `channel_id` once the channel is picked. Without this the tick is opaque: it returns silently at eleven different points and the logs distinguish only some of them.
 
-- [ ] **Step 9: Configure tracing at startup in `app/main.py`**
+- **Step 9: Configure tracing at startup in `app/main.py`**
 
 Add `from app import tracing` to the imports. In the startup hook, before `scheduler.start()`:
 
@@ -1190,17 +1192,17 @@ And in the shutdown hook, before `scheduler.shutdown(wait=False)`:
     tracing.flush()
 ```
 
-- [ ] **Step 10: Run the tests to verify they pass**
+- **Step 10: Run the tests to verify they pass**
 
 Run: `venv/bin/python -m pytest tests/test_evidence_loop_tracing.py -v`
 Expected: PASS (5 tests)
 
-- [ ] **Step 11: Confirm nothing regressed**
+- **Step 11: Confirm nothing regressed**
 
 Run: `venv/bin/python -m pytest -q`
 Expected: the 7 pre-existing `*_live.py` failures only. In particular `tests/test_reflection.py` must still pass — Step 3 restructured `_should_reflect` into a wrapper plus `_should_reflect_inner`, and those tests patch `_build_perf_report` and call `_should_reflect`, so they exercise the wrapper.
 
-- [ ] **Step 12: Commit**
+- **Step 12: Commit**
 
 ```bash
 git add app/audits.py app/reflection.py app/measurement.py app/autopilot.py app/main.py tests/test_evidence_loop_tracing.py
@@ -1243,7 +1245,7 @@ is swallowed exactly as before, and now also recorded."
 
 Phoenix is last on purpose: Tasks 1–3 are all verified against an in-memory exporter, so none of them needed a container. This task's only job is somewhere for the spans to land.
 
-- [ ] **Step 1: Create the `phoenix` database**
+- **Step 1: Create the `phoenix` database**
 
 Phoenix creates its own tables but not its own database, and `POSTGRES_DB=midas` only ever created `midas`. The cluster already exists, so an `initdb` script would never run — create it directly:
 
@@ -1255,7 +1257,7 @@ docker compose exec -T db createdb -U midas phoenix
 
 Expected: the `SELECT` returns no rows the first time; `createdb` is silent on success. Re-running `createdb` errors with "already exists", which is safe to ignore.
 
-- [ ] **Step 2: Add the service to `docker-compose.yml`**
+- **Step 2: Add the service to `docker-compose.yml`**
 
 Insert after the `db` service block (before the `postgrest` comment block):
 
@@ -1297,7 +1299,7 @@ Then add the two env vars to the `midas` service's `environment:` block:
       OTEL_ENDPOINT: ${OTEL_ENDPOINT:-http://phoenix:6006/v1/traces}
 ```
 
-- [ ] **Step 3: Document the settings in `.env.example`**
+- **Step 3: Document the settings in `.env.example`**
 
 ```
 # ── Observability ────────────────────────────────────────────────────────
@@ -1310,7 +1312,7 @@ OTEL_ENDPOINT=http://phoenix:6006/v1/traces
 OTEL_SERVICE_NAME=midas
 ```
 
-- [ ] **Step 4: Bring it up and verify a span lands end to end**
+- **Step 4: Bring it up and verify a span lands end to end**
 
 ```bash
 docker compose up -d phoenix
@@ -1333,7 +1335,7 @@ print('sent')
 
 Expected: prints `sent`, and a `smoke_test` span appears at http://localhost:6006 within a few seconds.
 
-- [ ] **Step 5: Verify the fail-open promise against a real dead collector**
+- **Step 5: Verify the fail-open promise against a real dead collector**
 
 ```bash
 docker compose stop phoenix
@@ -1351,7 +1353,7 @@ docker compose start phoenix
 
 Expected: prints `survived a dead collector`, exit code 0. This is the single most important check in the plan — it is the difference between telemetry and an outage.
 
-- [ ] **Step 6: Write `docs/OBSERVABILITY.md`**
+- **Step 6: Write `docs/OBSERVABILITY.md`**
 
 ```markdown
 # Observability
@@ -1403,7 +1405,7 @@ costs a background retry and nothing else. Autopilot runs unattended, so this
 is a hard requirement, not a nicety — `tests/test_tracing.py` pins it.
 ```
 
-- [ ] **Step 7: Note the snapshot boundary in `CLAUDE.md`**
+- **Step 7: Note the snapshot boundary in `CLAUDE.md`**
 
 Append to the database section:
 
@@ -1414,12 +1416,12 @@ comes back with no trace history. That is intended: see
 `docs/OBSERVABILITY.md`.
 ```
 
-- [ ] **Step 8: Run the full suite**
+- **Step 8: Run the full suite**
 
 Run: `venv/bin/python -m pytest -q`
 Expected: the 7 pre-existing `*_live.py` failures only.
 
-- [ ] **Step 9: Commit**
+- **Step 9: Commit**
 
 ```bash
 git add docker-compose.yml .env.example docs/OBSERVABILITY.md CLAUDE.md
@@ -1441,7 +1443,7 @@ could not: stopping the collector and confirming a traced block still exits
 zero."
 ```
 
-- [ ] **Step 10: Hand off the office-machine deployment**
+- **Step 10: Hand off the office-machine deployment**
 
 The office machine has **no git checkout** — it runs `.env`, `docker-compose.yml`, and a `.bat`, hand-carried. The app image updates itself; these two files do not. So this task is not deployed until the user physically copies over:
 

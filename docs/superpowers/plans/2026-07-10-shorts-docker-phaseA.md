@@ -1,5 +1,7 @@
 # Shorts Docker Deployment (Phase A) Implementation Plan
 
+> **Executed, then partially retired.** The CPU-torch ML stack this plan put in the Docker image is still what runs on the deploy machine, but the bgutil PO-token sidecar and yt-dlp HTTP-provider mode it added were stripped back out when shorts cutting went NAS-only (`docker-compose.yml` still carries a comment on how to revive them) — see `chore(shorts): retire YouTube-URL download flow; NAS-only cutting`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Make the local shorts cutter (and autopilot shorts) run inside Midas's deployed Docker image on the dedicated Windows/amd64 machine, so `docker compose up -d` gives a working end-to-end cutter.
@@ -30,7 +32,7 @@
 **Interfaces:**
 - Produces: `ytdlp_options()` uses the bgutil **HTTP** provider (`youtubepot-bgutilhttp`) when env `BGUTIL_POT_HTTP_BASE_URL` is set (Docker); otherwise falls back to the local **script** provider (`youtubepot-bgutilscript`) when the script file exists (Mac); otherwise neither (graceful degradation).
 
-- [ ] **Step 1: Write the failing tests** — add to `tests/shorts/cutter/test_download.py`:
+- **Step 1: Write the failing tests** — add to `tests/shorts/cutter/test_download.py`:
 
 ```python
 def test_ytdlp_options_uses_http_provider_when_env_set(monkeypatch):
@@ -52,9 +54,9 @@ def test_ytdlp_options_falls_back_to_script_when_env_absent(monkeypatch):
     assert ("youtubepot-bgutilscript" in ea) == BGUTIL_POT_SCRIPT.is_file()
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `venv/bin/pytest tests/shorts/cutter/test_download.py -q` → FAIL (`youtubepot-bgutilhttp` KeyError).
+- **Step 2: Run to verify they fail** — `venv/bin/pytest tests/shorts/cutter/test_download.py -q` → FAIL (`youtubepot-bgutilhttp` KeyError).
 
-- [ ] **Step 3: Implement.** Add `import os` at the top of `download.py`, and change `ytdlp_options()`'s provider-selection tail (the `if BGUTIL_POT_SCRIPT.is_file():` block) to:
+- **Step 3: Implement.** Add `import os` at the top of `download.py`, and change `ytdlp_options()`'s provider-selection tail (the `if BGUTIL_POT_SCRIPT.is_file():` block) to:
 
 ```python
     http_base = os.getenv("BGUTIL_POT_HTTP_BASE_URL")
@@ -69,9 +71,9 @@ def test_ytdlp_options_falls_back_to_script_when_env_absent(monkeypatch):
     return options
 ```
 
-- [ ] **Step 4: Run tests** — `venv/bin/pytest tests/shorts/cutter/test_download.py -q && venv/bin/pytest tests/ -q`. Expected PASS.
+- **Step 4: Run tests** — `venv/bin/pytest tests/shorts/cutter/test_download.py -q && venv/bin/pytest tests/ -q`. Expected PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add app/shorts/cutter/download.py tests/shorts/cutter/test_download.py
@@ -88,7 +90,7 @@ git commit -m "feat: download supports bgutil HTTP PO-token provider (Docker) wi
 **Interfaces:**
 - Produces: an image with torch/opencv/faster-whisper/ultralytics/demucs importable, CPU-only, ffmpeg present. No node (HTTP provider is a sidecar).
 
-- [ ] **Step 1: Edit `Dockerfile`.** After the existing `RUN pip install --no-cache-dir -r requirements.txt` line, add a CPU-torch install then the rest of the ML deps:
+- **Step 1: Edit `Dockerfile`.** After the existing `RUN pip install --no-cache-dir -r requirements.txt` line, add a CPU-torch install then the rest of the ML deps:
 
 ```dockerfile
 # Local shorts cutter ML stack (CPU-only — see docs Phase A). Install torch from
@@ -101,7 +103,7 @@ RUN pip install --no-cache-dir torch==2.12.1 torchvision==0.27.1 torchaudio==2.1
 ```
 (The second install sees torch/vision/audio already satisfied at the pinned versions and installs the rest — opencv, faster-whisper, ultralytics, demucs, bgutil-ytdlp-pot-provider, etc.)
 
-- [ ] **Step 2: Local build smoke-test** (Docker Desktop must be running; this is a real build, several minutes):
+- **Step 2: Local build smoke-test** (Docker Desktop must be running; this is a real build, several minutes):
 
 ```bash
 cd ~/Documents/Github/Midas
@@ -110,7 +112,7 @@ docker run --rm --platform linux/amd64 midas-mltest python -c "import torch, cv2
 ```
 Expected: `ml ok 2.12.1`. If the CPU torch wheel for cp313/linux-amd64 isn't found, STOP and report — may need a torch version bump for the CPU index.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add Dockerfile
@@ -128,7 +130,7 @@ git commit -m "feat: Dockerfile installs CPU torch + shorts-cutter ML stack"
 **Interfaces:**
 - Produces: a `bgutil-provider` sidecar service; the `midas` service gets `BGUTIL_POT_HTTP_BASE_URL=http://bgutil-provider:4416`, `SHORTS_CACHE_DIR=/app/shorts_cache`, and a `shorts_cache` named volume mounted there.
 
-- [ ] **Step 1: Edit `docker-compose.yml`.** Add the sidecar service, and extend the `midas` service's `environment` and `volumes`:
+- **Step 1: Edit `docker-compose.yml`.** Add the sidecar service, and extend the `midas` service's `environment` and `volumes`:
 
 ```yaml
 services:
@@ -158,20 +160,20 @@ volumes:
   shorts_cache:
 ```
 
-- [ ] **Step 2: Edit `.env.example`.** Remove the `WAYINVIDEO_*` block (dead since the port). `BGUTIL_POT_HTTP_BASE_URL` and `SHORTS_CACHE_DIR` are set in compose `environment:` so they don't need `.env` entries, but add a documented commented line:
+- **Step 2: Edit `.env.example`.** Remove the `WAYINVIDEO_*` block (dead since the port). `BGUTIL_POT_HTTP_BASE_URL` and `SHORTS_CACHE_DIR` are set in compose `environment:` so they don't need `.env` entries, but add a documented commented line:
 
 ```
 # Set in docker-compose.yml (bgutil sidecar). Leave unset on the Mac to use the local node script.
 # BGUTIL_POT_HTTP_BASE_URL=http://bgutil-provider:4416
 ```
 
-- [ ] **Step 3: Validate compose syntax**
+- **Step 3: Validate compose syntax**
 
 ```bash
 cd ~/Documents/Github/Midas && docker compose config >/dev/null && echo "compose valid"
 ```
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add docker-compose.yml .env.example
@@ -188,16 +190,16 @@ git commit -m "feat: compose adds bgutil PO-token sidecar, shorts_cache volume, 
 **Interfaces:**
 - Produces: the published `ghcr.io/jugaadchhabra/midas:latest` is a single-arch **linux/amd64** image (the heavy ML image is not QEMU-emulated for arm64).
 
-- [ ] **Step 1: Edit the build step.** Change `platforms: linux/amd64,linux/arm64` to `platforms: linux/amd64`. (The QEMU setup step can stay; it's a no-op for a single native arch.)
+- **Step 1: Edit the build step.** Change `platforms: linux/amd64,linux/arm64` to `platforms: linux/amd64`. (The QEMU setup step can stay; it's a no-op for a single native arch.)
 
-- [ ] **Step 2: Commit**
+- **Step 2: Commit**
 
 ```bash
 git add .github/workflows/docker-publish.yml
 git commit -m "ci: build midas image amd64-only (ML image too heavy to emulate arm64)"
 ```
 
-- [ ] **Step 3: Note on CI build time.** The first ML image build will be slow (large layers). GHA layer cache (`cache-from/to: type=gha` already configured) makes subsequent builds fast. If the build exceeds the runner time limit, split the ML pip install into its own cached layer (already the case — it's a distinct `RUN`).
+- **Step 3: Note on CI build time.** The first ML image build will be slow (large layers). GHA layer cache (`cache-from/to: type=gha` already configured) makes subsequent builds fast. If the build exceeds the runner time limit, split the ML pip install into its own cached layer (already the case — it's a distinct `RUN`).
 
 ---
 
@@ -205,20 +207,20 @@ git commit -m "ci: build midas image amd64-only (ML image too heavy to emulate a
 
 **Files:** none (deploy + verify).
 
-- [ ] **Step 1: Merge this branch to main and push.** CI builds+pushes the new `:latest` (amd64, ML). Watch the Tests + Build-and-Push workflows go green (`gh run watch`). The ML build is slow the first time.
+- **Step 1: Merge this branch to main and push.** CI builds+pushes the new `:latest` (amd64, ML). Watch the Tests + Build-and-Push workflows go green (`gh run watch`). The ML build is slow the first time.
 
-- [ ] **Step 2: On DESIGN-PC7 (Windows):**
+- **Step 2: On DESIGN-PC7 (Windows):**
   1. `git pull` in the Midas repo checkout (to get the updated `docker-compose.yml` / `.env.example`).
   2. Ensure `.env` has the real secrets (Supabase, OpenRouter, client_secret.json present).
   3. `docker compose pull && docker compose up -d`.
   4. `docker compose ps` — both `midas` and `bgutil-provider` healthy.
   5. `docker compose logs -f midas` — confirm startup complete, autopilot scheduler started, no import errors.
 
-- [ ] **Step 3: Backfill duration + verify the manual path.** In the dashboard for a connected channel, trigger a **full sync** (so existing videos get `duration_seconds` populated for the autopilot picker). Then use the per-video **"Make shorts"** button on a long-form video and confirm the job walks DOWNLOADING→…→DONE and uploads clips as private (this proves the cutter + ffmpeg + the bgutil HTTP provider all work in the container).
+- **Step 3: Backfill duration + verify the manual path.** In the dashboard for a connected channel, trigger a **full sync** (so existing videos get `duration_seconds` populated for the autopilot picker). Then use the per-video **"Make shorts"** button on a long-form video and confirm the job walks DOWNLOADING→…→DONE and uploads clips as private (this proves the cutter + ffmpeg + the bgutil HTTP provider all work in the container).
 
-- [ ] **Step 4: Verify autopilot shorts fires.** Enable "Auto-generate shorts" on a channel (videos/day=1). Within a tick or two, confirm a `shorts_jobs` row with `autopilot_generated=true` appears for the newest un-cut long-form video **under 4 min**, and that compilations are skipped. Confirm top-N upload (only the cap's worth of clips upload; the rest sit PENDING).
+- **Step 4: Verify autopilot shorts fires.** Enable "Auto-generate shorts" on a channel (videos/day=1). Within a tick or two, confirm a `shorts_jobs` row with `autopilot_generated=true` appears for the newest un-cut long-form video **under 4 min**, and that compilations are skipped. Confirm top-N upload (only the cap's worth of clips upload; the rest sit PENDING).
 
-- [ ] **Step 5: Disk check.** After a few cuts, `docker system df` and check the `shorts_cache` volume size. If it grows unbounded, add a periodic cleanup (out of scope here — note it as an ops follow-up: prune `shorts_cache/<job>` dirs older than N days).
+- **Step 5: Disk check.** After a few cuts, `docker system df` and check the `shorts_cache` volume size. If it grows unbounded, add a periodic cleanup (out of scope here — note it as an ops follow-up: prune `shorts_cache/<job>` dirs older than N days).
 
 ## Out of scope (follow-ups)
 
