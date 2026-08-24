@@ -2,7 +2,7 @@
 """Load the NDJSON export from scripts/export_supabase.py into local Postgres.
 
     docker compose up -d db postgrest
-    DATABASE_URL=postgresql://midas:<pw>@localhost:5432/midas \
+    DATABASE_URL=postgresql://midas:<pw>@localhost:55432/midas \
       python scripts/apply_migrations.py      # schema first
     DATABASE_URL=... python scripts/import_to_local.py
 

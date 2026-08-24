@@ -46,7 +46,10 @@ def _dsn() -> str:
     if not dsn:
         sys.exit(
             "DATABASE_URL is not set.\n"
-            "  local:  postgresql://midas:<pw>@localhost:5432/midas\n"
+            # 55432, not 5432: docker-compose publishes the db on the high port
+            # precisely because this machine already runs its own Postgres on
+            # 5432. Copying 5432 out of this message would migrate that one.
+            "  local:  postgresql://midas:<pw>@localhost:55432/midas\n"
             "  compose: it is set for you in docker-compose.yml"
         )
     return dsn

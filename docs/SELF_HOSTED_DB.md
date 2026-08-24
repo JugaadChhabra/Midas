@@ -57,7 +57,7 @@ docker compose up -d db postgrest
 ### 3. Create the schema
 
 ```bash
-DATABASE_URL="postgresql://midas:$POSTGRES_PASSWORD@localhost:5432/midas" \
+DATABASE_URL="postgresql://midas:$POSTGRES_PASSWORD@localhost:55432/midas" \
   python scripts/apply_migrations.py
 ```
 
@@ -92,7 +92,7 @@ pg_dump --no-owner --no-privileges --data-only \
         "postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres" \
         --file supabase-data.sql
 
-psql "postgresql://midas:$POSTGRES_PASSWORD@localhost:5432/midas" \
+psql "postgresql://midas:$POSTGRES_PASSWORD@localhost:55432/midas" \
      -f supabase-data.sql
 ```
 
