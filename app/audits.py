@@ -20,7 +20,7 @@ from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
 # revisiting CONTENT_INTELLIGENCE_ROADMAP.md.
-from app.transcripts import fetch_transcript, lang_display_name
+from app.transcripts import fetch_transcript, lang_display_name, youtube_language_code
 from app.youtube_client import (
     youtube_for_channel,
     yt_videos_update,
@@ -506,9 +506,13 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         "tags": new_tags,
         "categoryId": "27",  # Education
     }
-    if lang:
-        snippet["defaultLanguage"] = lang
-        snippet["defaultAudioLanguage"] = lang
+    # The stored language is the CONTENT language, which may be ISO 639-3 (a
+    # dialect with no two-letter code). YouTube documents ISO 639-1, so adapt
+    # at the boundary rather than storing a lie the audit prompt would read.
+    yt_lang = youtube_language_code(lang)
+    if yt_lang:
+        snippet["defaultLanguage"] = yt_lang
+        snippet["defaultAudioLanguage"] = yt_lang
 
     payload = {
         "id": video["id"],
@@ -810,9 +814,12 @@ def revert_audit(audit_id: int):
         "tags": audit.get("tags_before") or [],
         "categoryId": "27",
     }
-    if lang:
-        snippet["defaultLanguage"] = lang
-        snippet["defaultAudioLanguage"] = lang
+    # Same adaptation as the apply path. A revert restates the whole snippet,
+    # so a code YouTube rejects here would strand the video on the new metadata.
+    yt_lang = youtube_language_code(lang)
+    if yt_lang:
+        snippet["defaultLanguage"] = yt_lang
+        snippet["defaultAudioLanguage"] = yt_lang
     payload = {"id": video["id"], "snippet": snippet,
                "status": {"selfDeclaredMadeForKids": SELF_DECLARED_MADE_FOR_KIDS}}
 

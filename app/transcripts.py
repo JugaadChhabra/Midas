@@ -26,6 +26,31 @@ _LANG_NAMES = {
     "en": "English", "hi": "Hindi", "mr": "Marathi", "bn": "Bengali",
     "ta": "Tamil", "te": "Telugu", "gu": "Gujarati", "kn": "Kannada",
     "ml": "Malayalam", "pa": "Punjabi", "ur": "Urdu",
+    # ISO 639-3. No two-letter code exists — see _NON_ISO_639_1 below.
+    "bgc": "Haryanvi",
+}
+
+#: Content languages with no ISO 639-1 code, and the nearest code YouTube takes.
+#:
+#: `channels.default_language` serves two consumers that disagree about what a
+#: language code is. The audit prompt wants the language the AUDIENCE speaks, so
+#: the model writes in it. YouTube's `snippet.defaultLanguage` /
+#: `defaultAudioLanguage` — written on every apply and every revert — documents
+#: acceptance of "any supported application language or most other ISO 639-1:2002
+#: language codes", which is the two-letter set.
+#:
+#: Haryanvi forces them apart: a real audience, an ISO 639-3 code (`bgc`), and no
+#: 639-1 code at all. Storing `hi` would satisfy YouTube while telling the model
+#: to write standard Hindi — the wrong dialect for the channel. So the column
+#: holds the truth and this table adapts it at the boundary, mapping to the
+#: macrolanguage YouTube can express.
+#:
+#: Only add an entry you have confirmed has no 639-1 code. A code absent from
+#: here is passed through untouched: letting YouTube reject an unknown code
+#: fails loudly, whereas guessing a mapping mislabels the video to every viewer
+#: silently and permanently.
+_NON_ISO_639_1 = {
+    "bgc": "hi",     # Haryanvi -> Hindi
 }
 
 
@@ -33,6 +58,17 @@ def lang_display_name(code: str | None) -> str:
     if not code:
         return "unknown"
     return _LANG_NAMES.get(code, code)
+
+
+def youtube_language_code(code: str | None) -> str | None:
+    """The code to send YouTube for a channel's content language.
+
+    Returns None for an absent language so the caller omits the field rather
+    than guessing one — `audits.py` already treats None that way.
+    """
+    if not code:
+        return None
+    return _NON_ISO_639_1.get(code, code)
 
 
 def _build_proxy_config() -> Optional[ProxyConfig]:
