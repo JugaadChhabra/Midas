@@ -1,206 +1,229 @@
-# Deterministic format scorers
+# Format properties, measured against outcomes
 
-Date: 2026-08-24
+Date: 2026-08-24 (rewritten 2026-08-25 — see *What changed*)
 Status: approved, not started
 Implements step 4 of `2026-08-23-observability-evidence-loop-design.md`. Depends
 on nothing — no database, no office machine, no Phoenix.
 
-## The evidence
+## What changed, and why
 
-Every number below was measured on 2026-08-24 from `migration_export/audits.ndjson`
-(exported 2026-08-08), over the 2,617 audits with `status = applied`.
+The first version of this document specified a **compliance checker**: take the
+house format, freeze each of its rules into a scorer, report pass/fail. That was
+wrong, and the objection that killed it is worth recording because it applies to
+everything built on top of this.
 
-The house format says a description carries **exactly 15 hashtags** — 3 on the
-first line, which YouTube surfaces above the title, and 12 at the bottom.
-Fifteen is not a preference: **YouTube ignores every hashtag on a video that
-carries more than 15**, so 16 hashtags and 0 hashtags are the same thing to a
-viewer.
+Enforcing the house format cements it. The format is a set of human priors —
+the title template, the five-block description order, *exactly* 15 hashtags
+rather than *at most* 15, the bilingual layering — and **not one of them has
+ever been tested.** `reflection.py` calls them `NON-NEGOTIABLE HOUSE FORMAT` and
+instructs the model to "never weaken, reorder, or drop any of it." Writing an
+enforcement layer under that would have moved the priors from prose into code,
+where they are harder to dislodge, not easier.
 
-Two silent regressions, in opposite directions, three months apart:
+That matters because the format is not visibly winning. Across the 171 audits
+that carry a measured CTR verdict: **21 win, 147 neutral, 3 regression.** The
+house format is an untested hypothesis being defended as a constraint.
 
-| Applied | Channel | >15 hashtags | exactly 15 | <15 |
-|---|---|---|---|---|
-| 2026-05 | `UCr5-…` (mr) | **1332 (92.5%)** | 8 | 100 |
-| 2026-06 | `UCr5-…` (mr) | **490 (90.1%)** | 39 | 15 |
-| 2026-07 | `UC8Kjo…` (pa) | 0 | 8 | **568 (98.6%)** |
-| 2026-08 | `UCc4Tv…` | 0 | 53 | 4 |
+So the job is not to enforce it. **The job is to make it falsifiable.** Measure
+what shape each audit actually took, join that against what the shape earned,
+and let each rule justify its own existence on evidence. A rule that survives
+has earned its place; one that does not gets dropped, and the model gets that
+much more room.
 
-**May–June: 1,822 videos were published with every hashtag ignored.** The model
-was emitting 20–45 hashtags — 738 audits emitted exactly 30 — and nothing
-capped them. `cap_description_hashtags` did not exist until `dbef839`
-(2026-07-30).
+## Two kinds of constraint, and only one of them is a rule
 
-**July: the opposite failure.** 169 audits emitted **zero** hashtags, most of
-the rest 3–5. The first-line-3 rule — the one that puts hashtags above the
-title — was satisfied in **1.4%** of that month's audits.
+The distinction the first draft collapsed:
 
-Neither regression was detected by anything. Both are a single integer per
-audit, computable offline, with no model in the loop.
+**Platform physics.** YouTube ignores *every* hashtag on a video carrying more
+than 15. Titles hard-truncate at 100 characters. Tags cap at 500 characters
+total. These are properties of the environment, not opinions. A model emitting
+30 hashtags has not exercised judgement — it has shipped a bug, and this
+codebase has the receipts: between 2026-05 and 2026-06, **1,822 videos were
+published with every hashtag ignored**, because the model was emitting 20–45
+(738 audits emitted exactly 30) and nothing capped them until `dbef839`
+(2026-07-30). These stay pass/fail forever.
 
-### Why the persisted row cannot answer this now
+**Unvalidated priors.** Everything else. The title template. The block order.
+The exact-15 target. The keywords line. These become *measured properties* with
+an outcome attached, never pass/fail.
 
-August looks healthy: 53 of 57 audits carry exactly 15. That number is
-uninterpretable. `cap_description_hashtags` runs inside `AuditSuggestion._make`,
-so it has already trimmed the description before `to_audit_row()` persists it. A
-model emitting 15 and a model emitting 30 produce a **byte-identical row**.
+## The evidence this was built from
 
-So the fix destroyed the evidence of its own necessity. The cap is correct and
-must stay — it is what stands between a prompt regression and 1,822 more videos
-with dead hashtags — but it means the count has to be measured **before**
-normalisation or not at all. This is the single highest-value scorer in this
-document, and it is roughly four lines of code.
+Measured 2026-08-25 from `migration_export/audits.ndjson` (exported 2026-08-08),
+over the 2,617 audits with `status = applied`.
 
-## The constraint that shapes everything: score per channel, against its own prompt
+| Applied | Channel | `default_language` | >15 hashtags | =15 | <15 |
+|---|---|---|---|---|---|
+| 2026-05 | `UCr5-…` | `mr` | **1332 (92.5%)** | 8 | 100 |
+| 2026-06 | `UCr5-…` | `mr` | **490 (90.1%)** | 39 | 15 |
+| 2026-07 | `UC8Kjo…` | `pa` | 0 | 8 | **568 (98.6%)** |
+| 2026-08 | `UCc4Tv…` | **NULL** | 0 | 53 | 4 |
 
-While gathering the evidence above I produced a wrong finding and caught it. The
-regional-script rate in titles is ~99% in May–July and **3.5%** in August, which
-reads as a catastrophic regression. It is not. Each month is a different
-channel:
+Two silent regressions in opposite directions, three months apart, neither
+detected by anything. May–June is the hashtag overflow above. July is its
+inverse: **169 audits emitted zero hashtags**, most of the rest 3–5, and the
+first-line-3 rule — the hashtags a viewer sees above the title — was satisfied
+in **1.4%** of that month's audits.
 
-| Channel | `default_language` |
-|---|---|
-| `UCr5-YUqBiW7PUmeAtxUWuRg` | `mr` (Marathi) |
-| `UC8KjoL0Z9mTHKqB6gFutkJw` | `pa` (Punjabi) |
-| `UCc4Tv_DEGDEKrKAt-vyVNmw` | **`None`** → `audit_video` falls back to `"en"` |
+Both are one integer per audit, computable offline, no model in the loop.
 
-August's audits are an English-language channel correctly not emitting Devanagari.
-The same confound inflates the title-template rate from 0% to 73.7% across the
-same boundary.
+### The persisted row cannot answer this today
 
-Two consequences, both binding:
+August looks healthy: 53 of 57 at exactly 15. **That number is uninterpretable.**
+`cap_description_hashtags` runs inside `AuditSuggestion._make`, before
+`to_audit_row()` persists anything, so a model emitting 15 and a model emitting
+30 write a byte-identical row. The fix destroyed the evidence of its own
+necessity.
 
-1. **A scorer must be evaluated against the prompt that actually ran**, resolved
-   per channel (`audit_configs.generated_prompt`, or `shorts_prompt`, or
-   `DEFAULT_PROMPT`), never against a single global house format. `audits.py`
-   already records which prompt was used; `prompt_version_id` attributes it.
-2. **Cross-channel aggregate rates are not a signal.** A comparison is only
-   meaningful within one channel, or within one prompt version. Any report that
-   averages a rule's pass rate across channels will manufacture regressions out
-   of language differences, exactly as my first pass did.
+The cap is correct and stays — it is what stands between a prompt regression and
+1,822 more dead-hashtag videos. But the count has to be captured **before**
+normalisation or not at all.
 
-Not every rule is channel-dependent. The hashtag ceiling is a YouTube platform
-rule and applies to every channel identically. The rules split cleanly on this
-axis, and the split is what the design turns on.
+### A confound that nearly became a finding
 
-## What gets scored
+Regional-script presence in titles runs ~99% May–July and **3.5%** in August,
+which reads as catastrophic. It is not: each month is a different channel, and
+August's is `UCc4Tv_DEGDEKrKAt-vyVNmw` — *Taarak Mehta Ka Ooltah Chashmah
+Baalgeet Haryanvi* — whose `default_language` is NULL, so `audit_video` falls
+back to `"en"` (`app/audits.py:388`). The same confound inflates the
+title-template rate from 0% to 73.7% across the same boundary.
 
-### Universal rules — platform facts, identical for every channel
+**Cross-channel aggregates are not a signal.** Any comparison must hold the
+channel fixed, or it manufactures regressions out of language differences.
 
-These need no prompt context and cannot produce a false alarm from a language
-difference.
+This confound also exposed a live content bug — see open question 1.
 
-- **`hashtags_precap`** — the count *before* `cap_description_hashtags` runs.
-  Fails above 15. This is the rule the whole document exists for.
-- **`hashtags_exact_15`** — reports the count against the house target. Advisory
-  where a channel's live prompt does not demand 15; see below.
-- **`safety`** — delegate to `AuditSuggestion.rejection()` directly, never a
-  reimplementation, so the eval and the production apply gate cannot drift. It
-  already checks title ≤100 chars, description ≤5000, tags a list of strings,
-  ≤30 tags, ≤500 tag-characters.
-- **`json_intact`** — did the response parse without `json_repair` or the
-  brace-slice rescuing it. The tracing work already emits these as span
-  attributes; this reads the same facts offline for a candidate prompt that has
-  never run in production.
+## What gets measured
 
-### Channel-dependent rules — require the live prompt
+A **property vector per audit**, not a verdict. The unit of output is "this
+audit had 30 hashtags, 3 on the first line, a title matching the template, 315
+tag-characters," never "this audit failed rule 4."
 
-Each of these must resolve the channel's own prompt and skip, not fail, when
-that prompt does not assert the rule.
+`app/verdicts.py` already has the neighbouring concept: `levers()` says *which
+fields moved*. This extends it to *how they moved*. The two compose — a lever
+says the title changed, a property says it changed into the template shape.
 
-- **`first_line_3_hashtags`** — 1.4% in July. The rule exists because these are
-  the hashtags a viewer actually sees.
-- **`description_blocks`** — the five blocks present and in order: 3 hashtags,
-  English description, regional description, a Keywords line, 12 hashtags.
-- **`regional_script_present`** — a codepoint-range check against the channel's
-  `default_language`, not a heuristic and not a language-detection model.
-  **Skipped entirely when `default_language` is null**, which is the state
-  `UCc4Tv…` is in today.
-- **`title_template`** — matches the channel's prompt's title shape. For the
-  nursery-rhyme default that is `[regional] | [english] | [theme] Nursery 3D
-  Rhymes`.
-- **`tag_budget`** — total tag characters within a target band. Under 200 is a
-  wasted budget, not a pass; the observed medians are 315 / 324 / 217 / 392 by
-  month against a 500 ceiling.
+**Platform gates** (pass/fail, universal, no prompt context needed):
+- `hashtags_precap` — the count *before* `cap_description_hashtags` runs.
+  Above 15 is a defect on any channel. The single highest-value measurement
+  here, and roughly four lines of code.
+- `safety` — delegate to `AuditSuggestion.rejection()` directly, never a
+  reimplementation, so this and the production apply gate cannot drift.
+- `json_intact` — did the response parse without `json_repair` or the
+  brace-slice rescuing it. The tracing work emits these as span attributes for
+  live calls; this reads the same facts for a candidate prompt that has never
+  run in production.
 
-### Explicitly not scored
+**Measured properties** (no pass/fail; recorded with the outcome):
+- `hashtag_count`, `first_line_hashtag_count`
+- `title_matches_channel_template` — against the channel's *own* live prompt,
+  resolved per channel, never a global format. Null when the prompt asserts no
+  template.
+- `description_block_order` — which of the five blocks are present, in order.
+- `regional_script_present` — a codepoint-range check against the channel's
+  `default_language`. **Null, not false, when that language is NULL** — the
+  confound above is exactly this case.
+- `tag_char_count`, `tag_count`
+- `title_length`
 
-- **Anything requiring a judgement about quality.** No LLM. This document is
-  entirely deterministic, and that is what makes its output trustworthy enough
-  to gate on later. The judge is deferred in the parent spec with its own
-  re-entry criterion (≥30 regression verdicts).
-- **Whether a suggestion will earn CTR.** Not knowable offline. A format scorer
-  says the output is well-formed, never that it is good.
+Every property is also computed for the **pre-change** state (`title_before`,
+`description_before`, `tags_before`) so the question can be "did moving this
+property help?" rather than "do winners have this property?" The second question
+is answerable by any correlation; only the first is worth acting on.
+
+## Joining properties to outcomes
+
+The point of the whole document. For each audit carrying a measured verdict,
+emit its property vector alongside `measurement_status` and `ctr_delta`, so a
+question like *"does matching the title template correlate with a win, within
+this channel?"* becomes a query rather than an argument.
+
+**What this can and cannot tell you, stated plainly.** The joinable set today is
+**171 audits** — every one from a single channel, `UC8KjoL0Z9mTHKqB6gFutkJw`,
+with 21 wins and 3 regressions. That is not enough to conclude anything about
+any individual property, and this document does not pretend otherwise. Three
+consequences:
+
+1. **This ships as an accruing asset, not an answer.** Its output is a table
+   that gets more informative every month once the evidence loop is reconnected
+   (step 1 of the parent spec).
+2. **No property may be acted on from a single channel's data.** Format effects
+   and channel effects are perfectly confounded at n=1 channel.
+3. **Report effect sizes with counts, never bare percentages.** "3 of 4 audits
+   with property X won" must never render as "75%."
+
+A property that shows no effect after a few hundred verdicts across more than
+one channel is a candidate for removal from the prompt — which is the mechanism
+by which the model gets more room, on evidence.
 
 ## Shape
 
-`app/scorers.py` — pure functions, no I/O, no database, no network. Each takes a
-suggestion (and, for channel-dependent rules, a resolved prompt context) and
-returns a typed result: rule name, pass/fail/skip, the observed value, and the
-expected one. Skip is a first-class outcome, not a silent pass — a rule that
-cannot apply must say so, or a report of "100% passing" will hide the fact that
-half the rules never ran.
+`app/format_properties.py` — pure functions, no I/O, no network, no database.
+Takes a suggestion plus a resolved channel context; returns a typed property
+vector. Null is a first-class value meaning "not applicable here," never
+silently false — a report of "100% present" must not be able to hide a property
+that was never evaluated.
 
-`scripts/score_audits.py` — runs the scorers over a set of audits and prints a
-per-channel, per-rule table. Read-only. No production write path, no scheduler
-entry. It cannot affect autopilot.
+`scripts/audit_properties.py` — computes vectors over a set of audits and emits
+a per-channel table joined to outcomes. Read-only. No scheduler entry, no
+production write path. It cannot affect autopilot.
 
-Two input modes, because they answer different questions:
+Two input modes, answering different questions:
 
-- **Historical** — score existing `audits` rows to see how a live prompt has
-  been behaving. This is what would have surfaced both regressions above.
-  Limitation, stated plainly: for audits applied after 2026-07-30, the
-  `hashtags_precap` rule cannot run, because the stored description is already
-  capped. It reports `skip`, not `pass`.
-- **Fresh** — run a candidate prompt against a frozen video sample and score the
-  output before it is persisted, which is the only way `hashtags_precap` gets a
-  real answer.
-
-The frozen sample is load-bearing: comparing two prompt versions on different
-videos is not a comparison. Stratify across channels so the per-channel
-requirement above is exercisable.
+- **Historical** — vectors over existing `audits` rows, which is what would have
+  surfaced both regressions above. Honest limitation: for audits applied after
+  2026-07-30, `hashtags_precap` returns **null, not a value**, because the
+  stored description is already capped.
+- **Fresh** — run a candidate prompt over a frozen, channel-stratified video
+  sample and compute vectors before persistence, which is the only way
+  `hashtags_precap` gets a real answer. Frozen is load-bearing: two prompt
+  versions compared on different videos is not a comparison.
 
 ## Testing
 
-Table-driven per rule, with the fixtures drawn from the real failures:
+Table-driven, fixtures drawn from the real failures:
 
-- a description with 22 hashtags must score **fail** on `hashtags_precap`
-  **despite** `cap_description_hashtags` normalising it to 15 — this is the
-  test that pins the reason this work exists;
-- a description with 0 hashtags (July's most common shape, 169 audits) must fail
-  both `hashtags_exact_15` and `first_line_3_hashtags`;
-- an English-language channel with `default_language = None` must **skip**
-  `regional_script_present`, not fail it — the false alarm this design is built
-  to avoid;
-- `#मराठी` must count as one hashtag: `_HASHTAG_RE` is deliberately
-  `#[^\s#]+` rather than `#\w+`, because `\w` excludes Devanagari combining
-  marks and would truncate the regional hashtags the house format is built
-  around;
-- `safety` must agree with `AuditSuggestion.rejection()` on every fixture, by
-  calling it rather than restating its thresholds.
+- 22 hashtags must report `hashtags_precap = 22` and a platform-gate failure
+  **despite** `cap_description_hashtags` normalising the description to 15 —
+  the test that pins why this exists;
+- 0 hashtags (July's most common shape, 169 audits) must report `0`, not null;
+- a channel with `default_language = NULL` must report
+  `regional_script_present = null`, not `false` — the confound this design is
+  built to avoid, and the one that nearly became a published finding;
+- `#मराठी` counts as one hashtag: `_HASHTAG_RE` is deliberately `#[^\s#]+`
+  rather than `#\w+`, because `\w` excludes Devanagari combining marks and would
+  split the regional hashtags the format is built around
+  (`app/audit_suggestion.py:45`);
+- the platform gate must agree with `AuditSuggestion.rejection()` on every
+  fixture by *calling* it, not by restating its thresholds.
 
 ## Open questions
 
-1. **Is `UCc4Tv…`'s null `default_language` deliberate?** It is the autopilot
-   channel. `audit_video` silently falls back to `"en"`, so it currently gets
-   English-only metadata. If that channel is meant to be regional, this is a
-   live content bug affecting every audit it has ever produced — and it is
-   invisible for exactly the same reason the hashtag counts were. Needs a human
-   answer, not a code change.
-2. **What is the right tag-character band?** 500 is YouTube's ceiling and is
-   already enforced by `rejection()`. The lower bound is a judgement about
-   wasted budget, and the observed medians (217–392) suggest no channel is
-   close to the ceiling. Pick a number only after looking at whether tag count
-   correlates with measured CTR — which needs the evidence loop running, so
-   this rule ships advisory-only.
-3. **Should `hashtags_exact_15` fail or warn when a channel's prompt does not
-   demand 15?** Reflection can rewrite a prompt within the house format's rails,
-   and the rails are asserted as prose. Until a prompt's assertions are
-   machine-readable, this rule is advisory outside the default prompt.
+1. **`UCc4Tv_DEGDEKrKAt-vyVNmw` — "Taarak Mehta Ka Ooltah Chashmah Baalgeet
+   Haryanvi" — has `default_language = NULL` and is the only autopilot-enabled
+   channel.** `audit_video` falls back to `"en"`, so all 57 of its August
+   applies got English-only metadata for a Haryanvi audience. This is a live
+   content bug, not a scoring question, and it is invisible for exactly the
+   reason the hashtag counts were. One field fixes it; a human picks the value.
+2. **Which properties should reflection be allowed to change?** Today the
+   house-format block forbids all of them. As evidence accrues, each property
+   that shows no effect is a candidate for release from that block. The
+   mechanism for deciding — and who decides — is not designed here.
+3. **Does the tag-character budget matter at all?** Observed medians are
+   217–392 against a 500 ceiling, so no channel is close. Whether more tag
+   characters earn CTR is exactly the kind of question this join exists to
+   answer, and exactly the kind that cannot be answered at n=171.
 
 ## What this deliberately does not do
 
-It does not gate prompt promotion. The parent spec defers that until a judge can
-be calibrated, and gating on format alone would only assert that a candidate is
-well-formed — which the apply path already enforces through `rejection()`. These
-scorers report. Wiring them into `_promote_version` is a separate decision that
-should be made once there is evidence they predict anything.
+It does not gate prompt promotion, and it does not enforce the house format. The
+parent spec defers gating until a judge can be calibrated; gating on format
+alone would assert only that a candidate is well-formed, which
+`AuditSuggestion.rejection()` already enforces at apply time.
+
+It also does not make Midas agentic. That needs the audit model to gather
+information nobody pre-selected and to make decisions nobody pre-decided — tools
+and a loop, designed separately. This document's contribution to that is
+narrower and prior: it turns "the house format is non-negotiable" into a claim
+with evidence attached, so the constraints an agent inherits are the ones that
+earned their place.
