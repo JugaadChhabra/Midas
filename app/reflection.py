@@ -87,36 +87,32 @@ def _build_perf_report(channel_id: str) -> dict | None:
     if not audits:
         return None
 
-    now = datetime.now(timezone.utc)
     enriched = []
 
     for a in audits:
         status = a.get("measurement_status")
         if status not in MEASURED_STATUSES:
             continue
-        applied_at = a.get("applied_at")
-        try:
-            ap = datetime.fromisoformat((applied_at or "").replace("Z", "+00:00"))
-        except ValueError:
-            continue
         # `neutral` can legitimately carry no delta (pre_ctr was 0, or post
         # impressions were under the floor). It is still a measured verdict, so
         # it counts toward the win rate — it just can't contribute to the median.
-        verdict = verdicts.from_audit(a)
-        delta = verdict.ctr_delta if verdict else None
-        moved = verdicts.levers(a)
+        ro = verdicts.readout(a)
+        # No usable apply time means no recency to judge on — skip it, as the
+        # hand-rolled date-parse here used to on a ValueError.
+        if ro.days_since_apply is None:
+            continue
         enriched.append({
             "audit_id": a["id"],
             "measurement_status": status,
-            "ctr_delta_pct": (delta * 100.0) if delta is not None else None,
-            "ctr_delta": delta,
+            "ctr_delta_pct": ro.ctr_delta_pct,
+            "ctr_delta": ro.ctr_delta,
             "title_before": a.get("title_before"),
             "title_after": a.get("suggested_title"),
-            "title_changed": verdicts.TITLE in moved,
-            "desc_changed": verdicts.DESCRIPTION in moved,
-            "tags_changed": verdicts.TAGS in moved,
+            "title_changed": ro.title_moved,
+            "desc_changed": ro.description_moved,
+            "tags_changed": ro.tags_moved,
             "ai_reasoning": a.get("ai_reasoning"),
-            "is_recent": (now - ap) < timedelta(days=14),
+            "is_recent": ro.days_since_apply < 14,
         })
 
     if len(enriched) < _MIN_DATA_POINTS:
@@ -137,9 +133,9 @@ def _build_perf_report(channel_id: str) -> dict | None:
     median_delta = verdicts.median_ctr_delta_pct(r["ctr_delta"] for r in enriched)
 
     def _lever_avg(key: str) -> float | None:
-        sub = [r["ctr_delta_pct"] for r in enriched
-               if r[key] and r["ctr_delta_pct"] is not None]
-        return round(sum(sub) / len(sub), 1) if sub else None
+        # Population: every measured audit that moved this lever. The arithmetic
+        # (aggregate raw, round once) is app.verdicts', shared with the page.
+        return verdicts.lever_average(r["ctr_delta"] for r in enriched if r[key])
 
     # Rank on the delta; verdict-only rows (no delta) sort to the middle so they
     # never masquerade as the best or worst example shown to the LLM.

@@ -76,3 +76,22 @@ does not.
 
 These string values are persisted and mirrored in SQL and JS. They may not be
 renamed — see `app/status_vocab.py` and `tests/test_status_vocab.py`.
+
+## Readout
+
+One audit and what its verdict means, as a single row: the relative CTR change
+(raw fraction and percentage), the pre/post window rates, which levers it moved
+(title / description / tags), and how long since it was applied. The
+verdict-derived fields read None until the measurement window closes, so a
+Readout describes an audit still awaiting measurement as readily as a measured
+one.
+
+The **prompt loop** (`reflection`) and the **performance page** (`performance`)
+both read audits this way. The derivation is shared — `app.verdicts.readout` —
+so the two surfaces cannot describe the same audit differently; only the wire
+key-names stay at each edge (`desc_changed` in the prompt vs
+`description_changed` in the performance API, deliberately, see `app/verdicts.py`).
+
+Recency is carried as raw `days_since_apply`, not a flag: what counts as recent
+is a caller's policy (the loop's 14-day window), not a property of the verdict.
+Owner: `app/verdicts.py` (`Readout`, `readout`, `lever_average`).

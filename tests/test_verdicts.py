@@ -244,6 +244,79 @@ def test_rollup_reports_all_three_together():
     assert r["distribution"] == {"win": 1, "neutral": 1, "regression": 1, "total": 3}
 
 
+# ── the readout ────────────────────────────────────────────────────────────
+
+def test_readout_carries_the_verdict_derived_numbers():
+    ro = verdicts.readout(_audit(
+        applied_at="2026-07-01T00:00:00+00:00",
+        title_before="old", suggested_title="new",
+    ))
+    assert ro.ctr_delta == 0.5
+    assert ro.ctr_delta_pct == pytest.approx(50.0)
+    assert ro.title_moved is True
+    assert ro.description_moved is False
+    assert ro.tags_moved is False
+
+
+def test_readout_of_an_unmeasured_audit_is_none_but_still_reads_levers():
+    """A not_applicable audit has no verdict — but the page still shows which
+    levers it moved, so those come off the row, not the verdict."""
+    ro = verdicts.readout({
+        "id": 1, "measurement_status": "not_applicable",
+        "applied_at": "2026-07-01T00:00:00+00:00",
+        "tags_before": ["a"], "suggested_tags": ["b"],
+    })
+    assert ro.verdict is None
+    assert ro.ctr_delta is None
+    assert ro.ctr_delta_pct is None
+    assert ro.pre_ctr is None and ro.post_ctr is None
+    assert ro.tags_moved is True
+
+
+def test_readout_ctr_delta_pct_is_unrounded():
+    """Rounding is the edge's job — the readout hands over full precision."""
+    ro = verdicts.readout(_audit(
+        measurement_result=_result(**{verdicts.CTR_DELTA: 0.12345})))
+    assert ro.ctr_delta_pct == pytest.approx(12.345)
+
+
+def test_readout_pre_and_post_ctr_come_from_the_windows():
+    ro = verdicts.readout(_audit(measurement_result=_result()))
+    assert ro.pre_ctr == 0.04
+    assert ro.post_ctr == 0.06
+
+
+def test_readout_days_since_apply_is_none_without_a_usable_apply_time():
+    assert verdicts.readout(_audit(applied_at=None)).days_since_apply is None
+    assert verdicts.readout(_audit(applied_at="not-a-date")).days_since_apply is None
+
+
+def test_readout_days_since_apply_counts_forward_from_apply():
+    from datetime import datetime, timedelta, timezone
+    two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    d = verdicts.readout(_audit(applied_at=two_days_ago)).days_since_apply
+    assert d == pytest.approx(2.0, abs=0.05)
+
+
+# ── lever_average ──────────────────────────────────────────────────────────
+
+def test_lever_average_aggregates_raw_then_rounds_once():
+    """Not round-then-average. Per-row percentages 0.24, 0.24, 0.29 rounded to
+    one place first (0.2, 0.2, 0.3) average to 0.2; aggregating the raw fractions
+    and rounding once gives 0.3 — this pins the second, which is what the prompt
+    loop and the page now share."""
+    assert verdicts.lever_average([0.0024, 0.0024, 0.0029]) == pytest.approx(0.3)
+
+
+def test_lever_average_drops_none_rather_than_counting_zero():
+    assert verdicts.lever_average([0.10, None, 0.20]) == pytest.approx(15.0)
+
+
+def test_lever_average_of_nothing_is_none():
+    assert verdicts.lever_average([]) is None
+    assert verdicts.lever_average([None, None]) is None
+
+
 # ── nobody re-solves it ───────────────────────────────────────────────────
 
 APP = Path(__file__).resolve().parents[1] / "app"

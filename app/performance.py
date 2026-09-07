@@ -1,6 +1,5 @@
 import csv
 import io
-from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -13,22 +12,6 @@ router = APIRouter(tags=["performance"])
 
 # Loop 1 verdicts that count as evidence. `not_applicable` means the audit was
 # never measured, not that it was neutral.
-
-
-def _parse_iso(s: str | None) -> datetime | None:
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _days_since(iso: str | None) -> float | None:
-    dt = _parse_iso(iso)
-    if not dt:
-        return None
-    return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400.0, 2)
 
 
 def _pct(delta: float | None, base: float | None) -> float | None:
@@ -120,12 +103,12 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
         d_views = None if view_at is None else view_now - view_at
         d_likes = None if like_at is None else like_now - like_at
         d_comments = None if comment_at is None else comment_now - comment_at
-        days = _days_since(a.get("applied_at"))
 
-        moved = verdicts.levers(a)
-        title_changed = verdicts.TITLE in moved
-        desc_changed = verdicts.DESCRIPTION in moved
-        tags_changed = verdicts.TAGS in moved
+        ro = verdicts.readout(a)
+        days = ro.days_since_apply
+        title_changed = ro.title_moved
+        desc_changed = ro.description_moved
+        tags_changed = ro.tags_moved
         tags_before = a.get("tags_before") or []
         tags_after = a.get("suggested_tags") or []
 
@@ -145,18 +128,16 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
 
         # Loop 1's verdict for this audit, if the measurement window has closed.
         # `neutral` can legitimately carry no delta (pre-CTR was zero, or post
-        # impressions were under the floor) — the verdict still stands.
-        verdict = verdicts.from_audit(a)
+        # impressions were under the floor) — the verdict still stands. All of
+        # this comes off the readout; rounding is applied here, at the edge.
         m_status = a.get("measurement_status")
-        m_delta = verdict.ctr_delta if verdict else None
-        ctr_delta_pct = round(m_delta * 100.0, 1) if m_delta is not None else None
+        m_delta = ro.ctr_delta
+        ctr_delta_pct = round(ro.ctr_delta_pct, 1) if ro.ctr_delta_pct is not None else None
         # The measured window pair, for the before/after chart. These are real
         # rates over matched windows, which is what the old before/after view
         # bars only pretended to be.
-        _pre_ctr = verdict.pre_ctr if verdict else None
-        _post_ctr = verdict.post_ctr if verdict else None
-        ctr_before_pct = round(_pre_ctr * 100.0, 2) if _pre_ctr is not None else None
-        ctr_after_pct = round(_post_ctr * 100.0, 2) if _post_ctr is not None else None
+        ctr_before_pct = round(ro.pre_ctr * 100.0, 2) if ro.pre_ctr is not None else None
+        ctr_after_pct = round(ro.post_ctr * 100.0, 2) if ro.post_ctr is not None else None
 
         rows.append({
             "audit_id": a["id"],
@@ -274,12 +255,14 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
             return {"n": 0, "avg_delta_views": 0, "avg_pct_views": None, "avg_ctr_delta_pct": None}
         d = [r["delta_views"] for r in sub]
         p = [r["pct_views"] for r in sub if r["pct_views"] is not None]
-        c = [r["ctr_delta_pct"] for r in sub if r.get("ctr_delta_pct") is not None]
         return {
             "n": len(sub),
             "avg_delta_views": round(sum(d) / len(d), 1),
             "avg_pct_views": round(sum(p) / len(p), 2) if p else None,
-            "avg_ctr_delta_pct": round(sum(c) / len(c), 1) if c else None,
+            # Aggregate on the raw fraction and round once — the same arithmetic
+            # the prompt loop uses — instead of averaging the per-row percentages
+            # that were already rounded to one place.
+            "avg_ctr_delta_pct": verdicts.lever_average(r["ctr_delta"] for r in sub),
         }
 
     cohorts = {

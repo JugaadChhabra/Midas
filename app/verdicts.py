@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from app.status_vocab import AuditStatus, MEASURED_STATUSES, MeasurementStatus
 
@@ -193,6 +194,22 @@ def median_ctr_delta_pct(deltas) -> float | None:
     return round(statistics.median(usable) * 100.0, 1)
 
 
+def lever_average(deltas) -> float | None:
+    """Mean relative CTR change as a percentage over `deltas`. None if empty.
+
+    The sibling of `median_ctr_delta_pct`, and computed the same way: raw
+    fractions in, None entries dropped (nothing to compare, not a zero),
+    aggregated on the raw values and rounded once. The population — which audits
+    moved a given lever — is the caller's to choose (the prompt loop counts every
+    measured move; the performance page counts applied ones), but the arithmetic
+    lives here so the two surfaces cannot round it two different ways.
+    """
+    usable = [d for d in deltas if d is not None]
+    if not usable:
+        return None
+    return round(sum(usable) / len(usable) * 100.0, 1)
+
+
 def distribution(statuses) -> dict:
     """Counts per measured status, plus the total."""
     statuses = list(statuses)
@@ -227,3 +244,90 @@ def levers(audit: dict) -> frozenset[str]:
     if list(audit.get("tags_before") or []) != list(audit.get("suggested_tags") or []):
         moved.add(TAGS)
     return frozenset(moved)
+
+
+# ── Readout ─────────────────────────────────────────────────────────────────
+#
+# One audit and what its verdict means, as a single row. The prompt loop
+# (reflection) and the performance page each used to assemble this by hand from
+# `from_audit` + `levers` + a date-parse, with the lever booleans spelled
+# differently at each edge. The derivation is the shared part and lives here; the
+# wire key-names stay at each edge (see the ALL_LEVERS note above). Built from a
+# whole audit row so it also describes audits still awaiting measurement — the
+# verdict-derived fields simply read None until the window closes.
+
+
+def _days_since_apply(applied_at: str | None) -> float | None:
+    """Days since an audit was applied, or None if it never was / can't parse.
+
+    None is the same absence performance already rendered as a blank cell and the
+    prompt loop already skipped on: an audit with no usable apply time carries no
+    recency.
+    """
+    if not applied_at:
+        return None
+    try:
+        ap = datetime.fromisoformat(applied_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return round((datetime.now(timezone.utc) - ap).total_seconds() / 86400.0, 2)
+
+
+@dataclass(frozen=True)
+class Readout:
+    """An audit's verdict-derived facts, in one place.
+
+    `verdict` is None until the measurement window closes; every CTR property
+    reads through it, so they are all None-safe for an unmeasured audit. The
+    lever booleans and `days_since_apply` come from the audit row itself and are
+    populated whether or not the audit has been measured.
+
+    Recency is deliberately a raw `days_since_apply`, not an `is_recent` flag:
+    what counts as recent is a caller's policy (the prompt loop's 14-day window),
+    not a property of the verdict.
+    """
+
+    verdict: Verdict | None
+    title_moved: bool
+    description_moved: bool
+    tags_moved: bool
+    days_since_apply: float | None
+
+    @property
+    def ctr_delta(self) -> float | None:
+        """Relative CTR change as a raw fraction, or None if there is no signal."""
+        return self.verdict.ctr_delta if self.verdict else None
+
+    @property
+    def ctr_delta_pct(self) -> float | None:
+        """The same change as a percentage, UNROUNDED — rounding is the edge's job."""
+        d = self.ctr_delta
+        return d * 100.0 if d is not None else None
+
+    @property
+    def pre_ctr(self) -> float | None:
+        return self.verdict.pre_ctr if self.verdict else None
+
+    @property
+    def post_ctr(self) -> float | None:
+        return self.verdict.post_ctr if self.verdict else None
+
+
+def readout(audit: dict) -> Readout:
+    """The readout for one audit row.
+
+    Composes `from_audit` (None when unmeasured) and `levers`, so callers stop
+    re-deriving either. `measurement_status` is intentionally NOT carried here:
+    a row can be `not_applicable` (a real status the page shows) while its
+    verdict is None, so the status is read from the row, not inferred from the
+    verdict's presence.
+    """
+    v = from_audit(audit)
+    moved = levers(audit)
+    return Readout(
+        verdict=v,
+        title_moved=TITLE in moved,
+        description_moved=DESCRIPTION in moved,
+        tags_moved=TAGS in moved,
+        days_since_apply=_days_since_apply(audit.get("applied_at")),
+    )
