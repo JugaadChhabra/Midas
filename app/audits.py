@@ -8,6 +8,7 @@ from app import tracing
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
+from app.content_type import is_episode
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.audit_suggestion import AuditSuggestion
 from app.status_vocab import (
@@ -348,6 +349,16 @@ def audit_video(
             raise HTTPException(
                 400,
                 f"Skipping audit: video is {v.get('privacy_status')} (only public videos are audited)",
+            )
+        # Shows "episodes" are excluded — the SEO flow writes nursery-rhyme
+        # write-ups only. Classified live from the row's title/tags (the single
+        # definition in app.content_type), so this holds even for rows synced
+        # before videos.is_episode was backfilled. run_bulk_audit and
+        # reaudit_quarantined catch this and record it as skipped.
+        if is_episode(v.get("title"), v.get("tags")):
+            raise HTTPException(
+                400,
+                "Skipping audit: episode content (the SEO flow audits nursery-rhyme content only)",
             )
 
         cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data

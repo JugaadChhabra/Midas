@@ -117,7 +117,7 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     # The id tie-break makes the pick deterministic and matches the RPC's ordering.
     candidates = (
         supabase().table("videos")
-        .select("id,is_short,privacy_status")
+        .select("id,is_short,privacy_status,is_episode")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
         .order("id")
@@ -156,6 +156,12 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
 
     for v in candidates:
         if v["id"] in blocked_ids:
+            continue
+        # Shows "episodes" are excluded: the SEO flow audits nursery-rhyme
+        # content only. Mirrors next_audit_candidate's `is_episode is not true`
+        # — NULL (not yet classified) is treated as non-episode, so a channel
+        # keeps auditing exactly as before until the backfill runs.
+        if v.get("is_episode") is True:
             continue
         # Only public videos qualify for audit. Older rows synced before
         # privacy_status existed are treated as public to avoid stalling.

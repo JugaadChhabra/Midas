@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone
 from googleapiclient.errors import HttpError
 
+from app.content_type import is_episode
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
 from app.youtube_client import (
@@ -208,6 +209,11 @@ def sync_channel(channel_id: str, full: bool = False):
                 "tags": sn.get("tags") or [],
                 "privacy_status": privacy,
                 "is_short": is_short,
+                # Shows "episodes" are a different content type than the
+                # nursery-rhyme videos the SEO flow audits. Classified from the
+                # title/tag pattern (the Data API has no episode flag) and
+                # denormalised here so the audit picker can filter cheaply.
+                "is_episode": is_episode(sn.get("title"), sn.get("tags") or []),
                 "duration_seconds": duration_seconds,
                 "thumbnail_url": stable_thumb,
                 "category_id": sn.get("categoryId"),
