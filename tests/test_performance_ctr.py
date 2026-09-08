@@ -146,6 +146,18 @@ def test_cohorts_report_ctr_not_velocity():
     assert c["tags_changed"]["n"] == 0
 
 
+def test_cohort_ctr_average_aggregates_raw_not_per_row_rounded():
+    """The cohort average now uses verdicts.lever_average (aggregate raw, round
+    once), not a mean of the per-row percentages that were already rounded to one
+    place. Per-row 0.24, 0.24, 0.29 rounded first average to 0.2; aggregated raw
+    they round to 0.3."""
+    audits = [_audit(1, m_status="win", delta=0.0024),
+              _audit(2, m_status="win", delta=0.0024),
+              _audit(3, m_status="win", delta=0.0029)]
+    c = _summary(audits)["cohorts"]
+    assert c["title_changed"]["avg_ctr_delta_pct"] == pytest.approx(0.3)
+
+
 def test_no_velocity_math_left_in_the_module():
     import ast
     import inspect

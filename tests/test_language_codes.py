@@ -21,7 +21,8 @@ So the column holds the truth and the boundary adapts.
 """
 import pytest
 
-from app.transcripts import lang_display_name, youtube_language_code
+from app.transcripts import lang_display_name
+from app.youtube_metadata import youtube_language_code
 
 
 def test_haryanvi_has_a_display_name():
@@ -61,12 +62,14 @@ def test_an_unknown_code_is_passed_through_not_invented():
 def test_the_display_table_and_the_youtube_table_agree_about_what_exists():
     """Any code with a non-ISO-639-1 mapping must also have a display name.
 
-    The two tables exist for different consumers, but a code that needs
+    The two tables exist for different consumers and now live in different
+    modules (display names with the prompt helper in transcripts, the YouTube
+    mapping with the payload in youtube_metadata), but a code that needs
     translating for YouTube is by definition one this app writes content in —
     so the prompt must be able to name it. Without this, adding the next
     dialect makes the prompt say "raw code" and nothing catches it.
     """
-    from app.transcripts import _NON_ISO_639_1
+    from app.youtube_metadata import _NON_ISO_639_1
 
     for code in _NON_ISO_639_1:
         assert lang_display_name(code) != code, (

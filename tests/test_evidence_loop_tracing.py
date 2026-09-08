@@ -94,6 +94,9 @@ def test_audit_video_span_records_its_context(_isolated_tracer):
     video = {
         "id": "vid1", "channel_id": "ch1", "privacy_status": "public",
         "title": "t", "description": "d", "tags": [], "is_short": False,
+        # The same single-row mock answers the channel fetch too; audit_video
+        # now refuses without a content language, so give it one.
+        "default_language": "en",
     }
     suggestion = {
         "comparisons": {

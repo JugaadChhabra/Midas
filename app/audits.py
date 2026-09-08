@@ -21,7 +21,8 @@ from app.openrouter import chat_json
 # Keyframe extraction lives in app.keyframes but is not used by audits — it is
 # reserved for thumbnail generation (Block D). Do not re-import without
 # revisiting CONTENT_INTELLIGENCE_ROADMAP.md.
-from app.transcripts import fetch_transcript, lang_display_name, youtube_language_code
+from app.transcripts import fetch_transcript, lang_display_name
+from app.youtube_metadata import build_update_payload, SNIPPET_STATUS_PARTS
 from app.youtube_client import (
     youtube_for_channel,
     yt_videos_update,
@@ -31,23 +32,6 @@ from app.youtube_client import (
 log = logging.getLogger("midas.audits")
 
 router = APIRouter(tags=["audits"])
-
-#: YouTube's audience declaration, sent with every metadata write.
-#:
-#: Not really optional: `selfDeclaredMadeForKids` lives on `status`, and both write
-#: paths send parts="snippet,status", so every apply and every revert restates it
-#: — overwriting whatever the video carried. There is no "leave it alone" value.
-#: Omitting the key does not help either; YouTube treats the absent field on a
-#: status update as a change.
-#:
-#: So it is one fleet-wide setting, and it was previously inconsistent: the shorts
-#: uploader declared False while both audit paths declared True, leaving a video's
-#: audience flag dependent on which subsystem wrote last. Now one constant, with
-#: tests/test_made_for_kids.py asserting the two subsystems agree.
-#:
-#: This is a compliance declaration to the FTC, not a preference — changing it is
-#: a decision about the catalogue, not a code cleanup.
-SELF_DECLARED_MADE_FOR_KIDS = False
 
 
 DEFAULT_PROMPT = """\
@@ -396,7 +380,19 @@ def audit_video(
         channel = supabase().table("channels").select("default_language").eq(
             "id", v["channel_id"]
         ).single().execute().data or {}
-        channel_language = channel.get("default_language") or "en"
+        # No fabricated fallback. A channel with no content language once
+        # defaulted to "en" here, which shipped 57 English-only audits to a
+        # Haryanvi audience. The language is a required input, not a guess:
+        # refuse rather than invent one. Autopilot never reaches this — a
+        # language-less channel fails eligibility.can_audit — so this guards the
+        # manual paths (run_audit, run_bulk_audit).
+        channel_language = channel.get("default_language")
+        if not channel_language:
+            raise HTTPException(
+                400,
+                "Skipping audit: channel has no content language set "
+                "(set channels.default_language before auditing)",
+            )
 
         transcript, transcript_lang = fetch_transcript(video_id, channel_id=v["channel_id"])
         rec.set(**{
@@ -511,27 +507,13 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     )
     new_title, new_description, new_tags = applied.title, applied.description, applied.tags
 
-    snippet: dict = {
-        "title": new_title,
-        "description": new_description,
-        "tags": new_tags,
-        "categoryId": "27",  # Education
-    }
-    # The stored language is the CONTENT language, which may be ISO 639-3 (a
-    # dialect with no two-letter code). YouTube documents ISO 639-1, so adapt
-    # at the boundary rather than storing a lie the audit prompt would read.
-    yt_lang = youtube_language_code(lang)
-    if yt_lang:
-        snippet["defaultLanguage"] = yt_lang
-        snippet["defaultAudioLanguage"] = yt_lang
-
-    payload = {
-        "id": video["id"],
-        "snippet": snippet,
-        "status": {
-            "selfDeclaredMadeForKids": SELF_DECLARED_MADE_FOR_KIDS,
-        },
-    }
+    # The metadata YouTube accepts — category, the content language adapted to a
+    # code YouTube takes, and the made-for-kids declaration — is one contract,
+    # built in app.youtube_metadata so apply and revert cannot disagree.
+    payload = build_update_payload(
+        video["id"], title=new_title, description=new_description,
+        tags=new_tags, lang=lang,
+    )
 
     if settings.DRY_RUN:
         log.warning("[DRY_RUN] would update video %s with %s", video["id"], payload)
@@ -559,7 +541,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
     # Classify YouTube's failure ONCE here (the only place the raw error exists) and
     # raise a typed ApplyError; callers switch on .outcome, not on the error text.
     try:
-        yt_videos_update(yt, video["channel_id"], payload, parts="snippet,status")
+        yt_videos_update(yt, video["channel_id"], payload, parts=SNIPPET_STATUS_PARTS)
     except TokenExpiredError:
         raise ApplyError(ApplyOutcome.TOKEN_EXPIRED)
     except Exception as e:
@@ -819,20 +801,16 @@ def revert_audit(audit_id: int):
     ).single().execute().data or {}
     lang = channel.get("default_language") or None
 
-    snippet: dict = {
-        "title": audit.get("title_before") or video.get("title"),
-        "description": audit.get("description_before") or video.get("description"),
-        "tags": audit.get("tags_before") or [],
-        "categoryId": "27",
-    }
-    # Same adaptation as the apply path. A revert restates the whole snippet,
-    # so a code YouTube rejects here would strand the video on the new metadata.
-    yt_lang = youtube_language_code(lang)
-    if yt_lang:
-        snippet["defaultLanguage"] = yt_lang
-        snippet["defaultAudioLanguage"] = yt_lang
-    payload = {"id": video["id"], "snippet": snippet,
-               "status": {"selfDeclaredMadeForKids": SELF_DECLARED_MADE_FOR_KIDS}}
+    # Same contract as apply, built through the one owner. A revert restates the
+    # whole snippet, so a code YouTube rejects here would strand the video on the
+    # new metadata — which is exactly why both paths share the adaptation.
+    payload = build_update_payload(
+        video["id"],
+        title=audit.get("title_before") or video.get("title"),
+        description=audit.get("description_before") or video.get("description"),
+        tags=audit.get("tags_before") or [],
+        lang=lang,
+    )
 
     if settings.DRY_RUN:
         log.warning("[DRY_RUN] would revert video %s with %s", video["id"], payload)
@@ -843,7 +821,7 @@ def revert_audit(audit_id: int):
 
     yt = youtube_for_channel(video["channel_id"])
     try:
-        yt_videos_update(yt, video["channel_id"], payload, parts="snippet,status")
+        yt_videos_update(yt, video["channel_id"], payload, parts=SNIPPET_STATUS_PARTS)
     except Exception as e:
         raise HTTPException(500, f"YouTube revert failed: {e}")
 
@@ -861,10 +839,11 @@ def revert_audit(audit_id: int):
             "rationale": "reverted by operator before the measurement window closed"
         }
     supabase().table("audits").update(revert_patch).eq("id", audit_id).execute()
+    reverted = payload["snippet"]
     supabase().table("videos").update({
-        "title": snippet["title"],
-        "description": snippet["description"],
-        "tags": snippet["tags"],
+        "title": reverted["title"],
+        "description": reverted["description"],
+        "tags": reverted["tags"],
         "last_fetched_at": now,
     }).eq("id", video["id"]).execute()
     return {"status": AuditStatus.REVERTED}
