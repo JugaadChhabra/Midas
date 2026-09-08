@@ -44,14 +44,16 @@ def test_shorts_only_channel_runs_shorts_not_audit():
 
 def test_audit_only_channel_runs_audit_not_shorts():
     shorts_called, audit_called = _run_tick_with_channel(
-        {"id": "UC1", "autopilot_enabled": True, "autopilot_shorts_enabled": False})
+        {"id": "UC1", "autopilot_enabled": True, "autopilot_shorts_enabled": False,
+         "default_language": "hi"})
     assert shorts_called is False
     assert audit_called is True
 
 
 def test_both_enabled_runs_both():
     shorts_called, audit_called = _run_tick_with_channel(
-        {"id": "UC1", "autopilot_enabled": True, "autopilot_shorts_enabled": True})
+        {"id": "UC1", "autopilot_enabled": True, "autopilot_shorts_enabled": True,
+         "default_language": "hi"})
     assert shorts_called is True
     assert audit_called is True
 

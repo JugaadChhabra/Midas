@@ -380,7 +380,19 @@ def audit_video(
         channel = supabase().table("channels").select("default_language").eq(
             "id", v["channel_id"]
         ).single().execute().data or {}
-        channel_language = channel.get("default_language") or "en"
+        # No fabricated fallback. A channel with no content language once
+        # defaulted to "en" here, which shipped 57 English-only audits to a
+        # Haryanvi audience. The language is a required input, not a guess:
+        # refuse rather than invent one. Autopilot never reaches this — a
+        # language-less channel fails eligibility.can_audit — so this guards the
+        # manual paths (run_audit, run_bulk_audit).
+        channel_language = channel.get("default_language")
+        if not channel_language:
+            raise HTTPException(
+                400,
+                "Skipping audit: channel has no content language set "
+                "(set channels.default_language before auditing)",
+            )
 
         transcript, transcript_lang = fetch_transcript(video_id, channel_id=v["channel_id"])
         rec.set(**{

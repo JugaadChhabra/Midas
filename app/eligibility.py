@@ -62,14 +62,24 @@ class Job:
 # of use, not only at selection.
 
 def can_audit(channel: dict) -> bool:
-    """Audit path open? Enabled, and not paused.
+    """Audit path open? Enabled, not paused, and a content language is set.
 
     The pause is path-specific — it gates auditing only. This exact predicate
     previously appeared in autopilot twice (once inverted via de Morgan) and in
     the dashboard's counter, which is three chances to disagree about what
     "active" means on the page that reports it.
+
+    `default_language` is a hard requirement, not a nicety: audit_video refuses
+    without one (a missing language once fabricated "en" and shipped English
+    audits to a Haryanvi audience), so a language-less channel would only churn
+    failures if the tick kept picking it. Gate it out of selection instead. The
+    shorts path has no such requirement — see can_cut_shorts.
     """
-    return bool(channel.get("autopilot_enabled") and not channel.get("autopilot_paused_reason"))
+    return bool(
+        channel.get("autopilot_enabled")
+        and not channel.get("autopilot_paused_reason")
+        and channel.get("default_language")
+    )
 
 
 def can_cut_shorts(channel: dict) -> bool:
@@ -96,10 +106,10 @@ def has_work(channel: dict) -> bool:
 #: nothing. Found exactly that way: channel_ids_for() requests only `id`, so
 #: every autopilot job returned an empty list and the tick would have gone quiet.
 _PREDICATE_COLUMNS = {
-    Job.AUDIT: ("autopilot_enabled", "autopilot_paused_reason"),
+    Job.AUDIT: ("autopilot_enabled", "autopilot_paused_reason", "default_language"),
     Job.SHORTS: ("autopilot_shorts_enabled",),
     Job.AUTOPILOT: ("autopilot_enabled", "autopilot_paused_reason",
-                    "autopilot_shorts_enabled"),
+                    "autopilot_shorts_enabled", "default_language"),
 }
 
 

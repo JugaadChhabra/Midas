@@ -57,9 +57,9 @@ def _fleet(rows):
 
 def test_pick_next_channel_never_ticked_first_then_oldest():
     with _fleet([
-        {"id": "B", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-02T00:00:00Z"},
-        {"id": "A", "autopilot_enabled": True, "autopilot_last_tick_at": None},   # never ticked → highest priority
-        {"id": "C", "autopilot_enabled": True, "autopilot_last_tick_at": "2026-01-01T00:00:00Z"},
+        {"id": "B", "autopilot_enabled": True, "default_language": "hi", "autopilot_last_tick_at": "2026-01-02T00:00:00Z"},
+        {"id": "A", "autopilot_enabled": True, "default_language": "hi", "autopilot_last_tick_at": None},   # never ticked → highest priority
+        {"id": "C", "autopilot_enabled": True, "default_language": "hi", "autopilot_last_tick_at": "2026-01-01T00:00:00Z"},
     ]):
         assert ap._pick_next_channel()["id"] == "A"
 
@@ -73,7 +73,8 @@ def test_pick_next_channel_skips_a_paused_channel_without_writing_to_it():
     """The pause clearing runs first and must not disturb a live pause that has
     not aged out."""
     with _fleet([
-        {"id": "P", "autopilot_enabled": True, "autopilot_paused_reason": "token_expired",
+        {"id": "P", "autopilot_enabled": True, "default_language": "hi",
+         "autopilot_paused_reason": "token_expired",
          "autopilot_paused_at": "2099-01-01T00:00:00Z", "autopilot_last_tick_at": None},
     ]) as sb:
         assert ap._pick_next_channel() is None

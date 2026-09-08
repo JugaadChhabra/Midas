@@ -18,14 +18,27 @@ from tests.fakes import FakeSupabase
 
 # ── predicates ────────────────────────────────────────────────────────────
 
-def test_audit_path_needs_enabled_and_unpaused():
-    assert el.can_audit({"autopilot_enabled": True}) is True
-    assert el.can_audit({"autopilot_enabled": True,
+def test_audit_path_needs_enabled_unpaused_and_a_language():
+    assert el.can_audit({"autopilot_enabled": True, "default_language": "hi"}) is True
+    assert el.can_audit({"autopilot_enabled": True, "default_language": "hi",
                          "autopilot_paused_reason": None}) is True
-    assert el.can_audit({"autopilot_enabled": True,
+    assert el.can_audit({"autopilot_enabled": True, "default_language": "hi",
                          "autopilot_paused_reason": "token_expired"}) is False
     assert el.can_audit({"autopilot_enabled": False}) is False
     assert el.can_audit({}) is False
+
+
+def test_audit_path_needs_a_content_language():
+    """A missing language once fabricated 'en' and shipped English audits to a
+    Haryanvi audience — audit_video refuses without one, so the tick must not
+    pick such a channel and churn failures. The shorts path is unaffected."""
+    no_lang = {"autopilot_enabled": True, "autopilot_shorts_enabled": True}
+    assert el.can_audit(no_lang) is False
+    assert el.can_audit({**no_lang, "default_language": ""}) is False
+    assert el.can_audit({**no_lang, "default_language": "hi"}) is True
+    # shorts do not need a language
+    assert el.can_cut_shorts(no_lang) is True
+    assert el.has_work(no_lang) is True
 
 
 def test_shorts_path_ignores_the_audit_pause():
@@ -38,7 +51,7 @@ def test_shorts_path_ignores_the_audit_pause():
 
 
 def test_has_work_is_either_path():
-    assert el.has_work({"autopilot_enabled": True}) is True
+    assert el.has_work({"autopilot_enabled": True, "default_language": "hi"}) is True
     assert el.has_work({"autopilot_shorts_enabled": True}) is True
     assert el.has_work({"autopilot_enabled": False,
                         "autopilot_shorts_enabled": False}) is False
@@ -52,6 +65,7 @@ def test_has_work_is_either_path():
 
 FLEET = [
     {"id": "audit_only", "autopilot_enabled": True, "autopilot_shorts_enabled": False,
+     "default_language": "hi",
      "analytics_authorized": True, "measurement_enabled": True, "reach_warmup": False,
      "playlist_health_enabled": False, "refresh_token": "tok-1"},
     {"id": "paused", "autopilot_enabled": True, "autopilot_paused_reason": "token_expired",
@@ -103,6 +117,18 @@ def test_the_audit_job_excludes_a_paused_channel_the_shorts_job_keeps():
 
 def test_an_idle_channel_is_no_ones_work():
     assert "idle" not in _ids(Job.AUTOPILOT)
+
+
+def test_the_audit_job_excludes_a_language_less_channel():
+    """Also proves the projection carries default_language: without it the
+    predicate would filter on an unselected column and silently match nothing."""
+    fleet = [
+        {"id": "no_lang", "autopilot_enabled": True, "autopilot_shorts_enabled": False,
+         "refresh_token": "t"},
+        {"id": "has_lang", "autopilot_enabled": True, "autopilot_shorts_enabled": False,
+         "default_language": "bgc", "refresh_token": "t"},
+    ]
+    assert _ids(Job.AUDIT, fleet=fleet) == ["has_lang"]
 
 
 def test_reach_needs_consent_and_an_opt_in():
