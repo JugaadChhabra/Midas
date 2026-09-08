@@ -83,8 +83,14 @@ def _apply_date(audit: dict) -> date | None:
 
 # ── Verdict ───────────────────────────────────────────────────────────────
 
-def _classify(pre_ctr: float | None, post_ctr: float | None) -> tuple[str, float | None]:
-    """(measurement_status, relative delta). Floors already applied by caller."""
+def _classify(pre_ctr: float | None, post_ctr: float | None, *,
+              win_threshold: float, regression_threshold: float) -> tuple[str, float | None]:
+    """(measurement_status, relative delta). Floors already applied by caller.
+
+    The thresholds are passed in, not read from settings: the caller (the one
+    decision point, `decide_outcome`) reads each knob once and threads it here, so
+    the value the comparison decides with is the same value the verdict records.
+    """
     if pre_ctr is None or pre_ctr == 0.0:
         # >= MIN_IMPRESSIONS with literally zero clicks pre-change: the
         # relative delta is undefined, and a single stray post-change click
@@ -92,9 +98,9 @@ def _classify(pre_ctr: float | None, post_ctr: float | None) -> tuple[str, float
         # Neutral — genuinely can't tell.
         return MeasurementStatus.NEUTRAL, None
     delta = ((post_ctr or 0.0) - pre_ctr) / pre_ctr
-    if delta >= settings.CTR_WIN_THRESHOLD:
+    if delta >= win_threshold:
         return MeasurementStatus.WIN, delta
-    if delta <= settings.CTR_REGRESSION_THRESHOLD:
+    if delta <= regression_threshold:
         return MeasurementStatus.REGRESSION, delta
     return MeasurementStatus.NEUTRAL, delta
 
@@ -239,10 +245,21 @@ def plan_measurement(audit: dict, today: date, covered: set[str]) -> Plan:
     return Plan(MEASURE, pre=pre, post=post)
 
 
-def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
-                pre_imp: int, pre_ctr: float | None,
-                post_imp: int, post_ctr: float | None) -> Verdict:
-    """Turn a measured window pair into a terminal verdict."""
+def decide_outcome(*, pre: tuple[str, str], post: tuple[str, str],
+                   pre_imp: int, pre_ctr: float | None,
+                   post_imp: int, post_ctr: float | None) -> Verdict:
+    """Turn a measured window pair into a terminal verdict.
+
+    The single decision point for a measured audit: read the policy knobs once,
+    record them alongside the numbers, apply the impressions floors, and thread
+    the two CTR thresholds into `_classify`. Reading each knob here — rather than
+    once here and again inside `_classify` — is what keeps the value decided with
+    and the value recorded the same value.
+    """
+    min_impressions = settings.MIN_IMPRESSIONS
+    win_threshold = settings.CTR_WIN_THRESHOLD
+    regression_threshold = settings.CTR_REGRESSION_THRESHOLD
+
     # Built through app.verdicts so the writer and the four readers share one
     # definition of this shape — a renamed key here would otherwise leave every
     # reader silently finding None (see verdicts' module docstring).
@@ -250,23 +267,25 @@ def judge_reach(*, pre: tuple[str, str], post: tuple[str, str],
         pre=pre, post=post,
         pre_imp=pre_imp, pre_ctr=pre_ctr,
         post_imp=post_imp, post_ctr=post_ctr,
-        min_impressions=settings.MIN_IMPRESSIONS,
-        win_threshold=settings.CTR_WIN_THRESHOLD,
-        regression_threshold=settings.CTR_REGRESSION_THRESHOLD,
+        min_impressions=min_impressions,
+        win_threshold=win_threshold,
+        regression_threshold=regression_threshold,
         evaluated_at=datetime.now(timezone.utc).isoformat(),
     )
 
     # Dormant is checked first and deliberately: not_applicable and neutral
     # mean different things to Loop 2, and a dormant video fails both floors.
-    if pre_imp < settings.MIN_IMPRESSIONS:
-        result["rationale"] = f"dormant pre-change ({pre_imp} impressions < {settings.MIN_IMPRESSIONS} floor)"
+    if pre_imp < min_impressions:
+        result["rationale"] = f"dormant pre-change ({pre_imp} impressions < {min_impressions} floor)"
         result[verdicts.REASON] = REASON_DORMANT
         return Verdict(MeasurementStatus.NOT_APPLICABLE, OutcomeDecision.NONE, result)
-    if post_imp < settings.MIN_IMPRESSIONS:
-        result["rationale"] = f"insufficient post-change impressions ({post_imp} < {settings.MIN_IMPRESSIONS})"
+    if post_imp < min_impressions:
+        result["rationale"] = f"insufficient post-change impressions ({post_imp} < {min_impressions})"
         return Verdict(MeasurementStatus.NEUTRAL, OutcomeDecision.KEPT, result)
 
-    status, delta = _classify(pre_ctr, post_ctr)
+    status, delta = _classify(pre_ctr, post_ctr,
+                              win_threshold=win_threshold,
+                              regression_threshold=regression_threshold)
     result[verdicts.CTR_DELTA] = delta
     if status == MeasurementStatus.WIN:
         result["rationale"] = "CTR up beyond win threshold"
@@ -297,7 +316,7 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
     """Evaluate one audit. Returns the (possibly unchanged) measurement_status.
 
     Plumbing only: decide, fetch what the decision asked for, decide again,
-    persist. The policies live in plan_measurement and judge_reach.
+    persist. The policies live in plan_measurement and decide_outcome.
 
     `read_reach(video_id, window) -> (impressions, ctr)` is a parameter so this
     composition can be tested at all. The two pure stages were already covered,
@@ -333,9 +352,9 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
     _write_baseline(video_id=audit["video_id"], channel_id=video["channel_id"],
                     pre=plan.pre, impressions=pre_imp, ctr=pre_ctr)
 
-    verdict = judge_reach(pre=plan.pre, post=plan.post,
-                          pre_imp=pre_imp, pre_ctr=pre_ctr,
-                          post_imp=post_imp, post_ctr=post_ctr)
+    verdict = decide_outcome(pre=plan.pre, post=plan.post,
+                             pre_imp=pre_imp, pre_ctr=pre_ctr,
+                             post_imp=post_imp, post_ctr=post_ctr)
     _finalize(audit["id"], verdict.status, verdict.outcome, verdict.result)
     # The dormant verdict is the highest-volume cause of not_applicable there is
     # (381 of 381 in the investigation that motivated this loop), so leaving the

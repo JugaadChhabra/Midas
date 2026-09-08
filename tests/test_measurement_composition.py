@@ -1,6 +1,6 @@
 """The shell that carries data between Loop 1's two pure stages.
 
-`plan_measurement` and `judge_reach` were already covered (see
+`plan_measurement` and `decide_outcome` were already covered (see
 test_measurement_judge.py). `_eval_audit`, the thing that orders them, was not —
 and it holds the mistakes that would silently invert a verdict rather than raise:
 

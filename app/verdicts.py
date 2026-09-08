@@ -2,7 +2,7 @@
 
 A verdict is the terminal outcome of measuring one applied audit: a status
 (win / neutral / regression / not_applicable), the decision taken about it, and
-the evidence behind both. `measurement.judge_reach` produces it; it is persisted
+the evidence behind both. `measurement.decide_outcome` produces it; it is persisted
 as `audits.measurement_status` plus the `audits.measurement_result` JSON.
 
 That JSON had no owner. Four readers destructured it by string key — two in

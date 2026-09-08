@@ -8,7 +8,7 @@ function body. Four of its helpers were already pure and still untested.
 The decision is now two pure stages with the I/O pushed to the edges:
 
     plan_measurement(audit, today, covered)  -- what to do before reading reach
-    judge_reach(...)                         -- the verdict, given the numbers
+    decide_outcome(...)                      -- the verdict, given the numbers
 
 so every branch below runs with no mocks at all.
 """
@@ -57,6 +57,12 @@ def test_apply_date_prefers_applied_at_then_falls_back():
 
 # ── classify ──────────────────────────────────────────────────────────────
 
+# _classify now takes its thresholds as parameters — the tests state them
+# directly instead of reaching through settings, which is the point of the
+# refactor: the comparison is a pure function of its inputs.
+_TH = {"win_threshold": 0.10, "regression_threshold": -0.10}
+
+
 @pytest.mark.parametrize("pre,post,status", [
     (0.04, 0.05, MeasurementStatus.WIN),          # +25%
     (0.04, 0.042, MeasurementStatus.NEUTRAL),     # +5%
@@ -64,7 +70,7 @@ def test_apply_date_prefers_applied_at_then_falls_back():
     (0.04, 0.02, MeasurementStatus.REGRESSION),   # -50%
 ])
 def test_classify_thresholds(pre, post, status):
-    assert m._classify(pre, post)[0] == status
+    assert m._classify(pre, post, **_TH)[0] == status
 
 
 def test_thresholds_are_inclusive_at_the_boundary():
@@ -74,24 +80,24 @@ def test_thresholds_are_inclusive_at_the_boundary():
     the delta computes to 0.09999999999999991, so the "boundary" would be
     fictional and the test would be asserting float noise.
     """
-    with patch.object(m.settings, "CTR_WIN_THRESHOLD", 0.5), \
-         patch.object(m.settings, "CTR_REGRESSION_THRESHOLD", -0.5):
-        assert (3.0 - 2.0) / 2.0 == 0.5          # exact
-        assert m._classify(2.0, 3.0)[0] == MeasurementStatus.WIN
-        assert (1.0 - 2.0) / 2.0 == -0.5         # exact
-        assert m._classify(2.0, 1.0)[0] == MeasurementStatus.REGRESSION
+    assert (3.0 - 2.0) / 2.0 == 0.5          # exact
+    assert m._classify(2.0, 3.0, win_threshold=0.5,
+                       regression_threshold=-0.5)[0] == MeasurementStatus.WIN
+    assert (1.0 - 2.0) / 2.0 == -0.5         # exact
+    assert m._classify(2.0, 1.0, win_threshold=0.5,
+                       regression_threshold=-0.5)[0] == MeasurementStatus.REGRESSION
 
 
 def test_zero_pre_ctr_is_neutral_not_a_win():
     """A single stray post-change click must not mint a win Loop 2 learns from."""
     for pre in (None, 0.0):
-        status, delta = m._classify(pre, 0.05)
+        status, delta = m._classify(pre, 0.05, **_TH)
         assert status == MeasurementStatus.NEUTRAL
         assert delta is None
 
 
 def test_missing_post_ctr_counts_as_zero():
-    status, delta = m._classify(0.04, None)
+    status, delta = m._classify(0.04, None, **_TH)
     assert status == MeasurementStatus.REGRESSION
     assert delta == pytest.approx(-1.0)
 
@@ -213,12 +219,12 @@ def test_grace_boundary_is_not_off_by_one():
         == m.FINALIZE                # ingestion moved past it; the days are lost
 
 
-# ── judge_reach: the post-reach policies ──────────────────────────────────
+# ── decide_outcome: the post-reach policies ───────────────────────────────
 
 def _judge(pre_imp, pre_ctr, post_imp, post_ctr):
     pre, post = reach.window_for(APPLIED)
-    return m.judge_reach(pre=pre, post=post, pre_imp=pre_imp, pre_ctr=pre_ctr,
-                         post_imp=post_imp, post_ctr=post_ctr)
+    return m.decide_outcome(pre=pre, post=post, pre_imp=pre_imp, pre_ctr=pre_ctr,
+                            post_imp=post_imp, post_ctr=post_ctr)
 
 
 def test_dormant_pre_window_is_not_applicable():
