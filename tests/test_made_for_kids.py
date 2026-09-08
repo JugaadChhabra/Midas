@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.audits import SELF_DECLARED_MADE_FOR_KIDS
+from app.youtube_metadata import SELF_DECLARED_MADE_FOR_KIDS
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -40,16 +40,17 @@ def test_the_shorts_uploader_declares_the_same_thing():
             )
 
 
-def test_no_audit_path_hardcodes_the_flag():
-    """Both the apply and the revert payload must go through the constant.
+def test_the_payload_builder_does_not_hardcode_the_flag():
+    """The one payload builder must go through the constant, not a literal.
 
-    The revert path is the one that bites: it restores the pre-audit title and
-    description, so it reads as "undo" — but it restates `status` too, and a
-    hardcoded True there would re-flag a video the apply had just cleared.
+    Apply and revert now share app.youtube_metadata.build_update_payload, so
+    they cannot disagree by construction — but the builder itself restates
+    `status` on every write, and a hardcoded True there would re-flag a video an
+    apply had just cleared. The flag must resolve from SELF_DECLARED_MADE_FOR_KIDS.
     """
-    source = (REPO / "app" / "audits.py").read_text()
+    source = (REPO / "app" / "youtube_metadata.py").read_text()
     hardcoded = re.findall(r'"selfDeclaredMadeForKids":\s*(True|False)', source)
     assert not hardcoded, (
-        f"app/audits.py hardcodes the audience flag {hardcoded}; use "
-        f"SELF_DECLARED_MADE_FOR_KIDS so apply and revert cannot disagree"
+        f"app/youtube_metadata.py hardcodes the audience flag {hardcoded}; use "
+        f"SELF_DECLARED_MADE_FOR_KIDS so every write declares one value"
     )
