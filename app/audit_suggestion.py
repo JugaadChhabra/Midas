@@ -30,8 +30,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# The ceilings. Each is quoted as prose in DEFAULT_PROMPT, in elaborate()'s
-# embedded copy, and in reflection's house_format; this is what those describe.
+# The ceilings. `house_format_spec()` below interpolates these into the prompt
+# prose the three audit prompts render, and `rejection()` enforces them — one
+# source, so the numbers the model reads can't drift from the ones checked.
 TITLE_MAX = 100                # YouTube's hard title limit
 DESCRIPTION_MAX = 5000         # YouTube's hard description limit
 TAGS_MAX = 30                  # house format: ~25-30 tags
@@ -43,6 +44,54 @@ HASHTAG_LIMIT = 15             # YouTube ignores ALL hashtags above 15
 # as "#मर" — truncating and miscounting exactly the regional hashtags the house
 # format is built around.
 _HASHTAG_RE = re.compile(r"#[^\s#]+")
+
+
+def house_format_spec() -> str:
+    """The house-format contract as prompt text — the single referent every
+    audit prompt renders.
+
+    `audits.DEFAULT_PROMPT` (the auditor), `audits.elaborate` (prompt
+    generation), and reflection's meta-prompt each used to hand-type this
+    format and its ceilings as prose, independently. A change to a ceiling
+    above therefore drifted silently from the numbers those prompts quoted.
+    Now each site renders this block and supplies only its own framing around
+    it, and the numbers come from the constants above — so the prose the model
+    reads and the enforcement `rejection()` applies can no longer disagree.
+
+    The 3 + 12 hashtag split is presentational (which line each sits on); their
+    sum is the enforced ceiling, so only the total interpolates HASHTAG_LIMIT.
+    """
+    return f"""\
+=== REQUIRED TITLE FORMAT ===
+[Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes
+- Keep the whole title under {TITLE_MAX} characters.
+- Regional name in the channel's language/script; English name in English.
+- theme = one short topical hook drawn from the rhyme (e.g. Colors, Animals,
+  Bath Time, Counting).
+
+=== REQUIRED DESCRIPTION FORMAT (this exact order) ===
+1. First line: exactly 3 hashtags (these surface above the title).
+2. English description: 2-4 keyword-rich sentences about the rhyme.
+3. Regional description: the same, in the channel's regional language, keyword-rich.
+4. Keywords: one line of high-value search phrases (comma-separated), English + regional.
+5. Final line(s): exactly 12 hashtags.
+- TOTAL hashtags across the whole description must be EXACTLY {HASHTAG_LIMIT}. Never exceed
+  {HASHTAG_LIMIT} — YouTube ignores ALL hashtags on a video that has more than {HASHTAG_LIMIT}.
+
+=== TAGS ===
+- A list mixing broad and specific tags, English + regional. Maximize coverage up
+  to ~{TAGS_TOTAL_CHARS_MAX} characters total (YouTube's tag limit) — roughly {TAGS_MAX} tags.
+
+Return strictly a JSON object with this exact shape:
+{{
+  "comparisons": {{
+    "title":       {{ "current_problems": "what's weak about the current title", "suggested": "your rewrite in the required title format", "why_better": "1-2 sentences" }},
+    "description": {{ "current_problems": "what the current description is missing or doing badly", "suggested": "the FULL multi-line description following all 5 blocks above", "why_better": "..." }},
+    "tags":        {{ "current_problems": "gaps or noise in the current tag list", "suggested": ["tag1","tag2",...], "why_better": "..." }}
+  }},
+  "issues":   [ {{ "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." }} ],
+  "reasoning": "short overall summary"
+}}"""
 
 
 def cap_description_hashtags(description: str | None, limit: int = HASHTAG_LIMIT) -> str | None:

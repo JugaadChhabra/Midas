@@ -23,6 +23,7 @@ from app.audit_suggestion import (
     TAGS_TOTAL_CHARS_MAX,
     TITLE_MAX,
     AuditSuggestion,
+    house_format_spec,
 )
 
 
@@ -140,6 +141,45 @@ def test_ceilings_are_defined_once():
     """These numbers are quoted as prose in three prompts; this is the referent."""
     assert (TITLE_MAX, DESCRIPTION_MAX, TAGS_MAX, TAGS_TOTAL_CHARS_MAX, HASHTAG_LIMIT) \
         == (100, 5000, 30, 500, 15)
+
+
+# ── the house-format contract, rendered from one referent ─────────────────
+
+def test_house_format_spec_interpolates_the_ceilings():
+    """The prose the prompts render quotes the constants, not hand-typed numbers.
+
+    If a ceiling changes, the spec text changes with it — that is the whole
+    point of routing the prose through here.
+    """
+    spec = house_format_spec()
+    assert f"EXACTLY {HASHTAG_LIMIT}" in spec
+    assert f"under {TITLE_MAX} characters" in spec
+    assert f"~{TAGS_TOTAL_CHARS_MAX} characters" in spec
+    assert f"roughly {TAGS_MAX} tags" in spec
+    # The JSON schema the auditor must return travels with the format rules.
+    assert '"comparisons"' in spec and '"issues"' in spec and '"reasoning"' in spec
+
+
+def test_the_three_audit_prompts_render_the_one_spec():
+    """DEFAULT_PROMPT embeds the spec; elaborate() and reflection render it too.
+
+    A guard against the drift this consolidation removed: if a maintainer
+    re-inlines the format as fresh prose at any of these sites, the numbers can
+    silently diverge from the ceilings rejection() enforces. Keep them rendering
+    the one referent.
+    """
+    import inspect
+
+    from app import audits, reflection
+
+    spec = house_format_spec()
+    assert spec in audits.DEFAULT_PROMPT
+
+    # elaborate() and reflection build their prompt text at call time from a
+    # local; assert at the source level that they render the referent rather
+    # than a hand-typed copy.
+    assert "house_format_spec()" in inspect.getsource(audits.elaborate)
+    assert "house_format_spec()" in inspect.getsource(reflection._run_reflection)
 
 
 # ── round-tripping through the persisted row ──────────────────────────────

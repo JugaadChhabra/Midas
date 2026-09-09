@@ -9,6 +9,7 @@ from app.channel_audits import audits_for_channel, fetch_all
 from app.openrouter import chat_json, chat_text
 from app.youtube_client import youtube_for_channel, yt_search_videos
 from app.audits import audit_video
+from app.audit_suggestion import house_format_spec
 from app.status_vocab import (
     AuditStatus,
     MEASURED_STATUSES,
@@ -468,19 +469,9 @@ def _run_reflection(
     # tags) and the nested `comparisons` JSON shape audit_video() parses. Reflection
     # optimises within these rails, it does not get to redesign the output.
     house_format = (
-        "NON-NEGOTIABLE HOUSE FORMAT (the improved prompt MUST keep all of this):\n"
-        "TITLE: [Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes "
-        "(under 100 chars; regional name in the channel's script, English name in English).\n"
-        "DESCRIPTION (this exact order): (1) exactly 3 hashtags on the first line; "
-        "(2) English keyword-rich description; (3) regional-language keyword-rich description; "
-        "(4) a Keywords line of comma-separated search phrases (English + regional); "
-        "(5) exactly 12 hashtags on the final line(s). TOTAL hashtags must be EXACTLY 15 — "
-        "YouTube ignores all hashtags above 15.\n"
-        "TAGS: broad + specific, English + regional, up to ~500 characters (~25-30 tags).\n"
-        "OUTPUT SCHEMA: strictly a JSON object with keys comparisons "
-        "(title/description/tags, each with current_problems/suggested/why_better; "
-        "description.suggested holds the full multi-line description; tags.suggested is a list), "
-        "issues (array of {field,severity,problem,fix}), and reasoning."
+        "NON-NEGOTIABLE HOUSE FORMAT (the improved prompt MUST keep all of this "
+        "verbatim — never weaken, reorder, or drop any of it):\n\n"
+        + house_format_spec()
     )
     user = (
         f"{_format_perf_report(perf_report)}\n\n"
