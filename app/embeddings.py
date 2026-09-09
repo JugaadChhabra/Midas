@@ -14,7 +14,7 @@ import logging
 
 from app.db import supabase
 from app.openrouter import embed, EMBED_MODEL
-from app.rows import rows_for_ids
+from app.rows import all_rows, rows_for_ids
 from app.transcripts import fetch_transcript
 
 log = logging.getLogger("midas.embeddings")
@@ -144,12 +144,11 @@ def bootstrap_embeddings(channel_id: str) -> int:
     """
     applied_video_ids = {
         r["video_id"]
-        for r in (
+        for r in all_rows(
             supabase().table("audits")
             .select("video_id")
             .eq("status", "applied")
-            .execute()
-        ).data or []
+        )
     }
     if not applied_video_ids:
         return 0

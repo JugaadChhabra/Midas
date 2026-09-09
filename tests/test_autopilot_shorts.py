@@ -1,37 +1,20 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+from tests.fakes import FakeSupabase
 
 
-def _sb(videos, shorts_jobs, recorder):
-    """supabase() stand-in for the shorts helpers.
-    - videos: .table('videos').select().eq().order().execute().data
-    - shorts_jobs select: .table('shorts_jobs').select().eq()[.eq()][.in_()][.gte()].execute().data
-    - shorts_jobs insert: recorded, returns a row with id 99
+def _sb(videos, shorts_jobs):
+    """supabase() stand-in for the shorts source picker, backed by the real fake.
+
+    The picker's videos query filters `is_short=False` and
+    `duration_seconds < SHORTS_MAX_SOURCE_SECONDS` and scopes by channel; the
+    fake applies those for real, so fixtures carry a channel_id and an
+    under-cap duration by default (a test can still override either). The
+    shorts_jobs query scopes by channel and `source_video_id`.
     """
-    sb = MagicMock()
-
-    def table(name):
-        t = MagicMock()
-        if name == "videos":
-            # query is .select('*').eq('channel_id',..).eq('is_short', False)
-            #          .lt('duration_seconds', 240).order(..).execute()
-            t.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.execute.return_value.data = videos
-        if name == "shorts_jobs":
-            # select chains used: .select(...).eq('channel_id',..).in_('source_video_id',..).execute()
-            # and .select(...).eq('channel_id',..).eq('autopilot_generated',..).gte('created_at',..).execute()
-            sel = t.select.return_value
-            sel.eq.return_value.in_.return_value.execute.return_value.data = shorts_jobs["by_source"]
-            sel.eq.return_value.eq.return_value.gte.return_value.execute.return_value.data = shorts_jobs["today"]
-
-            def _insert(fields):
-                recorder.append(fields)
-                ins = MagicMock()
-                ins.execute.return_value.data = [{"id": 99, **fields}]
-                return ins
-            t.insert.side_effect = _insert
-        return t
-
-    sb.table.side_effect = table
-    return sb
+    vids = [{"channel_id": "UC1", "duration_seconds": 100, **v} for v in videos]
+    jobs = [{"channel_id": "UC1", **j} for j in shorts_jobs]
+    return FakeSupabase(tables={"videos": vids, "shorts_jobs": jobs})
 
 
 CH = {"id": "UC1", "autopilot_shorts_daily_cap": 1, "autopilot_shorts_upload_cap": 2,
@@ -49,8 +32,8 @@ def test_next_uncut_skips_shorts_nonpublic_and_already_cut():
     # NOTE: videos here is the already-filtered is_short=False set the query returns;
     # the query itself applies .eq('is_short', False), so vShort won't be in `videos`.
     long_videos = [v for v in videos if not v["is_short"]]
-    sj = {"by_source": [{"source_video_id": "vCut"}], "today": []}
-    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+    sj = [{"source_video_id": "vCut"}]
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj)):
         v = ap._next_uncut_video_for_channel("UC1")
     assert v is not None and v["id"] == "vGood"
 
@@ -61,8 +44,8 @@ def test_next_uncut_retries_video_with_only_failed_jobs():
     the autopilot pool permanently."""
     import app.autopilot as ap
     long_videos = [{"id": "vFailed", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
-    sj = {"by_source": [{"source_video_id": "vFailed", "status": "FAILED"}], "today": []}
-    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+    sj = [{"source_video_id": "vFailed", "status": "FAILED"}]
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj)):
         v = ap._next_uncut_video_for_channel("UC1")
     assert v is not None and v["id"] == "vFailed"
 
@@ -75,9 +58,8 @@ def test_next_uncut_skips_video_at_retry_cap():
         {"id": "vPoison", "channel_id": "UC1", "is_short": False, "privacy_status": "public"},
         {"id": "vGood", "channel_id": "UC1", "is_short": False, "privacy_status": "public"},
     ]
-    sj = {"by_source": [{"source_video_id": "vPoison", "status": "FAILED"}] * ap.MAX_SHORTS_RETRY_ATTEMPTS,
-          "today": []}
-    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+    sj = [{"source_video_id": "vPoison", "status": "FAILED"}] * ap.MAX_SHORTS_RETRY_ATTEMPTS
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj)):
         v = ap._next_uncut_video_for_channel("UC1")
     assert v is not None and v["id"] == "vGood"
 
@@ -87,9 +69,9 @@ def test_next_uncut_skips_video_with_done_job():
     also has earlier FAILED attempts."""
     import app.autopilot as ap
     long_videos = [{"id": "vDone", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
-    sj = {"by_source": [{"source_video_id": "vDone", "status": "FAILED"},
-                        {"source_video_id": "vDone", "status": "DONE"}], "today": []}
-    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj, [])):
+    sj = [{"source_video_id": "vDone", "status": "FAILED"},
+          {"source_video_id": "vDone", "status": "DONE"}]
+    with patch("app.autopilot.supabase", return_value=_sb(long_videos, sj)):
         v = ap._next_uncut_video_for_channel("UC1")
     assert v is None
 

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows
 from app.embeddings import (
     has_pooled_embedding,
     parse_vector,
@@ -35,13 +36,12 @@ def _current_members(playlist_id: str) -> dict[str, str | None]:
     Derives state from the append-only playlist_assignments log by taking
     the latest action per video and keeping only 'added' ones.
     """
-    rows = (
+    rows = all_rows(
         supabase().table("playlist_assignments")
         .select("video_id,action,playlist_item_id,decided_at")
         .eq("playlist_id", playlist_id)
         .order("decided_at", desc=True)
-        .execute()
-    ).data or []
+    )
 
     latest: dict[str, dict] = {}
     for row in rows:
@@ -356,12 +356,11 @@ def reconcile_channel(channel_id: str) -> dict:
         .execute()
     ).data or []
 
-    videos = (
+    videos = all_rows(
         supabase().table("videos")
         .select("id")
         .eq("channel_id", channel_id)
-        .execute()
-    ).data or []
+    )
 
     if not playlists or not videos:
         return {"added": 0, "removed": 0, "skipped_cap": False}
@@ -468,12 +467,11 @@ def tune_thresholds(channel_id: str) -> dict:
     Writes a new threshold_history row and updates settings in-process.
     Returns dict with fpr, old_join_high, new_join_high.
     """
-    rows = (
+    rows = all_rows(
         supabase().table("playlist_assignments")
         .select("action,decision_source")
         .eq("channel_id", channel_id)
-        .execute()
-    ).data or []
+    )
 
     embedding_adds = [r for r in rows if r["action"] == "added" and r["decision_source"] == "embedding"]
     removals = [r for r in rows if r["action"] == "removed"]

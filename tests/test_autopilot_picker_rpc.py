@@ -6,6 +6,7 @@ in-app pick on real data) is in tests/test_autopilot_picker_parity_live.py.
 from unittest.mock import MagicMock, patch
 
 import app.autopilot as ap
+from tests.fakes import FakeSupabase
 
 
 def _rpc_sb(rows):
@@ -31,20 +32,17 @@ def test_picker_rpc_returns_none_when_empty():
 
 def test_picker_falls_back_to_inapp_when_rpc_errors():
     """RPC raising must transparently use the in-app scan (which returns the
-    newest eligible unaudited public video)."""
-    sb = MagicMock()
-    sb.rpc.return_value.execute.side_effect = RuntimeError("no function")
-    # in-app path: videos scan, then audits scan
+    newest eligible unaudited public video).
+
+    The fake's rpc is left unstubbed, so calling it raises — exactly the error
+    the picker must swallow before falling back to the paged videos+audits scan.
+    """
     videos = [
-        {"id": "new", "is_short": False, "privacy_status": "public"},
-        {"id": "old", "is_short": False, "privacy_status": "public"},
+        {"id": "new", "channel_id": "UC1", "is_short": False, "privacy_status": "public"},
+        {"id": "old", "channel_id": "UC1", "is_short": False, "privacy_status": "public"},
     ]
-    sb.table.return_value.select.return_value.eq.return_value.order.return_value \
-        .order.return_value.execute.return_value.data = videos
-    sb.table.return_value.select.return_value.in_.return_value.order.return_value \
-        .execute.return_value.data = [
-            {"video_id": "new", "status": "applied", "created_at": "2026-01-02"},  # blocked
-        ]
+    audits = [{"video_id": "new", "status": "applied", "created_at": "2026-01-02"}]  # blocks 'new'
+    sb = FakeSupabase(tables={"videos": videos, "audits": audits})
     with patch.object(ap.settings, "AUTOPILOT_PICKER_USE_RPC", True), \
          patch.object(ap, "supabase", return_value=sb):
         out = ap._next_video_for_channel("UC1")
@@ -52,14 +50,10 @@ def test_picker_falls_back_to_inapp_when_rpc_errors():
 
 
 def test_inapp_path_used_when_flag_off():
-    videos = [{"id": "v", "is_short": False, "privacy_status": "public"}]
-    sb = MagicMock()
-    sb.table.return_value.select.return_value.eq.return_value.order.return_value \
-        .order.return_value.execute.return_value.data = videos
-    sb.table.return_value.select.return_value.in_.return_value.order.return_value \
-        .execute.return_value.data = []  # no audits -> eligible
+    videos = [{"id": "v", "channel_id": "UC1", "is_short": False, "privacy_status": "public"}]
+    sb = FakeSupabase(tables={"videos": videos, "audits": []})  # no audits -> eligible
     with patch.object(ap.settings, "AUTOPILOT_PICKER_USE_RPC", False), \
          patch.object(ap, "supabase", return_value=sb):
         out = ap._next_video_for_channel("UC1")
     assert out["id"] == "v"
-    sb.rpc.assert_not_called()  # flag off => never touches the RPC
+    assert sb.rpc_calls == []  # flag off => never touches the RPC

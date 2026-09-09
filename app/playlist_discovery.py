@@ -8,6 +8,7 @@ import math
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows
 from app.openrouter import chat_json, EMBED_MODEL
 from app.embeddings import pooled_embeddings
 from app.playlists import _current_members, _cosine_sim, _record_assignment
@@ -157,12 +158,11 @@ def discover_playlists(channel_id: str) -> dict:
         log.info("[DRY_RUN] discover_playlists skipped for %s", channel_id)
         return {"clusters_found": 0, "playlists_created": 0}
 
-    videos = (
+    videos = all_rows(
         supabase().table("videos")
         .select("id")
         .eq("channel_id", channel_id)
-        .execute()
-    ).data or []
+    )
     all_video_ids = [v["id"] for v in videos]
     if not all_video_ids:
         return {"clusters_found": 0, "playlists_created": 0}

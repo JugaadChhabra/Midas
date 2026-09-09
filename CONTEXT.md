@@ -112,3 +112,30 @@ prompt supplies only its own framing around the rendered block; the numbers a
 prompt quotes are the numbers `rejection()` checks. Owner:
 `app/audit_suggestion.py` (`house_format_spec`, the ceiling constants,
 `AuditSuggestion`).
+
+## Reading rows — the 1000-row cap
+
+PostgREST caps **every** response at ~1000 rows and separately caps the URL
+length of an `in_()` list. Both truncate silently — you get rows, just not all
+of them. This is the most-repeated bug in the codebase (the dashboard once
+showed 1000 of 5186 videos). The convention that prevents it:
+
+- A read whose result grows with the data — all of a channel's videos, a
+  channel's audits, a playlist's assignment log — goes through
+  **`app.rows.all_rows`** (or `rows_for_ids` for an id list, or the
+  domain-named `channel_audits.audits_for_channel`). These own the paging and
+  the id-chunking, so the cap can't truncate them.
+- A raw `supabase().table(...).select(...).execute()` is only for a read that
+  is **provably bounded**, and it must *say so out loud* — `.single()` /
+  `.maybe_single()` for one row, `.limit(n)` for a capped read, `count="exact"`
+  for a count. An unpaged multi-row `.select().execute()` with none of these is
+  the bug; if the set can grow, page it.
+
+This is enforced by **convention and review, not a source-scan guard**. A guard
+precise enough to catch only genuinely-unbounded reads (not the legitimate
+bounded/count forms) could not be written without a large grandfather list, and
+this repo has already shipped guards that "matched none of the code they were
+written to catch" (`tests/fakes.py`) — a false-positive-prone guard gets
+deleted, not obeyed. Tests read through **`tests.fakes.FakeSupabase`**, which
+pages and filters for real, so a test cannot pass while silently reading
+nothing. Owner: `app/rows.py`.
