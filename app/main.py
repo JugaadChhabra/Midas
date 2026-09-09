@@ -17,7 +17,7 @@ from app.autopilot import router as autopilot_router, tick as autopilot_tick
 from app.dashboard import router as dashboard_router
 from app.config import settings
 from app.db import supabase
-from app.playlists import reconcile_channel
+from app.playlists import reconcile_channel, tune_thresholds
 from app.playlists_sync import sync_playlists
 from app.playlist_discovery import discover_playlists
 from app.playlists_router import router as playlists_router
@@ -175,6 +175,22 @@ def _weekly_reflection():
     _run_per_channel(_one, "Weekly reflection")
 
 
+def _weekly_playlist_tuning():
+    """Nudge each channel's PLAYLIST_JOIN_HIGH from its assignment churn.
+
+    This used to piggyback the weekly reflection tick, which conflated playlist
+    tuning with CTR-driven prompt reflection. It now runs as its own weekly job
+    over the same channel set (Job.EVERY, via _run_per_channel's default), so
+    the cadence is unchanged — only the ownership is: the logic lives with the
+    playlist engine that reads the threshold.
+    """
+    def _one(channel_id):
+        result = tune_thresholds(channel_id)
+        _main_log.info("Weekly playlist tuning %s: %s", channel_id, result)
+
+    _run_per_channel(_one, "Weekly playlist tuning")
+
+
 def _daily_playlist_health_score():
     """Phase 1B Step 4 — score every channel where playlist_health_enabled=true.
 
@@ -257,6 +273,16 @@ async def lifespan(app: FastAPI):
         hour=4,
         minute=0,
         id="reflection",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        _weekly_playlist_tuning,
+        "cron",
+        day_of_week="mon",
+        hour=3,
+        minute=30,
+        id="playlist_tuning",
         max_instances=1,
         coalesce=True,
     )

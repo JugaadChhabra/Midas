@@ -135,7 +135,7 @@ def test_should_reflect_refuses_without_measured_outcomes():
          patch.object(reflection, "_build_perf_report", return_value=None):
         sb.return_value.table.return_value.select.return_value.eq.return_value \
             .order.return_value.limit.return_value.execute.return_value.data = []
-        ok, reason = reflection._should_reflect("ch1")
+        ok, reason, _ = reflection._should_reflect("ch1")
     assert ok is False
     assert reason == "no_measured_outcomes"
 
