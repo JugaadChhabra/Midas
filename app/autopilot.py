@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows, rows_for_ids
 from app.channel_audits import audits_for_channel
 from app import eligibility, quota, tracing
 from app.audits import audit_video, validate_audit, apply_audit_internal
@@ -115,29 +116,30 @@ def _next_video_for_channel(channel_id: str) -> dict | None:
     # In-app oracle / fallback. `videos` is a wide table (description/tags/snippet/…)
     # so we select only the 3 columns the picker filters on and the caller reads.
     # The id tie-break makes the pick deterministic and matches the RPC's ordering.
-    candidates = (
+    candidates = all_rows(
         supabase().table("videos")
         .select("id,is_short,privacy_status,is_episode")
         .eq("channel_id", channel_id)
         .order("published_at", desc=True)
-        .order("id")
-        .execute()
-    ).data or []
+    )
 
     if not candidates:
         return None
 
-    # Only fetch audits for this channel's videos — avoids cross-channel noise
-    # and prevents Supabase's 1000-row default cap from silently truncating results
-    # when the audits table is large.
+    # Only fetch audits for this channel's videos — avoids cross-channel noise.
+    # Paged in id chunks so neither the 1000-row cap nor the in_() URL length
+    # truncates on a channel with many audits; chunking by video_id keeps each
+    # video's audits contiguous and newest-first, so "latest per video" holds.
     candidate_ids = [v["id"] for v in candidates]
-    audits = (
-        supabase().table("audits")
-        .select("video_id,status,created_at,measurement_status")
-        .in_("video_id", candidate_ids)
-        .order("created_at", desc=True)
-        .execute()
-    ).data or []
+    audits = rows_for_ids(
+        lambda c: (
+            supabase().table("audits")
+            .select("video_id,status,created_at,measurement_status")
+            .in_("video_id", c)
+            .order("created_at", desc=True)
+        ),
+        candidate_ids,
+    )
     # Latest audit per video (keep the whole row — we filter on two columns).
     latest: dict[str, dict] = {}
     for a in audits:
@@ -215,17 +217,19 @@ def _next_uncut_video_for_channel(channel_id: str) -> dict | None:
     else:
         # No length cap, but still require a known duration.
         q = q.not_.is_("duration_seconds", "null")
-    candidates = q.order("published_at", desc=True).execute().data or []
+    candidates = all_rows(q.order("published_at", desc=True))
     if not candidates:
         return None
     candidate_ids = [v["id"] for v in candidates]
-    jobs = (
-        supabase().table("shorts_jobs")
-        .select("source_video_id,status")
-        .eq("channel_id", channel_id)
-        .in_("source_video_id", candidate_ids)
-        .execute()
-    ).data or []
+    jobs = rows_for_ids(
+        lambda c: (
+            supabase().table("shorts_jobs")
+            .select("source_video_id,status")
+            .eq("channel_id", channel_id)
+            .in_("source_video_id", c)
+        ),
+        candidate_ids,
+    )
     settled: set[str] = set()          # has a non-FAILED job (done or in-flight): never re-cut
     failed_counts: dict[str, int] = defaultdict(int)
     for j in jobs:

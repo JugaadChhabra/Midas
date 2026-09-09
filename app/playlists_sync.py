@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from app import quota
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows, rows_for_ids
 from app.quota import JobBudget
 from app.youtube_client import youtube_for_channel, yt_playlists_list, yt_playlist_items_page
 
@@ -237,12 +238,11 @@ def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
     # Load all video IDs we know about so we can skip orphaned YouTube videos
     known_videos = {
         v["id"]
-        for v in (
+        for v in all_rows(
             supabase().table("videos")
             .select("id")
             .eq("channel_id", channel_id)
-            .execute()
-        ).data or []
+        )
     }
 
     # Load existing (video_id, playlist_id) pairs for these playlists only
@@ -250,12 +250,14 @@ def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
     playlist_ids = [p["id"] for p in yt_playlists]
     existing_pairs = {
         (r["video_id"], r["playlist_id"])
-        for r in (
-            supabase().table("playlist_assignments")
-            .select("video_id,playlist_id")
-            .in_("playlist_id", playlist_ids)
-            .execute()
-        ).data or []
+        for r in rows_for_ids(
+            lambda c: (
+                supabase().table("playlist_assignments")
+                .select("video_id,playlist_id")
+                .in_("playlist_id", c)
+            ),
+            playlist_ids,
+        )
     }
 
     # Incremental walk: re-reading a playlist's full membership every day is the

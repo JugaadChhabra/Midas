@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from app import tracing, verdicts
 from app.config import settings
 from app.db import supabase
+from app.rows import all_rows, rows_for_ids
 from app.channel_audits import audits_for_channel, fetch_all
 from app.openrouter import chat_json, chat_text
 from app.youtube_client import youtube_for_channel, yt_search_videos
@@ -249,12 +250,11 @@ def derive_niche_queries(channel_id: str) -> list[str]:
         if v.get("title")
     ]
 
-    tag_rows = (
+    tag_rows = all_rows(
         supabase().table("videos")
         .select("tags")
         .eq("channel_id", channel_id)
-        .execute()
-    ).data or []
+    )
     tag_freq: dict[str, int] = {}
     for row in tag_rows:
         for tag in (row.get("tags") or []):
@@ -821,26 +821,29 @@ def trigger_reflection(channel_id: str):
 @router.get("/channels/{channel_id}/reflection/shadow-comparison")
 def shadow_comparison(channel_id: str):
     """Return side-by-side comparison: live vs shadow_pending audits for same videos."""
-    shadow_audits = (
+    shadow_audits = all_rows(
         supabase().table("audits")
         .select("id,video_id,suggested_title,suggested_description,suggested_tags,prompt_version_id,created_at")
         .eq("status", AuditStatus.SHADOW_PENDING)
-        .execute()
-    ).data or []
+    )
 
     if not shadow_audits:
         return []
 
     video_ids = list({a["video_id"] for a in shadow_audits})
 
-    live_audits = (
-        supabase().table("audits")
-        .select("video_id,suggested_title,suggested_description,suggested_tags,created_at")
-        .in_("video_id", video_ids)
-        .eq("status", AuditStatus.APPLIED)
-        .order("created_at", desc=True)
-        .execute()
-    ).data or []
+    # Chunked by video_id, so each video's applied audits stay contiguous and
+    # ordered newest-first — the "latest applied per video" pick below is intact.
+    live_audits = rows_for_ids(
+        lambda c: (
+            supabase().table("audits")
+            .select("video_id,suggested_title,suggested_description,suggested_tags,created_at")
+            .in_("video_id", c)
+            .eq("status", AuditStatus.APPLIED)
+            .order("created_at", desc=True)
+        ),
+        video_ids,
+    )
 
     live_by_vid: dict[str, dict] = {}
     for a in live_audits:

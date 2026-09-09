@@ -197,12 +197,11 @@ def bootstrap(channel_id: str):
 @router.get("/channels/{channel_id}/playlists/status")
 def playlist_status(channel_id: str):
     """Embedding coverage and playlist assignment stats for a channel."""
-    videos = (
+    videos = all_rows(
         supabase().table("videos")
         .select("id")
         .eq("channel_id", channel_id)
-        .execute()
-    ).data or []
+    )
     total_videos = len(videos)
     video_ids = [v["id"] for v in videos]
 
