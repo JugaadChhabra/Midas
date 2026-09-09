@@ -444,3 +444,87 @@ def reconcile_channel(channel_id: str) -> dict:
 
     log.info("reconcile_channel(%s): added=%d removed=%d cap_hit=%s", channel_id, added, removed, skipped_cap)
     return {"added": added, "removed": removed, "skipped_cap": skipped_cap}
+
+
+# ── Playlist threshold tuner ──────────────────────────────────────────────────
+#
+# Lives here, with the engine that reads PLAYLIST_JOIN_HIGH, because it is a
+# playlist concern — the churn of this module's own `playlist_assignments` log.
+# It used to ride the weekly reflection tick, which conflated it with CTR-driven
+# prompt tuning; the scheduler (`_weekly_playlist_tuning` in main) now drives it
+# directly, on the same weekly cadence and channel set.
+
+_THRESHOLD_JOIN_HIGH_MIN = 0.65
+_THRESHOLD_JOIN_HIGH_MAX = 0.85
+_THRESHOLD_NUDGE = 0.01
+_FPR_HIGH = 0.20   # false positive rate above which we tighten
+_FPR_LOW = 0.05    # false positive rate below which we loosen
+
+
+def tune_thresholds(channel_id: str) -> dict:
+    """Adjust PLAYLIST_JOIN_HIGH based on playlist assignment churn rate.
+
+    Churn signal: embedding-adds that were later removed = false positives.
+    Writes a new threshold_history row and updates settings in-process.
+    Returns dict with fpr, old_join_high, new_join_high.
+    """
+    rows = (
+        supabase().table("playlist_assignments")
+        .select("action,decision_source")
+        .eq("channel_id", channel_id)
+        .execute()
+    ).data or []
+
+    embedding_adds = [r for r in rows if r["action"] == "added" and r["decision_source"] == "embedding"]
+    removals = [r for r in rows if r["action"] == "removed"]
+
+    total_adds = len(embedding_adds)
+    if total_adds < 5:
+        log.info("tune_thresholds: insufficient assignment data for %s (%d adds)", channel_id, total_adds)
+        return {"skipped": True, "reason": "insufficient_data"}
+
+    fpr = len(removals) / total_adds
+    old_high = settings.PLAYLIST_JOIN_HIGH
+
+    if fpr > _FPR_HIGH:
+        delta = _THRESHOLD_NUDGE
+    elif fpr < _FPR_LOW:
+        delta = -_THRESHOLD_NUDGE
+    else:
+        log.info("tune_thresholds: FPR %.2f in stable range for %s — no change", fpr, channel_id)
+        return {"skipped": True, "reason": "stable_fpr", "fpr": round(fpr, 3)}
+
+    new_high = round(
+        max(_THRESHOLD_JOIN_HIGH_MIN, min(_THRESHOLD_JOIN_HIGH_MAX, old_high + delta)), 4
+    )
+
+    if new_high == old_high:
+        return {"skipped": True, "reason": "at_boundary", "fpr": round(fpr, 3), "new_join_high": new_high}
+
+    # Retire current active threshold row
+    supabase().table("threshold_history").update(
+        {"status": "retired"}
+    ).eq("channel_id", channel_id).eq("status", "active").execute()
+
+    # Insert new active threshold row
+    supabase().table("threshold_history").insert({
+        "channel_id": channel_id,
+        "join_high": new_high,
+        "join_low": settings.PLAYLIST_JOIN_LOW,
+        "leave_threshold": settings.PLAYLIST_LEAVE,
+        "status": "active",
+        "reason": f"fpr={round(fpr, 3):.3f} ({'tightened' if delta > 0 else 'loosened'})",
+    }).execute()
+
+    # Update in-process settings so the running app uses new threshold immediately
+    settings.PLAYLIST_JOIN_HIGH = new_high
+    log.info(
+        "tune_thresholds: %s PLAYLIST_JOIN_HIGH %.4f → %.4f (fpr=%.2f)",
+        channel_id, old_high, new_high, fpr,
+    )
+    return {
+        "fpr": round(fpr, 3),
+        "old_join_high": old_high,
+        "new_join_high": new_high,
+        "delta": delta,
+    }

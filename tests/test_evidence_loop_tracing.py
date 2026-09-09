@@ -60,7 +60,7 @@ def test_should_reflect_records_its_decision(_isolated_tracer):
          patch("app.reflection._build_perf_report", return_value=report):
         mock_sb.return_value.table.return_value.select.return_value.eq.return_value \
             .order.return_value.limit.return_value.execute.return_value.data = []
-        should, reason = _should_reflect("ch1")
+        should, reason, _ = _should_reflect("ch1")
 
     assert (should, reason) == (False, "performing_well")
     attrs = _named(_isolated_tracer, "should_reflect").attributes

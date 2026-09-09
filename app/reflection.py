@@ -159,8 +159,13 @@ def _build_perf_report(channel_id: str) -> dict | None:
 
 # ── Trigger logic ─────────────────────────────────────────────────────────────
 
-def _should_reflect(channel_id: str) -> tuple[bool, str]:
-    """Return (should_reflect, reason)."""
+def _should_reflect(channel_id: str) -> tuple[bool, str, dict | None]:
+    """Return (should_reflect, reason, report).
+
+    The report is the evidence the decision was made on; it travels out so the
+    caller can reflect on it without rebuilding it (it is None when the gate
+    short-circuits before building — cooldown, or no measured outcomes).
+    """
     with tracing.span("should_reflect", channel_id=channel_id) as rec:
         should, reason, report = _should_reflect_inner(channel_id)
         rec.set(**{
@@ -177,7 +182,7 @@ def _should_reflect(channel_id: str) -> tuple[bool, str]:
                 "reflection.median_ctr_delta_pct": report["median_ctr_delta_pct"],
                 "reflection.verdict_count": report["count"],
             })
-        return should, reason
+        return should, reason, report
 
 
 def _should_reflect_inner(channel_id: str) -> tuple[bool, str, dict | None]:
@@ -692,84 +697,6 @@ def _check_auto_revert(channel_id: str) -> None:
     log.info("Reverted channel %s to parent prompt version %s", channel_id, live["parent_version_id"])
 
 
-# ── Playlist threshold tuner ──────────────────────────────────────────────────
-
-_THRESHOLD_JOIN_HIGH_MIN = 0.65
-_THRESHOLD_JOIN_HIGH_MAX = 0.85
-_THRESHOLD_NUDGE = 0.01
-_FPR_HIGH = 0.20   # false positive rate above which we tighten
-_FPR_LOW = 0.05    # false positive rate below which we loosen
-
-
-def tune_thresholds(channel_id: str) -> dict:
-    """Adjust PLAYLIST_JOIN_HIGH based on playlist assignment churn rate.
-
-    Churn signal: embedding-adds that were later removed = false positives.
-    Writes a new threshold_history row and updates settings in-process.
-    Returns dict with fpr, old_join_high, new_join_high.
-    """
-    rows = (
-        supabase().table("playlist_assignments")
-        .select("action,decision_source")
-        .eq("channel_id", channel_id)
-        .execute()
-    ).data or []
-
-    embedding_adds = [r for r in rows if r["action"] == "added" and r["decision_source"] == "embedding"]
-    removals = [r for r in rows if r["action"] == "removed"]
-
-    total_adds = len(embedding_adds)
-    if total_adds < 5:
-        log.info("tune_thresholds: insufficient assignment data for %s (%d adds)", channel_id, total_adds)
-        return {"skipped": True, "reason": "insufficient_data"}
-
-    fpr = len(removals) / total_adds
-    old_high = settings.PLAYLIST_JOIN_HIGH
-
-    if fpr > _FPR_HIGH:
-        delta = _THRESHOLD_NUDGE
-    elif fpr < _FPR_LOW:
-        delta = -_THRESHOLD_NUDGE
-    else:
-        log.info("tune_thresholds: FPR %.2f in stable range for %s — no change", fpr, channel_id)
-        return {"skipped": True, "reason": "stable_fpr", "fpr": round(fpr, 3)}
-
-    new_high = round(
-        max(_THRESHOLD_JOIN_HIGH_MIN, min(_THRESHOLD_JOIN_HIGH_MAX, old_high + delta)), 4
-    )
-
-    if new_high == old_high:
-        return {"skipped": True, "reason": "at_boundary", "fpr": round(fpr, 3), "new_join_high": new_high}
-
-    # Retire current active threshold row
-    supabase().table("threshold_history").update(
-        {"status": "retired"}
-    ).eq("channel_id", channel_id).eq("status", "active").execute()
-
-    # Insert new active threshold row
-    supabase().table("threshold_history").insert({
-        "channel_id": channel_id,
-        "join_high": new_high,
-        "join_low": settings.PLAYLIST_JOIN_LOW,
-        "leave_threshold": settings.PLAYLIST_LEAVE,
-        "status": "active",
-        "reason": f"fpr={round(fpr, 3):.3f} ({'tightened' if delta > 0 else 'loosened'})",
-    }).execute()
-
-    # Update in-process settings so the running app uses new threshold immediately
-    settings.PLAYLIST_JOIN_HIGH = new_high
-    log.info(
-        "tune_thresholds: %s PLAYLIST_JOIN_HIGH %.4f → %.4f (fpr=%.2f)",
-        channel_id, old_high, new_high, fpr,
-    )
-    return {
-        "fpr": round(fpr, 3),
-        "old_join_high": old_high,
-        "new_join_high": new_high,
-        "delta": delta,
-    }
-
-
 # ── Main orchestrator ─────────────────────────────────────────────────────────
 
 def reflect(channel_id: str) -> dict:
@@ -791,18 +718,16 @@ def reflect(channel_id: str) -> dict:
 def _reflect_inner(channel_id: str) -> dict:
     log.info("Reflection tick for channel %s", channel_id)
 
-    should, reason = _should_reflect(channel_id)
+    should, reason, perf_report = _should_reflect(channel_id)
     if not should:
         log.info("Reflection skipped for %s: %s", channel_id, reason)
-        # Still run threshold tuner regardless
-        tune_result = tune_thresholds(channel_id)
-        return {"reflected": False, "reason": reason, "threshold_tune": tune_result}
+        return {"reflected": False, "reason": reason}
 
+    # `perf_report` is the evidence the gate already built and judged on — a
+    # `should=True` verdict always carries it, so reflect on that one report
+    # rather than issuing a second (expensive) _build_perf_report for the same
+    # window.
     niche_queries = get_or_derive_niche_queries(channel_id)
-    perf_report = _build_perf_report(channel_id)
-    if perf_report is None:
-        return {"reflected": False, "reason": "insufficient_data_at_reflect_time"}
-
     competitive_ctx = _sample_competitors(channel_id, niche_queries)
     niche_desc = ", ".join(niche_queries[:2]) if niche_queries else "general"
     platform_guidance = _get_platform_guidance(niche_desc)
@@ -836,7 +761,6 @@ def _reflect_inner(channel_id: str) -> dict:
             shadow_count = _run_shadow_audits(channel_id, version_row["prompt_text"], version_id)
 
     _check_auto_revert(channel_id)
-    tune_result = tune_thresholds(channel_id)
 
     log.info(
         "Reflection complete for %s: version_id=%s mode=%s shadow_count=%d",
@@ -847,7 +771,6 @@ def _reflect_inner(channel_id: str) -> dict:
         "version_id": version_id,
         "mode": mode,
         "shadow_audits_created": shadow_count,
-        "threshold_tune": tune_result,
     }
 
 
