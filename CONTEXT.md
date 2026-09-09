@@ -95,3 +95,20 @@ key-names stay at each edge (`desc_changed` in the prompt vs
 Recency is carried as raw `days_since_apply`, not a flag: what counts as recent
 is a caller's policy (the loop's 14-day window), not a property of the verdict.
 Owner: `app/verdicts.py` (`Readout`, `readout`, `lever_average`).
+
+## House format
+
+The fixed metadata contract every audit produces: the bilingual title template,
+the ordered 5-block description skeleton, the tag rule, the hashtag/title/tag
+ceilings, and the JSON shape the model must return. It is one contract seen from
+two sides — the **prose** three prompts show the model (`audits.DEFAULT_PROMPT`
+for the auditor, `audits.elaborate` for prompt generation, `reflection`'s
+meta-prompt for prompt improvement) and the **enforcement** applied to what
+comes back (`AuditSuggestion.rejection` / `cap_description_hashtags`).
+
+Both sides read one referent so they cannot disagree: the ceilings are constants
+and `house_format_spec()` renders them into the prose the prompts embed. Each
+prompt supplies only its own framing around the rendered block; the numbers a
+prompt quotes are the numbers `rejection()` checks. Owner:
+`app/audit_suggestion.py` (`house_format_spec`, the ceiling constants,
+`AuditSuggestion`).

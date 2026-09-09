@@ -10,7 +10,7 @@ from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
 from app.content_type import is_episode
 from app.apply_outcome import ApplyError, ApplyOutcome
-from app.audit_suggestion import AuditSuggestion
+from app.audit_suggestion import AuditSuggestion, house_format_spec
 from app.status_vocab import (
     ACTIVE_MEASUREMENT_STATUSES,
     AuditStatus,
@@ -34,7 +34,12 @@ log = logging.getLogger("midas.audits")
 router = APIRouter(tags=["audits"])
 
 
-DEFAULT_PROMPT = """\
+# The auditor prompt. Its house-format section (title template, description
+# skeleton, tag rule, and JSON schema) is rendered from the one referent in
+# audit_suggestion so the ceilings it quotes can't drift from the ones
+# rejection() enforces. Everything around it — role, content sources, the
+# language rule, and the two closing rules — is audit-specific framing.
+DEFAULT_PROMPT = f"""\
 You are a YouTube SEO expert for nursery-rhyme / kids 3D-rhyme channels.
 Audit this video's metadata and rewrite it to a FIXED house format.
 
@@ -51,36 +56,7 @@ BILINGUAL: an English layer AND a regional-language layer, exactly as laid out
 below. Never let the transcript's language override the channel's configured
 language.
 
-=== REQUIRED TITLE FORMAT ===
-[Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes
-- Keep the whole title under 100 characters.
-- Regional name in the channel's language/script; English name in English.
-- theme = one short topical hook drawn from the rhyme (e.g. Colors, Animals,
-  Bath Time, Counting).
-
-=== REQUIRED DESCRIPTION FORMAT (this exact order) ===
-1. First line: exactly 3 hashtags (these surface above the title).
-2. English description: 2-4 keyword-rich sentences about the rhyme.
-3. Regional description: the same, in the channel's regional language, keyword-rich.
-4. Keywords: one line of high-value search phrases (comma-separated), English + regional.
-5. Final line(s): exactly 12 hashtags.
-- TOTAL hashtags across the whole description must be EXACTLY 15. Never exceed 15 —
-  YouTube ignores ALL hashtags on a video that has more than 15.
-
-=== TAGS ===
-- A list mixing broad and specific tags, English + regional. Maximize coverage up
-  to ~500 characters total (YouTube's tag limit) — roughly 25-30 tags.
-
-Return strictly a JSON object with this exact shape:
-{
-  "comparisons": {
-    "title":       { "current_problems": "what's weak about the current title", "suggested": "your rewrite in the required title format", "why_better": "1-2 sentences" },
-    "description": { "current_problems": "what the current description is missing or doing badly", "suggested": "the FULL multi-line description following all 5 blocks above", "why_better": "..." },
-    "tags":        { "current_problems": "gaps or noise in the current tag list", "suggested": ["tag1","tag2",...], "why_better": "..." }
-  },
-  "issues":   [ { "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." } ],
-  "reasoning": "short overall summary"
-}
+{house_format_spec()}
 
 Rules:
 - Put the fully-formatted multi-line description (all 5 blocks, real newlines) in
@@ -136,33 +112,10 @@ The creator's notes (in their own words):
 
 Produce a single JSON object with one key: "generated_prompt".
 Its value must be a complete, well-organized audit prompt suitable for an LLM. The
-generated prompt MUST preserve this fixed house format (do not weaken or drop any of it):
+generated prompt MUST preserve this fixed house format verbatim (do not weaken, reorder,
+or drop any of it):
 
-TITLE FORMAT (mandatory):
-  [Regional rhyme name] | [English rhyme name] | [theme] Nursery 3D Rhymes
-  - under 100 characters; regional name in the channel's language/script, English name in English.
-
-DESCRIPTION FORMAT (mandatory, this exact order):
-  1. First line: exactly 3 hashtags.
-  2. English keyword-rich description (2-4 sentences).
-  3. Regional-language keyword-rich description.
-  4. Keywords line (comma-separated search phrases, English + regional).
-  5. Final line(s): exactly 12 hashtags.
-  - TOTAL hashtags must be EXACTLY 15 (YouTube ignores all hashtags above 15).
-
-TAGS (mandatory): a list mixing broad + specific, English + regional, up to ~500 characters (~25-30 tags).
-
-The generated prompt must instruct the auditor to return strictly a JSON object with this
-exact shape:
-  {{
-    "comparisons": {{
-      "title":       {{ "current_problems": "...", "suggested": "<title in the required format>", "why_better": "..." }},
-      "description": {{ "current_problems": "...", "suggested": "<full multi-line description following all 5 blocks>", "why_better": "..." }},
-      "tags":        {{ "current_problems": "...", "suggested": ["tag1","tag2",...], "why_better": "..." }}
-    }},
-    "issues":   [ {{ "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." }} ],
-    "reasoning": "short overall summary"
-  }}
+{house_format_spec()}
 
 Embed the creator's preferences and priorities directly into the prompt so the auditor
 knows what they care about, but never at the expense of the house format above. Be
