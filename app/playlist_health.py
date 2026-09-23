@@ -32,7 +32,7 @@ from typing import Any
 
 from app.config import settings
 from app.db import supabase
-from app.rows import all_rows
+from app.rows import all_rows, rows_for_ids
 
 log = logging.getLogger("midas.playlist_health")
 
@@ -173,34 +173,24 @@ def score_channel(channel_id: str) -> dict[str, Any]:
     from datetime import date as _date
     cutoff_iso = _date.fromordinal(cutoff_dt).isoformat()
 
-    # Chunk playlist_ids and paginate the rows within each chunk so we never
-    # hit Supabase's 1000-row default cap. Without chunking, a channel with
-    # >250 playlists (1000 rows / 4 weekly windows) would silently lose
-    # metric rows for the alphabetic tail of playlist_ids — those rows would
-    # never be aggregated and every affected playlist would land in
-    # insufficient_data with no signal that it was a query truncation, not a
-    # real data gap.
-    METRIC_ID_CHUNK = 100
-    metric_rows: list[dict] = []
-    for chunk_start in range(0, len(playlist_ids), METRIC_ID_CHUNK):
-        id_chunk = playlist_ids[chunk_start:chunk_start + METRIC_ID_CHUNK]
-        row_offset = 0
-        while True:
-            page = (
-                supabase().table("playlist_metrics")
-                .select("playlist_id,window_start,window_end,playlist_starts,"
-                        "views_per_playlist_start,avg_time_in_playlist_sec")
-                .in_("playlist_id", id_chunk)
-                .gte("window_end", cutoff_iso)
-                .order("window_end", desc=True)
-                .range(row_offset, row_offset + METRIC_ROW_PAGE - 1)
-                .execute()
-                .data or []
-            )
-            metric_rows.extend(page)
-            if len(page) < METRIC_ROW_PAGE:
-                break
-            row_offset += METRIC_ROW_PAGE
+    # rows_for_ids bounds the in_() list AND pages each chunk past the 1000-row
+    # cap. Without both, a channel with >250 playlists (1000 rows / 4 weekly
+    # windows) would silently lose metric rows for the tail of playlist_ids —
+    # those playlists would land in insufficient_data with no signal that it
+    # was a query truncation, not a real data gap. Each playlist falls in one
+    # chunk, so the window_end-desc order the grouping below relies on holds
+    # per playlist.
+    metric_rows = rows_for_ids(
+        lambda c: (
+            supabase().table("playlist_metrics")
+            .select("playlist_id,window_start,window_end,playlist_starts,"
+                    "views_per_playlist_start,avg_time_in_playlist_sec")
+            .in_("playlist_id", c)
+            .gte("window_end", cutoff_iso)
+            .order("window_end", desc=True)
+        ),
+        playlist_ids,
+    )
 
     # Group + keep only the most-recent AGG_WEEKS rows per playlist.
     by_pid: dict[str, list[dict]] = {}
@@ -218,26 +208,17 @@ def score_channel(channel_id: str) -> dict[str, Any]:
     # for the channel we flip tier_2_pending=false on every rationale.
     tier2_by_pid: dict[str, dict[str, int]] = {}  # playlist_id -> {video_id: views}
     if playlist_ids:
-        tier2_rows: list[dict] = []
-        for chunk_start in range(0, len(playlist_ids), METRIC_ID_CHUNK):
-            id_chunk = playlist_ids[chunk_start:chunk_start + METRIC_ID_CHUNK]
-            row_offset = 0
-            while True:
-                page = (
-                    supabase().table("video_traffic_source_playlist")
-                    .select("playlist_id,video_id,window_end,views")
-                    .in_("playlist_id", id_chunk)
-                    .eq("channel_id", channel_id)
-                    .gte("window_end", cutoff_iso)
-                    .order("window_end", desc=True)
-                    .range(row_offset, row_offset + METRIC_ROW_PAGE - 1)
-                    .execute()
-                    .data or []
-                )
-                tier2_rows.extend(page)
-                if len(page) < METRIC_ROW_PAGE:
-                    break
-                row_offset += METRIC_ROW_PAGE
+        tier2_rows = rows_for_ids(
+            lambda c: (
+                supabase().table("video_traffic_source_playlist")
+                .select("playlist_id,video_id,window_end,views")
+                .in_("playlist_id", c)
+                .eq("channel_id", channel_id)
+                .gte("window_end", cutoff_iso)
+                .order("window_end", desc=True)
+            ),
+            playlist_ids,
+        )
         # Sum views across the window per (playlist_id, video_id). Multiple
         # weekly rows for the same (playlist, video) collapse via dict-merge.
         for r in tier2_rows:
