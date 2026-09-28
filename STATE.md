@@ -49,7 +49,7 @@ because the DB was unreachable (see caveat). The repo does record:
 | `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) | (blank) | (blank) | n/a: no such flag | n/a: no such flag | Phase 0 probe channel 2026-06-10 (`20260610134419_metrics_tables.sql` header). In the default reconcile allowlist (`app/config.py:134-139`). |
 | `UC8KjoL0Z9mTHKqB6gFutkJw` (Punjabi) | (blank) | (blank) | n/a | n/a | Reach CSV probe 2026-07-02 (`20260702174235_…` header). Gap 6 bisect (`docs/PHASE_0_GAPS.md`). Reconcile allowlist. |
 | `UCOVKJdzghm2gOnuaGeJTonA` (Gujarati) | (blank) | (blank) | n/a | n/a | Reconcile allowlist only. |
-| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:375-380` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. The code path for `bgc` exists: `lang_display_name("bgc")` → `"Haryanvi"` (`app/transcripts.py` `_LANG_NAMES`), and `youtube_language_code` sends it to YouTube as `hi` (`app/youtube_metadata.py` `_NON_ISO_639_1 = {"bgc": "hi"}`). `scripts/probes/probe_i18n_languages.py` (live, not run by the suite) checks `bgc`/`hi` against `i18nLanguages.list`. |
+| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:375-380` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. The code path for `bgc` exists: `lang_display_name("bgc")` → `"Haryanvi"` (`app/transcripts.py:31` `_LANG_NAMES`), and `youtube_language_code` sends it to YouTube as `hi` (`app/youtube_metadata.py:58-71` `_NON_ISO_639_1 = {"bgc": "hi"}`). `scripts/probes/probe_i18n_languages.py` (live, not run by the suite) checks `bgc`/`hi` against `i18nLanguages.list`. |
 
 Flags that actually exist on `channels`: `analytics_authorized`, `measurement_enabled`,
 `reach_warmup`, `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`,
@@ -306,7 +306,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, `audit_video`, apply, revert, bulk ops |
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, validation, `house_format_spec()` |
 | `apply_outcome.py` | typed `ApplyError`/`ApplyOutcome` |
-| `youtube_metadata.py` | `videos.update` payload (category, language code, madeForKids). Content language → YouTube code via `_NON_ISO_639_1 = {"bgc": "hi"}`; unmapped codes pass through |
+| `youtube_metadata.py` | `videos.update` payload (category, language code, madeForKids). Content language → YouTube code via `_NON_ISO_639_1 = {"bgc": "hi"}` (`app/youtube_metadata.py:58-60`); unmapped codes pass through |
 | `youtube_client.py` | Data API wrappers + quota charging |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |

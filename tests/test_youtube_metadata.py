@@ -35,6 +35,14 @@ def test_a_two_letter_language_passes_through():
     assert p["snippet"]["defaultLanguage"] == "hi"
 
 
+def test_an_unmapped_language_reaches_the_payload_unchanged():
+    """`hi` is also the mapping's output, so it can't tell pass-through from
+    "everything becomes hi". A code the table doesn't touch can."""
+    p = build_update_payload("v", title="T", description="D", tags=[], lang="pa")
+    assert p["snippet"]["defaultLanguage"] == "pa"
+    assert p["snippet"]["defaultAudioLanguage"] == "pa"
+
+
 def test_absent_language_omits_the_field_rather_than_guessing():
     """A channel with no configured language must not have one invented for it."""
     p = build_update_payload("v", title="T", description="D", tags=[], lang=None)

@@ -4,7 +4,8 @@
 no ISO 639-1 code) to `hi` before it reaches `snippet.defaultLanguage` /
 `defaultAudioLanguage` (`_NON_ISO_639_1`). That mapping was chosen from the
 docs, not from the API. This probe asks the API: it calls `i18nLanguages.list`
-(1 quota unit) and prints whether `bgc` and `hi` are in the returned list.
+(1 quota unit) and prints whether each mapped code (`bgc`) and its target
+(`hi`) are in the returned list.
 
 Reading the result:
   - `hi` listed, `bgc` not  -> the `bgc -> hi` mapping stands.
@@ -31,8 +32,11 @@ import json
 from googleapiclient.errors import HttpError
 
 from app.youtube_client import youtube_for_channel
+from app.youtube_metadata import _NON_ISO_639_1
 
-_CODES = ("bgc", "hi")
+# Every mapped content code and the code it is sent as, so a new mapping is
+# probed without editing this file.
+_CODES = tuple(dict.fromkeys([*_NON_ISO_639_1, *_NON_ISO_639_1.values()]))
 
 
 def main() -> int:
@@ -50,8 +54,8 @@ def main() -> int:
         return 1
 
     items = resp.get("items") or []
-    listed = {(i.get("snippet") or {}).get("hl"): (i.get("snippet") or {}).get("name")
-              for i in items}
+    snippets = [i.get("snippet") or {} for i in items]
+    listed = {sn.get("hl"): sn.get("name") for sn in snippets}
     print(f"{len(listed)} languages listed")
 
     print("\n=== codes Midas cares about ===")
