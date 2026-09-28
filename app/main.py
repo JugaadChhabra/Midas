@@ -159,12 +159,18 @@ def _daily_reconcile():
         except Exception as e:
             _main_log.exception("Daily playlist sync failed for %s: %s", channel_id, e)
             errors.append(f"sync: {job_status.describe(e)}")
-        try:
-            result = reconcile_channel(channel_id)
-            _main_log.info("Daily reconcile %s: %s", channel_id, result)
-        except Exception as e:
-            _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
-            errors.append(f"reconcile: {job_status.describe(e)}")
+        if not settings.PLAYLIST_RECONCILE_WRITES_ENABLED:
+            _main_log.info(
+                "Daily reconcile %s: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)",
+                channel_id,
+            )
+        else:
+            try:
+                result = reconcile_channel(channel_id)
+                _main_log.info("Daily reconcile %s: %s", channel_id, result)
+            except Exception as e:
+                _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
+                errors.append(f"reconcile: {job_status.describe(e)}")
         if errors:
             raise RuntimeError("; ".join(errors))
 
@@ -239,16 +245,13 @@ def _refresh_pot_provider():
     _main_log.info("Refreshed PO-token provider session")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # BEFORE anything else, and before a single scheduled job is registered: on
-    # a machine that has never run Midas, ./pgdata is an empty cluster and this
-    # restores last night's NAS snapshot into it. Raising here keeps the app
-    # down, which is the intended behaviour when the NAS is unreachable — see
-    # app/provision.py for why serving an empty database is the worse outcome.
-    ensure_database_populated()
+def _register_jobs(sched) -> None:
+    """Add every scheduled job to ``sched`` without starting it.
 
-    scheduler.add_job(
+    Split out of lifespan() so tests can introspect what registers under a
+    given set of flags. The A4 freeze flags decide which writers register.
+    """
+    sched.add_job(
         autopilot_tick,
         "interval",
         seconds=settings.AUTOPILOT_TICK_SECONDS,
@@ -256,7 +259,7 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
+    sched.add_job(
         dispatch_tick,
         "interval",
         seconds=settings.SHORTS_DISPATCH_INTERVAL_SECONDS,
@@ -264,7 +267,7 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
+    sched.add_job(
         _daily_reconcile,
         "cron",
         hour=2,
@@ -273,37 +276,49 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
-        _weekly_discovery,
-        "cron",
-        day_of_week="sun",
-        hour=3,
-        minute=0,
-        id="playlist_discovery",
-        max_instances=1,
-        coalesce=True,
-    )
-    scheduler.add_job(
-        _weekly_reflection,
-        "cron",
-        day_of_week="mon",
-        hour=4,
-        minute=0,
-        id="reflection",
-        max_instances=1,
-        coalesce=True,
-    )
-    scheduler.add_job(
-        _weekly_playlist_tuning,
-        "cron",
-        day_of_week="mon",
-        hour=3,
-        minute=30,
-        id="playlist_tuning",
-        max_instances=1,
-        coalesce=True,
-    )
-    scheduler.add_job(
+    if not settings.PLAYLIST_RECONCILE_WRITES_ENABLED:
+        _main_log.info("playlist_reconcile registered for sync only: add/remove "
+                       "skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)")
+    if settings.PLAYLIST_DISCOVERY_ENABLED:
+        sched.add_job(
+            _weekly_discovery,
+            "cron",
+            day_of_week="sun",
+            hour=3,
+            minute=0,
+            id="playlist_discovery",
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        _main_log.info("playlist_discovery not registered: PLAYLIST_DISCOVERY_ENABLED=false")
+    if settings.REFLECTION_ENABLED:
+        sched.add_job(
+            _weekly_reflection,
+            "cron",
+            day_of_week="mon",
+            hour=4,
+            minute=0,
+            id="reflection",
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        _main_log.info("reflection not registered: REFLECTION_ENABLED=false")
+    if settings.PLAYLIST_TUNING_ENABLED:
+        sched.add_job(
+            _weekly_playlist_tuning,
+            "cron",
+            day_of_week="mon",
+            hour=3,
+            minute=30,
+            id="playlist_tuning",
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        _main_log.info("playlist_tuning not registered: PLAYLIST_TUNING_ENABLED=false")
+    sched.add_job(
         poll_metrics,
         "cron",
         hour=5,
@@ -324,7 +339,7 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
+    sched.add_job(
         poll_reporting,
         "cron",
         hour=6,
@@ -343,7 +358,7 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
+    sched.add_job(
         _daily_playlist_health_score,
         "cron",
         hour=7,
@@ -362,7 +377,7 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
+    sched.add_job(
         eval_measurements,
         "cron",
         hour=8,
@@ -377,7 +392,7 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
-    scheduler.add_job(
+    sched.add_job(
         run_nightly_backup,
         "cron",
         hour=settings.BACKUP_HOUR,
@@ -393,7 +408,7 @@ async def lifespan(app: FastAPI):
     if os.getenv("BGUTIL_POT_HTTP_BASE_URL"):
         # Only meaningful for the Docker HTTP sidecar; the Mac mints per-request
         # via a local script, so there's no long-lived session to go stale.
-        scheduler.add_job(
+        sched.add_job(
             _refresh_pot_provider,
             "interval",
             hours=2,
@@ -401,6 +416,18 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             coalesce=True,
         )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # BEFORE anything else, and before a single scheduled job is registered: on
+    # a machine that has never run Midas, ./pgdata is an empty cluster and this
+    # restores last night's NAS snapshot into it. Raising here keeps the app
+    # down, which is the intended behaviour when the NAS is unreachable — see
+    # app/provision.py for why serving an empty database is the worse outcome.
+    ensure_database_populated()
+
+    _register_jobs(scheduler)
     # After every add_job: each registered job shows as never_run until it
     # fires, and every run (success or failure) lands in the registry.
     job_status.registry.watch(scheduler)
