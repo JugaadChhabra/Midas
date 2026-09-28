@@ -111,7 +111,7 @@ class Settings:
     # Freeze switches for the writers whose changes nobody measures (Phase A ·
     # A4). Off means the job is not registered at startup; reconcile is the
     # exception — it still registers so sync_playlists runs, and only its
-    # add/remove step is skipped. The matching manual endpoints return 409.
+    # add/remove step is skipped, and POST .../playlists/reconcile returns 409.
     PLAYLIST_DISCOVERY_ENABLED = os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"
     PLAYLIST_RECONCILE_WRITES_ENABLED = os.getenv("PLAYLIST_RECONCILE_WRITES_ENABLED", "false").lower() == "true"
     PLAYLIST_TUNING_ENABLED = os.getenv("PLAYLIST_TUNING_ENABLED", "false").lower() == "true"

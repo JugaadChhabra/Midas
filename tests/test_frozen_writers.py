@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi.testclient import TestClient
 
 from app import main
+from tests.fakes import FakeSupabase
 
 FROZEN_JOBS = [
     ("PLAYLIST_DISCOVERY_ENABLED", "playlist_discovery"),
@@ -74,38 +75,60 @@ def test_unfrozen_jobs_still_register_with_every_flag_off():
             "nightly_db_backup"} <= ids
 
 
-def _run_daily_reconcile(writes: bool, reconcile=None):
+def _run_daily_reconcile(writes: bool):
+    """Run the real _daily_reconcile → reconcile_channel over a FakeSupabase.
+
+    One embedded video sits well above PLAYLIST_JOIN_HIGH for a playlist it is
+    not in, and one member sits below PLAYLIST_LEAVE with the judge agreeing,
+    so with writes on (and HITL off) reconcile inserts AND deletes — the
+    writes-on case proves the fixture reaches both YouTube calls.
+    """
+    import app.playlists as pl
+
+    fake = FakeSupabase(tables={
+        "playlists": [{"id": "p1", "channel_id": "a", "title": "Colors", "description": ""}],
+        "videos": [{"id": "v_in", "channel_id": "a"}, {"id": "v_out", "channel_id": "a"}],
+        "playlist_assignments": [{
+            "playlist_id": "p1", "video_id": "v_out", "action": "added",
+            "playlist_item_id": "item_out", "decided_at": "2026-09-01T00:00:00+00:00",
+        }],
+    })
+    sims = {("p1", "v_in"): 0.95, ("p1", "v_out"): 0.10}
     sync = MagicMock(return_value={})
-    reconcile = reconcile or MagicMock(return_value={})
-    with patch.object(main.settings, "PLAYLIST_RECONCILE_WRITES_ENABLED", writes), \
+    with patch.multiple(main.settings, PLAYLIST_RECONCILE_WRITES_ENABLED=writes,
+                        PLAYLIST_HITL=False, DRY_RUN=False), \
          patch.object(main, "JobBudget"), \
-         patch.object(main.eligibility, "channel_ids_for", return_value=["a", "b"]), \
+         patch.object(main.eligibility, "channel_ids_for", return_value=["a"]), \
          patch.object(main, "_reconcile_channel_order", side_effect=lambda ids: ids), \
          patch.object(main, "sync_playlists", sync), \
-         patch.object(main, "reconcile_channel", reconcile), \
-         patch("app.playlists.yt_playlist_items_insert") as yt_insert, \
-         patch("app.playlists.yt_playlist_items_delete") as yt_delete:
+         patch.object(pl, "supabase", return_value=fake), \
+         patch.object(pl, "_sims_matrix", return_value=(sims, {"p1"})), \
+         patch.object(pl, "_llm_judge", return_value=True), \
+         patch.object(pl, "youtube_for_channel"), \
+         patch.object(pl, "yt_playlist_items_insert", return_value="item_new") as yt_insert, \
+         patch.object(pl, "yt_playlist_items_delete") as yt_delete:
         main._daily_reconcile()
-    return sync, reconcile, yt_insert, yt_delete
+    return sync, yt_insert, yt_delete, fake
 
 
 def test_reconcile_with_writes_off_syncs_but_never_adds_or_removes(caplog):
     with caplog.at_level(logging.INFO, logger="midas.main"):
-        sync, reconcile, yt_insert, yt_delete = _run_daily_reconcile(writes=False)
+        sync, yt_insert, yt_delete, fake = _run_daily_reconcile(writes=False)
 
-    assert [c.args[0] for c in sync.call_args_list] == ["a", "b"]
-    reconcile.assert_not_called()
+    assert [c.args[0] for c in sync.call_args_list] == ["a"]
     yt_insert.assert_not_called()
     yt_delete.assert_not_called()
+    assert fake.writes == []
     assert any("PLAYLIST_RECONCILE_WRITES_ENABLED" in r.getMessage()
                and "skipped" in r.getMessage() for r in caplog.records)
 
 
-def test_reconcile_with_writes_on_still_reconciles():
-    sync, reconcile, _, _ = _run_daily_reconcile(writes=True)
+def test_reconcile_with_writes_on_adds_and_removes():
+    sync, yt_insert, yt_delete, _ = _run_daily_reconcile(writes=True)
 
-    assert [c.args[0] for c in sync.call_args_list] == ["a", "b"]
-    assert [c.args[0] for c in reconcile.call_args_list] == ["a", "b"]
+    assert [c.args[0] for c in sync.call_args_list] == ["a"]
+    yt_insert.assert_called_once()
+    yt_delete.assert_called_once()
 
 
 @pytest.mark.parametrize("path,flag", [

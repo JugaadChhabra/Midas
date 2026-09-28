@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-29 (§3, §4, §5 updated for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A4 commit on top of `cf4f20d` (a commit can't cite its own SHA) · **Branch:** `phase-a/10-a4-freeze-writers`
+**Generated:** 2026-09-29 (§1, §3, §4, §5, §7.1 updated for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A4 commit on top of `cf4f20d` (a commit can't cite its own SHA) · **Branch:** `phase-a/10-a4-freeze-writers`
 (working tree: three untracked files, `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`, `midas-seo-agent-v2.excalidraw`, `scripts/overnight_phase_a.sh`)
 
 **Data caveat for this generation.** The live database runs on the office machine,
@@ -178,10 +178,10 @@ override. The office machine's `.env` is hand-carried and was not read.
 | `MAX_NEW_PLAYLISTS_PER_WINDOW` | absent; hardcoded `MAX_NEW_PLAYLISTS = 2` per weekly run (`app/playlist_discovery.py:20`) | 3 per window | **differs** |
 | `PLAYLIST_AUTO_DELETE` | absent (no delete path exists) | false | absent |
 | `PLAYLIST_CHALLENGER_PCT` | absent | 0.20 | **absent** |
-| `PLAYLIST_DISCOVERY_ENABLED` | `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | false (implementation spec A4) | no |
-| `PLAYLIST_RECONCILE_WRITES_ENABLED` | `os.getenv("PLAYLIST_RECONCILE_WRITES_ENABLED", "false").lower() == "true"` | false (implementation spec A4) | no |
-| `PLAYLIST_TUNING_ENABLED` | `os.getenv("PLAYLIST_TUNING_ENABLED", "false").lower() == "true"` | false (implementation spec A4) | no |
-| `REFLECTION_ENABLED` | `os.getenv("REFLECTION_ENABLED", "false").lower() == "true"` | false (implementation spec A4) | no |
+| `PLAYLIST_DISCOVERY_ENABLED` | `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
+| `PLAYLIST_RECONCILE_WRITES_ENABLED` | `os.getenv("PLAYLIST_RECONCILE_WRITES_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
+| `PLAYLIST_TUNING_ENABLED` | `os.getenv("PLAYLIST_TUNING_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
+| `REFLECTION_ENABLED` | `os.getenv("REFLECTION_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
 | `AUDIT_MODEL` | `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; **local .env: `google/gemini-3.7-flash`** | (not spec'd) | — |
 
 **Settings in code with no spec home** (verbatim defaults):
@@ -225,7 +225,7 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 
 ## 4. Scheduled jobs
 
-All registered in `app/main.py` `lifespan()` (`BackgroundScheduler`, `max_instances=1, coalesce=True`).
+All registered in `app/main.py` `_register_jobs()`, called from `lifespan()` (`BackgroundScheduler`, `max_instances=1, coalesce=True`).
 
 **Failure semantics.** Per-channel jobs (`playlist_reconcile`, `playlist_discovery`,
 `playlist_tuning`, `reflection`, `playlist_health_score`) fan out through
@@ -246,7 +246,9 @@ Three writers register only when their flag is true; when it is false startup lo
 `"<job_id> not registered: <FLAG>=false"`, and the job never runs. `playlist_reconcile` always
 registers; with its flag false `_daily_reconcile` runs `sync_playlists` and skips
 `reconcile_channel` (so no `playlistItems.insert/delete` and no new proposals), logging
-`"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"`. All four
+`"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` per channel
+(startup also logs `"playlist_reconcile registered for sync only: add/remove skipped
+(PLAYLIST_RECONCILE_WRITES_ENABLED=false)"`). All four
 flags default to false (§3), so on a default `.env` these writers are frozen.
 
 | Job id | Trigger | Entry point | Status |
