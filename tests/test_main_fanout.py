@@ -76,7 +76,6 @@ def test_run_per_channel_uses_explicit_channel_ids():
     assert seen == ["x", "y"]
 
 
-
 def test_daily_reconcile_fails_the_channel_when_a_step_raises():
     """Sync failing still lets reconcile run for that channel, and every other
     channel still runs — but the cycle ends failed, naming the channel."""
@@ -100,6 +99,7 @@ def test_daily_reconcile_fails_the_channel_when_a_step_raises():
     assert reconciled == ["a", "b"]
     assert list(exc_info.value.failed_channels) == ["a"]
     assert "sync: RuntimeError: playlists.list 500" in exc_info.value.failed_channels["a"]
+
 
 # --- job-status registry + /health/jobs -------------------------------------
 

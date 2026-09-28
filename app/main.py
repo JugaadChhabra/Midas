@@ -149,11 +149,9 @@ def _daily_reconcile():
         # upserting some playlists but before completing membership seeding,
         # reconcile_channel runs against a partially-updated state and may
         # produce add/remove decisions that the next clean sync will revert.
-        # Behavior is best-effort; the loud .exception() log is the operator
-        # signal to investigate.
-        #
-        # Either step failing still fails the channel (re-raised below, after
-        # reconcile has had its turn) so _run_per_channel counts it.
+        # Behavior is best-effort. Either step failing still fails the channel
+        # (re-raised below, after reconcile has had its turn), so the cycle
+        # ends failed in /health/jobs as well as in the loud .exception() log.
         errors = []
         try:
             sync_result = sync_playlists(channel_id, budget=budget)
@@ -214,7 +212,8 @@ def _daily_playlist_health_score():
 
     Runs after metrics_poll (UTC 05:00) so each tick scores against fresh
     playlist_metrics rows. Per-channel exceptions are isolated; one bad
-    channel does not kill the loop. Channels with the flag false are
+    channel does not kill the loop, but the run still ends failed
+    (``JobRunFailed``, visible at /health/jobs). Channels with the flag false are
     skipped silently — same graceful-degradation pattern as Phase 0's
     metrics_poll skipping `analytics_authorized=false`.
     """

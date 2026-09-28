@@ -12,8 +12,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-28 (§4, §5, §8 updated for A8 job-failure visibility) · **Commit:** `b97f35a` + A8 · **Branch:** `phase-a/09-a8-job-failures`
-(working tree: one untracked file, `docs/superpowers/specs/2026-09-22-discoverability-agent-spec.md`)
+**Generated:** 2026-09-28 (§4, §5, §8 updated for A8 job-failure visibility) · **Commit:** the A8 commit on top of `b97f35a` (a commit can't cite its own SHA) · **Branch:** `phase-a/09-a8-job-failures`
+(working tree: three untracked files, `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`, `midas-seo-agent-v2.excalidraw`, `scripts/overnight_phase_a.sh`)
 
 **Data caveat for this generation.** The live database runs on the office machine,
 bound to `127.0.0.1:55432` there (`docker-compose.yml:18-22`), so it can't be reached from the
@@ -569,7 +569,7 @@ The live DB was unreachable (see caveat), so live counts are blank. Figures belo
   - Earlier: *"~8k units/day fleet-wide"* for the reconcile (`app/config.py:128-131`).
   - Autopilot has no pre-apply quota check. YouTube's `quotaExceeded` makes the whole fleet dormant until the Pacific reset (`app/autopilot.py`).
 - **Failures**
-  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` caught per-channel exceptions and returned normally. That silent-failure pattern applied to every per-channel job until A8: `_run_per_channel` now raises `JobRunFailed` after the fan-out, and `GET /health/jobs` shows each job's last status and failed channels (§4).
+  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` caught per-channel exceptions and returned normally. That silent-failure pattern applied to every `_run_per_channel` job until A8: it now raises `JobRunFailed` after the fan-out, and `GET /health/jobs` shows each job's last status and failed channels (§4). **Still silent:** `metrics_poll`, `reporting_poll` and `measurement_eval` don't fan out through `_run_per_channel`. They catch per-video, per-report and per-audit exceptions internally and only count them (`app/metrics_poll.py:276-278`, `app/reporting_poll.py:273-278`, `app/measurement.py:452-454`), so `/health/jobs` shows them `success` even when every item failed.
   - `join_pass` is disabled, so applied videos are no longer placed into playlists (`app/autopilot.py:455`).
   - Quarantine count: blank (the `/dashboard` `quarantined_count` has it live).
   - `threshold_history` tuning writes one channel's FPR into the **process-global** `settings.PLAYLIST_JOIN_HIGH` (`app/playlists.py:tune_thresholds`), so the last channel tuned sets the threshold for all of them until restart.

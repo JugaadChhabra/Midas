@@ -30,7 +30,6 @@ class JobRunFailed(Exception):
     """
 
     def __init__(self, label: str, failed_channels: dict[str, str]):
-        self.label = label
         self.failed_channels = dict(failed_channels)
         super().__init__(
             f"{label} failed for {len(self.failed_channels)} channel(s): "
