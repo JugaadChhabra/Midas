@@ -229,8 +229,12 @@ class Settings:
     # measuring), collapsing the daily set ~87×. Set false to restore the wide net
     # without a deploy (e.g. if a future loop wants longitudinal watch-time history).
     METRICS_POLL_MEASURED_ONLY = os.getenv("METRICS_POLL_MEASURED_ONLY", "true").lower() == "true"
-    # Strategy stamp for Loop 3 attribution (seeded in the Loop 1 migration).
-    STRATEGY_VERSION = os.getenv("STRATEGY_VERSION") or "2026.07-baseline-v1"
+    # Human-readable prefix of the strategy stamp for Loop 3 attribution. The
+    # stamp itself is derived per audit, `<STRATEGY_LABEL>-<short hash>` over the
+    # prompt source, AUDIT_MODEL and the decision question-set version
+    # (audits.strategy_version), so a model swap in .env shows up in the stamp.
+    # The Loop 1 migration's `2026.07-baseline-v1` seed row stays for history.
+    STRATEGY_LABEL = os.getenv("STRATEGY_LABEL") or "2026.07-baseline"
 
     # Content-aware audit (Block B)
     TRANSCRIPT_MAX_CHARS = int(os.getenv("TRANSCRIPT_MAX_CHARS") or "8000")
