@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app import eligibility, quota, tracing
+from app import eligibility, job_status, quota, tracing
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
 from app.performance import router as performance_router
@@ -77,19 +77,27 @@ def _run_per_channel(fn, label, channel_ids=None) -> None:
 
     Calls ``fn(channel_id)`` for each id (every channel unless ``channel_ids``
     is supplied). ``fn`` is responsible for its own success
-    logging; a raised exception is caught and logged per channel as
-    ``"<label> failed for <id>: <err>"`` so one bad channel never kills the
-    loop — the shared shape behind the daily/weekly scheduler jobs.
+    logging; a raised exception is caught and logged per channel at ERROR, with
+    traceback, as ``"<label> failed for <id>: <err>"`` so one bad channel never
+    kills the loop — the shared shape behind the daily/weekly scheduler jobs.
+
+    Once every channel has run, any failure raises one ``JobRunFailed`` naming
+    the failed channels, so APScheduler records the run as failed instead of
+    "executed successfully" (see app/job_status.py).
     """
     ids = (
         eligibility.channel_ids_for(eligibility.Job.EVERY)
         if channel_ids is None else channel_ids
     )
+    failed: dict[str, str] = {}
     for channel_id in ids:
         try:
             fn(channel_id)
         except Exception as e:
             _main_log.exception("%s failed for %s: %s", label, channel_id, e)
+            failed[channel_id] = job_status.describe(e)
+    if failed:
+        raise job_status.JobRunFailed(label, failed)
 
 
 def _reconcile_channel_order(ids: list[str]) -> list[str]:
@@ -143,20 +151,30 @@ def _daily_reconcile():
         # produce add/remove decisions that the next clean sync will revert.
         # Behavior is best-effort; the loud .exception() log is the operator
         # signal to investigate.
+        #
+        # Either step failing still fails the channel (re-raised below, after
+        # reconcile has had its turn) so _run_per_channel counts it.
+        errors = []
         try:
             sync_result = sync_playlists(channel_id, budget=budget)
             _main_log.info("Daily playlist sync %s: %s", channel_id, sync_result)
         except Exception as e:
             _main_log.exception("Daily playlist sync failed for %s: %s", channel_id, e)
+            errors.append(f"sync: {job_status.describe(e)}")
         try:
             result = reconcile_channel(channel_id)
             _main_log.info("Daily reconcile %s: %s", channel_id, result)
         except Exception as e:
             _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
+            errors.append(f"reconcile: {job_status.describe(e)}")
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
     ids = _reconcile_channel_order(eligibility.channel_ids_for(eligibility.Job.RECONCILE))
-    _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids)
-    _main_log.info("Daily reconcile cycle done — %s", budget)
+    try:
+        _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids)
+    finally:
+        _main_log.info("Daily reconcile cycle done — %s", budget)
 
 
 def _weekly_discovery():
@@ -384,6 +402,9 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             coalesce=True,
         )
+    # After every add_job: each registered job shows as never_run until it
+    # fires, and every run (success or failure) lands in the registry.
+    job_status.registry.watch(scheduler)
     from app.shorts.runner import reap_stuck_jobs
     try:
         reap_stuck_jobs()
@@ -439,3 +460,9 @@ def channel_page():
 @app.get("/health")
 def health():
     return {"ok": True, "dry_run": settings.DRY_RUN}
+
+
+@app.get("/health/jobs")
+def health_jobs():
+    """Last run of every scheduled job (in-memory; a restart clears it)."""
+    return {"jobs": job_status.registry.snapshot()}
