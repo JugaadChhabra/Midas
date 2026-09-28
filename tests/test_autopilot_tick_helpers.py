@@ -260,6 +260,7 @@ def test_tick_rechecks_quota_after_the_audit_spent_some():
 
 def test_tick_that_can_afford_the_apply_applies():
     ap._yt_quota_exhausted_until = None
+    ap._failure_counts.clear()
     with _tick_on(_ready_channel(), can_afford=lambda *a, **k: True) as (_, p):
         p["apply"].return_value = {"status": "applied"}
         ap.tick()

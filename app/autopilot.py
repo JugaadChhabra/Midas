@@ -637,6 +637,9 @@ def tick():
             # 9. Quota gate again, immediately before the write: the audit can spend
             # quota itself (the captions fallback is 250u). YouTube's quotaExceeded
             # stays the backstop (see _quota_dormant / _next_yt_quota_reset above).
+            # A skip here leaves the new audit pending, which the picker won't
+            # re-select: the same place apply_audit_internal's quotaExceeded path
+            # leaves it. apply-pending is the way to push it once quota resets.
             if not _can_afford_apply(channel_id):
                 rec.set(**{"tick.outcome": QUOTA_INSUFFICIENT})
                 _touch_tick(channel_id)
