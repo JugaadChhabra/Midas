@@ -1,3 +1,14 @@
+> **Superseded.** This doc is superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`
+> (2026-09-23) and is kept for history only. Don't build from it.
+> Carried forward from it, per that spec's Part 2 §0.5 "Kept":
+>
+> - The sensor layer: `metrics_poll`, `reporting_poll`, `reach.py`, `video_reach_daily`.
+> - The apply path: `apply_audit_internal` → `yt_videos_update`.
+> - The `AuditSuggestion` decoder and validation.
+> - Quota: `JobBudget`, apply reserve.
+> - `status_vocab` (with its guard test) and Certification (`reach.certify`).
+> - The playlist write functions in `youtube_client.py` and the inventory, health, and proposal machinery.
+
 # Midas — Build Plan
 
 Phase-wise sequencing for the two specs:

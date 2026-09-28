@@ -1,7 +1,7 @@
 # The discoverability agent — implementation spec
 
 Date: 2026-09-22
-Status: approved to implement, not started
+Status: superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` (2026-09-23); kept for history
 Supersedes: the earlier draft of today (`2026-09-22-audit-agent-implementation-spec.md`, deleted) — that draft faithfully transcribed the planned diagram and issue #8, and in doing so inherited their central mistake: it scoped the agent to **metadata rewrite only**. This spec is the corrected design.
 Reference: `docs/agentic-workflow-planned.excalidraw`, `2026-08-26-tool-using-audit-agent-design.md`, issue #8.
 
