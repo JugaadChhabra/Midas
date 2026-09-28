@@ -772,6 +772,15 @@ def revert_audit(audit_id: int):
         ).eq("id", audit_id).execute()
         return {"status": "dry_run", "payload": payload}
 
+    from app import quota
+    revert_cost = quota.cost(quota.Op.VIDEOS_UPDATE)
+    if not quota.can_afford(revert_cost):
+        raise HTTPException(
+            409,
+            f"quota_insufficient: revert needs {revert_cost} units, "
+            f"{quota.units_remaining()} remaining today",
+        )
+
     yt = youtube_for_channel(video["channel_id"])
     try:
         yt_videos_update(yt, video["channel_id"], payload, parts=SNIPPET_STATUS_PARTS)

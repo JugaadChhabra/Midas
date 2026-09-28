@@ -190,3 +190,87 @@ def test_apply_handle_separates_an_unclassified_crash_from_a_youtube_failure():
         assert ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1") == ap.APPLY_UNCLASSIFIED
     rec.assert_called_once_with("UC1")
     assert ap.APPLY_UNCLASSIFIED != ApplyOutcome.FAILED.value
+
+
+# ── A10: pre-write quota gate ──────────────────────────────────────────────────
+#
+# The ledger already knows when a write can't be afforded. Autopilot used to find
+# out only from YouTube's quotaExceeded, which puts the whole fleet dormant; a
+# gate that trips on the ledger must skip the tick and nothing more.
+
+@contextmanager
+def _tick_on(channel, can_afford):
+    """Run one tick against a single ready channel with the ledger answering
+    `can_afford`. Yields (store, patches) so tests can assert on both."""
+    sb = FakeSupabase({"channels": [channel]})
+    video = {"id": "v1", "is_short": False}
+    with patch("app.eligibility.supabase", return_value=sb), \
+         patch("app.autopilot.supabase", return_value=sb), \
+         patch("app.autopilot.quota.can_afford", side_effect=can_afford) as afford, \
+         patch("app.autopilot.quota.units_remaining", return_value=12), \
+         patch("app.autopilot._applies_today", return_value=0), \
+         patch("app.autopilot._next_video_for_channel", return_value=video), \
+         patch("app.autopilot.audit_video", return_value={"id": 7}) as audit, \
+         patch("app.autopilot.validate_audit", return_value=(True, "")), \
+         patch("app.autopilot.apply_audit_internal") as apply_, \
+         patch("app.autopilot.embed_video"), \
+         patch("app.autopilot.tracing.span") as span:
+        rec = MagicMock()
+        span.return_value.__enter__.return_value = rec
+        yield sb, {"afford": afford, "audit": audit, "apply": apply_, "rec": rec}
+
+
+def _ready_channel():
+    return {"id": "UC1", "autopilot_enabled": True, "default_language": "hi",
+            "autopilot_paused_reason": None, "autopilot_last_tick_at": None,
+            "last_synced_at": datetime.now(timezone.utc).isoformat()}
+
+
+def test_tick_that_cannot_afford_the_apply_makes_no_youtube_call_and_pauses_nothing(caplog):
+    ap._yt_quota_exhausted_until = None
+    ap._failure_counts.clear()
+    with caplog.at_level("INFO", logger="midas.autopilot"), \
+         _tick_on(_ready_channel(), can_afford=lambda *a, **k: False) as (sb, p):
+        ap.tick()
+    p["apply"].assert_not_called()                          # no videos.update
+    p["audit"].assert_not_called()                          # no LLM spend on a write we can't make
+    p["afford"].assert_any_call(ap.quota.cost_of(*ap.quota.APPLY))
+    p["rec"].set.assert_any_call(**{"tick.outcome": "quota_insufficient"})
+    assert sb.rows("channels")[0]["autopilot_paused_reason"] is None   # not paused
+    assert not any(op == "update" and payload.get("autopilot_paused_reason")
+                   for _, op, payload in sb.writes)             # no write sets a pause
+    assert ap._yt_quota_exhausted_until is None             # not fleet-dormant
+    assert ap._failure_counts.get("UC1", 0) == 0            # not a failure
+    assert "quota_insufficient" in caplog.text
+
+
+def test_tick_rechecks_quota_after_the_audit_spent_some():
+    """The audit itself can spend quota (the captions fallback is 250u), so the
+    gate runs again immediately before the write."""
+    answers = iter([True, False])
+    ap._yt_quota_exhausted_until = None
+    with _tick_on(_ready_channel(), can_afford=lambda *a, **k: next(answers)) as (sb, p):
+        ap.tick()
+    p["audit"].assert_called_once()
+    p["apply"].assert_not_called()
+    p["rec"].set.assert_any_call(**{"tick.outcome": "quota_insufficient"})
+    assert sb.rows("channels")[0]["autopilot_paused_reason"] is None
+    assert ap._yt_quota_exhausted_until is None
+
+
+def test_tick_that_can_afford_the_apply_applies():
+    ap._yt_quota_exhausted_until = None
+    with _tick_on(_ready_channel(), can_afford=lambda *a, **k: True) as (_, p):
+        p["apply"].return_value = {"status": "applied"}
+        ap.tick()
+    p["apply"].assert_called_once_with(7)
+    ap._failure_counts.clear()
+
+
+def test_quota_exceeded_log_says_it_is_fleet_wide(caplog):
+    ap._yt_quota_exhausted_until = None
+    with caplog.at_level("WARNING", logger="midas.autopilot"), \
+         patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.QUOTA_EXCEEDED)):
+        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+    assert "project-wide" in caplog.text and "fleet-wide" in caplog.text
+    ap._yt_quota_exhausted_until = None
