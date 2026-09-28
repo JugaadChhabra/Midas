@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-29 (§1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A6 commit on top of `a15e643` (a commit can't cite its own SHA) · **Branch:** `phase-a/12-a6-strategy-stamp`
+**Generated:** 2026-09-29 (§1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A5 commit on top of `fd83c70` (a commit can't cite its own SHA) · **Branch:** `phase-a/13-a5-haryanvi-lang`
 (working tree: three untracked files, `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`, `midas-seo-agent-v2.excalidraw`, `scripts/overnight_phase_a.sh`)
 
 **Data caveat for this generation.** The live database runs on the office machine,
@@ -49,7 +49,7 @@ because the DB was unreachable (see caveat). The repo does record:
 | `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) | (blank) | (blank) | n/a: no such flag | n/a: no such flag | Phase 0 probe channel 2026-06-10 (`20260610134419_metrics_tables.sql` header). In the default reconcile allowlist (`app/config.py:134-139`). |
 | `UC8KjoL0Z9mTHKqB6gFutkJw` (Punjabi) | (blank) | (blank) | n/a | n/a | Reach CSV probe 2026-07-02 (`20260702174235_…` header). Gap 6 bisect (`docs/PHASE_0_GAPS.md`). Reconcile allowlist. |
 | `UCOVKJdzghm2gOnuaGeJTonA` (Gujarati) | (blank) | (blank) | n/a | n/a | Reconcile allowlist only. |
-| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:375-380` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. |
+| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:375-380` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. The code path for `bgc` exists: `lang_display_name("bgc")` → `"Haryanvi"` (`app/transcripts.py` `_LANG_NAMES`), and `youtube_language_code` sends it to YouTube as `hi` (`app/youtube_metadata.py` `_NON_ISO_639_1 = {"bgc": "hi"}`). `scripts/probes/probe_i18n_languages.py` (live, not run by the suite) checks `bgc`/`hi` against `i18nLanguages.list`. |
 
 Flags that actually exist on `channels`: `analytics_authorized`, `measurement_enabled`,
 `reach_warmup`, `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`,
@@ -306,7 +306,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, `audit_video`, apply, revert, bulk ops |
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, validation, `house_format_spec()` |
 | `apply_outcome.py` | typed `ApplyError`/`ApplyOutcome` |
-| `youtube_metadata.py` | `videos.update` payload (category, language code, madeForKids) |
+| `youtube_metadata.py` | `videos.update` payload (category, language code, madeForKids). Content language → YouTube code via `_NON_ISO_639_1 = {"bgc": "hi"}`; unmapped codes pass through |
 | `youtube_client.py` | Data API wrappers + quota charging |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
