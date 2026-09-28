@@ -6,7 +6,7 @@ AUDIT_MODEL swap in .env was invisible to attribution. Now the version is
 `<STRATEGY_LABEL>-<short hash>` over the inputs, and each distinct version gets
 its own row carrying the real model and the hashed inputs.
 """
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -82,9 +82,10 @@ def test_new_audit_model_upserts_a_new_row_with_that_model():
     sb = FakeSupabase({"audit_strategies": []})
     with patch("app.audits.supabase", return_value=sb):
         with patch.object(settings, "AUDIT_MODEL", "anthropic/claude-haiku-4.5"):
-            v1, _ = audits._stamp_strategy(None)
+            v1 = audits._stamp_strategy(None)
         with patch.object(settings, "AUDIT_MODEL", "google/gemini-3.7-flash"):
-            v2, inputs2 = audits._stamp_strategy(None)
+            v2 = audits._stamp_strategy(None)
+            _, inputs2 = audits.strategy_version(None)
 
     rows = {r["version"]: r for r in sb.rows("audit_strategies")}
     assert set(rows) == {v1, v2}
@@ -104,10 +105,16 @@ def test_row_is_upserted_once_per_version_per_process():
 
 
 def test_upsert_never_overwrites_an_existing_row():
-    """The 2026.07-baseline-v1 seed row stays for history; derived rows never clobber."""
-    seed = {"version": "2026.07-baseline-v1", "model": "anthropic/claude-haiku-4.5",
-            "status": "champion"}
-    sb = FakeSupabase({"audit_strategies": [seed]})
+    """The 2026.07-baseline-v1 seed row, and any curated row, stays as it is.
+
+    FakeSupabase's upsert always merges, so assert the flag postgrest acts on.
+    """
+    sb = MagicMock()
     with patch("app.audits.supabase", return_value=sb):
         audits._stamp_strategy(None)
-    assert seed in sb.rows("audit_strategies")
+    kwargs = sb.table.return_value.upsert.call_args.kwargs
+    assert kwargs == {"on_conflict": "version", "ignore_duplicates": True}
+
+
+def test_derived_version_never_collides_with_the_seed_row():
+    assert audits.strategy_version()[0] != "2026.07-baseline-v1"

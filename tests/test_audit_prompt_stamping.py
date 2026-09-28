@@ -72,7 +72,10 @@ def _run_audit_video(cfg_row, live_version_id, strategy_upserts=None, **kwargs):
                         [{"id": live_version_id}] if live_version_id else []
                     )
             elif name == "audit_strategies" and strategy_upserts is not None:
-                m.upsert.side_effect = lambda row, **kw: (strategy_upserts.append(row), MagicMock())[1]
+                def capture_strategy(row, **_kw):
+                    strategy_upserts.append(row)
+                    return MagicMock()
+                m.upsert.side_effect = capture_strategy
             elif name == "audits":
                 def capture(row):
                     inserted.update(row)

@@ -231,7 +231,7 @@ def strategy_version(prompt_version_id: int | None = None) -> tuple[str, dict]:
 _strategy_rows_ensured: set[str] = set()
 
 
-def _stamp_strategy(prompt_version_id: int | None) -> tuple[str, dict]:
+def _stamp_strategy(prompt_version_id: int | None) -> str:
     """Derive the audit's strategy version and guarantee its audit_strategies row.
 
     The audits.strategy_version FK means an unregistered version would hard-fail
@@ -240,7 +240,7 @@ def _stamp_strategy(prompt_version_id: int | None) -> tuple[str, dict]:
     """
     version, inputs = strategy_version(prompt_version_id)
     if version in _strategy_rows_ensured:
-        return version, inputs
+        return version
     try:
         supabase().table("audit_strategies").upsert(
             {
@@ -261,7 +261,7 @@ def _stamp_strategy(prompt_version_id: int | None) -> tuple[str, dict]:
         # Table missing (migration not applied yet) — insert below will fail
         # on the column anyway; log the real cause instead of masking it.
         log.warning("could not ensure audit_strategies row %s: %s", version, e)
-    return version, inputs
+    return version
 
 
 def _live_prompt_version_id(channel_id: str) -> int | None:
@@ -410,7 +410,7 @@ def audit_video(
         })
         if not suggestion.is_valid:
             log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
-        strategy, _ = _stamp_strategy(prompt_version_id)
+        strategy = _stamp_strategy(prompt_version_id)
         row = {
             "video_id": video_id,
             "status": status_override or AuditStatus.PENDING,
