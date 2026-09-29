@@ -5,10 +5,17 @@ tests/test_eligibility.py. What this file still asserts is that the POLLER
 honours it end to end, which is the behaviour that mattered when the flag was
 introduced and is worth keeping independent of where the predicate lives.
 """
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+
+import pytest
+from apscheduler.events import EVENT_JOB_ERROR, JobExecutionEvent
 
 import app.eligibility as el
 import app.reporting_poll as rp
+from app.analytics_client import AnalyticsNotAuthorizedError
+from app.job_status import JobRunFailed, JobStatusRegistry
+from app.youtube_client import TokenExpiredError
 
 
 def _sb():
@@ -41,18 +48,10 @@ def test_polls_all_authorized_when_flag_off():
     first_eq.or_.assert_not_called()   # no opt-in filter
 
 
-
 # ── failure reporting (A8 finish, #23) ────────────────────────────────────
 #
 # Same shape as metrics_poll: per-channel isolation, but a crash now fails the
 # run (JobRunFailed) once every channel has been polled.
-
-import pytest
-
-from app.analytics_client import AnalyticsNotAuthorizedError
-from app.job_status import JobRunFailed
-from app.youtube_client import TokenExpiredError
-
 
 def _poll_with(channel_ids, poll_channel, ran):
     def _one(cid):
@@ -77,6 +76,14 @@ def test_one_crash_still_polls_the_rest_then_fails_the_run():
 
     assert ran == ["bad", "good"]
     assert exc_info.value.failed_channels == {"bad": "RuntimeError: reports.list 500"}
+
+    reg = JobStatusRegistry()
+    reg.on_event(JobExecutionEvent(EVENT_JOB_ERROR, "reporting_poll", "default",
+                                   datetime(2026, 9, 29, tzinfo=timezone.utc),
+                                   exception=exc_info.value))
+    entry = reg.snapshot()["reporting_poll"]
+    assert entry["status"] == "failed"
+    assert entry["failed_channels"] == {"bad": "RuntimeError: reports.list 500"}
 
 
 def test_all_channels_succeeding_is_success():

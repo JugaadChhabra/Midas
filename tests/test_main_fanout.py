@@ -64,7 +64,6 @@ def test_run_per_channel_logs_each_failure_with_label_channel_and_traceback(capl
     assert set(exc_info.value.failed_channels) == {"x", "y"}
 
 
-
 def test_run_per_channel_error_line_carries_the_job_id(caplog):
     from app import main
 
@@ -108,6 +107,7 @@ def test_every_fanout_job_passes_its_scheduler_id():
         "Weekly playlist tuning": "playlist_tuning",
         "Daily playlist_health_score": "playlist_health_score",
     }
+
 
 def test_run_per_channel_uses_explicit_channel_ids():
     from app import main
@@ -292,7 +292,6 @@ def test_health_endpoint_unchanged():
 
     r = TestClient(main.app).get("/health")
     assert r.json() == {"ok": True, "dry_run": main.settings.DRY_RUN}
-
 
 
 # --- measurement_eval scheduler wrapper (#23) --------------------------------

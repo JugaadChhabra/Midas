@@ -308,7 +308,6 @@ def test_one_bad_audit_does_not_abort_the_pass():
     assert summary[MeasurementStatus.WIN] == 2      # the other two still landed
 
 
-
 def test_failures_are_recorded_per_channel_with_the_audit_ids():
     """The detail the scheduler fails the run with. Recorded where `errors` is
     counted, so the count and the detail can't drift apart."""
@@ -385,6 +384,7 @@ def test_evaluate_endpoint_returns_the_summary_when_an_audit_fails():
     assert r.status_code == 200
     body = r.json()
     assert (body["evaluated"], body["errors"], body[MeasurementStatus.WIN]) == (2, 1, 1)
+
 
 def test_only_still_applied_audits_are_evaluated():
     """A human revert mid-window takes the video off the new metadata, so the

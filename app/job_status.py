@@ -24,9 +24,10 @@ FAILED = "failed"
 
 
 class JobRunFailed(Exception):
-    """A fan-out run in which at least one channel raised.
+    """A job run in which at least one channel (or item on it) raised.
 
-    Carries ``failed_channels`` ({channel_id: "<Type>: <message>"}) so the
+    Carries ``failed_channels`` ({channel_id: "<Type>: <message>"}; for
+    measurement_eval the value lists the failing audits) so the
     registry gets the per-channel detail from the exception APScheduler hands
     it, rather than from a side channel.
     """
