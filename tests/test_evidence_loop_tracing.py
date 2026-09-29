@@ -110,7 +110,7 @@ def test_audit_video_span_records_its_context(_isolated_tracer):
     with patch("app.audits.supabase") as mock_sb, \
          patch("app.audits.chat_json", return_value=suggestion), \
          patch("app.audits.fetch_transcript", return_value=("transcript", "en")), \
-         patch("app.audits._ensure_strategy_row"):
+         patch("app.audits._stamp_strategy", return_value="v"):
         tbl = mock_sb.return_value.table.return_value
         tbl.select.return_value.eq.return_value.single.return_value \
             .execute.return_value.data = video

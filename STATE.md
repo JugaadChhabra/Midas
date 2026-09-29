@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-29 (§4, §5, §7.1, §7.3, §8 updated for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A10 commit on top of `b3e7db3` (a commit can't cite its own SHA) · **Branch:** `phase-a/11-a10-quota-gate`
+**Generated:** 2026-09-29 (§1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A6 commit on top of `a15e643` (a commit can't cite its own SHA) · **Branch:** `phase-a/12-a6-strategy-stamp`
 (working tree: three untracked files, `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`, `midas-seo-agent-v2.excalidraw`, `scripts/overnight_phase_a.sh`)
 
 **Data caveat for this generation.** The live database runs on the office machine,
@@ -32,14 +32,14 @@ Spec abbreviations: **CIL** = `docs/CONTINUOUS_IMPROVEMENT_LOOP.md`, **PO** =
 | Phase | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | 0 | Sensor foundation | **built** (CTR via a different API than spec) | `app/analytics_client.py`, `app/metrics_poll.py`, `app/reporting_client.py`, `app/reporting_poll.py`, `app/reach.py`, migrations `20260610122433_analytics_authorized.sql`, `20260610134419_metrics_tables.sql`, `20260702174235_phase05_reporting_reach.sql` | CTR does not exist on the on-demand Analytics API. It comes from Reporting API CSVs (`channel_reach_basic_a1`) into `video_reach_daily` (`docs/PHASE_0_GAPS.md` Gap 1). The video sensor polls only in-measurement videos by default (`METRICS_POLL_MEASURED_ONLY=true`). |
-| 1A | Metadata control loop | **partial**: sense and judge built; the act half is inert | `app/measurement.py`, `app/verdicts.py`, `app/audits.py:733` (`revert_audit`), migration `20260702183233_phase1a_loop1_measurement.sql` | Verdicts are written. There is no redo path and no auto-revert: `MAX_REDO` and `AUTO_REVERT_ON_REGRESSION` are declared in `app/config.py` but never read. `OutcomeDecision.REDO_QUEUED` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`). `docs/PHASE_2_TRACK2_LOOP1_REDO.md` is still **DRAFT**. |
+| 1A | Metadata control loop | **partial**: sense and judge built; the act half is inert | `app/measurement.py`, `app/verdicts.py`, `app/audits.py:774` (`revert_audit`), migration `20260702183233_phase1a_loop1_measurement.sql` | Verdicts are written. There is no redo path and no auto-revert: `MAX_REDO` and `AUTO_REVERT_ON_REGRESSION` are declared in `app/config.py` but never read. `OutcomeDecision.REDO_QUEUED` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`). `docs/PHASE_2_TRACK2_LOOP1_REDO.md` is still **DRAFT**. |
 | 1B | Playlist inventory + health | **built** (scorer was crashing 2026-08-06 → 2026-09-23; fixed) | `app/playlists_sync.py`, `app/playlist_health.py`, `app/playlists_router.py:521,552`, migrations `20260618115221_…`, `20260618133036_…` | From `b355f40` (rows refactor) until this commit, `score_channel` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` (seen in `logs/midas.log*`). It now reads through `rows.rows_for_ids`, covered by `tests/test_playlist_health.py`. Stored `health_*` values on the live DB are stale until the next 07:00 UTC run after deploy. Tier-2 (playlist traffic source) is disabled: `TIER2_TRAFFIC_SOURCE_SUPPORTED = False` (`app/metrics_poll.py`, Gap 6 REOPENED). |
 | 2A | Competitor research | **not started** (as spec'd) | none | Something nearby exists. `app/reflection.py` has `derive_niche_queries` and `_sample_competitors`, which call `search.list` × 2 and feed the *prompt reflection* loop, not playlists. No `playlist_competitor_reference_json`. |
 | 2B | Playlist construction | **not started** (as spec'd); a pre-spec similarity builder runs instead | `app/playlist_discovery.py` (weekly, **creates** playlists via `playlists.insert`), `app/playlists.py` (daily reconcile add/remove); both frozen by default behind A4 flags (§4) | No `playlist_interventions` table, no LLM re-rank for session continuation, no ordering or entry-point logic. `join_pass` is commented out in autopilot (`app/autopilot.py:453-455`: "Playlist allocation skipped — workflow under review"). |
 | 2C | Playlist self-eval | **not started** | none | Nothing measures playlists the optimizer created. |
 | 3A | Metadata playbook | **not started** | none | There is no `app/playbook.py` and no `playbook_json`. The only memory-like mechanism is `prompt_versions` reflection (§7.2). |
 | 3B | Playlist playbook | **not started** | none | |
-| 4 | Meta loops | **partial** (stamping only) | `audit_strategies` table + seed row (`20260702183233_…`), `app/audits.py:197-224,384` | Every audit is stamped with `settings.STRATEGY_VERSION`. There is no `app/eval.py`, no challenger routing, and no `/strategies` endpoints. Per-channel prompt champion/challenger exists in `app/reflection.py`; that is a different design (§7.3). |
+| 4 | Meta loops | **partial** (stamping only) | `audit_strategies` table + seed row (`20260702183233_…`), `app/audits.py:196-265,413-424` | Every audit is stamped with a derived `strategy_version(prompt_version_id)` = `<STRATEGY_LABEL>-<12-hex sha256>` (§3), and each distinct version gets its own `audit_strategies` row. There is no `app/eval.py`, no challenger routing, and no `/strategies` endpoints. Per-channel prompt champion/challenger exists in `app/reflection.py`; that is a different design (§7.3). |
 
 **Channels live.** Per-channel flags are DB columns (`channels.*`). Live values are blank
 because the DB was unreachable (see caveat). The repo does record:
@@ -49,14 +49,14 @@ because the DB was unreachable (see caveat). The repo does record:
 | `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) | (blank) | (blank) | n/a: no such flag | n/a: no such flag | Phase 0 probe channel 2026-06-10 (`20260610134419_metrics_tables.sql` header). In the default reconcile allowlist (`app/config.py:134-139`). |
 | `UC8KjoL0Z9mTHKqB6gFutkJw` (Punjabi) | (blank) | (blank) | n/a | n/a | Reach CSV probe 2026-07-02 (`20260702174235_…` header). Gap 6 bisect (`docs/PHASE_0_GAPS.md`). Reconcile allowlist. |
 | `UCOVKJdzghm2gOnuaGeJTonA` (Gujarati) | (blank) | (blank) | n/a | n/a | Reconcile allowlist only. |
-| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:336-341` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. |
+| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:375-380` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. |
 
 Flags that actually exist on `channels`: `analytics_authorized`, `measurement_enabled`,
 `reach_warmup`, `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`,
 `sync_shorts`. None of `playlist_optimizer_enabled`, `playbook_enabled`, or any thumbnail flag
 exists (see §2).
 
-Recorded fact (`app/audits.py:249-259`): *"on 2026-08-23 the only channel with autopilot on
+Recorded fact (`app/audits.py:289-299`): *"on 2026-08-23 the only channel with autopilot on
 was the one channel with that flag [measurement_enabled] off — 57 applies in a month, every
 one landing on the `not_applicable` default."*
 
@@ -202,7 +202,7 @@ PLAYLIST_SYNC_QUOTA_BUDGET=2000  PLAYLIST_FULL_WALK_DAYS=30
 PLAYLIST_HEALTH_AGG_WEEKS=4  PLAYLIST_HEALTH_REMOVE_PCTL=5  PLAYLIST_HEALTH_REVIVE_PCTL=20
 DASHBOARD_USE_RPC=true  MEASUREMENT_COVERAGE_GRACE_DAYS=14  REACH_STALE_AFTER_DAYS=7
 REPORTING_MEASURED_CHANNELS_ONLY=true  METRICS_POLL_MEASURED_ONLY=true
-STRATEGY_VERSION = "2026.07-baseline-v1"
+STRATEGY_LABEL = os.getenv("STRATEGY_LABEL") or "2026.07-baseline"
 TRANSCRIPT_MAX_CHARS=8000  KEYFRAME_MAX_FRAMES=4  KEYFRAMES_LOCAL_DIR  KEYFRAME_FFMPEG_TIMEOUT=30
 NAS_* (MODE=smb, AUTH_PROTOCOL=ntlm, SOURCE/DESTINATION roots, LOCAL_ROOT)
 DATABASE_URL  BACKUP_ENABLED=true  BACKUP_HOUR=0  BACKUP_WORK_DIR  BACKUP_SLOTS=1 (local .env 2; CLAUDE.md says 2)
@@ -327,7 +327,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 | `autopilot.py` | the tick loop |
 | `tracing.py` | OpenTelemetry → Phoenix spans (off by default) |
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
-| `keyframes.py` | **dead**: not imported anywhere ("reserved for thumbnail generation (Block D)", `app/audits.py:21-23`) |
+| `keyframes.py` | **dead**: not imported anywhere ("reserved for thumbnail generation (Block D)", `app/audits.py:23-25`) |
 | `shorts/*` | shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` is gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
 | `static/*` | vanilla-JS dashboard (`index.html`, `channel.html`, `autoshorts.html`, `theme.css`, …) |
 
@@ -335,9 +335,9 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 
 ## 6. Prompts and LLM calls
 
-- **Audit prompt**: `app/audits.py:42` `DEFAULT_PROMPT`. It is used when the channel has no
+- **Audit prompt**: `app/audits.py:44` `DEFAULT_PROMPT`. It is used when the channel has no
   `audit_configs.generated_prompt`. Precedence is `prompt_override` > `shorts_prompt` (if is_short) >
-  `generated_prompt` > `DEFAULT_PROMPT` (`app/audits.py:308-316`). **The per-channel
+  `generated_prompt` > `DEFAULT_PROMPT` (`app/audits.py:347-355`). **The per-channel
   `generated_prompt` (DB, possibly rewritten by reflection) is what actually runs on any channel that has one.
   Its current text lives in the DB, not the repo.** Verbatim `DEFAULT_PROMPT`:
 
@@ -403,7 +403,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
   ```
   (The `current_problems` strings are elided above; they are the full sentences in the source.)
 
-- **`_build_user_block()`**, verbatim (`app/audits.py:142-191`):
+- **`_build_user_block()`**, verbatim (`app/audits.py:144-193`):
 
   ```python
   def _build_user_block(video, transcript, transcript_lang, channel_language) -> str:
@@ -443,13 +443,13 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
       ]
       return "\n".join(lines)
   ```
-  - The `default_language` rule is injected as the **first block of the user message**. `DEFAULT_PROMPT`'s LANGUAGE section restates it in the system prompt. A missing `default_language` makes `audit_video` refuse with 400 instead of defaulting (`app/audits.py:336-348`), and `eligibility.can_audit` gates such channels out of autopilot.
+  - The `default_language` rule is injected as the **first block of the user message**. `DEFAULT_PROMPT`'s LANGUAGE section restates it in the system prompt. A missing `default_language` makes `audit_video` refuse with 400 instead of defaulting (`app/audits.py:375-387`), and `eligibility.can_audit` gates such channels out of autopilot.
   - Transcript language is labelled "content signal only" in both prompts. It is also persisted to `audits.transcript_lang` and used nowhere else in output selection. **Confirmed.**
   - The per-channel `generated_prompt` or a reflection candidate replaces the *system* prompt, but `_build_user_block` still carries the language rule, so the rule survives prompt rewrites.
   - The user block never includes CTR, impressions, or traffic-source data. It includes lifetime `view_count` and `like_count`.
 
 - **Known SEO-prompt issues:**
-  - *Hashtag cap*: **fixed and enforced in code.** `AuditSuggestion._make` calls `cap_description_hashtags` (`app/audit_suggestion.py:147`) on every construction path, including apply-time overrides (`from_fields`, `app/audits.py:452-461`). It keeps the first 15 (`HASHTAG_LIMIT = 15`, line 40), and its regex is Indic-safe (`#[^\s#]+`). The prompt asks for **exactly** 15, but code only enforces ≤15. `rejection()` does not check for too few.
+  - *Hashtag cap*: **fixed and enforced in code.** `AuditSuggestion._make` calls `cap_description_hashtags` (`app/audit_suggestion.py:147`) on every construction path, including apply-time overrides (`from_fields`, `app/audits.py:492-501`). It keeps the first 15 (`HASHTAG_LIMIT = 15`, line 40), and its regex is Indic-safe (`#[^\s#]+`). The prompt asks for **exactly** 15, but code only enforces ≤15. `rejection()` does not check for too few.
   - *Search vs browse/suggested*: **not fixed.** The house format optimises for search: "keyword-rich sentences" (`audit_suggestion.py:74`), "high-value search phrases" (`:76`), a tag list maximised to ~500 chars (`:82`). Reflection's guidance query asks "what drives search discovery and click-through rate" (`app/reflection.py:349`). No prompt mentions browse, suggested, or packaging-for-CTR.
   - *No "no change recommended" option*: **not fixed for audits.** `DEFAULT_PROMPT` says "rewrite it to a FIXED house format", and the JSON schema has no no-op field. Every audit produces a rewrite, and autopilot applies any valid one. (Reflection *does* have a no-change output: an empty `candidate_prompt`, `app/reflection.py:497-520`.)
   - *Tag weighting*: **not addressed.** The only instruction is "A list mixing broad and specific tags … Maximize coverage up to ~500 characters". There is no ordering or weighting guidance. Validation checks only count ≤30 and total chars ≤500 (`rejection()`).
@@ -458,8 +458,8 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 
   | Call | Model | Path | Prompt location |
   |---|---|---|---|
-  | Audit | `settings.AUDIT_MODEL` (chat_json default) | `audit_video` → `chat_json(user, system=audit_prompt)` | `app/audits.py:42,142` + DB `audit_configs` |
-  | Prompt elaboration | `settings.PROMPT_GEN_MODEL` | `POST /audit-config/elaborate` | `app/audits.py:105-123` |
+  | Audit | `settings.AUDIT_MODEL` (chat_json default) | `audit_video` → `chat_json(user, system=audit_prompt)` | `app/audits.py:44,144` + DB `audit_configs` |
+  | Prompt elaboration | `settings.PROMPT_GEN_MODEL` | `POST /audit-config/elaborate` | `app/audits.py:107-125` |
   | Niche queries | hardcoded `anthropic/claude-haiku-4.5` | reflection | `app/reflection.py:264-272` |
   | Platform guidance | hardcoded `perplexity/sonar` (`chat_text`, no JSON mode) | reflection | `app/reflection.py:346-352` |
   | Reflection candidate prompt | `settings.REFLECTION_MODEL` | reflection | `app/reflection.py:465-507` |
@@ -470,7 +470,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 
   Playlist proposals ignore `default_language`: the proposal prompt (`playlist_discovery.py:136-141`) carries no language rule.
 
-- **Models in use vs defaults.** Code defaults are `AUDIT_MODEL=anthropic/claude-haiku-4.5`, `PROMPT_GEN_MODEL=google/gemini-2.0-flash-001`, `REFLECTION_MODEL=anthropic/claude-sonnet-4-6`. The dev-machine `.env` sets `google/gemini-3.7-flash`, `anthropic/claude-opus-5:online`, and `anthropic/claude-sonnet-5`. **The office machine's `.env` was not read.** Whatever it sets, `STRATEGY_VERSION` stays `2026.07-baseline-v1` and its `audit_strategies.model` stays `anthropic/claude-haiku-4.5`. The seed row is inserted with `ignore_duplicates=True` (`app/audits.py:218`), so a model swap does not change the strategy stamp (§7.3).
+- **Models in use vs defaults.** Code defaults are `AUDIT_MODEL=anthropic/claude-haiku-4.5`, `PROMPT_GEN_MODEL=google/gemini-2.0-flash-001`, `REFLECTION_MODEL=anthropic/claude-sonnet-4-6`. The dev-machine `.env` sets `google/gemini-3.7-flash`, `anthropic/claude-opus-5:online`, and `anthropic/claude-sonnet-5`. **The office machine's `.env` was not read.** The strategy stamp now records the model actually in use. `app/audits.py` `strategy_version(prompt_version_id=None) -> (version, inputs)` returns `f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}"`, where `_strategy_hash` is the first 12 hex chars of sha256 over `json.dumps(inputs, sort_keys=True, separators=(",", ":"))` and `inputs` = `label`, `default_prompt_sha256` (sha256 of `DEFAULT_PROMPT`), `audit_model` (`settings.AUDIT_MODEL`), `decision_question_set_version` (placeholder `DECISION_QUESTION_SET_VERSION = "none"`), `prompt_version_id` (the audit's own), plus `writer_model` only if a `WRITER_MODEL` setting exists (it doesn't yet). `audit_video` calls `_stamp_strategy(prompt_version_id)` right before the insert: it upserts `{version, prompt_template, model: settings.AUDIT_MODEL, config: inputs, status: "champion", notes}` with `ignore_duplicates=True`, once per version per process (`_strategy_rows_ensured`). So an `AUDIT_MODEL` swap yields a new version and a new row. The `2026.07-baseline-v1` seed row (model `anthropic/claude-haiku-4.5`) is left in place for history; nothing stamps it any more. Shorts prompts and one-off overrides without a `prompt_version_id` are not in the hash (§7.3 #6).
 
 ---
 
@@ -542,10 +542,10 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 3. **Coverage failure → `not_applicable`, not `neutral`.** Spec §1.3 says insufficient data → neutral. Built: *post*-window impressions under the floor → `neutral` (matches spec), but lost reach coverage → `not_applicable` with `reason_code='coverage_lost'`, and the grace period runs in *ingested* time (`measurement.py:204-243`). **Code is correct.** It is a deliberate change, documented in the `measurement.py` docstring.
 4. **Where dormancy is enforced.** Spec §1.2: at apply ("If the video had ~no impressions pre-change → not_applicable"), keeping dormant videos out of the loop. Built: the apply path stamps `awaiting_window` unconditionally on measurement-enabled channels. Dormancy is only discovered by `measurement_eval` **after** the post window closes. The picker selects **newest-published first** with no impressions filter (`next_audit_candidate`, `20260904000100…sql`: `order by v.published_at desc`). So dormant videos are audited and applied (and each spends ~50 Data API units), then block re-audit for ≥3 weeks. **Neither side is fully right.** The spec's intent (target warm videos) is unmet. This is the targeting problem.
 5. **Loop 2 / Loop 3.** Spec: a per-channel playbook injected into the user block (data), plus fleet-level `audit_strategies` champion/challenger (machinery). Built: `reflection.py` rewrites the per-channel **system prompt** (so it mutates the strategy, not data). Candidates are tested by shadow audits that are never applied or measured. Promotion is manual or `auto` mode, not measured win-rate. Auto-revert compares cohort median CTR deltas per `prompt_version_id`. **The spec is the intended target.** `docs/superpowers/specs/2026-09-22-discoverability-agent-spec.md` ("approved to implement, not started") proposes yet another direction; see 7.4.
-6. **Strategy attribution.** Spec: stamp every audit with the strategy (prompt template + model + logic). Built: one static `STRATEGY_VERSION` env string. Prompt changes are tracked separately in `prompt_versions`, model changes aren't tracked at all, and the seed row's `model` is frozen at haiku. **The spec is correct.** The current stamp can't distinguish the model swaps the `.env` already made.
+6. **Strategy attribution.** Spec: stamp every audit with the strategy (prompt template + model + logic). Built (A6): a derived stamp, `<STRATEGY_LABEL>-<short hash>` over the `DEFAULT_PROMPT` hash, the audit's `prompt_version_id`, `AUDIT_MODEL`, `WRITER_MODEL` if present, and a placeholder decision question-set version (`app/audits.py` `strategy_version`, §6). Each distinct version gets an `audit_strategies` row with the real `model` and `config` = the hashed inputs. The spec says "derive at startup", but the prompt-version id is only known at audit time, so the stamp is derived per audit; every other input is fixed for the process. Remaining gaps: the text of a per-channel `generated_prompt` is identified only through its `prompt_versions` id (a `generated_prompt` with no live version hashes as `prompt_version_id: null`, same as `DEFAULT_PROMPT`), and `shorts_prompt` or a one-off `prompt_override` without a version id are not in the hash. Audits stamped before A6 still carry `2026.07-baseline-v1`.
 7. **Playlist construction.** Spec: embeddings for recall → LLM session re-rank → ordering → language-ruled metadata, measured as interventions. Built: centroid cosine ≥0.72 add, Haiku-confirmed removal <0.60, orphan clusters ≥4 at 0.75 → new playlist with a Haiku title. No ordering, no measurement, no provenance stamp (`origin` stays `inherited`). **The spec is correct.**
 8. **Playlist health cadence and window.** Spec: `PLAYLIST_MEASUREMENT_WINDOW_DAYS=35` gate. Built: a 4-week aggregate plus per-channel percentile bands (remove ≤5th, revive ≤20th), a design from `PHASE_1B_PLAN.md`. Deliberate; the plan doc is the record.
-9. **Apply cost.** `quota.APPLY = (VIDEOS_LIST, VIDEOS_UPDATE)` = 51u (`app/quota.py`), but `apply_audit_internal` no longer fetches stats (`app/audits.py:482-488`). The preview, `apply-pending` and autopilot (`_can_afford_apply`) gates overestimate by 1u per apply. Minor drift; left as-is (errs on the safe side).
+9. **Apply cost.** `quota.APPLY = (VIDEOS_LIST, VIDEOS_UPDATE)` = 51u (`app/quota.py`), but `apply_audit_internal` no longer fetches stats (`app/audits.py:522-528`). The preview, `apply-pending` and autopilot (`_can_afford_apply`) gates overestimate by 1u per apply. Minor drift; left as-is (errs on the safe side).
 10. **Metric storage units.** `avg_time_in_playlist_sec integer` (spec: `_min FLOAT`) and `avg_view_duration_sec integer` (spec: FLOAT). The live API returns integer seconds (Gap 3). **Code is correct.**
 
 ### 7.4 Contradictions between the specs
@@ -567,7 +567,7 @@ The live DB was unreachable (see caveat), so live counts are blank. Figures belo
   - Live win / neutral / regression / awaiting_window / measuring / not_applicable counts: blank. Run the SQL below.
   - Recorded 2026-08-23 (`app/reflection.py:32-34`): *"171 verdicts … 147 neutral / 21 win / 3 regression, a win rate of 12.3%."*
   - Recorded in `app/measurement.py:162-165,359-361`: an investigation found *"381 dormant, of which 184 published inside their own pre-window"*, and dormant was *"381 of 381"* of the `not_applicable` verdicts on the measure path. This is the targeting ratio (7.3 #4).
-  - Recorded 2026-08-23 (`app/audits.py:253-257`): 57 applies in a month on the one autopilot channel. None were measured, because `measurement_enabled` was off there.
+  - Recorded 2026-08-23 (`app/audits.py:293-297`): 57 applies in a month on the one autopilot channel. None were measured, because `measurement_enabled` was off there.
   - Dev-machine logs (`logs/midas.log.2`, 2026-07-14 → 07-28): `measurement_eval: {'evaluated': 557, 'errors': 0, 'awaiting_window': 557}`, unchanged across that span.
   - Reflection: *"five candidate prompts, none promoted"* from 2026-05 onward (`app/reflection.py:35-37`).
 - **Sensor health**

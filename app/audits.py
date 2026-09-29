@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -191,37 +193,75 @@ def _build_user_block(
     return "\n".join(lines)
 
 
-_strategy_row_ensured = False
+# Version of the decision question set that `decide()` will ask (Phase B). It
+# does not exist yet; the placeholder is hashed now so bumping it changes the
+# stamp the day the question set does.
+DECISION_QUESTION_SET_VERSION = "none"
 
 
-def _ensure_strategy_row() -> None:
-    """Guarantee settings.STRATEGY_VERSION exists in audit_strategies.
+def _strategy_hash(inputs: dict) -> str:
+    """Short, key-order-independent hash of the strategy inputs."""
+    canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
-    The audits.strategy_version FK means an unregistered version (env
-    override typo, or a deploy racing the migration) would hard-fail EVERY
-    audit insert fleet-wide. Auto-register once per process instead; Loop 3
-    ops can flesh out the row later.
+
+def strategy_version(prompt_version_id: int | None = None) -> tuple[str, dict]:
+    """The strategy stamp for an audit: (`<STRATEGY_LABEL>-<short hash>`, inputs).
+
+    The hash covers what actually produced the audit: the DEFAULT_PROMPT text,
+    the audit's per-channel prompt_versions id, AUDIT_MODEL, WRITER_MODEL when
+    that setting exists (Phase B), and the decision question-set version. All but
+    the prompt-version id are fixed for the life of the process; that one is
+    known only at audit time, so the version is derived per audit rather than
+    once at startup. Pure: same inputs, same version.
     """
-    global _strategy_row_ensured
-    if _strategy_row_ensured:
-        return
+    inputs = {
+        "label": settings.STRATEGY_LABEL,
+        "default_prompt_sha256": hashlib.sha256(DEFAULT_PROMPT.encode("utf-8")).hexdigest(),
+        "audit_model": settings.AUDIT_MODEL,
+        "decision_question_set_version": DECISION_QUESTION_SET_VERSION,
+        "prompt_version_id": prompt_version_id,
+    }
+    writer_model = getattr(settings, "WRITER_MODEL", None)
+    if writer_model:
+        inputs["writer_model"] = writer_model
+    return f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}", inputs
+
+
+_strategy_rows_ensured: set[str] = set()
+
+
+def _stamp_strategy(prompt_version_id: int | None) -> str:
+    """Derive the audit's strategy version and guarantee its audit_strategies row.
+
+    The audits.strategy_version FK means an unregistered version would hard-fail
+    EVERY audit insert fleet-wide, so each distinct version is registered on
+    first use, once per process, with the real model and the hashed inputs.
+    """
+    version, inputs = strategy_version(prompt_version_id)
+    if version in _strategy_rows_ensured:
+        return version
     try:
         supabase().table("audit_strategies").upsert(
             {
-                "version": settings.STRATEGY_VERSION,
+                "version": version,
                 "prompt_template": "code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)",
                 "model": settings.AUDIT_MODEL,
+                "config": inputs,
                 "status": "champion",
-                "notes": "auto-registered by _ensure_strategy_row (STRATEGY_VERSION setting)",
+                "notes": "auto-registered by _stamp_strategy (derived from config)",
             },
             on_conflict="version",
-            ignore_duplicates=True,  # never overwrite a real, curated row
+            # A version is a hash of its inputs, so an existing row already holds
+            # them; never overwrite a real, curated row (or the seed row).
+            ignore_duplicates=True,
         ).execute()
-        _strategy_row_ensured = True
+        _strategy_rows_ensured.add(version)
     except Exception as e:
         # Table missing (migration not applied yet) — insert below will fail
         # on the column anyway; log the real cause instead of masking it.
-        log.warning("could not ensure audit_strategies row %s: %s", settings.STRATEGY_VERSION, e)
+        log.warning("could not ensure audit_strategies row %s: %s", version, e)
+    return version
 
 
 def _live_prompt_version_id(channel_id: str) -> int | None:
@@ -278,7 +318,6 @@ def audit_video(
     here, so every caller gets attribution without stamping it themselves.
     """
     with tracing.span("audit_video", video_id=video_id) as rec:
-        _ensure_strategy_row()
         v = supabase().table("videos").select("*").eq("id", video_id).single().execute().data
         if not v:
             raise HTTPException(404, "Video not found")
@@ -371,6 +410,7 @@ def audit_video(
         })
         if not suggestion.is_valid:
             log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
+        strategy = _stamp_strategy(prompt_version_id)
         row = {
             "video_id": video_id,
             "status": status_override or AuditStatus.PENDING,
@@ -381,7 +421,7 @@ def audit_video(
             # measured outcomes stay attributable when Loop 3 arrives. Same reason
             # for prompt_version_id — stamped here, at the single insert site, so no
             # caller can forget it (_cohort_median_ctr_delta silently ignores NULLs).
-            "strategy_version": settings.STRATEGY_VERSION,
+            "strategy_version": strategy,
             "prompt_version_id": prompt_version_id,
         }
         inserted = supabase().table("audits").insert(row).execute()

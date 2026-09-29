@@ -15,6 +15,9 @@ Two defects motivated this:
 
 So the rule is: stamp the live version only when the channel's
 generated_prompt was the prompt actually sent to the model.
+
+strategy_version is stamped at the same insert, derived from the same
+prompt_version_id (see tests/test_strategy_version.py for the derivation).
 """
 from unittest.mock import MagicMock, patch
 
@@ -37,13 +40,18 @@ LLM_RESULT = {
 }
 
 
-def _run_audit_video(cfg_row, live_version_id, **kwargs):
-    """Call audit_video against a mocked world; return (inserted_row, system_prompt)."""
+def _run_audit_video(cfg_row, live_version_id, strategy_upserts=None, **kwargs):
+    """Call audit_video against a mocked world; return (inserted_row, system_prompt).
+
+    Pass a list as `strategy_upserts` to collect the audit_strategies upserts.
+    """
+    from app import audits
+
     inserted = {}
+    audits._strategy_rows_ensured.clear()
 
     with patch("app.audits.supabase") as mock_sb, \
          patch("app.audits.fetch_transcript", return_value=(None, None)), \
-         patch("app.audits._ensure_strategy_row"), \
          patch("app.audits.chat_json", return_value=LLM_RESULT) as mock_chat:
 
         def table_side_effect(name):
@@ -63,6 +71,11 @@ def _run_audit_video(cfg_row, live_version_id, **kwargs):
                     .order.return_value.limit.return_value.execute.return_value.data = (
                         [{"id": live_version_id}] if live_version_id else []
                     )
+            elif name == "audit_strategies" and strategy_upserts is not None:
+                def capture_strategy(row, **_kw):
+                    strategy_upserts.append(row)
+                    return MagicMock()
+                m.upsert.side_effect = capture_strategy
             elif name == "audits":
                 def capture(row):
                     inserted.update(row)
@@ -156,3 +169,30 @@ def test_callers_no_longer_stamp_after_the_fact():
         assert '{"prompt_version_id"' not in inspect.getsource(fn), (
             f"{fn.__qualname__} still stamps prompt_version_id after the insert"
         )
+
+
+def test_audit_is_stamped_with_the_derived_strategy_version():
+    """The insert carries the version derived from THIS audit's prompt_version_id."""
+    from app.audits import strategy_version
+    from app.config import settings
+
+    upserts = []
+    with patch.object(settings, "AUDIT_MODEL", "google/gemini-3.7-flash"):
+        row, _ = _run_audit_video(
+            {"generated_prompt": "CHANNEL PROMPT"}, live_version_id=7,
+            strategy_upserts=upserts,
+        )
+        expected, inputs = strategy_version(7)
+
+    assert row["strategy_version"] == expected
+    assert row["strategy_version"] != "2026.07-baseline-v1"
+    assert [u["version"] for u in upserts] == [expected]
+    assert upserts[0]["model"] == "google/gemini-3.7-flash"
+    assert upserts[0]["config"] == inputs
+
+
+def test_default_prompt_audit_is_stamped_without_a_prompt_version():
+    from app.audits import strategy_version
+
+    row, _ = _run_audit_video({"generated_prompt": ""}, live_version_id=7)
+    assert row["strategy_version"] == strategy_version(None)[0]
