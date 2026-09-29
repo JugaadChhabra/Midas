@@ -13,7 +13,7 @@
 > **Regenerate with:** Claude Code, prompt in §9.
 
 **Generated:** 2026-09-29 (§4, §5, §8 updated for per-item poll errors (fail when a whole category fails, `degraded` when partial) and job ids on `_daily_reconcile`'s inner ERROR lines; §7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the job-health fix on top of `af355f7` (a commit can't cite its own SHA) · **Branch:** `fix/job-health-item-errors`
-(working tree: one untracked file, `scripts/overnight_phase_a.sh`. `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` and `docs/midas-seo-agent-v2.excalidraw` are committed.)
+(working tree clean. `scripts/overnight_tickets.sh` is the unattended ticket runner, driven by a playbook: dev tooling, never deployed. The shipped shorts plans in `docs/superpowers/plans/` and the two `docs/agentic-workflow-*.excalidraw` diagrams were deleted; they're in git history.)
 
 **Data caveat for this generation.** The live database runs on the office machine,
 bound to `127.0.0.1:55432` there (`docker-compose.yml:18-22`), so it can't be reached from the
