@@ -12,8 +12,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-23 · **Commit:** `41131ee` · **Branch:** `main`
-(working tree: one untracked file, `docs/superpowers/specs/2026-09-22-discoverability-agent-spec.md`)
+**Generated:** 2026-09-28 (§4, §5, §8 updated for A8 job-failure visibility) · **Commit:** the A8 commit on top of `b97f35a` (a commit can't cite its own SHA) · **Branch:** `phase-a/09-a8-job-failures`
+(working tree: three untracked files, `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`, `midas-seo-agent-v2.excalidraw`, `scripts/overnight_phase_a.sh`)
 
 **Data caveat for this generation.** The live database runs on the office machine,
 bound to `127.0.0.1:55432` there (`docker-compose.yml:18-22`), so it can't be reached from the
@@ -223,6 +223,20 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 
 All registered in `app/main.py` `lifespan()` (`BackgroundScheduler`, `max_instances=1, coalesce=True`).
 
+**Failure semantics.** Per-channel jobs (`playlist_reconcile`, `playlist_discovery`,
+`playlist_tuning`, `reflection`, `playlist_health_score`) fan out through
+`main._run_per_channel`. Channels stay isolated: each channel's exception is logged at ERROR
+with traceback as `"<label> failed for <id>: <err>"` and the loop continues. Once every channel
+has run, any failure raises one `job_status.JobRunFailed` naming the failed channels, so
+APScheduler records the run as failed (`app/main.py`, `app/job_status.py`). In
+`_daily_reconcile` a channel fails if either `sync_playlists` or `reconcile_channel` raised;
+reconcile still runs after a failed sync. After all `add_job` calls, `job_status.registry.watch(scheduler)`
+registers every job as `never_run` and listens for `EVENT_JOB_EXECUTED | EVENT_JOB_ERROR`. It
+records per job id `status` (`never_run|success|failed`), `last_run_at` (the event's
+`scheduled_run_time`), `error`, and `failed_channels` (`{channel_id: "<Type>: <message>"}`, taken
+from the `JobRunFailed`), and logs failures as `"JOB FAILED <job_id> at <time>: <error>"`. The
+registry is in-memory: a restart clears it. It is served at `GET /health/jobs` (§5).
+
 | Job id | Trigger | Entry point | Status |
 |---|---|---|---|
 | `autopilot` | interval `AUTOPILOT_TICK_SECONDS` | `app/autopilot.py:tick`: at most one video per tick: quota gate → pick channel → shorts action → audit → validate → apply → re-embed | registered; per-channel gated by `eligibility.can_audit` / `can_cut_shorts` |
@@ -249,7 +263,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 
 **Routes** (`app/main.py` mounts every router below):
 
-- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health`; `GET /autoshorts` (`shorts/autoshorts.py`); `/static/*`.
+- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels}}}` from the in-process registry (`app/job_status.py`, §4); `GET /autoshorts` (`shorts/autoshorts.py`); `/static/*`.
 - **Auth/channels** (`app/auth.py`, prefix `/auth` for login/callback): `GET /auth/login` starts OAuth. `GET /auth/callback` stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause. `GET /auth/channels` lists channels with flags. `PATCH /auth/channels/{id}` sets flags; enabling `measurement_enabled` returns 409 unless `reach.certify` passes.
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
 - **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate` (LLM builds prompt from notes), `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply`, `POST /channels/{id}/audits/apply-pending`, `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk`, `POST /audits/{id}/revert`, `GET /quota-cost-preview`.
@@ -265,6 +279,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 | File | Owns |
 |---|---|
 | `main.py` | FastAPI app, logging, scheduler registration, per-channel job fan-out |
+| `job_status.py` | `JobRunFailed` + in-memory job-status registry (APScheduler listener) behind `/health/jobs` |
 | `config.py` | `Settings` (env) |
 | `db.py` | thread-local PostgREST (`supabase-py`) client with retry. The app talks to Postgres **only** via PostgREST on `SUPABASE_URL` |
 | `rows.py` | the 1000-row cap: `all_rows`, `all_rows_parallel`, `rows_for_ids` |
@@ -554,7 +569,7 @@ The live DB was unreachable (see caveat), so live counts are blank. Figures belo
   - Earlier: *"~8k units/day fleet-wide"* for the reconcile (`app/config.py:128-131`).
   - Autopilot has no pre-apply quota check. YouTube's `quotaExceeded` makes the whole fleet dormant until the Pacific reset (`app/autopilot.py`).
 - **Failures**
-  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` catches per-channel exceptions: a silent-failure pattern that applies to every per-channel job.
+  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` caught per-channel exceptions and returned normally. That silent-failure pattern applied to every `_run_per_channel` job until A8: it now raises `JobRunFailed` after the fan-out, and `GET /health/jobs` shows each job's last status and failed channels (§4). **Still silent:** `metrics_poll`, `reporting_poll` and `measurement_eval` don't fan out through `_run_per_channel`. They catch per-video, per-report and per-audit exceptions internally and only count them (`app/metrics_poll.py:276-278`, `app/reporting_poll.py:273-278`, `app/measurement.py:452-454`), so `/health/jobs` shows them `success` even when every item failed.
   - `join_pass` is disabled, so applied videos are no longer placed into playlists (`app/autopilot.py:455`).
   - Quarantine count: blank (the `/dashboard` `quarantined_count` has it live).
   - `threshold_history` tuning writes one channel's FPR into the **process-global** `settings.PLAYLIST_JOIN_HIGH` (`app/playlists.py:tune_thresholds`), so the last channel tuned sets the threshold for all of them until restart.
