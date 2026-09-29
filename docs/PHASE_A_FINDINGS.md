@@ -7,71 +7,212 @@ A7 and A9. The code tasks (A4, A6, A8, A10, A11) are recorded in their PRs and i
 If a probe fails, paste the exact error and list the variants tried (spec Part 1,
 "Probe discipline").
 
-**Where each command runs.** The office machine is not a git checkout. It holds
-`.env`, `docker-compose.yml` and the `.bat` files, nothing else.
+## Restart day: do these steps in order
 
-- **[office]**: run on the office machine, from the folder holding
-  `docker-compose.yml`. That covers `docker compose`, `psql` (through
-  `docker compose exec db psql -U midas midas`), and `curl` to the app on
-  `http://localhost:8000`.
-- **[dev]**: run on a dev machine with a repo checkout, `venv`, `client_secret.json`
-  and a `.env` whose `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` reach the database
-  holding the channel's OAuth tokens. These are the probes and
-  `scripts/create_reporting_job.py`. Every probe reads the channel's stored token,
-  and the only DB write any of them can make is the token refresh inside
-  `youtube_for_channel` / `reporting_for_channel` (`app/youtube_client.py:22-49`,
-  `app/analytics_client.py:71-111`). The office PostgREST is bound to loopback
-  (`docker-compose.yml`: `127.0.0.1:8001:80`), so if the dev machine can't reach
-  it, the same scripts ship in the image (`Dockerfile`: `COPY scripts ./scripts`)
-  and run on the office machine as
-  `docker compose exec midas python -m scripts.probes.<name> <args>` once the
-  image carrying them is pulled. Write any output file under `/app/logs/` there,
-  so it lands in the host's `logs/`.
+Everything below runs **on the office machine**, in PowerShell, in the Midas folder.
+Where a step says "paste into psql", you're inside the database prompt from step 5.
+Record what you see in the A0 section further down as you go.
+
+### Before `start.bat`
+
+**1. Open the Midas folder.**
+
+```
+cd "D:\My Data\Desktop\midas"
+```
+
+**2. Stop the old app if Docker restarted it by itself.** Every container is set to
+`restart: unless-stopped`, so if the machine was shut down without `stop.bat`,
+Docker Desktop brings the **old** Midas back at boot, and its autopilot starts
+rewriting titles within 2 minutes. Check:
+
+```
+docker compose ps
+```
+
+- It says Docker isn't running: open Docker Desktop, wait until it shows "Engine
+  running", then run `docker compose ps` again.
+- A `midas` row shows `Up` or `running`: stop it right away:
+
+  ```
+  docker compose stop midas
+  ```
+
+- No `midas` row, or it shows `Exited`: nothing to do.
+
+**3. Edit `.env`.**
+
+```
+notepad .env
+```
+
+- a. Find the line that starts with `STRATEGY_VERSION=`. **Delete the whole line.**
+  (The app now reads `STRATEGY_LABEL`, which defaults to `2026.07-baseline`.) If
+  there's no such line, skip this.
+- b. Search (Ctrl+F) for each of these four names. If a line exists, **delete it.**
+  If there's no line, do nothing:
+  - `PLAYLIST_DISCOVERY_ENABLED`
+  - `PLAYLIST_RECONCILE_WRITES_ENABLED`
+  - `PLAYLIST_TUNING_ENABLED`
+  - `REFLECTION_ENABLED`
+
+  With the four missing, playlist creation, playlist add/remove, threshold tuning
+  and prompt reflection all stay off. That's the intended state.
+- c. Save and close Notepad.
+
+Don't touch `docker-compose.yml`. It needs no change.
+
+**4. Start only the database.**
+
+```
+docker compose up -d db
+docker compose ps db
+```
+
+Wait until the `db` row says `healthy`. Run the second command again every few
+seconds until it does.
+
+**5. Open the database prompt.**
+
+```
+docker compose exec db psql -U midas midas
+```
+
+You should see a `midas=#` prompt. If it says `role "midas" does not exist`, use
+the `POSTGRES_USER` value from `.env` in place of both `midas` words.
+
+**6. See which channels have title autopilot on.** Paste into psql:
+
+```sql
+select count(*) as channels_total from channels;
+select id, name, autopilot_enabled, autopilot_shorts_enabled, measurement_enabled
+from channels where autopilot_enabled order by name;
+```
+
+- `channels_total` is **0**: the database is empty, and the app will restore it
+  from the NAS on boot. Type `\q`, then **go to step 10b** instead of step 7.
+- The second query shows rows: copy the ids into the A0 section. Go to step 7.
+- The second query shows **no rows**: autopilot is already off. Skip step 7.
+
+**7. Turn title autopilot off.** Paste into psql:
+
+```sql
+update channels set autopilot_enabled = false
+where autopilot_enabled
+returning id, name, autopilot_enabled, autopilot_shorts_enabled, measurement_enabled;
+```
+
+It must print the same channels as step 6, now with `autopilot_enabled` = `f`.
+Leave `measurement_enabled` as it is.
+
+*Optional: also pause Shorts uploads.* Shorts keep uploading unless you do this.
+The spec allows either choice, because Shorts don't edit existing videos. To pause
+them too, paste:
+
+```sql
+update channels set autopilot_shorts_enabled = false
+where autopilot_shorts_enabled returning id, name;
+```
+
+**8. Record the videos still inside a measurement window.** Paste into psql, then
+copy the whole output into the A0 section ("Videos in a measurement window"):
+
+```sql
+select v.channel_id, a.id as audit_id, a.video_id, v.title, a.measurement_status,
+       (coalesce(a.applied_at, a.measurement_started_at) at time zone 'UTC')::date + 22 as window_closes
+from audits a join videos v on v.id = a.video_id
+where a.measurement_status in ('awaiting_window', 'measuring')
+order by window_closes, v.channel_id, a.video_id;
+```
+
+**9. Leave psql.**
+
+```
+\q
+```
+
+### Start the app
+
+**10a. Normal case.** Run:
+
+```
+start.bat
+```
+
+Wait for `Service is healthy.` (or `Service started but may still be
+initializing`). It pulls the new image by itself.
+
+**10b. Only if step 6 found an empty database.** The app restores the NAS snapshot
+on boot, and the restored channels will still have autopilot on. So give yourself
+30 minutes before the first autopilot tick:
+
+1. `notepad .env`, add the line `AUTOPILOT_TICK_SECONDS=1800` at the end, then save.
+2. Run `start.bat` and wait for it to finish.
+3. Run the step 7 update:
+
+   ```
+   docker compose exec db psql -U midas midas -c "update channels set autopilot_enabled = false where autopilot_enabled returning id, name;"
+   ```
+
+4. Run the step 8 query the same way (`-c "…"`) and record the output.
+5. `notepad .env`, delete the `AUTOPILOT_TICK_SECONDS=1800` line, save, then run
+   `docker compose up -d midas` to restart the app with the normal tick.
+
+### Straight after `start.bat` (5 minutes)
+
+**11. Check the freeze took effect.**
+
+```
+docker compose logs midas | findstr /C:"not registered" /C:"registered for sync only"
+```
+
+You should see 4 lines: `playlist_discovery`, `playlist_tuning` and `reflection`
+"not registered", and `playlist_reconcile` "registered for sync only". Fewer
+lines means one of the four flags from step 3b is still in `.env`.
+
+**12. Check the job health page.**
+
+```
+curl.exe -s http://localhost:8000/health/jobs
+```
+
+You should get JSON listing every job, mostly `"never_run"` at this point.
+
+**13. Check autopilot stayed off.**
+
+```
+docker compose exec db psql -U midas midas -c "select id, name from channels where autopilot_enabled;"
+```
+
+It must print `(0 rows)`. Write the time into the A0 table as the pause timestamp.
+
+**14. Create the A1 report job now,** because its first report takes a day or more.
+This is the one YouTube write in Phase A, and it only subscribes the channel to a
+daily report:
+
+```
+docker compose exec -e PYTHONPATH=/app midas python scripts/create_reporting_job.py UCr5-YUqBiW7PUmeAtxUWuRg --report-type channel_traffic_source_a2 --job-name midas-traffic-source
+```
+
+Copy the job id it prints into A1.1.
+
+**Later.**
+- **Tomorrow after 07:00 UTC:** do A9 (below).
+- **24 hours after step 13:** do A0's acceptance check.
+- **Once the first A1 report exists:** do A1.1's inspect step.
 
 ---
 
-## Pre-restart checklist
+**Running the other probes.** The office machine isn't a git checkout, but the
+image ships the repo's `scripts/`. The database only listens on the office machine
+itself (`127.0.0.1`), so run every probe *inside the container*. Where a section
+below shows `PYTHONPATH=. venv/bin/python scripts/<path> <args>`, run it there as:
 
-Do these on the office machine before `start.bat`.
+```
+docker compose exec -e PYTHONPATH=/app midas python scripts/<path> <args>
+```
 
-| Field | Value |
-|---|---|
-| Date | |
-| Channel | n/a (fleet config) |
-| Command / SQL | the checklist items below |
-| Raw evidence | |
-| Outcome | |
-
-- [ ] **Image.** The prep chain is merged to `main` and the "Build and Push Docker
-      Image" workflow has pushed `ghcr.io/jugaadchhabra/midas:latest`
-      (`.github/workflows/docker-publish.yml` builds on push to `main`). The
-      `midas` service has `pull_policy: always`, so `start.bat`'s
-      `docker compose up -d` pulls it. A merge is not a deploy.
-- [ ] **`.env`: rename `STRATEGY_VERSION` to `STRATEGY_LABEL`.** The app reads only
-      `STRATEGY_LABEL` (`app/config.py:237`,
-      `STRATEGY_LABEL = os.getenv("STRATEGY_LABEL") or "2026.07-baseline"`); nothing
-      in `app/` reads `STRATEGY_VERSION` any more. The label is only the prefix: the
-      stamp is `<STRATEGY_LABEL>-<12 hex>` (`app/audits.py` `strategy_version`). If
-      the old value was `2026.07-baseline-v1`, either drop the line (the default
-      applies) or set `STRATEGY_LABEL=2026.07-baseline`.
-- [ ] **`.env`: the four A4 freeze flags stay unset or `false`.** Each defaults to
-      `false` (`app/config.py:34,115-117`):
-
-      | Flag | What `false` freezes |
-      |---|---|
-      | `PLAYLIST_DISCOVERY_ENABLED` | `playlist_discovery` (Sun 03:00) is not registered: no playlists created on YouTube |
-      | `PLAYLIST_RECONCILE_WRITES_ENABLED` | `playlist_reconcile` (02:00) still runs `sync_playlists` but skips `reconcile_channel`: no `playlistItems.insert/delete`, no new proposals. `POST /channels/{id}/playlists/reconcile` returns 409 |
-      | `PLAYLIST_TUNING_ENABLED` | `playlist_tuning` (Mon 03:30) is not registered: `PLAYLIST_JOIN_HIGH` is not mutated |
-      | `REFLECTION_ENABLED` | `reflection` (Mon 04:00) is not registered: no prompt rewrites, `search.list` or Perplexity calls. `POST .../reflection/trigger` and `POST .../prompt-versions/{vid}/promote` return 409 |
-
-      After boot, confirm the startup log has one line per frozen job
-      (`"<job_id> not registered: <FLAG>=false"`, and for reconcile
-      `"playlist_reconcile registered for sync only: add/remove skipped
-      (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"`).
-- [ ] **No compose change is needed.** `git diff 41131ee..HEAD -- docker-compose.yml`
-      is empty (checked 2026-09-29 at `21d09aa`), and the `midas` service loads the
-      whole `.env` through `env_file: - .env`, so the new settings need only `.env`
-      lines. Keep the office `docker-compose.yml` as it is.
+Write any output file under `/app/logs/`, which lands in the host's `logs\` folder.
 
 ---
 
@@ -103,49 +244,8 @@ action should keep running. Confirm on the running app:
 | Evidence (`shorts_jobs` rows created after the pause, or the tick log) | |
 | If no: owner's decision on pausing Shorts too | |
 
-**The safe order, verbatim.** Autopilot is an APScheduler `interval` job of
-`seconds=settings.AUTOPILOT_TICK_SECONDS` (`app/main.py:270-277`, in
-`_register_jobs`), and an interval trigger with no `next_run_time` first fires one
-interval after `scheduler.start()`. `AUTOPILOT_TICK_SECONDS` defaults to 120
-(`app/config.py:56`; the office `.env` may override it). So the channel must be off
-before the app boots.
-
-1. **[office]** Start only the database:
-
-   ```
-   docker compose up -d db
-   ```
-
-2. **[office]** Find the channel with autopilot on, then turn it off:
-
-   ```
-   docker compose exec db psql -U midas midas
-   ```
-
-   ```sql
-   select id, name, autopilot_enabled, autopilot_shorts_enabled, measurement_enabled
-   from channels where autopilot_enabled order by name;
-
-   update channels set autopilot_enabled = false
-   where id = '<channel_id>'
-   returning id, name, autopilot_enabled, autopilot_shorts_enabled, measurement_enabled;
-   ```
-
-   The UPDATE must report `UPDATE 1`. Leave `measurement_enabled` on (spec A0 step 3).
-   Don't use `autopilot_paused_reason`: that pause has a cooldown
-   (`AUTOPILOT_PAUSE_COOLDOWN_MINUTES`) and resumes on its own.
-   **If it reports `UPDATE 0` because the database is empty, stop.** On boot the app
-   restores the NAS snapshot into an empty database (`provision.ensure_database_populated`,
-   `app/main.py`), and the restored row would carry the old `autopilot_enabled`. In
-   that case start the app, and run the same UPDATE within the first
-   `AUTOPILOT_TICK_SECONDS` of boot, or use
-   `PATCH /auth/channels/<channel_id>` with `{"autopilot_enabled": false}`.
-
-3. **[office]** Start the app:
-
-   ```
-   start.bat
-   ```
+**How to pause.** Follow steps 1–13 of "Restart day" at the top of this doc. Put the
+channel ids from step 6 and the timestamp from step 13 in the table above.
 
 **Videos in a measurement window at pause time.** Slice 1 excludes these until their
 window closes (Part 2 §1.6). The close date is derived the way `app/measurement.py`
@@ -215,7 +315,7 @@ the first report can take a day or more.
 | Raw evidence | |
 | Outcome | |
 
-**[dev]** Create or confirm the job (idempotent: an existing job for the type is
+**[office, in the container: see "Running the other probes"]** Create or confirm the job (idempotent: an existing job for the type is
 printed, not duplicated):
 
 ```
@@ -223,7 +323,7 @@ PYTHONPATH=. venv/bin/python scripts/create_reporting_job.py UCr5-YUqBiW7PUmeAtx
     --report-type channel_traffic_source_a2 --job-name midas-traffic-source
 ```
 
-**[dev]** Once a report exists, inspect the newest one:
+**[office, in the container: see "Running the other probes"]** Once a report exists, inspect the newest one:
 
 ```
 PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_report.py \
@@ -256,7 +356,7 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 | Raw evidence | |
 | Outcome | |
 
-**[dev]** Pick a warm video (≥500 impressions in the last 30 days: the A7 warm-pool
+**[office, in the container: see "Running the other probes"]** Pick a warm video (≥500 impressions in the last 30 days: the A7 warm-pool
 query lists the channel's). Then:
 
 ```
@@ -286,7 +386,7 @@ PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_analytics.py \
 | Raw evidence | |
 | Outcome | |
 
-**[dev]** Run the on-demand probe on the target video and look for the referring
+**[office, in the container: see "Running the other probes"]** Run the on-demand probe on the target video and look for the referring
 video's id in the detail rows, and note the source type it appears under:
 
 ```
@@ -321,7 +421,7 @@ type only · (c) nothing usable. These map onto Part 2 §1.2.
 | Raw evidence | |
 | Outcome | |
 
-**[dev]** Read-only; 1 Data API unit. Never attempt a write (spec A2 step 4).
+**[office, in the container: see "Running the other probes"]** Read-only; 1 Data API unit. Never attempt a write (spec A2 step 4).
 
 ```
 PYTHONPATH=. venv/bin/python scripts/probes/probe_short_link.py <channel_id> <short_id> \
@@ -348,7 +448,7 @@ Then check the current `videos.update` reference for any writable field matching
 | Raw evidence | |
 | Outcome | |
 
-**[dev]** The `YT_SEARCH` variant of the A1.2 probe is this probe. To run only it:
+**[office, in the container: see "Running the other probes"]** The `YT_SEARCH` variant of the A1.2 probe is this probe. To run only it:
 
 ```
 PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_analytics.py \
@@ -378,7 +478,7 @@ This decides whether `get_search_terms` (Part 2 §3.2) is built.
 | Raw evidence | |
 | Outcome | |
 
-**[dev]** The i18n probe (read-only, 1u):
+**[office, in the container: see "Running the other probes"]** The i18n probe (read-only, 1u):
 
 ```
 PYTHONPATH=. venv/bin/python scripts/probes/probe_i18n_languages.py UCc4Tv_DEGDEKrKAt-vyVNmw
