@@ -114,22 +114,27 @@ update channels set autopilot_shorts_enabled = false
 where autopilot_shorts_enabled returning id, name;
 ```
 
-**8. Record the videos still inside a measurement window.** Paste into psql, then
-copy the whole output into the A0 section ("Videos in a measurement window"):
+**8. Record the videos still inside a measurement window.** This can be thousands of
+rows, so don't try to read it on screen. First leave psql (type `\q`). Then run the
+two commands below in PowerShell.
 
-```sql
-select v.channel_id, a.id as audit_id, a.video_id, v.title, a.measurement_status,
-       (coalesce(a.applied_at, a.measurement_started_at) at time zone 'UTC')::date + 22 as window_closes
-from audits a join videos v on v.id = a.video_id
-where a.measurement_status in ('awaiting_window', 'measuring')
-order by window_closes, v.channel_id, a.video_id;
-```
+- a. **Summary: paste its output into the A0 section.** It's a few rows per channel:
 
-**9. Leave psql.**
+  ```
+  docker compose exec -T db psql -U midas midas -c "select v.channel_id, a.measurement_status, count(*) as videos, min((coalesce(a.applied_at, a.measurement_started_at) at time zone 'UTC')::date + 22) as first_window_closes, max((coalesce(a.applied_at, a.measurement_started_at) at time zone 'UTC')::date + 22) as last_window_closes from audits a join videos v on v.id = a.video_id where a.measurement_status in ('awaiting_window','measuring') group by 1,2 order by 1,2;"
+  ```
 
-```
-\q
-```
+- b. **Full list: saved to a file, not shown on screen.** Open it in Excel if you need
+  to look. In the A0 section, write down only the file name:
+
+  ```
+  docker compose exec -T db psql -U midas midas --csv -c "select v.channel_id, a.id as audit_id, a.video_id, v.title, a.measurement_status, (coalesce(a.applied_at, a.measurement_started_at) at time zone 'UTC')::date + 22 as window_closes from audits a join videos v on v.id = a.video_id where a.measurement_status in ('awaiting_window','measuring') order by window_closes, v.channel_id, a.video_id;" | Set-Content -Encoding utf8 logs\a0-in-window.csv
+  ```
+
+  `-T` stops the scrolling pager. `Set-Content -Encoding utf8` keeps Indic titles
+  readable: a plain `>` in Windows PowerShell writes UTF-16.
+
+**9. You're already out of psql** (step 8 had you leave). Go on to step 10.
 
 ### Start the app
 
@@ -154,7 +159,7 @@ on boot, and the restored channels will still have autopilot on. So give yoursel
    docker compose exec db psql -U midas midas -c "update channels set autopilot_enabled = false where autopilot_enabled returning id, name;"
    ```
 
-4. Run the step 8 query the same way (`-c "…"`) and record the output.
+4. Run the two step 8 commands (8a and 8b).
 5. `notepad .env`, delete the `AUTOPILOT_TICK_SECONDS=1800` line, save, then run
    `docker compose up -d midas` to restart the app with the normal tick.
 
@@ -270,10 +275,12 @@ where a.measurement_status in ('awaiting_window', 'measuring')
 order by window_closes, v.channel_id, a.video_id;
 ```
 
-Raw result (paste):
+Summary from restart-day step 8a (paste):
 
 ```
 ```
+
+Full list saved to (step 8b): `logs\a0-in-window.csv` on the office machine.
 
 **Acceptance check (24 h after the pause). [office]**
 
