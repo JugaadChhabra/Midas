@@ -288,7 +288,7 @@ def _poll_channel(channel_id: str) -> dict:
     }
 
 
-def poll_reporting() -> None:
+def poll_reporting() -> dict | None:
     """APScheduler entry point. One pass over re-consented channels.
 
     By default (REPORTING_MEASURED_CHANNELS_ONLY) only measurement_enabled
@@ -304,11 +304,20 @@ def poll_reporting() -> None:
         return
 
     crashed: dict[str, str] = {}
+    partial_errors: dict[str, str] = {}
     for ch in channels:
         cid = ch["id"]
         try:
             counts = _poll_channel(cid)
             log.info("reporting_poll %s: %s", cid, counts)
+            c = counts or {}
+            failure, partial = job_status.item_error_verdict(
+                {"reports": (c.get("reports_err", 0), c.get("reports_new", 0))})
+            if failure:
+                log.error("reporting_poll %s: every new report failed to ingest: %s", cid, failure)
+                crashed[cid] = f"ItemsFailed: {failure}"
+            elif partial:
+                partial_errors[cid] = partial
         except AnalyticsNotAuthorizedError:
             log.info("reporting_poll %s: analytics_authorized flipped to false; skipped", cid)
         except TokenExpiredError:
@@ -319,3 +328,4 @@ def poll_reporting() -> None:
     # Same as metrics_poll: fail the run once every channel has been polled.
     if crashed:
         raise job_status.JobRunFailed("reporting_poll", crashed)
+    return {"partial_errors": partial_errors} if partial_errors else None

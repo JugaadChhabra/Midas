@@ -260,6 +260,7 @@ def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool,
     tier2_rows_written = 0
     tier2_videos_no_data = 0
     tier2_err = 0
+    tier2_attempted = 0
     for vid in public_video_ids:
         try:
             row = yt_analytics_video_report(analytics, channel_id, vid, start, end)
@@ -288,6 +289,7 @@ def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool,
         # genuinely bad videos (deleted / privacy-flipped) both calls will
         # fail and inflate the err counters — accepted noise.
         if tier_2:
+            tier2_attempted += 1
             try:
                 ts_rows = yt_analytics_video_traffic_source_playlist(
                     analytics, channel_id, vid, start, end
@@ -342,10 +344,24 @@ def _poll_channel(channel_id: str, start: str, end: str, *, tier_2: bool,
         "tier2_rows_written": tier2_rows_written,
         "tier2_videos_no_data": tier2_videos_no_data,
         "tier2_err": tier2_err,
+        "tier2_attempted": tier2_attempted,
     }
 
 
-def poll_metrics() -> None:
+def _item_verdict(counts: dict) -> tuple[str | None, str | None]:
+    """(failure, partial) for one channel's per-item errors; see job_status."""
+    def cat(prefix, attempted):
+        return (counts.get(f"{prefix}_err", 0), attempted)
+    return job_status.item_error_verdict({
+        "videos": cat("videos", counts.get("videos_written", 0)
+                      + counts.get("videos_no_data", 0) + counts.get("videos_err", 0)),
+        "playlists": cat("playlists", counts.get("playlists_written", 0)
+                         + counts.get("playlists_no_data", 0) + counts.get("playlists_err", 0)),
+        "tier2": cat("tier2", counts.get("tier2_attempted", 0)),
+    })
+
+
+def poll_metrics() -> dict | None:
     """APScheduler entry point. One pass over all re-consented channels."""
     start, end = _window_dates()
     log.info("metrics_poll start — window %s → %s", start, end)
@@ -371,6 +387,8 @@ def poll_metrics() -> None:
                      "(playlists still polled)")
 
     crashed: dict[str, str] = {}
+
+    partial_errors: dict[str, str] = {}
     for ch in channels:
         cid = ch["id"]
         try:
@@ -380,6 +398,12 @@ def poll_metrics() -> None:
                 measured_video_ids=measured_video_ids,
             )
             log.info("metrics_poll %s: %s", cid, counts)
+            failure, partial = _item_verdict(counts or {})
+            if failure:
+                log.error("metrics_poll %s: every item in a category failed: %s", cid, failure)
+                crashed[cid] = f"ItemsFailed: {failure}"
+            elif partial:
+                partial_errors[cid] = partial
         except AnalyticsNotAuthorizedError:
             # Race: row was true at query time, false now. Skip silently.
             log.info("metrics_poll %s: analytics_authorized flipped to false; skipped", cid)
@@ -392,3 +416,6 @@ def poll_metrics() -> None:
     # APScheduler records the run a success even when every channel crashed.
     if crashed:
         raise job_status.JobRunFailed("metrics_poll", crashed)
+    # Returned, not raised: APScheduler hands it to the registry as the run's
+    # retval, which records the run "degraded" rather than a clean success.
+    return {"partial_errors": partial_errors} if partial_errors else None

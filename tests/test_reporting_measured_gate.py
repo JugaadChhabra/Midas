@@ -106,3 +106,34 @@ def test_expected_skips_are_not_failures():
 def test_no_channels_is_success():
     with patch.object(rp.eligibility, "channels_for", return_value=[]):
         assert rp.poll_reporting() is None
+
+
+# ── per-report errors inside one channel's poll ───────────────────────────
+
+def test_every_new_report_failing_fails_the_channel():
+    ran = []
+    with pytest.raises(JobRunFailed) as exc_info:
+        _poll_with(["stuck", "good"],
+                   lambda cid: {"reports_new": 2, "reports_err": 2} if cid == "stuck" else {},
+                   ran)
+    assert ran == ["stuck", "good"]
+    assert exc_info.value.failed_channels == {"stuck": "ItemsFailed: reports: all 2 failed"}
+
+
+def test_some_reports_failing_is_degraded():
+    from apscheduler.events import EVENT_JOB_EXECUTED
+    with patch.object(rp.eligibility, "channels_for", return_value=[{"id": "c"}]), \
+         patch.object(rp, "_poll_channel", return_value={"reports_new": 4, "reports_err": 1}):
+        retval = rp.poll_reporting()
+
+    assert retval == {"partial_errors": {"c": "reports: 1/4 failed"}}
+    reg = JobStatusRegistry()
+    reg.on_event(JobExecutionEvent(EVENT_JOB_EXECUTED, "reporting_poll", "default",
+                                   datetime(2026, 9, 29, tzinfo=timezone.utc), retval=retval))
+    assert reg.snapshot()["reporting_poll"]["status"] == "degraded"
+
+
+def test_no_new_reports_is_success():
+    with patch.object(rp.eligibility, "channels_for", return_value=[{"id": "c"}]), \
+         patch.object(rp, "_poll_channel", return_value={"reports_new": 0, "reports_err": 0}):
+        assert rp.poll_reporting() is None
