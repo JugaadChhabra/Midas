@@ -16,8 +16,9 @@ Two defects motivated this:
 So the rule is: stamp the live version only when the channel's
 generated_prompt was the prompt actually sent to the model.
 
-strategy_version is stamped at the same insert, derived from the same
-prompt_version_id (see tests/test_strategy_version.py for the derivation).
+strategy_version is stamped at the same insert, derived from the prompt text
+actually sent, its source, and the same prompt_version_id (see
+tests/test_strategy_version.py for the derivation).
 """
 from unittest.mock import MagicMock, patch
 
@@ -172,8 +173,8 @@ def test_callers_no_longer_stamp_after_the_fact():
 
 
 def test_audit_is_stamped_with_the_derived_strategy_version():
-    """The insert carries the version derived from THIS audit's prompt_version_id."""
-    from app.audits import strategy_version
+    """The insert carries the version derived from THIS audit's prompt and version id."""
+    from app.audits import PROMPT_SOURCE_GENERATED, strategy_version
     from app.config import settings
 
     upserts = []
@@ -182,17 +183,59 @@ def test_audit_is_stamped_with_the_derived_strategy_version():
             {"generated_prompt": "CHANNEL PROMPT"}, live_version_id=7,
             strategy_upserts=upserts,
         )
-        expected, inputs = strategy_version(7)
+        expected, inputs = strategy_version("CHANNEL PROMPT", PROMPT_SOURCE_GENERATED, 7)
 
     assert row["strategy_version"] == expected
     assert row["strategy_version"] != "2026.07-baseline-v1"
     assert [u["version"] for u in upserts] == [expected]
     assert upserts[0]["model"] == "google/gemini-3.7-flash"
     assert upserts[0]["config"] == inputs
+    assert upserts[0]["prompt_template"] == "audit_configs.generated_prompt (per-channel)"
 
 
 def test_default_prompt_audit_is_stamped_without_a_prompt_version():
-    from app.audits import strategy_version
+    from app.audits import DEFAULT_PROMPT, PROMPT_SOURCE_DEFAULT, strategy_version
 
     row, _ = _run_audit_video({"generated_prompt": ""}, live_version_id=7)
-    assert row["strategy_version"] == strategy_version(None)[0]
+    assert row["strategy_version"] == strategy_version(DEFAULT_PROMPT, PROMPT_SOURCE_DEFAULT)[0]
+
+
+def test_shorts_audit_is_stamped_from_the_shorts_prompt():
+    from app.audits import DEFAULT_PROMPT, PROMPT_SOURCE_DEFAULT, PROMPT_SOURCE_SHORTS, strategy_version
+
+    upserts = []
+    with patch.dict(MOCK_VIDEO, {"is_short": True}):
+        row, system = _run_audit_video(
+            {"generated_prompt": "CHANNEL PROMPT", "shorts_prompt": "SHORTS PROMPT"},
+            live_version_id=7, strategy_upserts=upserts,
+        )
+    assert system == "SHORTS PROMPT"
+    assert row["strategy_version"] == strategy_version("SHORTS PROMPT", PROMPT_SOURCE_SHORTS)[0]
+    assert row["strategy_version"] != strategy_version(DEFAULT_PROMPT, PROMPT_SOURCE_DEFAULT)[0]
+    assert upserts[0]["prompt_template"] == "audit_configs.shorts_prompt (per-channel)"
+
+
+def test_override_audit_is_stamped_from_the_override_text():
+    from app.audits import PROMPT_SOURCE_OVERRIDE, strategy_version
+
+    row, _ = _run_audit_video(
+        {"generated_prompt": "CHANNEL PROMPT"}, live_version_id=7,
+        prompt_override="ONE OFF PROMPT",
+    )
+    assert row["strategy_version"] == strategy_version("ONE OFF PROMPT", PROMPT_SOURCE_OVERRIDE)[0]
+
+    shadow, _ = _run_audit_video(
+        {"generated_prompt": "CHANNEL PROMPT"}, live_version_id=7,
+        prompt_override="CANDIDATE PROMPT", prompt_version_id=12,
+    )
+    assert shadow["strategy_version"] == strategy_version(
+        "CANDIDATE PROMPT", PROMPT_SOURCE_OVERRIDE, 12
+    )[0]
+
+
+def test_unversioned_generated_prompts_stamp_by_their_text():
+    """No live prompt_versions row: the text itself must separate the stamps."""
+    a, _ = _run_audit_video({"generated_prompt": "CHANNEL PROMPT A"}, live_version_id=None)
+    b, _ = _run_audit_video({"generated_prompt": "CHANNEL PROMPT B"}, live_version_id=None)
+    assert a["prompt_version_id"] is None and b["prompt_version_id"] is None
+    assert a["strategy_version"] != b["strategy_version"]

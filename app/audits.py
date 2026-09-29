@@ -205,19 +205,41 @@ def _strategy_hash(inputs: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
-def strategy_version(prompt_version_id: int | None = None) -> tuple[str, dict]:
+# Where the system prompt sent to the model came from, in audit_video's
+# precedence order. Hashed into the strategy stamp and named on its row.
+PROMPT_SOURCE_OVERRIDE = "override"
+PROMPT_SOURCE_SHORTS = "shorts"
+PROMPT_SOURCE_GENERATED = "generated"
+PROMPT_SOURCE_DEFAULT = "default"
+
+# audit_strategies.prompt_template for a derived row: which prompt it covers.
+_PROMPT_SOURCE_TEMPLATES = {
+    PROMPT_SOURCE_OVERRIDE: "audit_video prompt_override (caller-supplied, e.g. reflection shadow candidate)",
+    PROMPT_SOURCE_SHORTS: "audit_configs.shorts_prompt (per-channel)",
+    PROMPT_SOURCE_GENERATED: "audit_configs.generated_prompt (per-channel)",
+    PROMPT_SOURCE_DEFAULT: "code:app/audits.py DEFAULT_PROMPT",
+}
+
+
+def strategy_version(
+    prompt_text: str, prompt_source: str, prompt_version_id: int | None = None
+) -> tuple[str, dict]:
     """The strategy stamp for an audit: (`<STRATEGY_LABEL>-<short hash>`, inputs).
 
-    The hash covers what actually produced the audit: the DEFAULT_PROMPT text,
-    the audit's per-channel prompt_versions id, AUDIT_MODEL, WRITER_MODEL when
-    that setting exists (Phase B), and the decision question-set version. All but
-    the prompt-version id are fixed for the life of the process; that one is
-    known only at audit time, so the version is derived per audit rather than
-    once at startup. Pure: same inputs, same version.
+    The hash covers what actually produced the audit: the sha256 of the system
+    prompt text sent to the model and which source it came from (a
+    PROMPT_SOURCE_* value), the audit's prompt_versions id when it has one,
+    AUDIT_MODEL, WRITER_MODEL when that setting exists (Phase B), and the
+    decision question-set version. The prompt is known only at audit time, so
+    the version is derived per audit rather than once at startup. The inputs
+    carry the prompt's hash, never its text. Pure: same inputs, same version.
     """
+    if prompt_source not in _PROMPT_SOURCE_TEMPLATES:
+        raise ValueError(f"unknown prompt source {prompt_source!r}")
     inputs = {
         "label": settings.STRATEGY_LABEL,
-        "default_prompt_sha256": hashlib.sha256(DEFAULT_PROMPT.encode("utf-8")).hexdigest(),
+        "prompt_source": prompt_source,
+        "prompt_sha256": hashlib.sha256(prompt_text.encode("utf-8")).hexdigest(),
         "audit_model": settings.AUDIT_MODEL,
         "decision_question_set_version": DECISION_QUESTION_SET_VERSION,
         "prompt_version_id": prompt_version_id,
@@ -231,21 +253,21 @@ def strategy_version(prompt_version_id: int | None = None) -> tuple[str, dict]:
 _strategy_rows_ensured: set[str] = set()
 
 
-def _stamp_strategy(prompt_version_id: int | None) -> str:
+def _stamp_strategy(prompt_text: str, prompt_source: str, prompt_version_id: int | None) -> str:
     """Derive the audit's strategy version and guarantee its audit_strategies row.
 
     The audits.strategy_version FK means an unregistered version would hard-fail
     EVERY audit insert fleet-wide, so each distinct version is registered on
     first use, once per process, with the real model and the hashed inputs.
     """
-    version, inputs = strategy_version(prompt_version_id)
+    version, inputs = strategy_version(prompt_text, prompt_source, prompt_version_id)
     if version in _strategy_rows_ensured:
         return version
     try:
         supabase().table("audit_strategies").upsert(
             {
                 "version": version,
-                "prompt_template": "code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)",
+                "prompt_template": _PROMPT_SOURCE_TEMPLATES[prompt_source],
                 "model": settings.AUDIT_MODEL,
                 "config": inputs,
                 "status": "champion",
@@ -343,16 +365,15 @@ def audit_video(
         # name the prompt that ACTUALLY ran. An empty generated_prompt silently
         # falls back to DEFAULT_PROMPT, and stamping the live version there labels
         # the audit with a prompt the model never saw.
-        used_generated = False
         if prompt_override:
-            audit_prompt = prompt_override
+            audit_prompt, prompt_source = prompt_override, PROMPT_SOURCE_OVERRIDE
         elif v.get("is_short") and cfg_row.get("shorts_prompt"):
-            audit_prompt = cfg_row["shorts_prompt"]
+            audit_prompt, prompt_source = cfg_row["shorts_prompt"], PROMPT_SOURCE_SHORTS
         elif cfg_row.get("generated_prompt"):
-            audit_prompt = cfg_row["generated_prompt"]
-            used_generated = True
+            audit_prompt, prompt_source = cfg_row["generated_prompt"], PROMPT_SOURCE_GENERATED
         else:
-            audit_prompt = DEFAULT_PROMPT
+            audit_prompt, prompt_source = DEFAULT_PROMPT, PROMPT_SOURCE_DEFAULT
+        used_generated = prompt_source == PROMPT_SOURCE_GENERATED
 
         if prompt_version_id is None and used_generated:
             prompt_version_id = _live_prompt_version_id(v["channel_id"])
@@ -360,12 +381,7 @@ def audit_video(
         rec.set(**{
             "channel_id": v["channel_id"],
             "audit.is_short": bool(v.get("is_short")),
-            "audit.prompt_source": (
-                "override" if prompt_override
-                else "shorts" if (v.get("is_short") and cfg_row.get("shorts_prompt"))
-                else "generated" if cfg_row.get("generated_prompt")
-                else "default"
-            ),
+            "audit.prompt_source": prompt_source,
             "audit.prompt_version_id": prompt_version_id,
         })
 
@@ -410,7 +426,7 @@ def audit_video(
         })
         if not suggestion.is_valid:
             log.warning("Audit for %s is not applicable: %s", video_id, suggestion.rejection())
-        strategy = _stamp_strategy(prompt_version_id)
+        strategy = _stamp_strategy(audit_prompt, prompt_source, prompt_version_id)
         row = {
             "video_id": video_id,
             "status": status_override or AuditStatus.PENDING,
