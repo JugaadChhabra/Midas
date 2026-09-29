@@ -308,6 +308,84 @@ def test_one_bad_audit_does_not_abort_the_pass():
     assert summary[MeasurementStatus.WIN] == 2      # the other two still landed
 
 
+
+def test_failures_are_recorded_per_channel_with_the_audit_ids():
+    """The detail the scheduler fails the run with. Recorded where `errors` is
+    counted, so the count and the detail can't drift apart."""
+    audits = [{"id": i, "video_id": f"v{i}",
+               "measurement_status": MeasurementStatus.AWAITING_WINDOW}
+              for i in (1, 2, 3, 4)]
+    videos = [{"id": "v1", "channel_id": "c1"}, {"id": "v2", "channel_id": "c1"},
+              {"id": "v3", "channel_id": "c2"}, {"id": "v4", "channel_id": "c1"}]
+    sb, _ = _eval_sb(audits, videos)
+
+    def boom(audit, *a, **kw):
+        if audit["id"] in (2, 4):
+            raise RuntimeError(f"hiccup {audit['id']}")
+        return MeasurementStatus.WIN
+
+    with patch.object(m, "supabase", return_value=sb), \
+         patch.object(m.reach, "coverage", return_value=set()), \
+         patch.object(m, "_eval_audit", side_effect=boom):
+        summary, failed = m.evaluate_with_failures()
+
+    assert summary["errors"] == 2
+    assert summary[MeasurementStatus.WIN] == 2
+    assert failed == {"c1": "audit 2: RuntimeError: hiccup 2; audit 4: RuntimeError: hiccup 4"}
+
+
+def test_a_clean_pass_records_no_failures():
+    audits = [{"id": 1, "video_id": "v1",
+               "measurement_status": MeasurementStatus.AWAITING_WINDOW}]
+    sb, _ = _eval_sb(audits, [{"id": "v1", "channel_id": "c1"}])
+    with patch.object(m, "supabase", return_value=sb), \
+         patch.object(m.reach, "coverage", return_value=set()), \
+         patch.object(m, "_eval_audit", return_value=MeasurementStatus.WIN):
+        summary, failed = m.evaluate_with_failures()
+
+    assert (summary["errors"], failed) == (0, {})
+
+
+def test_an_error_before_the_channel_is_known_is_still_recorded():
+    """A vanished video has no channel to key by; the failure must not vanish
+    with it."""
+    audits = [{"id": 9, "video_id": "gone",
+               "measurement_status": MeasurementStatus.AWAITING_WINDOW}]
+    sb, _ = _eval_sb(audits, [])
+    with patch.object(m, "supabase", return_value=sb), \
+         patch.object(m, "_finalize", side_effect=RuntimeError("write failed")):
+        summary, failed = m.evaluate_with_failures()
+
+    assert summary["errors"] == 1
+    assert failed == {m.UNKNOWN_CHANNEL: "audit 9: RuntimeError: write failed"}
+
+
+def test_evaluate_endpoint_returns_the_summary_when_an_audit_fails():
+    """POST /measurement/evaluate keeps its contract: 200 and the summary. Only
+    the scheduler path turns errors into a failed run."""
+    from fastapi.testclient import TestClient
+    from app import main
+
+    audits = [{"id": i, "video_id": f"v{i}",
+               "measurement_status": MeasurementStatus.AWAITING_WINDOW}
+              for i in (1, 2)]
+    videos = [{"id": f"v{i}", "channel_id": "c1"} for i in (1, 2)]
+    sb, _ = _eval_sb(audits, videos)
+
+    def boom(audit, *a, **kw):
+        if audit["id"] == 2:
+            raise RuntimeError("postgrest hiccup")
+        return MeasurementStatus.WIN
+
+    with patch.object(m, "supabase", return_value=sb), \
+         patch.object(m.reach, "coverage", return_value=set()), \
+         patch.object(m, "_eval_audit", side_effect=boom):
+        r = TestClient(main.app).post("/measurement/evaluate")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["evaluated"], body["errors"], body[MeasurementStatus.WIN]) == (2, 1, 1)
+
 def test_only_still_applied_audits_are_evaluated():
     """A human revert mid-window takes the video off the new metadata, so the
     post window would measure post-revert exposure — and finalizing would

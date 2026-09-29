@@ -5,7 +5,9 @@ the rest. Before this module that isolation also hid the failure: APScheduler
 logged the run as "executed successfully" and `playlist_health_score` raised
 `NameError` daily for seven weeks unnoticed. Now `_run_per_channel` raises
 `JobRunFailed` once every channel has run, APScheduler fires `EVENT_JOB_ERROR`,
-and the listener here records it.
+and the listener here records it. The jobs that loop on their own
+(`poll_metrics`, `poll_reporting`, `main._daily_measurement_eval`) raise the
+same exception after their pass.
 
 In-memory only: a restart clears it. Persisting it is Phase B work.
 """

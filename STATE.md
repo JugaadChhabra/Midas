@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-29 (§1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the #22 commit on top of `a29db90` (a commit can't cite its own SHA) · **Branch:** `phase-a-prep/22-a6-prompt-hash`
+**Generated:** 2026-09-29 (§4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the #23 commit on top of `eaae24e` (a commit can't cite its own SHA) · **Branch:** `phase-a-prep/23-a8-finish`
 (working tree: one untracked file, `scripts/overnight_phase_a.sh`. `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` and `docs/midas-seo-agent-v2.excalidraw` are committed.)
 
 **Data caveat for this generation.** The live database runs on the office machine,
@@ -231,9 +231,20 @@ All registered in `app/main.py` `_register_jobs()`, called from `lifespan()` (`B
 **Failure semantics.** Per-channel jobs (`playlist_reconcile`, `playlist_discovery`,
 `playlist_tuning`, `reflection`, `playlist_health_score`) fan out through
 `main._run_per_channel`. Channels stay isolated: each channel's exception is logged at ERROR
-with traceback as `"<label> failed for <id>: <err>"` and the loop continues. Once every channel
+with traceback as `"<label> (job <job_id>) failed for <id>: <err>"` (`job_id` is the APScheduler id,
+passed by each wrapper as `job_id=`, default `"-"`) and the loop continues. Once every channel
 has run, any failure raises one `job_status.JobRunFailed` naming the failed channels, so
-APScheduler records the run as failed (`app/main.py`, `app/job_status.py`). In
+APScheduler records the run as failed (`app/main.py`, `app/job_status.py`). The three jobs outside
+the fan-out raise the same exception. `poll_metrics` and `poll_reporting` collect each channel that
+raised anything other than the expected skips (`AnalyticsNotAuthorizedError`, `TokenExpiredError`)
+as `{channel_id: "<Type>: <message>"}` and raise `JobRunFailed("metrics_poll" | "reporting_poll", …)`
+after the last channel (`app/metrics_poll.py:390-394`, `app/reporting_poll.py:318-321`); "no channels"
+returns normally. Both are called only by the scheduler. `measurement_eval` registers
+`main._daily_measurement_eval`, which calls `measurement.evaluate_with_failures()` and raises
+`JobRunFailed("measurement_eval", failed)` when any audit errored, keyed by channel id with the
+audits in the message (`"audit <id>: <Type>: <message>; …"`; `unknown_channel` when the video row is
+gone). `eval_measurements()` (what `POST /measurement/evaluate` returns) still returns only the summary,
+whose `errors` is counted from the same per-channel record (`app/measurement.py:376-474`). In
 `_daily_reconcile` a channel fails if either `sync_playlists` or `reconcile_channel` raised;
 reconcile still runs after a failed sync. After all `add_job` calls, `job_status.registry.watch(scheduler)`
 registers every job as `never_run` and listens for `EVENT_JOB_EXECUTED | EVENT_JOB_ERROR`. It
@@ -263,7 +274,7 @@ flags default to false (§3), so on a default `.env` these writers are frozen.
 | `metrics_poll` | cron 05:00 UTC | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in-measurement |
 | `reporting_poll` | cron 06:00 UTC | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` |
 | `playlist_health_score` | cron 07:00 UTC | `main._daily_playlist_health_score` → `score_channel` | registered; `playlist_health_enabled` channels (NameError crash fixed in this commit; §1 1B) |
-| `measurement_eval` | cron 08:00 UTC | `app/measurement.py:eval_measurements` | registered |
+| `measurement_eval` | cron 08:00 UTC | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered; fails the run if any audit errored |
 | `nightly_db_backup` | cron `BACKUP_HOUR` local | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
 | `pot_provider_refresh` | interval 2h | `main._refresh_pot_provider` | **gated**: only if env `BGUTIL_POT_HTTP_BASE_URL` set |
 
@@ -585,7 +596,7 @@ The live DB was unreachable (see caveat), so live counts are blank. Figures belo
   - Autopilot checks the quota ledger before the audit and before the apply (`_can_afford_apply`, `app/autopilot.py`); a no skips the tick with `quota_insufficient` and pauses nothing. A real YouTube `quotaExceeded` still makes the whole fleet dormant until the Pacific reset (the Data API quota is project-wide), logged as `"YouTube quotaExceeded: the Data API quota is project-wide, so autopilot is dormant fleet-wide (every channel, not just %s) until %s"`. A ledger skip at the second gate (after the audit) leaves that audit `pending`, which the picker excludes (`AUDIT_PICKER_SKIP_STATUSES`, `app/status_vocab.py`); it waits for `apply-pending`, as a quotaExceeded apply already did (`app/audits.py`).
   - Shorts uploads (`videos.insert` via `upload_short`, `app/shorts/youtube_upload.py`) are not reached from the autopilot tick: `_run_shorts_action` only inserts `shorts_jobs` rows, and the upload runs in the worker subprocess that `shorts_dispatch` spawns (`app/shorts/dispatcher.py`, `app/shorts/runner.py`). They have no `quota.can_afford` gate and no `Op` in `quota.UNIT_COST`, so they are not charged to the ledger.
 - **Failures**
-  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` caught per-channel exceptions and returned normally. That silent-failure pattern applied to every `_run_per_channel` job until A8: it now raises `JobRunFailed` after the fan-out, and `GET /health/jobs` shows each job's last status and failed channels (§4). **Still silent:** `metrics_poll`, `reporting_poll` and `measurement_eval` don't fan out through `_run_per_channel`. They catch per-video, per-report and per-audit exceptions internally and only count them (`app/metrics_poll.py:276-278`, `app/reporting_poll.py:273-278`, `app/measurement.py:452-454`), so `/health/jobs` shows them `success` even when every item failed.
+  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` caught per-channel exceptions and returned normally. That silent-failure pattern applied to every `_run_per_channel` job until A8: it now raises `JobRunFailed` after the fan-out, and `GET /health/jobs` shows each job's last status and failed channels (§4). `metrics_poll`, `reporting_poll` and `measurement_eval` now end failed too: a channel that crashes either poll, or any audit that errors in the measurement pass, raises `JobRunFailed` after the pass (§4), so `/health/jobs` lists the failing channels (and, for measurement, the audit ids). Still only counted, not raised: per-video, per-playlist and per-report errors *inside* a channel's poll (`videos_err`, `playlists_err`, `tier2_err`, `reports_err`; `app/metrics_poll.py:277,306,331`, `app/reporting_poll.py:274`), which leave that channel a success.
   - `join_pass` is disabled, so applied videos are no longer placed into playlists (`app/autopilot.py:455`).
   - Quarantine count: blank (the `/dashboard` `quarantined_count` has it live).
   - `threshold_history` tuning writes one channel's FPR into the **process-global** `settings.PLAYLIST_JOIN_HIGH` (`app/playlists.py:tune_thresholds`), so the last channel tuned sets the threshold for all of them until restart.

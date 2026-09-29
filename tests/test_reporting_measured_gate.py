@@ -39,3 +39,63 @@ def test_polls_all_authorized_when_flag_off():
          patch.object(el, "supabase", return_value=sb):
         rp.poll_reporting()
     first_eq.or_.assert_not_called()   # no opt-in filter
+
+
+
+# ── failure reporting (A8 finish, #23) ────────────────────────────────────
+#
+# Same shape as metrics_poll: per-channel isolation, but a crash now fails the
+# run (JobRunFailed) once every channel has been polled.
+
+import pytest
+
+from app.analytics_client import AnalyticsNotAuthorizedError
+from app.job_status import JobRunFailed
+from app.youtube_client import TokenExpiredError
+
+
+def _poll_with(channel_ids, poll_channel, ran):
+    def _one(cid):
+        ran.append(cid)
+        return poll_channel(cid)
+
+    with patch.object(rp.eligibility, "channels_for",
+                      return_value=[{"id": c} for c in channel_ids]), \
+         patch.object(rp, "_poll_channel", side_effect=_one):
+        rp.poll_reporting()
+
+
+def test_one_crash_still_polls_the_rest_then_fails_the_run():
+    def poll(cid):
+        if cid == "bad":
+            raise RuntimeError("reports.list 500")
+        return {}
+
+    ran = []
+    with pytest.raises(JobRunFailed) as exc_info:
+        _poll_with(["bad", "good"], poll, ran)
+
+    assert ran == ["bad", "good"]
+    assert exc_info.value.failed_channels == {"bad": "RuntimeError: reports.list 500"}
+
+
+def test_all_channels_succeeding_is_success():
+    ran = []
+    _poll_with(["a", "b"], lambda cid: {}, ran)
+    assert ran == ["a", "b"]
+
+
+def test_expected_skips_are_not_failures():
+    def poll(cid):
+        if cid == "unauthorized":
+            raise AnalyticsNotAuthorizedError(cid)
+        raise TokenExpiredError(cid)
+
+    ran = []
+    _poll_with(["unauthorized", "expired"], poll, ran)
+    assert ran == ["unauthorized", "expired"]
+
+
+def test_no_channels_is_success():
+    with patch.object(rp.eligibility, "channels_for", return_value=[]):
+        assert rp.poll_reporting() is None

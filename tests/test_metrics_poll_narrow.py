@@ -151,3 +151,65 @@ def test_poll_metrics_measured_empty_skips_video_poll():
     video_report.assert_not_called()      # the narrowing works...
     playlist_report.assert_called_once()  # ...and the pass still did its work
     mock_exc.assert_not_called()          # nothing was swallowed
+
+
+
+# ── failure reporting (A8 finish, #23) ────────────────────────────────────
+#
+# poll_metrics isolates each channel, but used to only log a crash, so the
+# scheduler recorded "success" even when every channel failed. It now raises
+# JobRunFailed once every channel has run. Expected skips stay successes.
+
+import pytest
+
+from app.analytics_client import AnalyticsNotAuthorizedError
+from app.job_status import JobRunFailed
+from app.youtube_client import TokenExpiredError
+
+
+def _poll_with(channel_ids, poll_channel, ran):
+    def _one(cid, *a, **kw):
+        ran.append(cid)
+        return poll_channel(cid)
+
+    with patch.object(metrics_poll.settings, "METRICS_POLL_MEASURED_ONLY", False), \
+         patch.object(metrics_poll.eligibility, "channels_for",
+                      return_value=[{"id": c} for c in channel_ids]), \
+         patch.object(metrics_poll, "_poll_channel", side_effect=_one):
+        metrics_poll.poll_metrics()
+
+
+def test_poll_metrics_one_crash_still_polls_the_rest_then_fails_the_run():
+    def poll(cid):
+        if cid == "bad":
+            raise RuntimeError("analytics 500")
+        return {}
+
+    ran = []
+    with pytest.raises(JobRunFailed) as exc_info:
+        _poll_with(["bad", "good"], poll, ran)
+
+    assert ran == ["bad", "good"]
+    assert exc_info.value.failed_channels == {"bad": "RuntimeError: analytics 500"}
+
+
+def test_poll_metrics_all_succeed_is_success():
+    ran = []
+    _poll_with(["a", "b"], lambda cid: {}, ran)
+    assert ran == ["a", "b"]
+
+
+def test_poll_metrics_expected_skips_are_not_failures():
+    def poll(cid):
+        if cid == "unauthorized":
+            raise AnalyticsNotAuthorizedError(cid)
+        raise TokenExpiredError(cid)
+
+    ran = []
+    _poll_with(["unauthorized", "expired"], poll, ran)
+    assert ran == ["unauthorized", "expired"]
+
+
+def test_poll_metrics_no_channels_is_success():
+    with patch.object(metrics_poll.eligibility, "channels_for", return_value=[]):
+        assert metrics_poll.poll_metrics() is None
