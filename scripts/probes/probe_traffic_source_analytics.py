@@ -18,6 +18,9 @@ Quota: 0 Data API units. The YouTube Analytics API has its own quota, and
 analytics_client logs no quota_log rows for it. 6 queries per run with the
 default types.
 
+Requires `analytics_authorized = true` on the channel; otherwise
+`AnalyticsNotAuthorizedError` is raised before any query.
+
 Read-only. Nothing is written to YouTube or to the DB, except that
 `analytics_for_channel` stores a refreshed access token if the old one
 expired.

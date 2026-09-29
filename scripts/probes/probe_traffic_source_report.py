@@ -24,6 +24,10 @@ Quota: 0 Data API units. Reporting API calls (jobs.list, jobs.reports.list,
 the CSV download) draw on the Reporting API's own pool, and reporting_client
 logs no quota_log rows for them.
 
+Requires `analytics_authorized = true` on the channel (the Reporting API is
+authorized by the yt-analytics.readonly scope); otherwise
+`AnalyticsNotAuthorizedError` is raised before any call.
+
 Read-only. Nothing is written to YouTube or to the DB, except that
 `reporting_for_channel` stores a refreshed access token if the old one
 expired. It never creates a job. `--save` writes the downloaded CSV to a
@@ -39,6 +43,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import statistics
 from collections import Counter
 from datetime import datetime
 
@@ -79,6 +84,11 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+def _report_order(r: dict) -> tuple[str, str]:
+    """Data date first, then create time: the order "newest" means here."""
+    return r.get("startTime") or "", r.get("createTime") or ""
+
+
 def _parse_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None
@@ -95,7 +105,7 @@ def _find_column(header: list[str], needle: str) -> int | None:
 def _print_lag(reports: list[dict]) -> None:
     print(f"\n=== {len(reports)} reports: data date vs create time ===")
     lags: list[int] = []
-    for r in sorted(reports, key=lambda r: (r.get("startTime") or "", r.get("createTime") or "")):
+    for r in sorted(reports, key=_report_order):
         data_day = report_data_date(r)
         created = _parse_ts(r.get("createTime"))
         lag = (created.date() - data_day).days if created else None
@@ -104,7 +114,7 @@ def _print_lag(reports: list[dict]) -> None:
         print(f"  {r['id']:>14s}  data {data_day}  created {r.get('createTime')}  lag {lag} d")
     if lags:
         print(f"lag (days, create date - data date): min {min(lags)}, max {max(lags)}, "
-              f"median {sorted(lags)[len(lags) // 2]}")
+              f"median {statistics.median(lags)}")
 
 
 def _print_samples(rows: list[list[str]], type_ix: int, detail_ix: int | None,
@@ -157,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nreport {args.report_id} is not in job {job['id']}")
             return 1
     else:
-        target = max(reports, key=lambda r: (r.get("startTime") or "", r.get("createTime") or ""))
+        target = max(reports, key=_report_order)
     print(f"\n── downloading report {target['id']} (data {report_data_date(target)}, "
           f"created {target.get('createTime')}) ──")
     text = download_report_csv(handle, channel_id, target["downloadUrl"])

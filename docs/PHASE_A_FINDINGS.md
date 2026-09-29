@@ -38,6 +38,7 @@ Do these on the office machine before `start.bat`.
 |---|---|
 | Date | |
 | Channel | n/a (fleet config) |
+| Command / SQL | the checklist items below |
 | Raw evidence | |
 | Outcome | |
 
@@ -80,6 +81,7 @@ Do these on the office machine before `start.bat`.
 |---|---|
 | Date (pause timestamp, UTC) | |
 | Channel | |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -209,6 +211,7 @@ the first report can take a day or more.
 | Date (job created) | |
 | Date (first report inspected) | |
 | Channel | `UCr5-YUqBiW7PUmeAtxUWuRg` |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -249,6 +252,7 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 | Date | |
 | Channel | |
 | Video (warm) | |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -278,6 +282,7 @@ PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_analytics.py \
 | Referring video (has the link in its description) | |
 | Target video (linked) | |
 | Link added on (≥2 weeks ago) | |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -312,6 +317,7 @@ type only · (c) nothing usable. These map onto Part 2 §1.2.
 | Channel | |
 | Short (with a related video set in Studio) | |
 | Linked video | |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -338,6 +344,7 @@ Then check the current `videos.update` reference for any writable field matching
 | Date | |
 | Channel | |
 | Video (warm) | |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -367,6 +374,7 @@ This decides whether `get_search_terms` (Part 2 §3.2) is built.
 |---|---|
 | Date | |
 | Channel | `UCc4Tv_DEGDEKrKAt-vyVNmw` |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
@@ -412,6 +420,7 @@ app container: `docker compose exec midas python -c "from app.backup import snap
 |---|---|
 | Date | |
 | Channel | all |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome (rollout channel #1 and the reason) | |
 
@@ -494,6 +503,7 @@ Raw results (paste):
 | Date (deploy) | |
 | Date (first 07:00 UTC run after deploy) | |
 | Channel | every `playlist_health_enabled` channel |
+| Command / SQL | pre-filled in this section, below |
 | Raw evidence | |
 | Outcome | |
 
