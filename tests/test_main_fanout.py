@@ -64,6 +64,51 @@ def test_run_per_channel_logs_each_failure_with_label_channel_and_traceback(capl
     assert set(exc_info.value.failed_channels) == {"x", "y"}
 
 
+def test_run_per_channel_error_line_carries_the_job_id(caplog):
+    from app import main
+
+    def fn(cid):
+        raise ValueError("bad")
+
+    with caplog.at_level(logging.ERROR, logger="midas.main"):
+        with pytest.raises(JobRunFailed):
+            main._run_per_channel(fn, "Weekly reflection", channel_ids=["x"],
+                                  job_id="reflection")
+
+    [record] = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert "Weekly reflection" in record.getMessage()
+    assert "(job reflection)" in record.getMessage()
+
+
+def test_every_fanout_job_passes_its_scheduler_id():
+    """Each wrapper names the APScheduler id it is registered under, so the
+    ERROR line can be matched to /health/jobs."""
+    from app import main
+
+    seen = {}
+
+    def fake_run(fn, label, channel_ids=None, job_id="-"):
+        seen[label] = job_id
+
+    with patch.object(main, "_run_per_channel", side_effect=fake_run), \
+         patch.object(main, "JobBudget"), \
+         patch.object(main.eligibility, "channel_ids_for", return_value=["a"]), \
+         patch.object(main, "_reconcile_channel_order", side_effect=lambda ids: ids):
+        main._daily_reconcile()
+        main._weekly_discovery()
+        main._weekly_reflection()
+        main._weekly_playlist_tuning()
+        main._daily_playlist_health_score()
+
+    assert seen == {
+        "Daily reconcile cycle": "playlist_reconcile",
+        "Weekly discovery": "playlist_discovery",
+        "Weekly reflection": "reflection",
+        "Weekly playlist tuning": "playlist_tuning",
+        "Daily playlist_health_score": "playlist_health_score",
+    }
+
+
 def test_run_per_channel_uses_explicit_channel_ids():
     from app import main
 
@@ -247,3 +292,40 @@ def test_health_endpoint_unchanged():
 
     r = TestClient(main.app).get("/health")
     assert r.json() == {"ok": True, "dry_run": main.settings.DRY_RUN}
+
+
+# --- measurement_eval scheduler wrapper (#23) --------------------------------
+
+
+def test_measurement_eval_job_fails_with_the_failing_audits_by_channel():
+    from app import main
+
+    failed = {"c1": "audit 2: RuntimeError: hiccup"}
+    with patch.object(main.measurement, "evaluate_with_failures",
+                      return_value=({"evaluated": 3, "errors": 1}, failed)):
+        with pytest.raises(JobRunFailed) as exc_info:
+            main._daily_measurement_eval()
+
+    assert exc_info.value.failed_channels == failed
+
+    reg = JobStatusRegistry()
+    reg.on_event(_event(EVENT_JOB_ERROR, "measurement_eval", exc_info.value))
+    entry = reg.snapshot()["measurement_eval"]
+    assert entry["status"] == "failed"
+    assert entry["failed_channels"] == failed
+
+
+def test_measurement_eval_job_succeeds_when_nothing_failed():
+    from app import main
+
+    with patch.object(main.measurement, "evaluate_with_failures",
+                      return_value=({"evaluated": 0}, {})):
+        assert main._daily_measurement_eval() is None
+
+
+def test_measurement_eval_registers_the_scheduler_wrapper_not_the_endpoint_function():
+    from app import main
+
+    sched = BackgroundScheduler(daemon=True)
+    main._register_jobs(sched)
+    assert sched.get_job("measurement_eval").func is main._daily_measurement_eval

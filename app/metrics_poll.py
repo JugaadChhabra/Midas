@@ -34,7 +34,7 @@ from app.analytics_client import (
     yt_analytics_video_report,
     yt_analytics_video_traffic_source_playlist,
 )
-from app import eligibility
+from app import eligibility, job_status
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
@@ -370,6 +370,7 @@ def poll_metrics() -> None:
             log.info("metrics_poll: no videos under active measurement; skipping video poll "
                      "(playlists still polled)")
 
+    crashed: dict[str, str] = {}
     for ch in channels:
         cid = ch["id"]
         try:
@@ -386,3 +387,8 @@ def poll_metrics() -> None:
             log.warning("metrics_poll %s: OAuth token expired; skipping until re-consent", cid)
         except Exception as e:
             log.exception("metrics_poll %s crashed: %s", cid, e)
+            crashed[cid] = job_status.describe(e)
+    # After the whole pass, so one crash never skips the rest; without the raise
+    # APScheduler records the run a success even when every channel crashed.
+    if crashed:
+        raise job_status.JobRunFailed("metrics_poll", crashed)

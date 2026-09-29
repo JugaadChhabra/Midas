@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app import eligibility, job_status, quota, tracing
+from app import eligibility, job_status, measurement, quota, tracing
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
 from app.performance import router as performance_router
@@ -29,7 +29,7 @@ from app.backup import run_nightly_backup
 from app.provision import ensure_database_populated
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
-from app.measurement import router as measurement_router, eval_measurements
+from app.measurement import router as measurement_router
 from app.playlist_health import score_channel as playlist_health_score_channel
 
 def _configure_logging() -> None:
@@ -72,14 +72,15 @@ log = logging.getLogger("midas")
 scheduler = BackgroundScheduler(daemon=True)
 
 
-def _run_per_channel(fn, label, channel_ids=None) -> None:
+def _run_per_channel(fn, label, channel_ids=None, job_id="-") -> None:
     """Fan a per-channel job out over every channel, isolating failures.
 
     Calls ``fn(channel_id)`` for each id (every channel unless ``channel_ids``
     is supplied). ``fn`` is responsible for its own success
     logging; a raised exception is caught and logged per channel at ERROR, with
-    traceback, as ``"<label> failed for <id>: <err>"`` so one bad channel never
-    kills the loop — the shared shape behind the daily/weekly scheduler jobs.
+    traceback, as ``"<label> (job <job_id>) failed for <id>: <err>"`` so one bad
+    channel never kills the loop — the shared shape behind the daily/weekly
+    scheduler jobs. ``job_id`` is the APScheduler id, the key in /health/jobs.
 
     Once every channel has run, any failure raises one ``JobRunFailed`` naming
     the failed channels, so APScheduler records the run as failed instead of
@@ -94,7 +95,7 @@ def _run_per_channel(fn, label, channel_ids=None) -> None:
         try:
             fn(channel_id)
         except Exception as e:
-            _main_log.exception("%s failed for %s: %s", label, channel_id, e)
+            _main_log.exception("%s (job %s) failed for %s: %s", label, job_id, channel_id, e)
             failed[channel_id] = job_status.describe(e)
     if failed:
         raise job_status.JobRunFailed(label, failed)
@@ -176,7 +177,8 @@ def _daily_reconcile():
 
     ids = _reconcile_channel_order(eligibility.channel_ids_for(eligibility.Job.RECONCILE))
     try:
-        _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids)
+        _run_per_channel(_one, "Daily reconcile cycle", channel_ids=ids,
+                         job_id="playlist_reconcile")
     finally:
         _main_log.info("Daily reconcile cycle done — %s", budget)
 
@@ -186,7 +188,7 @@ def _weekly_discovery():
         result = discover_playlists(channel_id)
         _main_log.info("Weekly discovery %s: %s", channel_id, result)
 
-    _run_per_channel(_one, "Weekly discovery")
+    _run_per_channel(_one, "Weekly discovery", job_id="playlist_discovery")
 
 
 def _weekly_reflection():
@@ -194,7 +196,7 @@ def _weekly_reflection():
         result = reflection_reflect(channel_id)
         _main_log.info("Weekly reflection %s: %s", channel_id, result)
 
-    _run_per_channel(_one, "Weekly reflection")
+    _run_per_channel(_one, "Weekly reflection", job_id="reflection")
 
 
 def _weekly_playlist_tuning():
@@ -210,7 +212,7 @@ def _weekly_playlist_tuning():
         result = tune_thresholds(channel_id)
         _main_log.info("Weekly playlist tuning %s: %s", channel_id, result)
 
-    _run_per_channel(_one, "Weekly playlist tuning")
+    _run_per_channel(_one, "Weekly playlist tuning", job_id="playlist_tuning")
 
 
 def _daily_playlist_health_score():
@@ -232,7 +234,20 @@ def _daily_playlist_health_score():
         summary = playlist_health_score_channel(channel_id)
         _main_log.info("Daily playlist_health_score %s: %s", channel_id, summary)
 
-    _run_per_channel(_one, "Daily playlist_health_score", channel_ids=ids)
+    _run_per_channel(_one, "Daily playlist_health_score", channel_ids=ids,
+                     job_id="playlist_health_score")
+
+
+def _daily_measurement_eval():
+    """Scheduler wrapper for the measurement pass.
+
+    `eval_measurements` also serves `POST /measurement/evaluate`, which must
+    keep answering with its summary, so the raise lives here: any audit that
+    errored fails the run, with the failing audits grouped by channel.
+    """
+    _summary, failed = measurement.evaluate_with_failures()
+    if failed:
+        raise job_status.JobRunFailed("measurement_eval", failed)
 
 
 def _refresh_pot_provider():
@@ -378,7 +393,7 @@ def _register_jobs(sched) -> None:
         coalesce=True,
     )
     sched.add_job(
-        eval_measurements,
+        _daily_measurement_eval,
         "cron",
         hour=8,
         minute=0,

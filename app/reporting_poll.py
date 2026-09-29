@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from app import eligibility, reach
+from app import eligibility, job_status, reach
 from app.analytics_client import AnalyticsNotAuthorizedError
 from app.config import settings
 from app.db import supabase
@@ -303,6 +303,7 @@ def poll_reporting() -> None:
                  "(measured-only=%s); nothing to do", settings.REPORTING_MEASURED_CHANNELS_ONLY)
         return
 
+    crashed: dict[str, str] = {}
     for ch in channels:
         cid = ch["id"]
         try:
@@ -314,3 +315,7 @@ def poll_reporting() -> None:
             log.warning("reporting_poll %s: OAuth token expired; skipping until re-consent", cid)
         except Exception as e:
             log.exception("reporting_poll %s crashed: %s", cid, e)
+            crashed[cid] = job_status.describe(e)
+    # Same as metrics_poll: fail the run once every channel has been polled.
+    if crashed:
+        raise job_status.JobRunFailed("reporting_poll", crashed)

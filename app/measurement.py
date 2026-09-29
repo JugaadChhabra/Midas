@@ -62,7 +62,7 @@ from app.status_vocab import (
     MeasurementStatus,
     OutcomeDecision,
 )
-from app import reach, tracing, verdicts
+from app import job_status, reach, tracing, verdicts
 from app.verdicts import Verdict
 
 log = logging.getLogger("midas.measurement")
@@ -372,12 +372,30 @@ def _eval_audit(audit: dict, video: dict, covered: set[str], today: date,
 
 # ── Job entry point ───────────────────────────────────────────────────────
 
+#: Key for a failed audit whose video row (and so channel) couldn't be resolved.
+UNKNOWN_CHANNEL = "unknown_channel"
+
+
 def eval_measurements() -> dict:
     """Daily pass over all audits in awaiting_window / measuring.
 
     Once an audit has entered the pipeline it is evaluated even if the
     channel's measurement_enabled flag was flipped off afterwards — the flag
     gates ENTRY (at apply), not evaluation of in-flight measurements.
+
+    Returns the summary only; per-audit errors are counted in it, never raised,
+    so `POST /measurement/evaluate` always answers with the summary. The
+    scheduler runs `evaluate_with_failures` instead, which fails the run.
+    """
+    return evaluate_with_failures()[0]
+
+
+def evaluate_with_failures() -> tuple[dict, dict[str, str]]:
+    """`eval_measurements`, plus the failed audits grouped by channel.
+
+    The second value is ``{channel_id: "audit <id>: <Type>: <message>; ..."}``,
+    the shape `job_status.JobRunFailed` carries. ``summary["errors"]`` is
+    derived from it, so the count and the detail can't disagree.
     """
     with tracing.span("eval_measurements") as rec:
         audits = all_rows(
@@ -395,7 +413,7 @@ def eval_measurements() -> dict:
         if not audits:
             log.info("measurement_eval: nothing in flight")
             rec.set(**{"measurement.audits_in_flight": 0})
-            return {"evaluated": 0}
+            return {"evaluated": 0}, {}
 
         # Resolve channel per audit (audits carry no channel_id), chunked.
         video_ids = list({a["video_id"] for a in audits})
@@ -419,7 +437,8 @@ def eval_measurements() -> dict:
         #: `counts` rather than folded into it because the two answer different
         #: questions: how many landed where, and why.
         reasons: dict[str, int] = {}
-        errors = 0
+        #: channel_id -> ["audit <id>: <Type>: <message>", ...]
+        failed: dict[str, list[str]] = {}
         for audit in audits:
             try:
                 video = videos.get(audit["video_id"])
@@ -450,8 +469,12 @@ def eval_measurements() -> dict:
                 status = _eval_audit(audit, video, coverage[cid], today, reasons=reasons)
                 counts[status] = counts.get(status, 0) + 1
             except Exception as e:
-                errors += 1
                 log.exception("measurement_eval failed for audit %s: %s", audit.get("id"), e)
+                channel = (videos.get(audit.get("video_id")) or {}).get("channel_id")
+                failed.setdefault(channel or UNKNOWN_CHANNEL, []).append(
+                    f"audit {audit.get('id')}: {job_status.describe(e)}")
+
+        errors = sum(len(items) for items in failed.values())
 
         summary = {"evaluated": len(audits), "errors": errors, **counts}
         if stalled_channels:
@@ -468,7 +491,7 @@ def eval_measurements() -> dict:
             # dormant video is nothing to fix, lost coverage is our own outage.
             **{f"measurement.reason.{code}": n for code, n in reasons.items()},
         })
-        return summary
+        return summary, {cid: "; ".join(items) for cid, items in failed.items()}
 
 
 # ── Endpoints (CIL §1.8, minimal slice subset) ────────────────────────────
