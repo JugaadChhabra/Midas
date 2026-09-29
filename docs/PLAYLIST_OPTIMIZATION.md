@@ -1,3 +1,11 @@
+> **Superseded.** This doc is superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`
+> (2026-09-23) and is kept for history only. Don't build from it.
+> Carried forward from it, per that spec's Part 2 §0.5 "Kept":
+>
+> - The sensor layer: `metrics_poll`, `reporting_poll`, `reach.py`, `video_reach_daily`.
+> - Quota: `JobBudget`, apply reserve.
+> - The playlist write functions in `youtube_client.py` and the inventory, health, and proposal machinery.
+
 # Midas — Playlist Optimizer
 
 A per-channel subsystem that **builds, prunes, and continuously improves YouTube
