@@ -4,6 +4,7 @@ Covers the three things that are easy to get wrong and expensive to get wrong:
 the plan's ordering, the deferred item_count write (losing a drift signal is
 silent), and the mid-walk stop (a partial membership must not look walked).
 """
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -189,8 +190,10 @@ def test_deferred_playlist_keeps_its_stale_item_count():
 def test_skipped_playlist_still_records_the_current_count():
     """A playlist NOT owed a walk is not deferred — its count is written as usual."""
     yt = [{"id": "p1", "item_count": 10, "title": "p1", "description": ""}]
-    existing = [{"id": "p1", "item_count": 10,
-                 "membership_walked_at": "2026-08-12T00:00:00+00:00"}]
+    # Walked yesterday, relative to the wall clock sync_playlists reads: a
+    # fixed date here goes stale once it falls past PLAYLIST_FULL_WALK_DAYS.
+    walked_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    existing = [{"id": "p1", "item_count": 10, "membership_walked_at": walked_at}]
     sb, tables, fetched, page_fn = _stub_sync(yt, existing, {})
 
     result = _run(sb, page_fn, yt, budget=_budget(100))
