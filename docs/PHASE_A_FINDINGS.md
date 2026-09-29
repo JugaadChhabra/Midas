@@ -324,18 +324,34 @@ the first report can take a day or more.
 
 ### A1.1 Reporting API: the traffic-source report
 
-`channel_traffic_source_a2` returned 404 on 2026-09-29 (retired). Use the live
-`channel_traffic_source_…` ID from restart-day step 14 everywhere below, shown as
-`<traffic_type_id>`.
+`channel_traffic_source_a2` returned 404 on 2026-09-29 (retired). The live ID is
+**`channel_traffic_source_a3`**, used as `<traffic_type_id>` below. A second job was
+created for **`playlist_traffic_source_a2`**, for the playlist half of the A1 answer.
 
 | Field | Value |
 |---|---|
-| Date (job created) | |
+| Date (job created) | 2026-09-29T13:07:01Z (traffic source), 2026-09-29T13:07:22Z (playlist traffic source) |
 | Date (first report inspected) | |
 | Channel | `UCr5-YUqBiW7PUmeAtxUWuRg` |
 | Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome | |
+| Raw evidence | see below |
+| Outcome | jobs created; waiting for the first report (24–48h) |
+
+Raw evidence, 2026-09-29 on the office machine:
+
+```
+# jobs.create with the spec's ID
+HttpError 404 when requesting https://youtubereporting.googleapis.com/v1/jobs?alt=json
+returned "Requested entity was not found."   (reportTypeId channel_traffic_source_a2)
+
+# probe_reporting.py reportTypes.list, filtered to "traffic"
+channel_traffic_source_a3     Traffic sources
+playlist_traffic_source_a2    Playlist traffic sources
+
+# jobs created
+created job 3647f5d8-d935-43dc-8745-38ba143ca5ec (type channel_traffic_source_a3, name midas-traffic-source) for UCr5-YUqBiW7PUmeAtxUWuRg at 2026-09-29T13:07:01.017767Z
+created job 381cf084-cbf7-4af1-955d-4d170dd07b56 (type playlist_traffic_source_a2, name midas-playlist-traffic-source) for UCr5-YUqBiW7PUmeAtxUWuRg at 2026-09-29T13:07:22.764313Z
+```
 
 **[office, in the container: see "Running the other probes"]** Create or confirm the job (idempotent: an existing job for the type is
 printed, not duplicated):
