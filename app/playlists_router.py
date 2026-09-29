@@ -263,6 +263,8 @@ def playlist_status(channel_id: str):
 @router.post("/channels/{channel_id}/playlists/reconcile")
 def reconcile(channel_id: str):
     """Manually trigger a playlist reconcile for a channel."""
+    if not settings.PLAYLIST_RECONCILE_WRITES_ENABLED:
+        raise HTTPException(409, "Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false")
     return reconcile_channel(channel_id)
 
 

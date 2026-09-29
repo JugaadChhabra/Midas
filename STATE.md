@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-28 (§4, §5, §8 updated for A8 job-failure visibility) · **Commit:** the A8 commit on top of `b97f35a` (a commit can't cite its own SHA) · **Branch:** `phase-a/09-a8-job-failures`
+**Generated:** 2026-09-29 (§1, §3, §4, §5, §7.1 updated for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A4 commit on top of `cf4f20d` (a commit can't cite its own SHA) · **Branch:** `phase-a/10-a4-freeze-writers`
 (working tree: three untracked files, `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`, `midas-seo-agent-v2.excalidraw`, `scripts/overnight_phase_a.sh`)
 
 **Data caveat for this generation.** The live database runs on the office machine,
@@ -35,7 +35,7 @@ Spec abbreviations: **CIL** = `docs/CONTINUOUS_IMPROVEMENT_LOOP.md`, **PO** =
 | 1A | Metadata control loop | **partial**: sense and judge built; the act half is inert | `app/measurement.py`, `app/verdicts.py`, `app/audits.py:733` (`revert_audit`), migration `20260702183233_phase1a_loop1_measurement.sql` | Verdicts are written. There is no redo path and no auto-revert: `MAX_REDO` and `AUTO_REVERT_ON_REGRESSION` are declared in `app/config.py` but never read. `OutcomeDecision.REDO_QUEUED` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`). `docs/PHASE_2_TRACK2_LOOP1_REDO.md` is still **DRAFT**. |
 | 1B | Playlist inventory + health | **built** (scorer was crashing 2026-08-06 → 2026-09-23; fixed) | `app/playlists_sync.py`, `app/playlist_health.py`, `app/playlists_router.py:521,552`, migrations `20260618115221_…`, `20260618133036_…` | From `b355f40` (rows refactor) until this commit, `score_channel` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` (seen in `logs/midas.log*`). It now reads through `rows.rows_for_ids`, covered by `tests/test_playlist_health.py`. Stored `health_*` values on the live DB are stale until the next 07:00 UTC run after deploy. Tier-2 (playlist traffic source) is disabled: `TIER2_TRAFFIC_SOURCE_SUPPORTED = False` (`app/metrics_poll.py`, Gap 6 REOPENED). |
 | 2A | Competitor research | **not started** (as spec'd) | none | Something nearby exists. `app/reflection.py` has `derive_niche_queries` and `_sample_competitors`, which call `search.list` × 2 and feed the *prompt reflection* loop, not playlists. No `playlist_competitor_reference_json`. |
-| 2B | Playlist construction | **not started** (as spec'd); a pre-spec similarity builder runs instead | `app/playlist_discovery.py` (weekly, **creates** playlists via `playlists.insert`), `app/playlists.py` (daily reconcile add/remove) | No `playlist_interventions` table, no LLM re-rank for session continuation, no ordering or entry-point logic. `join_pass` is commented out in autopilot (`app/autopilot.py:453-455`: "Playlist allocation skipped — workflow under review"). |
+| 2B | Playlist construction | **not started** (as spec'd); a pre-spec similarity builder runs instead | `app/playlist_discovery.py` (weekly, **creates** playlists via `playlists.insert`), `app/playlists.py` (daily reconcile add/remove); both frozen by default behind A4 flags (§4) | No `playlist_interventions` table, no LLM re-rank for session continuation, no ordering or entry-point logic. `join_pass` is commented out in autopilot (`app/autopilot.py:453-455`: "Playlist allocation skipped — workflow under review"). |
 | 2C | Playlist self-eval | **not started** | none | Nothing measures playlists the optimizer created. |
 | 3A | Metadata playbook | **not started** | none | There is no `app/playbook.py` and no `playbook_json`. The only memory-like mechanism is `prompt_versions` reflection (§7.2). |
 | 3B | Playlist playbook | **not started** | none | |
@@ -178,6 +178,10 @@ override. The office machine's `.env` is hand-carried and was not read.
 | `MAX_NEW_PLAYLISTS_PER_WINDOW` | absent; hardcoded `MAX_NEW_PLAYLISTS = 2` per weekly run (`app/playlist_discovery.py:20`) | 3 per window | **differs** |
 | `PLAYLIST_AUTO_DELETE` | absent (no delete path exists) | false | absent |
 | `PLAYLIST_CHALLENGER_PCT` | absent | 0.20 | **absent** |
+| `PLAYLIST_DISCOVERY_ENABLED` | `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
+| `PLAYLIST_RECONCILE_WRITES_ENABLED` | `os.getenv("PLAYLIST_RECONCILE_WRITES_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
+| `PLAYLIST_TUNING_ENABLED` | `os.getenv("PLAYLIST_TUNING_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
+| `REFLECTION_ENABLED` | `os.getenv("REFLECTION_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
 | `AUDIT_MODEL` | `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; **local .env: `google/gemini-3.7-flash`** | (not spec'd) | — |
 
 **Settings in code with no spec home** (verbatim defaults):
@@ -221,7 +225,7 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 
 ## 4. Scheduled jobs
 
-All registered in `app/main.py` `lifespan()` (`BackgroundScheduler`, `max_instances=1, coalesce=True`).
+All registered in `app/main.py` `_register_jobs()`, called from `lifespan()` (`BackgroundScheduler`, `max_instances=1, coalesce=True`).
 
 **Failure semantics.** Per-channel jobs (`playlist_reconcile`, `playlist_discovery`,
 `playlist_tuning`, `reflection`, `playlist_health_score`) fan out through
@@ -237,14 +241,24 @@ records per job id `status` (`never_run|success|failed`), `last_run_at` (the eve
 from the `JobRunFailed`), and logs failures as `"JOB FAILED <job_id> at <time>: <error>"`. The
 registry is in-memory: a restart clears it. It is served at `GET /health/jobs` (§5).
 
+**Freeze flags (A4).** Jobs are added by `main._register_jobs(sched)`, called from `lifespan()`.
+Three writers register only when their flag is true; when it is false startup logs one line,
+`"<job_id> not registered: <FLAG>=false"`, and the job never runs. `playlist_reconcile` always
+registers; with its flag false `_daily_reconcile` runs `sync_playlists` and skips
+`reconcile_channel` (so no `playlistItems.insert/delete` and no new proposals), logging
+`"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` per channel
+(startup also logs `"playlist_reconcile registered for sync only: add/remove skipped
+(PLAYLIST_RECONCILE_WRITES_ENABLED=false)"`). All four
+flags default to false (§3), so on a default `.env` these writers are frozen.
+
 | Job id | Trigger | Entry point | Status |
 |---|---|---|---|
 | `autopilot` | interval `AUTOPILOT_TICK_SECONDS` | `app/autopilot.py:tick`: at most one video per tick: quota gate → pick channel → shorts action → audit → validate → apply → re-embed | registered; per-channel gated by `eligibility.can_audit` / `can_cut_shorts` |
 | `shorts_dispatch` | interval 5s | `app/shorts/dispatcher.py:dispatch_tick` | registered |
-| `playlist_reconcile` | cron 02:00 server-local | `main._daily_reconcile` → `sync_playlists` (budgeted) + `reconcile_channel` | registered; channel allowlist `PLAYLIST_RECONCILE_CHANNELS`. **Writes to YouTube** (`playlistItems.insert/delete`) or queues proposals when `PLAYLIST_HITL=true` |
-| `playlist_discovery` | cron Sun 03:00 local | `main._weekly_discovery` → `app/playlist_discovery.py:discover_playlists` | registered, **all channels** (`Job.EVERY`). **Creates playlists on YouTube** (≤2/run), skipped under DRY_RUN |
-| `playlist_tuning` | cron Mon 03:30 local | `app/playlists.py:tune_thresholds` | registered, all channels. Mutates `settings.PLAYLIST_JOIN_HIGH` **in-process, globally** from one channel's churn |
-| `reflection` | cron Mon 04:00 local | `app/reflection.py:reflect` | registered, all channels |
+| `playlist_reconcile` | cron 02:00 server-local | `main._daily_reconcile` → `sync_playlists` (budgeted) + `reconcile_channel` | registered; channel allowlist `PLAYLIST_RECONCILE_CHANNELS`. **Writes to YouTube** (`playlistItems.insert/delete`) or queues proposals when `PLAYLIST_HITL=true`. **Add/remove step frozen by `PLAYLIST_RECONCILE_WRITES_ENABLED`** (sync still runs) |
+| `playlist_discovery` | cron Sun 03:00 local | `main._weekly_discovery` → `app/playlist_discovery.py:discover_playlists` | **frozen by `PLAYLIST_DISCOVERY_ENABLED`** (not registered when false). When on: **all channels** (`Job.EVERY`). **Creates playlists on YouTube** (≤2/run), skipped under DRY_RUN |
+| `playlist_tuning` | cron Mon 03:30 local | `app/playlists.py:tune_thresholds` | **frozen by `PLAYLIST_TUNING_ENABLED`** (not registered when false). When on: all channels. Mutates `settings.PLAYLIST_JOIN_HIGH` **in-process, globally** from one channel's churn |
+| `reflection` | cron Mon 04:00 local | `app/reflection.py:reflect` | **frozen by `REFLECTION_ENABLED`** (not registered when false). When on: all channels |
 | `metrics_poll` | cron 05:00 UTC | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in-measurement |
 | `reporting_poll` | cron 06:00 UTC | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` |
 | `playlist_health_score` | cron 07:00 UTC | `main._daily_playlist_health_score` → `score_channel` | registered; `playlist_health_enabled` channels (NameError crash fixed in this commit; §1 1B) |
@@ -268,8 +282,8 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
 - **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate` (LLM builds prompt from notes), `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply`, `POST /channels/{id}/audits/apply-pending`, `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk`, `POST /audits/{id}/revert`, `GET /quota-cost-preview`.
 - **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes` (counts + `pending_review` regressions + 25 recent), `POST /measurement/evaluate` (manual run).
-- **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`.
-- **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate` (runs the scorer), `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile`, `GET /channels/{id}/playlists/proposals`, `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube).
+- **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`. Promote and trigger return 409 `"Reflection is frozen: REFLECTION_ENABLED=false"` while the flag is false (`_require_reflection_enabled`).
+- **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate` (runs the scorer), `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile` (409 `"Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false"` while that flag is false), `GET /channels/{id}/playlists/proposals`, `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube; not frozen, these are human decisions).
 - **Autopilot** (`app/autopilot.py`): `POST /channels/{id}/autopilot/resume`, `GET /channels/{id}/autopilot/log`.
 - **Ops** : `GET /dashboard` (`app/dashboard.py`, 30s cache, RPC-first), `GET /quota` (`app/quota.py`), `GET /channels/{id}/performance`, `/performance/summary`, `/performance.csv` (`app/performance.py`).
 - **Shorts** (`app/shorts/routes.py`, prefix `/shorts`): `POST|GET /shorts/jobs`, `POST /shorts/cut`, `GET /shorts/languages`, `POST /shorts/jobs/clear-failed`, `GET /shorts/jobs/{id}`, `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`, `POST /videos/{id}/short`, `POST /autoshorts/jobs`.
@@ -500,7 +514,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 
 **Cross-cutting (plan §Cross-cutting)**
 - "`default_language` survives everything": holds for audits and reflection (via `_build_user_block` + `house_format_spec`). **Violated** for playlist proposal titles and descriptions (`playlist_discovery._propose_playlist`) and the membership judge.
-- "auto-delete default off": vacuously true, because no delete path exists. But `reconcile_channel` **removes** videos from playlists (LLM-confirmed, not human) when `PLAYLIST_HITL=false`.
+- "auto-delete default off": vacuously true, because no delete path exists. But `reconcile_channel` **removes** videos from playlists (LLM-confirmed, not human) when `PLAYLIST_HITL=false` and `PLAYLIST_RECONCILE_WRITES_ENABLED=true` (default false, §4).
 
 ### 7.2 Built but not spec'd
 

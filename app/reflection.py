@@ -789,9 +789,17 @@ def reflection_history(channel_id: str):
     return rows
 
 
+def _require_reflection_enabled() -> None:
+    # Phase A · A4: prompt rewrites and promotions are frozen; the prompt that
+    # is live now keeps running unchanged.
+    if not settings.REFLECTION_ENABLED:
+        raise HTTPException(409, "Reflection is frozen: REFLECTION_ENABLED=false")
+
+
 @router.post("/channels/{channel_id}/prompt-versions/{version_id}/promote")
 def promote_version(channel_id: str, version_id: int):
     """Manually promote a shadow candidate to live. Only valid for status=shadow."""
+    _require_reflection_enabled()
     version = (
         supabase().table("prompt_versions")
         .select("*")
@@ -814,6 +822,7 @@ def promote_version(channel_id: str, version_id: int):
 @router.post("/channels/{channel_id}/reflection/trigger")
 def trigger_reflection(channel_id: str):
     """Manually trigger a reflection cycle (ignores cooldown check)."""
+    _require_reflection_enabled()
     result = reflect(channel_id)
     return result
 

@@ -29,6 +29,9 @@ class Settings:
     AUDIT_MODEL = os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"
     PROMPT_GEN_MODEL = os.getenv("PROMPT_GEN_MODEL") or "google/gemini-2.0-flash-001"
     REFLECTION_MODEL = os.getenv("REFLECTION_MODEL") or "anthropic/claude-sonnet-4-6"
+    # Freezes the weekly reflection job, its manual trigger and prompt
+    # promotion (Phase A · A4). Live prompts keep running unchanged.
+    REFLECTION_ENABLED = os.getenv("REFLECTION_ENABLED", "false").lower() == "true"
 
     # Tracing. Defaults to OFF so merging the instrumentation changes nothing
     # until an environment opts in. OTEL_ENDPOINT is the Phoenix collector's
@@ -104,6 +107,14 @@ class Settings:
 
     # Set to false to skip human review and execute playlist changes directly (autopilot mode).
     PLAYLIST_HITL = os.getenv("PLAYLIST_HITL", "true").lower() == "true"
+
+    # Freeze switches for the writers whose changes nobody measures (Phase A ·
+    # A4). Off means the job is not registered at startup; reconcile is the
+    # exception — it still registers so sync_playlists runs, and only its
+    # add/remove step is skipped, and POST .../playlists/reconcile returns 409.
+    PLAYLIST_DISCOVERY_ENABLED = os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"
+    PLAYLIST_RECONCILE_WRITES_ENABLED = os.getenv("PLAYLIST_RECONCILE_WRITES_ENABLED", "false").lower() == "true"
+    PLAYLIST_TUNING_ENABLED = os.getenv("PLAYLIST_TUNING_ENABLED", "false").lower() == "true"
 
     # Playlist assignment thresholds (cosine similarity, 0–1)
     PLAYLIST_JOIN_HIGH    = float(os.getenv("PLAYLIST_JOIN_HIGH")    or "0.72")  # direct add

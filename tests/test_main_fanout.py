@@ -88,7 +88,8 @@ def test_daily_reconcile_fails_the_channel_when_a_step_raises():
             raise RuntimeError("playlists.list 500")
         return {}
 
-    with patch.object(main, "JobBudget"), \
+    with patch.object(main.settings, "PLAYLIST_RECONCILE_WRITES_ENABLED", True), \
+         patch.object(main, "JobBudget"), \
          patch.object(main.eligibility, "channel_ids_for", return_value=["a", "b"]), \
          patch.object(main, "_reconcile_channel_order", side_effect=lambda ids: ids), \
          patch.object(main, "sync_playlists", side_effect=sync), \
