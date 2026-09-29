@@ -238,10 +238,10 @@ Write any output file under `/app/logs/`, which lands in the host's `logs\` fold
 | Field | Value |
 |---|---|
 | Date (pause timestamp, UTC) | 2026-09-29, before the app started at 11:54:32 UTC (step 7 ran against the DB-only stack). Verified 0 rows at ≈13:15 UTC (step 13) |
-| Channel | **none.** No channel had title autopilot on before the pause (owner, 2026-09-29), so the step 7 UPDATE changed nothing. All 13 channels are `autopilot_enabled = f` |
+| Channel | **none at restart.** The owner had already turned title autopilot off around **2026-09-23**, so the step 7 UPDATE on 2026-09-29 changed nothing. All 13 channels are `autopilot_enabled = f` |
 | Command / SQL | restart-day steps 6–13 |
 | Raw evidence | below |
-| Outcome | title autopilot was already off fleet-wide, so A0 needed no change. `measurement_enabled` left as it was; Shorts left on (11 channels). The 1,910 in-window audits (below) were therefore applied some other way than autopilot, for example the bulk endpoints (`POST /channels/{id}/audits/apply-pending`, `.../run-bulk`), which A0 doesn't stop |
+| Outcome | Effective pause date **≈2026-09-23** (owner). The restart confirmed it stayed off. `measurement_enabled` left as it was; Shorts left on (11 channels). The 1,910 in-window audits (below) are autopilot's applies up to the pause: the last window closes 2026-10-16, i.e. an apply ≈09-24 |
 
 Raw evidence, 2026-09-29 ≈13:15 UTC (`logs\restart-check.txt` on the office machine):
 
