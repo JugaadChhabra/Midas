@@ -471,8 +471,9 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> st
         elif e.outcome is ApplyOutcome.QUOTA_EXCEEDED:
             _yt_quota_exhausted_until = _next_yt_quota_reset()
             log.warning(
-                "YouTube quota exhausted; autopilot dormant until %s",
-                _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
+                "YouTube quotaExceeded: the Data API quota is project-wide, so "
+                "autopilot is dormant fleet-wide (every channel, not just %s) until %s",
+                channel_id, _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
             )
         elif e.outcome is ApplyOutcome.TOKEN_EXPIRED:
             log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
@@ -484,6 +485,28 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> st
         log.exception("Apply failed for %s: %s", audit_row["id"], e)
         _record_failure(channel_id)
         return APPLY_UNCLASSIFIED
+
+
+#: tick.outcome, and the token in the log line, when the ledger says the apply
+#: can't be afforded. Unlike a real quotaExceeded this pauses nothing and sets no
+#: dormancy: the next tick simply asks the ledger again.
+QUOTA_INSUFFICIENT = "quota_insufficient"
+
+
+def _can_afford_apply(channel_id: str) -> bool:
+    """Ask the quota ledger whether one apply fits in what is left today.
+
+    A no here is the ledger's estimate, not YouTube's verdict, so it is handled
+    as a skip: no pause, no failure count, no fleet-wide dormancy.
+    """
+    cost = quota.cost_of(*quota.APPLY)
+    if quota.can_afford(cost):
+        return True
+    log.info(
+        "%s: skipping apply for %s, needs %du, %du remaining today",
+        QUOTA_INSUFFICIENT, channel_id, cost, quota.units_remaining(),
+    )
+    return False
 
 
 def tick():
@@ -547,6 +570,13 @@ def tick():
                 _touch_tick(channel_id)
                 return
 
+            # 5b. Quota gate, before the audit: a tick that can't afford the apply
+            # shouldn't spend an LLM audit it would then leave pending.
+            if not _can_afford_apply(channel_id):
+                rec.set(**{"tick.outcome": QUOTA_INSUFFICIENT})
+                _touch_tick(channel_id)
+                return
+
             # 6. Model safety gate
             if _is_unsafe_model(settings.AUDIT_MODEL):
                 rec.set(**{"tick.outcome": "unsafe_model"})
@@ -604,10 +634,16 @@ def tick():
                 _touch_tick(channel_id)
                 return
 
-            # 9. No pre-apply quota re-check: YouTube's own quotaExceeded is the
-            # signal (see _quota_dormant / _next_yt_quota_reset above). To restore
-            # one, gate on quota.can_afford(quota.cost_of(*quota.APPLY)) — the price
-            # lives in app.quota now, not in a constant here.
+            # 9. Quota gate again, immediately before the write: the audit can spend
+            # quota itself (the captions fallback is 250u). YouTube's quotaExceeded
+            # stays the backstop (see _quota_dormant / _next_yt_quota_reset above).
+            # A skip here leaves the new audit pending, which the picker won't
+            # re-select: the same place apply_audit_internal's quotaExceeded path
+            # leaves it. apply-pending is the way to push it once quota resets.
+            if not _can_afford_apply(channel_id):
+                rec.set(**{"tick.outcome": QUOTA_INSUFFICIENT})
+                _touch_tick(channel_id)
+                return
 
             # 10. Apply and react to the typed outcome.
             outcome = _apply_audit_and_handle(audit_row, video, channel_id)
