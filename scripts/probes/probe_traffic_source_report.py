@@ -55,6 +55,9 @@ from app.reporting_client import (
     reporting_for_channel,
 )
 
+# Google versions report types (_a2, _a3, …) and retires old ones. On 2026-09-29
+# jobs.create returned 404 for _a2 on the office machine, so pass the live ID with
+# --report-type. Find it with scripts/probe_reporting.py.
 REPORT_TYPE_ID = "channel_traffic_source_a2"
 
 # The four source types Part 2 §1.2 routes on, and the substrings that count
@@ -75,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
         description=f"Inspect the newest {REPORT_TYPE_ID} report for a channel.",
     )
     p.add_argument("channel_id")
+    p.add_argument("--report-type", default=REPORT_TYPE_ID,
+                   help=f"reportTypeId of the job to read (default {REPORT_TYPE_ID})")
     p.add_argument("--job-id", help=f"job to read (default: the channel's {REPORT_TYPE_ID} job)")
     p.add_argument("--report-id", help="report to download (default: newest data date)")
     p.add_argument("--save", metavar="PATH", help="also write the downloaded CSV here")
@@ -138,17 +143,18 @@ def _print_samples(rows: list[list[str]], type_ix: int, detail_ix: int | None,
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    report_type = args.report_type
     channel_id = args.channel_id
 
     handle = reporting_for_channel(channel_id)
     jobs = [j for j in list_jobs(handle, channel_id)
-            if j.get("reportTypeId") == REPORT_TYPE_ID
+            if j.get("reportTypeId") == report_type
             and (not args.job_id or j.get("id") == args.job_id)]
     if not jobs:
-        print(f"no {REPORT_TYPE_ID} job on {channel_id}"
+        print(f"no {report_type} job on {channel_id}"
               + (f" with id {args.job_id}" if args.job_id else "")
               + ". Create it with scripts/create_reporting_job.py "
-                f"{channel_id} --report-type {REPORT_TYPE_ID}")
+                f"{channel_id} --report-type {report_type}")
         return 1
     job = jobs[0]
     print(f"job {job['id']} (type {job.get('reportTypeId')}, name {job.get('name')}, "

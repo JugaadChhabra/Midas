@@ -192,11 +192,22 @@ docker compose exec db psql -U midas midas -c "select id, name from channels whe
 It must print `(0 rows)`. Write the time into the A0 table as the pause timestamp.
 
 **14. Create the A1 report job now,** because its first report takes a day or more.
+First look up the real report-type ID. Google versions them (`_a2`, `_a3`, …) and
+retires old ones, and `jobs.create` answers a retired ID with a bare 404:
+
+```
+docker compose exec -T -e PYTHONPATH=/app midas python scripts/probe_reporting.py UCr5-YUqBiW7PUmeAtxUWuRg | findstr /I "traffic"
+```
+
+Put the `channel_traffic_source_…` ID it prints in place of `<traffic_type_id>`
+below, and record it in A1.1. If you run the command with a wrong ID, the script
+now stops and prints the IDs that exist. That needs the image from after
+2026-09-29 13:00; the one running now just gives the 404.
 This is the one YouTube write in Phase A, and it only subscribes the channel to a
 daily report:
 
 ```
-docker compose exec -e PYTHONPATH=/app midas python scripts/create_reporting_job.py UCr5-YUqBiW7PUmeAtxUWuRg --report-type channel_traffic_source_a2 --job-name midas-traffic-source
+docker compose exec -e PYTHONPATH=/app midas python scripts/create_reporting_job.py UCr5-YUqBiW7PUmeAtxUWuRg --report-type <traffic_type_id> --job-name midas-traffic-source
 ```
 
 Copy the job id it prints into A1.1.
@@ -311,7 +322,11 @@ takes over the channel during the pause.
 Probe channel `UCr5-YUqBiW7PUmeAtxUWuRg` (spec A1 step 1). Create the job on day one:
 the first report can take a day or more.
 
-### A1.1 Reporting API: `channel_traffic_source_a2`
+### A1.1 Reporting API: the traffic-source report
+
+`channel_traffic_source_a2` returned 404 on 2026-09-29 (retired). Use the live
+`channel_traffic_source_…` ID from restart-day step 14 everywhere below, shown as
+`<traffic_type_id>`.
 
 | Field | Value |
 |---|---|
@@ -327,14 +342,14 @@ printed, not duplicated):
 
 ```
 PYTHONPATH=. venv/bin/python scripts/create_reporting_job.py UCr5-YUqBiW7PUmeAtxUWuRg \
-    --report-type channel_traffic_source_a2 --job-name midas-traffic-source
+    --report-type <traffic_type_id> --job-name midas-traffic-source
 ```
 
 **[office, in the container: see "Running the other probes"]** Once a report exists, inspect the newest one:
 
 ```
 PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_report.py \
-    UCr5-YUqBiW7PUmeAtxUWuRg --save traffic_source_a2_newest.csv
+    UCr5-YUqBiW7PUmeAtxUWuRg --report-type <traffic_type_id> --save /app/logs/traffic_source_newest.csv
 ```
 
 If the type column holds numeric codes, re-run with `--sample-value <code>` for each
@@ -401,7 +416,7 @@ PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_analytics.py \
     <channel_id> <target_video_id>
 ```
 
-Do the same in the A1.1 report CSV (`grep <referring_video_id> traffic_source_a2_newest.csv`).
+Do the same in the A1.1 report CSV (open `logs\traffic_source_newest.csv` in Excel and search it for `<referring_video_id>`).
 
 ### A1 outcome per lever (the exit gate needs one per row)
 

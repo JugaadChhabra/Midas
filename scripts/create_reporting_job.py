@@ -57,6 +57,19 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     handle = reporting_for_channel(channel_id)
+
+    # jobs.create answers an unknown reportTypeId with a bare 404 ("Requested
+    # entity was not found"). Check the ID against the live list first, so a
+    # retired or misspelt type fails with the IDs that do exist.
+    types = handle.service.reportTypes().list(pageSize=100).execute().get("reportTypes") or []
+    known = {t["id"] for t in types}
+    if report_type not in known:
+        stem = report_type.rsplit("_", 1)[0]
+        close = sorted(t for t in known if t.startswith(stem)) or sorted(known)
+        print(f"unknown report type {report_type!r}. Available"
+              f"{' ' + stem + '*' if close != sorted(known) else ''}: {', '.join(close)}")
+        return 2
+
     for j in list_jobs(handle, channel_id):
         if j.get("reportTypeId") == report_type:
             print(f"job already exists: {j['id']} (type {report_type}, "
