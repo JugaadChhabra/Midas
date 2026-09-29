@@ -7,6 +7,24 @@ A7 and A9. The code tasks (A4, A6, A8, A10, A11) are recorded in their PRs and i
 If a probe fails, paste the exact error and list the variants tried (spec Part 1,
 "Probe discipline").
 
+## Status: resume here
+
+*Last updated 2026-09-29.*
+
+| Task | State |
+|---|---|
+| Restart day (steps 1–14) | **done 2026-09-29.** New image running since 11:54 UTC. Freeze confirmed |
+| A0 pause | **done.** Title autopilot off since ≈2026-09-23 (owner); confirmed off after the restart. Shorts left on |
+| A1 report jobs | **created 2026-09-29 13:07 UTC**: `channel_traffic_source_a3`, `playlist_traffic_source_a2`. First CSV due 09-30 to 10-01 |
+| **A9** | **NEXT, on 2026-09-30 after 08:30 UTC** (14:00 IST): run the A9 block below |
+| A1.1 inspect | after A9, once a CSV exists. Needs one `stop.bat` / `start.bat` first (the `--report-type` fix). **Do the restart only after A9:** it wipes `/health/jobs` |
+| A0 24 h check | any time after 2026-09-30 13:15 UTC: the apply-history query in A0 |
+| A1.2, A1.3, A2, A3, A5, A7 | not started |
+| STATE.md §9 rewrite + exit gate | after all of the above |
+
+**Tomorrow, in order:** (1) A9 → (2) the A0 24-hour check → (3) `stop.bat`, then `start.bat` →
+(4) A1.1 inspect, if a report has landed.
+
 ## Restart day: do these steps in order
 
 Everything below runs **on the office machine**, in PowerShell, in the Midas folder.
@@ -722,6 +740,28 @@ curl -s http://localhost:8000/health/jobs
 Every registered job must appear, and `playlist_health_score` must show
 `"status": "success"` with a `last_run_at` after the deploy. The frozen jobs
 (`playlist_discovery`, `playlist_tuning`, `reflection`) must be absent.
+
+**Copy-paste version.** Run after 08:30 UTC, so the 05:00 `metrics_poll`, 06:00
+`reporting_poll`, 07:00 `playlist_health_score` and 08:00 `measurement_eval` have all
+run. **Don't restart the app before this:** `/health/jobs` is in memory. In PowerShell,
+in the Midas folder:
+
+```
+& {
+  "=== A9: /health/jobs ==="
+  curl.exe -s http://localhost:8000/health/jobs
+  "`n`n=== A9: playlist health freshness ==="
+  docker compose exec -T db psql -U midas midas -c "select p.channel_id, c.name, c.playlist_health_enabled, max(p.health_computed_at) as last_scored, count(*) filter (where p.health_recommendation is not null) as scored from playlists p join channels c on c.id = p.channel_id group by 1,2,3 order by 3 desc, 1;"
+} *>&1 | Set-Content -Encoding utf8 logs\a9-check.txt
+notepad logs\a9-check.txt
+```
+
+**Pass:**
+- Every `playlist_health_enabled = t` row has `last_scored` on 2026-09-30.
+- In `/health/jobs`, `playlist_health_score` is `success`, and `metrics_poll`,
+  `reporting_poll` and `measurement_eval` are no longer `never_run`.
+- Any `failed` or `degraded` entry comes with its `failed_channels` / `partial_errors`.
+  That's the new failure reporting working, not a defect. Record it.
 
 | Record | Value |
 |---|---|

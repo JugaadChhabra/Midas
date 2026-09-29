@@ -12,8 +12,19 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-29 (§4, §5, §8 updated for per-item poll errors (fail when a whole category fails, `degraded` when partial) and job ids on `_daily_reconcile`'s inner ERROR lines; §7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the job-health fix on top of `af355f7` (a commit can't cite its own SHA) · **Branch:** `fix/job-health-item-errors`
+**Generated:** 2026-09-29 (header + §3 + §7.1 updated for the office restart: Phase A image live, freeze confirmed, A1 report jobs created; §4, §5, §8 updated for per-item poll errors (fail when a whole category fails, `degraded` when partial) and job ids on `_daily_reconcile`'s inner ERROR lines; §7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the restart-record commit on top of `eedd961` (a commit can't cite its own SHA) · **Branch:** `main`
 (working tree clean. `scripts/overnight_tickets.sh` is the unattended ticket runner, driven by a playbook: dev tooling, never deployed. The shipped shorts plans in `docs/superpowers/plans/` and the two `docs/agentic-workflow-*.excalidraw` diagrams were deleted; they're in git history.)
+
+**Office deployment (2026-09-29, from `docs/PHASE_A_FINDINGS.md` A0/A1.1).** The office
+machine has run the Phase A image since 2026-09-29 11:54 UTC. The four A4 writers are
+confirmed frozen from the startup log. All 13 channels have `autopilot_enabled = f`
+(title autopilot off since ≈2026-09-23, owner). 11 have `autopilot_shorts_enabled = t`,
+so the autopilot tick still runs, for Shorts only. The office `.env` sets
+`AUTOPILOT_TICK_SECONDS` to 30. There were 1,910 audits in a measurement window on
+2026-09-29 (Marathi 1,198, Gujarati 706, Punjabi 6). Two Reporting API jobs exist on
+`UCr5-YUqBiW7PUmeAtxUWuRg`: `channel_traffic_source_a3` and
+`playlist_traffic_source_a2`. `channel_traffic_source_a2` is retired: `jobs.create`
+returned 404. A9 (fresh health scores, `/health/jobs`) is next, on 2026-09-30.
 
 **Data caveat for this generation.** The live database runs on the office machine,
 bound to `127.0.0.1:55432` there (`docker-compose.yml:18-22`), so it can't be reached from the
@@ -191,7 +202,7 @@ PROMPT_GEN_MODEL = "google/gemini-2.0-flash-001"      # local .env: anthropic/cl
 REFLECTION_MODEL = "anthropic/claude-sonnet-4-6"      # local .env: anthropic/claude-sonnet-5
 OTEL_ENABLED=false  OTEL_ENDPOINT="http://phoenix:6006/v1/traces"  OTEL_SERVICE_NAME="midas"
 DRY_RUN = false (default!)   YT_DAILY_QUOTA=10000  YT_QUOTA_SAFETY_BUFFER=300  YT_QUOTA_APPLY_RESERVE=1500
-AUTOPILOT_TICK_SECONDS=120 (local .env 100)  AUTOPILOT_PICKER_USE_RPC=false (local .env true)
+AUTOPILOT_TICK_SECONDS=120 (local .env 100; office .env 30, observed 2026-09-29)  AUTOPILOT_PICKER_USE_RPC=false (local .env true)
 AUTOPILOT_PAUSE_COOLDOWN_MINUTES=60
 SHORTS_MAX_CONCURRENT_JOBS=2  SHORTS_DISPATCH_INTERVAL_SECONDS=5  SHORTS_YT_DOWNLOAD_ENABLED=false
 SHORTS_MAX_SOURCE_SECONDS=300  SHORTS_CACHE_DIR  LOG_DIR  LOG_LEVEL
@@ -504,7 +515,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 **Phase 0**
 - CIL §0.2 `videoThumbnailImpressions*` via `reports.query`: impossible on the live API (Gap 1). Replaced by the Reporting API (see 7.3).
 - CIL §0.4 "for each video currently under measurement": built. The v0 "every public video" wide net is now off by default.
-- PO §Sensor traffic-source=PLAYLIST member breakdown: the code is built but disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED=False`). The table exists but stays empty. The Reporting-API replacement probe (`channel_traffic_source_a2`) is not done (Gap 6). The Phase A1 kit exists but has not been run: `scripts/create_reporting_job.py --report-type channel_traffic_source_a2` creates the job, and `scripts/probes/probe_traffic_source_report.py` / `scripts/probes/probe_traffic_source_analytics.py` read it; commands and answer slots are in `docs/PHASE_A_FINDINGS.md`.
+- PO §Sensor traffic-source=PLAYLIST member breakdown: the code is built but disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED=False`). The table exists but stays empty. The Reporting-API replacement probe is in progress (Gap 6). `channel_traffic_source_a2` is retired (404 on 2026-09-29). Jobs for `channel_traffic_source_a3` and `playlist_traffic_source_a2` were created on the probe channel on 2026-09-29 with `scripts/create_reporting_job.py --report-type <id>`, and no report has been inspected yet; `scripts/probes/probe_traffic_source_report.py` / `scripts/probes/probe_traffic_source_analytics.py` read it; commands and answer slots are in `docs/PHASE_A_FINDINGS.md`.
 - Phase 0 exit gate ("≥1 week trustworthy CTR on one channel"): `PHASE_0_GAPS.md` Gap 1 still reads "CLOSING … exit gate pending". The live gate state is unverified here.
 
 **Phase 1A**
