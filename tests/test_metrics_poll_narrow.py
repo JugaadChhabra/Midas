@@ -220,3 +220,62 @@ def test_poll_metrics_expected_skips_are_not_failures():
 def test_poll_metrics_no_channels_is_success():
     with patch.object(metrics_poll.eligibility, "channels_for", return_value=[]):
         assert metrics_poll.poll_metrics() is None
+
+
+# ── per-item errors inside one channel's poll ─────────────────────────────
+#
+# A category where every attempted item errored fails the channel (an outage or
+# a bug). Some-but-not-all is accepted noise, so the run ends "degraded", not
+# failed: returned as partial_errors, recorded by the registry from retval.
+
+def _registry_after(retval):
+    from apscheduler.events import EVENT_JOB_EXECUTED
+    reg = JobStatusRegistry()
+    reg.on_event(JobExecutionEvent(EVENT_JOB_EXECUTED, "metrics_poll", "default",
+                                   datetime(2026, 9, 29, tzinfo=timezone.utc),
+                                   retval=retval))
+    return reg.snapshot()["metrics_poll"]
+
+
+def test_poll_metrics_every_video_failing_fails_the_channel():
+    counts = {"videos_written": 0, "videos_no_data": 0, "videos_err": 3,
+              "playlists_written": 2, "playlists_no_data": 0, "playlists_err": 0}
+    ran = []
+    with pytest.raises(JobRunFailed) as exc_info:
+        _poll_with(["outage", "good"], lambda cid: counts if cid == "outage" else {}, ran)
+
+    assert ran == ["outage", "good"]
+    assert exc_info.value.failed_channels == {"outage": "ItemsFailed: videos: all 3 failed"}
+
+
+def test_poll_metrics_some_items_failing_is_degraded_not_failed():
+    counts = {"videos_written": 9, "videos_no_data": 0, "videos_err": 1,
+              "playlists_written": 0, "playlists_no_data": 1, "playlists_err": 1}
+    with patch.object(metrics_poll.settings, "METRICS_POLL_MEASURED_ONLY", False), \
+         patch.object(metrics_poll.eligibility, "channels_for", return_value=[{"id": "c"}]), \
+         patch.object(metrics_poll, "_poll_channel", return_value=counts):
+        retval = metrics_poll.poll_metrics()
+
+    assert retval == {"partial_errors": {"c": "videos: 1/10 failed; playlists: 1/2 failed"}}
+    entry = _registry_after(retval)
+    assert entry["status"] == "degraded"
+    assert entry["partial_errors"] == {"c": "videos: 1/10 failed; playlists: 1/2 failed"}
+
+
+def test_poll_metrics_nothing_attempted_is_not_a_failure():
+    with patch.object(metrics_poll.settings, "METRICS_POLL_MEASURED_ONLY", False), \
+         patch.object(metrics_poll.eligibility, "channels_for", return_value=[{"id": "c"}]), \
+         patch.object(metrics_poll, "_poll_channel", return_value={
+             "videos_written": 0, "videos_no_data": 0, "videos_err": 0}):
+        assert metrics_poll.poll_metrics() is None
+    assert _registry_after(None)["status"] == "success"
+
+
+def test_tier2_is_judged_against_its_own_attempts():
+    # tier-2's denominator is tier2_attempted, not the video count: a channel whose
+    # every tier-2 call failed is an outage even though tier-1 was fine.
+    failure, partial = metrics_poll._item_verdict({
+        "videos_written": 5, "videos_no_data": 0, "videos_err": 0,
+        "tier2_attempted": 5, "tier2_err": 5})
+    assert failure == "tier2: all 5 failed"
+    assert partial is None

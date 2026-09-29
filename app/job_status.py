@@ -21,6 +21,9 @@ log = logging.getLogger("midas.job_status")
 NEVER_RUN = "never_run"
 SUCCESS = "success"
 FAILED = "failed"
+# Ran to completion, but some items inside a channel errored (not all of them).
+# A job reports this by returning {"partial_errors": {channel_id: detail}}.
+DEGRADED = "degraded"
 
 
 class JobRunFailed(Exception):
@@ -44,8 +47,23 @@ def describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def item_error_verdict(categories: dict[str, tuple[int, int]]) -> tuple[str | None, str | None]:
+    """Judge one channel's per-item errors: ``{category: (errored, attempted)}``.
+
+    Returns ``(failure, partial)``. A category where EVERY attempted item errored
+    is a failure: that is an outage or a bug (the class of the seven-week
+    ``NameError``), not noise. Some-but-not-all is partial: the polls already
+    accept a trickle of per-item errors (deleted videos, transient DNS, Gap 10),
+    so failing on one would page every night and teach everyone to ignore it.
+    """
+    failure = [f"{c}: all {n} failed" for c, (e, n) in categories.items() if n and e >= n]
+    partial = [f"{c}: {e}/{n} failed" for c, (e, n) in categories.items() if 0 < e < n]
+    return ("; ".join(failure) or None, "; ".join(partial) or None)
+
+
 def _blank() -> dict:
-    return {"status": NEVER_RUN, "last_run_at": None, "error": None, "failed_channels": {}}
+    return {"status": NEVER_RUN, "last_run_at": None, "error": None,
+            "failed_channels": {}, "partial_errors": {}}
 
 
 class JobStatusRegistry:
@@ -77,14 +95,22 @@ class JobStatusRegistry:
             entry["failed_channels"] = dict(getattr(exc, "failed_channels", {}))
             log.error("JOB FAILED %s at %s: %s", event.job_id, entry["last_run_at"], entry["error"])
         else:
-            entry["status"] = SUCCESS
+            retval = getattr(event, "retval", None)
+            partial = retval.get("partial_errors") if isinstance(retval, dict) else None
+            if partial:
+                entry["status"] = DEGRADED
+                entry["partial_errors"] = dict(partial)
+                log.warning("JOB DEGRADED %s at %s: %s", event.job_id, entry["last_run_at"], partial)
+            else:
+                entry["status"] = SUCCESS
         with self._lock:
             self._jobs[event.job_id] = entry
 
     def snapshot(self) -> dict[str, dict]:
         with self._lock:
             return {
-                job_id: {**entry, "failed_channels": dict(entry["failed_channels"])}
+                job_id: {**entry, "failed_channels": dict(entry["failed_channels"]),
+                         "partial_errors": dict(entry["partial_errors"])}
                 for job_id, entry in self._jobs.items()
             }
 

@@ -158,7 +158,7 @@ def _daily_reconcile():
             sync_result = sync_playlists(channel_id, budget=budget)
             _main_log.info("Daily playlist sync %s: %s", channel_id, sync_result)
         except Exception as e:
-            _main_log.exception("Daily playlist sync failed for %s: %s", channel_id, e)
+            _main_log.exception("Daily playlist sync (job playlist_reconcile) failed for %s: %s", channel_id, e)
             errors.append(f"sync: {job_status.describe(e)}")
         if not settings.PLAYLIST_RECONCILE_WRITES_ENABLED:
             _main_log.info(
@@ -170,7 +170,7 @@ def _daily_reconcile():
                 result = reconcile_channel(channel_id)
                 _main_log.info("Daily reconcile %s: %s", channel_id, result)
             except Exception as e:
-                _main_log.exception("Daily reconcile failed for %s: %s", channel_id, e)
+                _main_log.exception("Daily reconcile (job playlist_reconcile) failed for %s: %s", channel_id, e)
                 errors.append(f"reconcile: {job_status.describe(e)}")
         if errors:
             raise RuntimeError("; ".join(errors))

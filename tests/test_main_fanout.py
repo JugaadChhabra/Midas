@@ -163,7 +163,7 @@ def test_registry_lists_registered_jobs_as_never_run():
             "status": "never_run",
             "last_run_at": None,
             "error": None,
-            "failed_channels": {},
+            "failed_channels": {}, "partial_errors": {},
         }
     }
 
@@ -212,7 +212,7 @@ def test_all_channels_succeeding_ends_the_job_successful():
         "status": "success",
         "last_run_at": RUN_AT.isoformat(),
         "error": None,
-        "failed_channels": {},
+        "failed_channels": {}, "partial_errors": {},
     }
 
 
@@ -329,3 +329,27 @@ def test_measurement_eval_registers_the_scheduler_wrapper_not_the_endpoint_funct
     sched = BackgroundScheduler(daemon=True)
     main._register_jobs(sched)
     assert sched.get_job("measurement_eval").func is main._daily_measurement_eval
+
+
+def test_daily_reconcile_inner_error_lines_carry_the_job_id(caplog):
+    """The inner sync/reconcile lines name the job id too, not only the outer
+    _run_per_channel line, so a grep for the id finds every line of a failure."""
+    import logging
+    from app import main
+
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+
+    with patch.object(main.settings, "PLAYLIST_RECONCILE_WRITES_ENABLED", True), \
+         patch.object(main, "JobBudget"), \
+         patch.object(main.eligibility, "channel_ids_for", return_value=["a"]), \
+         patch.object(main, "_reconcile_channel_order", side_effect=lambda ids: ids), \
+         patch.object(main, "sync_playlists", side_effect=boom), \
+         patch.object(main, "reconcile_channel", side_effect=boom), \
+         caplog.at_level(logging.ERROR, logger="midas.main"):
+        with pytest.raises(JobRunFailed):
+            main._daily_reconcile()
+
+    lines = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(m.startswith("Daily playlist sync (job playlist_reconcile) failed for a") for m in lines)
+    assert any(m.startswith("Daily reconcile (job playlist_reconcile) failed for a") for m in lines)
