@@ -24,7 +24,8 @@ cd "D:\My Data\Desktop\midas"
 **2. Stop the old app if Docker restarted it by itself.** Every container is set to
 `restart: unless-stopped`, so if the machine was shut down without `stop.bat`,
 Docker Desktop brings the **old** Midas back at boot, and its autopilot starts
-rewriting titles within 2 minutes. Check:
+rewriting titles within one tick: `AUTOPILOT_TICK_SECONDS`, which is **30 s** on
+the office `.env` (observed 2026-09-29). Check:
 
 ```
 docker compose ps
@@ -236,11 +237,55 @@ Write any output file under `/app/logs/`, which lands in the host's `logs\` fold
 
 | Field | Value |
 |---|---|
-| Date (pause timestamp, UTC) | |
-| Channel | |
-| Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome | |
+| Date (pause timestamp, UTC) | 2026-09-29, before the app started at 11:54:32 UTC (step 7 ran against the DB-only stack). Verified 0 rows at ≈13:15 UTC (step 13) |
+| Channel | all 13 channels now `autopilot_enabled = f`. Which were on before: the apply-history query below |
+| Command / SQL | restart-day steps 6–13 |
+| Raw evidence | below |
+| Outcome | title autopilot off fleet-wide; `measurement_enabled` left as it was; Shorts left on (11 channels) |
+
+Raw evidence, 2026-09-29 ≈13:15 UTC (`logs\restart-check.txt` on the office machine):
+
+```
+# step 11: freeze lines
+2026-09-29 11:54:32,536 midas.main INFO playlist_reconcile registered for sync only: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)
+2026-09-29 11:54:32,536 midas.main INFO playlist_discovery not registered: PLAYLIST_DISCOVERY_ENABLED=false
+2026-09-29 11:54:32,537 midas.main INFO reflection not registered: REFLECTION_ENABLED=false
+2026-09-29 11:54:32,537 midas.main INFO playlist_tuning not registered: PLAYLIST_TUNING_ENABLED=false
+
+# step 12: /health/jobs lists 8 jobs: autopilot, shorts_dispatch (success); playlist_reconcile,
+# metrics_poll, reporting_poll, playlist_health_score, measurement_eval, nightly_db_backup (never_run).
+# The 3 frozen jobs are absent. pot_provider_refresh is absent: it's only registered when
+# BGUTIL_POT_HTTP_BASE_URL is set.
+
+# step 13
+select id, name from channels where autopilot_enabled;  ->  (0 rows)
+
+# channels after the pause (autopilot_enabled / autopilot_shorts_enabled / measurement_enabled)
+UCOVKJdzghm2gOnuaGeJTonA  Baalgeet Gujarati        f t t
+UC8KjoL0Z9mTHKqB6gFutkJw  Baalgeet Punjabi         f t t
+UCqtU4xCSjsSvE53Iy6NUKSg  3D Animated Series       f t f
+UCX8BttGE4UAFdm1RRIULOPQ  Baalgeet Malayalam       f t t
+UCFO6AQ_KBQDEaQiTi-dBEWQ  Balgeet Rajasthani       f t f
+UCR9qQMyP86aSt-1VgaMg7UA  Rhymes / Baalgeet        f t t
+UCMpj6iUMCMhB0k4L5EcxJwQ  English Rhymes           f t t
+UC8oC7Yiz0WkH3PKb3GW42XA  Baalgeet Bhojpuri        f t t
+UCWb0eKKkX1NE1r_Tu6oKhdQ  Baalgeet Tamil           f t t
+UCc4Tv_DEGDEKrKAt-vyVNmw  Baalgeet Haryanvi        f t f
+UCr5-YUqBiW7PUmeAtxUWuRg  Baalgeet Marathi         f t t
+UCxK1-ftYdFvU4IuUW3POxRA  Telugu Rhymes            f f f
+UCo4_mZK5aAF7ugv4cTfZlEg  Kannada Rhymes           f f f
+```
+
+Which channels had title autopilot on before the pause (apply history, read-only):
+
+```
+docker compose exec -T db psql -U midas midas -c "select v.channel_id, count(*) filter (where a.applied_at > now() - interval '7 days') as applies_last_7d, max(a.applied_at) as last_apply from audits a join videos v on v.id = a.video_id where a.status = 'applied' group by 1 order by last_apply desc nulls last;"
+```
+
+Result (paste):
+
+```
+```
 
 **Shorts independence (spec A0 step 1).**
 
@@ -256,8 +301,8 @@ action should keep running. Confirm on the running app:
 
 | Field | Value |
 |---|---|
-| Does the Shorts action still run with `autopilot_enabled=false`, `autopilot_shorts_enabled=true`? (yes/no) | |
-| Evidence (`shorts_jobs` rows created after the pause, or the tick log) | |
+| Does the Shorts action still run with `autopilot_enabled=false`, `autopilot_shorts_enabled=true`? (yes/no) | **yes, the tick runs.** Every channel with `autopilot_shorts_enabled = t` has `autopilot_last_tick_at` advancing every 30 s after the pause (13:10:02 → 13:15:02 UTC), and `autopilot` = `success` in `/health/jobs`. Whether a clip was actually cut or uploaded: check `shorts_jobs` created after 11:54 UTC |
+| Evidence (`shorts_jobs` rows created after the pause, or the tick log) | `autopilot_last_tick_at` above |
 | If no: owner's decision on pausing Shorts too | |
 
 **How to pause.** Follow steps 1–13 of "Restart day" at the top of this doc. Put the
@@ -286,10 +331,21 @@ where a.measurement_status in ('awaiting_window', 'measuring')
 order by window_closes, v.channel_id, a.video_id;
 ```
 
-Summary from restart-day step 8a (paste):
+Summary from restart-day step 8a, 2026-09-29 ≈13:15 UTC:
 
 ```
+        channel_id        | measurement_status | videos | first_window_closes | last_window_closes
+--------------------------+--------------------+--------+---------------------+--------------------
+ UC8KjoL0Z9mTHKqB6gFutkJw | awaiting_window    |      6 | 2026-10-16          | 2026-10-16
+ UCOVKJdzghm2gOnuaGeJTonA | awaiting_window    |    490 | 2026-09-29          | 2026-10-04
+ UCOVKJdzghm2gOnuaGeJTonA | measuring          |    216 | 2026-09-27          | 2026-09-28
+ UCr5-YUqBiW7PUmeAtxUWuRg | awaiting_window    |   1085 | 2026-09-29          | 2026-10-13
+ UCr5-YUqBiW7PUmeAtxUWuRg | measuring          |    113 | 2026-09-27          | 2026-09-28
 ```
+
+1,910 audits in a window: Marathi 1,198, Gujarati 706, Punjabi 6. The `measuring`
+rows' windows have already closed (09-27/28). They're held until reach coverage
+reaches the close day, not until a date. The last window closes 2026-10-16.
 
 Full list saved to (step 8b): `logs\a0-in-window.csv` on the office machine.
 
