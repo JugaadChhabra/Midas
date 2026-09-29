@@ -238,10 +238,10 @@ Write any output file under `/app/logs/`, which lands in the host's `logs\` fold
 | Field | Value |
 |---|---|
 | Date (pause timestamp, UTC) | 2026-09-29, before the app started at 11:54:32 UTC (step 7 ran against the DB-only stack). Verified 0 rows at ≈13:15 UTC (step 13) |
-| Channel | all 13 channels now `autopilot_enabled = f`. Which were on before: the apply-history query below |
+| Channel | **none.** No channel had title autopilot on before the pause (owner, 2026-09-29), so the step 7 UPDATE changed nothing. All 13 channels are `autopilot_enabled = f` |
 | Command / SQL | restart-day steps 6–13 |
 | Raw evidence | below |
-| Outcome | title autopilot off fleet-wide; `measurement_enabled` left as it was; Shorts left on (11 channels) |
+| Outcome | title autopilot was already off fleet-wide, so A0 needed no change. `measurement_enabled` left as it was; Shorts left on (11 channels). The 1,910 in-window audits (below) were therefore applied some other way than autopilot, for example the bulk endpoints (`POST /channels/{id}/audits/apply-pending`, `.../run-bulk`), which A0 doesn't stop |
 
 Raw evidence, 2026-09-29 ≈13:15 UTC (`logs\restart-check.txt` on the office machine):
 
@@ -276,7 +276,7 @@ UCxK1-ftYdFvU4IuUW3POxRA  Telugu Rhymes            f f f
 UCo4_mZK5aAF7ugv4cTfZlEg  Kannada Rhymes           f f f
 ```
 
-Which channels had title autopilot on before the pause (apply history, read-only):
+Where the applies came from (apply history, read-only; optional now that the owner has confirmed none had autopilot on). This is also the A0 24-hour acceptance check: rerun it after 2026-09-30 13:15 UTC, and `last_apply` must be before 2026-09-29 11:54 UTC:
 
 ```
 docker compose exec -T db psql -U midas midas -c "select v.channel_id, count(*) filter (where a.applied_at > now() - interval '7 days') as applies_last_7d, max(a.applied_at) as last_apply from audits a join videos v on v.id = a.video_id where a.status = 'applied' group by 1 order by last_apply desc nulls last;"
