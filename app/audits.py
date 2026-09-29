@@ -361,7 +361,7 @@ def audit_video(
 
         cfg = supabase().table("audit_configs").select("*").eq("channel_id", v["channel_id"]).execute().data
         cfg_row = cfg[0] if cfg else {}
-        # `used_generated` gates prompt attribution below: prompt_version_id must
+        # `prompt_source` gates prompt attribution below: prompt_version_id must
         # name the prompt that ACTUALLY ran. An empty generated_prompt silently
         # falls back to DEFAULT_PROMPT, and stamping the live version there labels
         # the audit with a prompt the model never saw.
@@ -373,9 +373,8 @@ def audit_video(
             audit_prompt, prompt_source = cfg_row["generated_prompt"], PROMPT_SOURCE_GENERATED
         else:
             audit_prompt, prompt_source = DEFAULT_PROMPT, PROMPT_SOURCE_DEFAULT
-        used_generated = prompt_source == PROMPT_SOURCE_GENERATED
 
-        if prompt_version_id is None and used_generated:
+        if prompt_version_id is None and prompt_source == PROMPT_SOURCE_GENERATED:
             prompt_version_id = _live_prompt_version_id(v["channel_id"])
 
         rec.set(**{
