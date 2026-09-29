@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-09-29 (§4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the #23 commit on top of `eaae24e` (a commit can't cite its own SHA) · **Branch:** `phase-a-prep/23-a8-finish`
+**Generated:** 2026-09-29 (§7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the #24 commit on top of `21d09aa` (a commit can't cite its own SHA) · **Branch:** `phase-a-prep/24-restart-kit`
 (working tree: one untracked file, `scripts/overnight_phase_a.sh`. `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` and `docs/midas-seo-agent-v2.excalidraw` are committed.)
 
 **Data caveat for this generation.** The live database runs on the office machine,
@@ -493,7 +493,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 **Phase 0**
 - CIL §0.2 `videoThumbnailImpressions*` via `reports.query`: impossible on the live API (Gap 1). Replaced by the Reporting API (see 7.3).
 - CIL §0.4 "for each video currently under measurement": built. The v0 "every public video" wide net is now off by default.
-- PO §Sensor traffic-source=PLAYLIST member breakdown: the code is built but disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED=False`). The table exists but stays empty. The Reporting-API replacement probe (`channel_traffic_source_a2`) is not done (Gap 6).
+- PO §Sensor traffic-source=PLAYLIST member breakdown: the code is built but disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED=False`). The table exists but stays empty. The Reporting-API replacement probe (`channel_traffic_source_a2`) is not done (Gap 6). The Phase A1 kit exists but has not been run: `scripts/create_reporting_job.py --report-type channel_traffic_source_a2` creates the job, and `scripts/probes/probe_traffic_source_report.py` / `scripts/probes/probe_traffic_source_analytics.py` read it; commands and answer slots are in `docs/PHASE_A_FINDINGS.md`.
 - Phase 0 exit gate ("≥1 week trustworthy CTR on one channel"): `PHASE_0_GAPS.md` Gap 1 still reads "CLOSING … exit gate pending". The live gate state is unverified here.
 
 **Phase 1A**
