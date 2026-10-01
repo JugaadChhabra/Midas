@@ -469,6 +469,10 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 | Detail for SHORTS | **Type 24 (Shorts feed):** always `unknown` (1,897 rows). No referrer. Not needed: the Short → video lever is type 32 |
 | Detail for YT_SEARCH | **Type 5:** the search term, including Devanagari (`nach re mora song`, `dhobi aaya dhobi aaya`, `marathi song`, …), but **233 of 319 rows have an empty detail** (low-volume terms suppressed) |
 | Sample rows (IDs are fine) | from `--sample-value 7 32 14 24 5 18 8` on the 2026-09-29 report (`logs\a1-detail.txt`). Type 8 (Other YouTube features): `offline`, `unknown`, `ytremote` |
+| Views by source, 2026-09-29, Marathi (`logs\a1-checks.txt`, 52,319 rows, 259,868 views) | 14 Playlists 118,342 (45.5%) · 24 Shorts feed 49,292 (19.0%) · 7 Suggested 48,862 (18.8%) · 3 Browse 17,652 (6.8%) · 8 Other 12,851 (4.9%) · 4 Channels 7,432 (2.9%) · 5 Search 2,911 (1.1%) · 0 Direct 1,368 · 9 External 668 · 20 Endscreen 254 · 18 Playlist pages 148 · 27 Sound 33 · 32 Related video 27 · 26 Hashtag 20 · 17 Notifications 8 |
+| Type 14 split | `RD…` YouTube Mixes 117,929 views (25,520 rows) · `PL…` channel playlists **50** views (41 rows) · other 363 (154 rows). `RD<id>` is a Mix seeded from video `<id>` (e.g. `RDq2kEmaYSaGY` ← `q2kEmaYSaGY`, also a top type-7 referrer) |
+| Type 32 sources | 12 videos, 27 views in total (top `Ww5VGM9sWDs` and `RFnQaxuV9Q0`, 4 each). **None is in `videos`** (0 rows); whether they are Midas-uploaded Shorts: `logs\a1-checks2.txt` |
+| Top type-7 referrers | `vXReAEu6riI` 1,107 · `-yyhXOOUzJw` 716 · `tYcw7BuyR2I` 658 · `HY1CBgG0SlA` 574 · `wygHI6Wwxl4` 475. Own-catalog share: `logs\a1-checks2.txt` |
 | Lag: data date vs create time (min / max / median days) | The first batch backfilled ≈30 days at once (data 2026-08-30 → 09-28, all created 2026-09-30), so max 31 / median 14–16 is a backfill artefact. **Steady state: 2 days** (data 2026-09-29 created 2026-10-01). The playlist report has duplicate reports for some data dates (09-22, 09-25, 09-28, i.e. restatements), so ingestion must handle more than one report per day |
 
 ### A1.2 On-demand Analytics
