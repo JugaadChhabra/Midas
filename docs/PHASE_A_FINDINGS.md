@@ -18,7 +18,9 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A1 report jobs | **created 2026-09-29 13:07 UTC**: `channel_traffic_source_a3`, `playlist_traffic_source_a2`. First CSV due 09-30 to 10-01 |
 | A9 | **done 2026-10-01. PASS**: all 8 jobs `success`, Punjabi health scores fresh |
 | A0 24 h check | **done 2026-10-01. PASS**: last apply 2026-09-24 04:00 UTC, none since |
-| A1.1 inspect | **in progress 2026-10-01**: both reports landed; columns, codes and lag recorded. **NEXT:** the `--sample-value` run, for the detail per type |
+| A1.1 inspect | **mostly done 2026-10-01**: columns, codes, lag and per-type detail recorded. Provisional outcomes in "A1 outcome per lever". **NEXT:** `a1-checks.txt` (are the type-32 sources Shorts? the PL vs RD share of playlist views) |
+| A1.3 description-link test | **waiting on the SEO team** for one pair: video A linked from B's description ≥2 weeks ago (Marathi) |
+| A3 search terms | **largely answered by A1.1**: type 5 detail = the search term, per video × day × country, with low-volume terms suppressed (233/319 rows empty). Still to do: the on-demand comparison |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
 
@@ -462,11 +464,11 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 | Header row (verbatim) | `channel_traffic_source_a3` (15 cols): `date,channel_id,video_id,live_or_on_demand,subscribed_status,country_code,traffic_source_type,traffic_source_detail,views,engaged_views,watch_time_minutes,average_view_duration_seconds,average_view_duration_percentage,red_views,red_watch_time_minutes`. `playlist_traffic_source_a2` (16 cols): `date,channel_id,playlist_id,video_id,live_or_on_demand,subscribed_status,country_code,traffic_source_type,traffic_source_detail,views,engaged_views,watch_time_minutes,average_view_duration_seconds,playlist_starts,playlist_saves_added,playlist_saves_removed` |
 | Distinct traffic-source-type values | **Numeric codes**, not names. 2026-09-29 channel report, 52,319 rows: `14` 25,715 · `7` 21,357 · `24` 1,897 · `4` 1,129 · `3` 850 · `8` 599 · `5` 319 · `9` 170 · `0` 80 · `18` 78 · `20` 69 · `26` 18 · `32` 17 · `27` 14 · `17` 7. Playlist report, 104 rows: `4` 48 · `14` 39 · `18` 12 · `7` 3 · `20` 2. Code → name, from https://developers.google.com/youtube/reporting/v1/reports/dimensions (fetched 2026-10-01): 0 Direct or unknown · 1 YouTube advertising · 3 Browse features · 4 YouTube channels · 5 YouTube search · 7 Suggested videos · 8 Other YouTube features · 9 External · 11 Video cards and annotations · 14 Playlists · 17 Notifications · 18 Playlist pages · 19 Programming from claimed content · 20 Interactive video endscreen · 23 Stories · 24 Shorts · 25 Product Pages · 26 Hashtag Pages · 27 Sound Pages · 28 Live redirect · 29 Podcasts · 30 Remixed video · 31 Vertical live feed · 32 Related video |
 | Detail column exists? Its name | yes: `traffic_source_detail`, in both reports |
-| Detail for RELATED_VIDEO (or its real name) | Docs: type 7 (Suggested videos) = "the video ID for that video". Type 32 (Related video): not documented. Samples pending |
-| Detail for PLAYLIST | type 14 / 18: not documented. Samples pending. The playlist report carries `playlist_id` and `playlist_starts` per playlist × video × day regardless |
-| Detail for SHORTS | type 24: not documented. Samples pending |
-| Detail for YT_SEARCH | Docs: type 5 = "the search term that led to the referred traffic". Samples pending |
-| Sample rows (IDs are fine) | pending (`--sample-value` run) |
+| Detail for RELATED_VIDEO (or its real name) | **Type 7 (Suggested videos):** an 11-char video ID in all 21,357 rows (`QNlylc0RRu4`, `0beqKSb4D34`, `q2kEmaYSaGY`, …). **Type 32 (Related video):** an 11-char video ID in all 17 rows (`RFnQaxuV9Q0`, `JxBJ4yThEII`, `aOFqxU14qVA`, `Ww5VGM9sWDs`, `vlbDVvjoKvc`). Very likely the Short whose related-video link was clicked; check 1 below confirms |
+| Detail for PLAYLIST | **Type 14 (Playlists):** a playlist ID in all 25,715 rows, mostly `RD…` (YouTube auto Mixes: `RDQB9vbB8-QFg`, `RDAMVMHY7LepEngtg`, …) plus `PL…` channel playlists (`PLdOc4aI4TeAo`). **Type 18 (Playlist pages):** `PL…` IDs, `RDTMAK…`, `my-likes`, `YS`. The playlist report carries `playlist_id` + `playlist_starts` per playlist × video × day |
+| Detail for SHORTS | **Type 24 (Shorts feed):** always `unknown` (1,897 rows). No referrer. Not needed: the Short → video lever is type 32 |
+| Detail for YT_SEARCH | **Type 5:** the search term, including Devanagari (`nach re mora song`, `dhobi aaya dhobi aaya`, `marathi song`, …), but **233 of 319 rows have an empty detail** (low-volume terms suppressed) |
+| Sample rows (IDs are fine) | from `--sample-value 7 32 14 24 5 18 8` on the 2026-09-29 report (`logs\a1-detail.txt`). Type 8 (Other YouTube features): `offline`, `unknown`, `ytremote` |
 | Lag: data date vs create time (min / max / median days) | The first batch backfilled ≈30 days at once (data 2026-08-30 → 09-28, all created 2026-09-30), so max 31 / median 14–16 is a backfill artefact. **Steady state: 2 days** (data 2026-09-29 created 2026-10-01). The playlist report has duplicate reports for some data dates (09-22, 09-25, 09-28, i.e. restatements), so ingestion must handle more than one report per day |
 
 ### A1.2 On-demand Analytics
@@ -527,9 +529,9 @@ type only · (c) nothing usable. These map onto Part 2 §1.2.
 
 | Lever | Outcome (a/b/c) | Source type and detail it rests on | Evidence (section) |
 |---|---|---|---|
-| Backlinks (description links) | | | |
-| Playlist | | | |
-| Short → video | | | |
+| Backlinks (description links) | **open:** (a) if description clicks are filed under type 7 (referrer ID, but mixed with the algorithm's own suggestions for that pair); (b)/(c) if they land in a type with no detail | type 7 Suggested videos → detail = referring video ID (confirmed). How description clicks are classified: A1.3 | A1.1, A1.3 |
+| Playlist | **(a), provisional** | type 14 / 18 → detail = playlist ID (`PL…` for channel playlists; `RD…` = YouTube Mixes, not ours); `playlist_traffic_source_a2` adds `playlist_starts` per playlist × video × day | A1.1 |
+| Short → video | **(a), provisional:** pending the check that the type-32 sources are Shorts | type 32 Related video → detail = referring video ID | A1.1 |
 
 ---
 
