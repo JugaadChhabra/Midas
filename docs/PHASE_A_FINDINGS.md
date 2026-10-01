@@ -19,7 +19,8 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A9 | **done 2026-10-01. PASS**: all 8 jobs `success`, Punjabi health scores fresh |
 | A0 24 h check | **done 2026-10-01. PASS**: last apply 2026-09-24 04:00 UTC, none since |
 | A1.1 inspect | **mostly done 2026-10-01**: columns, codes, lag and per-type detail recorded. Provisional outcomes in "A1 outcome per lever". **NEXT:** `a1-checks.txt` (are the type-32 sources Shorts? the PL vs RD share of playlist views) |
-| A1.3 description-link test | **waiting on the SEO team** for one pair: video A linked from B's description ≥2 weeks ago (Marathi) |
+| A1.3 description-link test | **no longer needs the SEO team**: part C of the `a1-checks2` block finds every description link in `videos.description` and checks those pairs in the report |
+| A2 | **example found 2026-10-01** via Studio: Short `Ww5VGM9sWDs` → "Chanda Mama Ki Cycle". **NEXT:** the `a2-check` block (videos.list probe) |
 | A3 search terms | **largely answered by A1.1**: type 5 detail = the search term, per video × day × country, with low-volume terms suppressed (233/319 rows empty). Still to do: the on-demand comparison |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
@@ -543,13 +544,13 @@ type only · (c) nothing usable. These map onto Part 2 §1.2.
 
 | Field | Value |
 |---|---|
-| Date | |
-| Channel | |
-| Short (with a related video set in Studio) | |
-| Linked video | |
-| Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome | |
+| Date | 2026-10-01 |
+| Channel | `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) |
+| Short (with a related video set in Studio) | `Ww5VGM9sWDs`, "बा बसली होती स्वयंपाकघरात \| Baa Baithi Thi Rasoi Mai \| Marathi Rhyme", 0:25. Filename `Baa_Baithi_Thi_Rasoi_Mai_Marathi_stanza_…`, i.e. Midas cutter output. It's the top type-32 source in A1.1 |
+| Linked video | Studio's "Related video" shows "चांदोबा सायकलवर आला! 🌙🚲 \| Chanda Mama Ki Cycle 4K song \| Taarak Mehta Ka Ooltah Chashmah Marathi". The ID isn't shown in Studio; it's taken from the report's type-32 rows (`logs\a2-check.txt`) |
+| Command / SQL | `logs\a2-check.txt` block (below) |
+| Raw evidence | Studio, read by Claude in Chrome 2026-10-01: the Short's Details page has a "Related video" field set to the title above. Probe JSON: `logs\a2-short-raw.json` (pending) |
+| Outcome | pending the probe. Already established: the type-32 sources are this channel's own Shorts, so Short → video is a lever we own |
 
 **[office, in the container: see "Running the other probes"]** Read-only; 1 Data API unit. Never attempt a write (spec A2 step 4).
 
