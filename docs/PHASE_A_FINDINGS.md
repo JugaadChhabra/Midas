@@ -20,7 +20,8 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A0 24 h check | **done 2026-10-01. PASS**: last apply 2026-09-24 04:00 UTC, none since |
 | A1.1 inspect | **mostly done 2026-10-01**: columns, codes, lag and per-type detail recorded. Provisional outcomes in "A1 outcome per lever". **NEXT:** `a1-checks.txt` (are the type-32 sources Shorts? the PL vs RD share of playlist views) |
 | A1.3 description-link test | **no longer needs the SEO team**: part C of the `a1-checks2` block finds every description link in `videos.description` and checks those pairs in the report |
-| A2 | **example found 2026-10-01** via Studio: Short `Ww5VGM9sWDs` → "Chanda Mama Ki Cycle". **NEXT:** the `a2-check` block (videos.list probe) |
+| A2 | **done 2026-10-01**: not readable or writable via the Data API; set in Studio, measurable via type 32 |
+| A1 own-catalog share | **open**: `videos` may be stale (two of the channel's own videos are missing). **NEXT:** `a1-checks3` (sync freshness, fleet-wide share, report video ids missing from `videos`) |
 | A3 search terms | **largely answered by A1.1**: type 5 detail = the search term, per video × day × country, with low-volume terms suppressed (233/319 rows empty). Still to do: the on-demand comparison |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
@@ -472,8 +473,10 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 | Sample rows (IDs are fine) | from `--sample-value 7 32 14 24 5 18 8` on the 2026-09-29 report (`logs\a1-detail.txt`). Type 8 (Other YouTube features): `offline`, `unknown`, `ytremote` |
 | Views by source, 2026-09-29, Marathi (`logs\a1-checks.txt`, 52,319 rows, 259,868 views) | 14 Playlists 118,342 (45.5%) · 24 Shorts feed 49,292 (19.0%) · 7 Suggested 48,862 (18.8%) · 3 Browse 17,652 (6.8%) · 8 Other 12,851 (4.9%) · 4 Channels 7,432 (2.9%) · 5 Search 2,911 (1.1%) · 0 Direct 1,368 · 9 External 668 · 20 Endscreen 254 · 18 Playlist pages 148 · 27 Sound 33 · 32 Related video 27 · 26 Hashtag 20 · 17 Notifications 8 |
 | Type 14 split | `RD…` YouTube Mixes 117,929 views (25,520 rows) · `PL…` channel playlists **50** views (41 rows) · other 363 (154 rows). `RD<id>` is a Mix seeded from video `<id>` (e.g. `RDq2kEmaYSaGY` ← `q2kEmaYSaGY`, also a top type-7 referrer) |
-| Type 32 sources | 12 videos, 27 views in total (top `Ww5VGM9sWDs` and `RFnQaxuV9Q0`, 4 each). **None is in `videos`** (0 rows); whether they are Midas-uploaded Shorts: `logs\a1-checks2.txt` |
-| Top type-7 referrers | `vXReAEu6riI` 1,107 · `-yyhXOOUzJw` 716 · `tYcw7BuyR2I` 658 · `HY1CBgG0SlA` 574 · `wygHI6Wwxl4` 475. Own-catalog share: `logs\a1-checks2.txt` |
+| Type 32 sources | 12 videos, 27 views in total (top `Ww5VGM9sWDs` and `RFnQaxuV9Q0`, 4 each). **None is in `videos`, and none is in `shorts_clips`**, so they are the channel's own Shorts (confirmed in Studio for `Ww5VGM9sWDs`) **not uploaded through Midas** |
+| Top type-7 referrers | `vXReAEu6riI` 1,107 · `-yyhXOOUzJw` 716 · `tYcw7BuyR2I` 658 · `HY1CBgG0SlA` 574 · `wygHI6Wwxl4` 475 |
+| Own-catalog share (`logs\a1-checks2.txt`) | Matched against the 5,676 Marathi rows in `videos`: type 7 from own videos **1,546 of 48,862** views (3.2%); Mixes seeded from own videos **1,549 of 117,929** (1.3%). **Not yet trustworthy:** two of this channel's own videos (`Ww5VGM9sWDs`, `_JQBqkC9b1A`) are missing from `videos` although `sync_shorts = t`, so `videos` may be stale. Freshness and fleet-wide share: `logs\a1-checks3.txt` |
+| Description-link pairs (A1.3, `logs\a1-checks2.txt`) | 1,804 (source, target) pairs extracted from Marathi `videos.description` (regex; includes junk such as `ExampleURL3`). Report rows with `video_id` = target and `traffic_source_detail` = source: **type 7 only, 4 rows, 4 views** on 2026-09-29. Caveats: descriptions are as of our last sync, and types without a video-id detail can't be checked per pair |
 | Lag: data date vs create time (min / max / median days) | The first batch backfilled ≈30 days at once (data 2026-08-30 → 09-28, all created 2026-09-30), so max 31 / median 14–16 is a backfill artefact. **Steady state: 2 days** (data 2026-09-29 created 2026-10-01). The playlist report has duplicate reports for some data dates (09-22, 09-25, 09-28, i.e. restatements), so ingestion must handle more than one report per day |
 
 ### A1.2 On-demand Analytics
@@ -550,7 +553,7 @@ type only · (c) nothing usable. These map onto Part 2 §1.2.
 | Linked video | Studio's "Related video" shows "चांदोबा सायकलवर आला! 🌙🚲 \| Chanda Mama Ki Cycle 4K song \| Taarak Mehta Ka Ooltah Chashmah Marathi". The ID isn't shown in Studio; it's taken from the report's type-32 rows (`logs\a2-check.txt`) |
 | Command / SQL | `logs\a2-check.txt` block (below) |
 | Raw evidence | Studio, read by Claude in Chrome 2026-10-01: the Short's Details page has a "Related video" field set to the title above. Probe JSON: `logs\a2-short-raw.json` (pending) |
-| Outcome | pending the probe. Already established: the type-32 sources are this channel's own Shorts, so Short → video is a lever we own |
+| Outcome | **Readable via Data API: NO.** `videos.list` with every part (`snippet,contentDetails,status,topicDetails,recordingDetails,localizations,player`) on `Ww5VGM9sWDs`: `_JQBqkC9b1A` (the linked video, from the report's type-32 rows) appears in **0** JSON paths (`logs\a2-check.txt`, raw JSON `logs\a2-short-raw.json`). **Writable: no** field on `videos.update` (none in the parts above). So the link is set in Studio by hand, and measured through type-32 traffic (A1.1) |
 
 **[office, in the container: see "Running the other probes"]** Read-only; 1 Data API unit. Never attempt a write (spec A2 step 4).
 
