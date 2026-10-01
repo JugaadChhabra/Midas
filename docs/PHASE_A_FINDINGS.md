@@ -23,15 +23,14 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A2 | **done 2026-10-01**: not readable or writable via the Data API; set in Studio, measurable via type 32 |
 | A1.3 description links | **done 2026-10-01** (DB-based): 1,804 links on Marathi; only 4 views/day attributable to them (type 7). Backlinks look weak as they stand |
 | A1 own-catalog share | **done 2026-10-01**: our channels supply ≥23% of Marathi's suggested views and ≥6% of its Mix views; the rest is external |
-| Finding: sync stopped with the A0 pause | **fixed in code 2026-10-01**: the daily `video_sync` job (04:00 UTC, all channels, read-only), merged to `main`. **Live only after the next office restart** |
+| Finding: sync stopped with the A0 pause | **fixed 2026-10-01**: the daily `video_sync` job (04:00 UTC, all channels, read-only). **Office restarted ≈12:46 UTC on 2026-10-01**; `/health/jobs` lists `video_sync` (`never_run`; first run 2026-10-02 04:00 UTC) |
 | A3 search terms | **largely answered by A1.1**: type 5 detail = the search term, per video × day × country, with low-volume terms suppressed (233/319 rows empty). Still to do: the on-demand comparison |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
 
 **Next session, in order:**
-1. **Restart the office app** (`stop.bat`, then `start.bat`) so the `video_sync` job is live.
-   Check that `curl.exe -s http://localhost:8000/health/jobs` lists `video_sync`.
-2. **After its first 04:00 UTC run,** confirm `/health/jobs` shows `video_sync` `success`,
+1. ~~Restart the office app.~~ Done 2026-10-01 ≈12:46 UTC; `video_sync` is registered.
+2. **After its first 04:00 UTC run (2026-10-02),** confirm `/health/jobs` shows `video_sync` `success`,
    and that Marathi's `last_synced_at` is from that morning.
 3. **A7 live numbers,** on the fresh video list. They pick rollout channel #1 and a warm video.
 4. **A1.2 and A3 on-demand:** the Analytics API comparison, on that warm video.
