@@ -9,21 +9,22 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 
 ## Status: resume here
 
-*Last updated 2026-09-29.*
+*Last updated 2026-10-01.*
 
 | Task | State |
 |---|---|
 | Restart day (steps 1–14) | **done 2026-09-29.** New image running since 11:54 UTC. Freeze confirmed |
 | A0 pause | **done.** Title autopilot off since ≈2026-09-23 (owner); confirmed off after the restart. Shorts left on |
 | A1 report jobs | **created 2026-09-29 13:07 UTC**: `channel_traffic_source_a3`, `playlist_traffic_source_a2`. First CSV due 09-30 to 10-01 |
-| **A9** | **NEXT, on 2026-09-30 after 08:30 UTC** (14:00 IST): run the A9 block below |
-| A1.1 inspect | after A9, once a CSV exists. Needs one `stop.bat` / `start.bat` first (the `--report-type` fix). **Do the restart only after A9:** it wipes `/health/jobs` |
-| A0 24 h check | any time after 2026-09-30 13:15 UTC: the apply-history query in A0 |
+| A9 | **done 2026-10-01. PASS**: all 8 jobs `success`, Punjabi health scores fresh |
+| A0 24 h check | **done 2026-10-01. PASS**: last apply 2026-09-24 04:00 UTC, none since |
+| **A1.1 inspect** | **NEXT**: `stop.bat` / `start.bat` (picks up the `--report-type` fix), then inspect both report jobs (A1.1) |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
 
-**Tomorrow, in order:** (1) A9 → (2) the A0 24-hour check → (3) `stop.bat`, then `start.bat` →
-(4) A1.1 inspect, if a report has landed.
+**Next, in order:** (1) `stop.bat`, then `start.bat` → (2) A1.1 inspect, for both
+report jobs → (3) A7 live numbers (they pick the warm video for A1.2/A3) → (4) A1.2, A1.3,
+A3 → (5) A2 (needs a Short from the SEO team) → (6) A5.
 
 ## Restart day: do these steps in order
 
@@ -300,10 +301,21 @@ Where the applies came from (apply history, read-only; optional now that the own
 docker compose exec -T db psql -U midas midas -c "select v.channel_id, count(*) filter (where a.applied_at > now() - interval '7 days') as applies_last_7d, max(a.applied_at) as last_apply from audits a join videos v on v.id = a.video_id where a.status = 'applied' group by 1 order by last_apply desc nulls last;"
 ```
 
-Result (paste):
+Result, 2026-10-01 ≈09:22 UTC (**A0 24 h acceptance: PASS**, no applies after the pause):
 
 ```
+        channel_id        | applies_last_7d |          last_apply
+--------------------------+-----------------+-------------------------------
+ UC8KjoL0Z9mTHKqB6gFutkJw |               0 | 2026-09-24 04:00:13.115649+00
+ UCr5-YUqBiW7PUmeAtxUWuRg |               0 | 2026-09-21 01:20:43.48096+00
+ UCOVKJdzghm2gOnuaGeJTonA |               0 | 2026-09-12 13:08:03.778507+00
+ UCMpj6iUMCMhB0k4L5EcxJwQ |               0 | 2026-08-14 14:11:18.103152+00
+ UCc4Tv_DEGDEKrKAt-vyVNmw |               0 | 2026-08-13 09:13:11.140242+00
+ UC8oC7Yiz0WkH3PKb3GW42XA |               0 | 2026-07-31 14:50:09.697548+00
 ```
+
+The last apply fleet-wide was 2026-09-24 04:00 UTC (Punjabi). That matches the step 8a window-close
+dates (apply + 22 days: Punjabi 10-16, Marathi 10-13, Gujarati 10-04).
 
 **Shorts independence (spec A0 step 1).**
 
@@ -712,12 +724,12 @@ Raw results (paste):
 
 | Field | Value |
 |---|---|
-| Date (deploy) | |
-| Date (first 07:00 UTC run after deploy) | |
-| Channel | every `playlist_health_enabled` channel |
-| Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome | |
+| Date (deploy) | 2026-09-29 11:54 UTC |
+| Date (first 07:00 UTC run after deploy) | 2026-09-30 (checked on the 2026-10-01 run) |
+| Channel | every `playlist_health_enabled` channel: only `UC8KjoL0Z9mTHKqB6gFutkJw` (Punjabi) has it on |
+| Command / SQL | the copy-paste block below (`logs\a9-check.txt`) |
+| Raw evidence | below |
+| Outcome | **PASS.** All 8 registered jobs show `success` for their 2026-10-01 run. Punjabi was scored at 2026-10-01 07:00 UTC (39 playlists). There are no `JOB FAILED` / `JOB DEGRADED` lines in `logs\midas.log` |
 
 **[office]** After the first 07:00 UTC `playlist_health_score` run following the
 deploy, the freshness query from `STATE.md` §8:
@@ -765,8 +777,23 @@ notepad logs\a9-check.txt
 
 | Record | Value |
 |---|---|
-| `max(health_computed_at)` per channel | |
-| `/health/jobs` output (paste) | |
+| `max(health_computed_at)` per channel | `UC8KjoL0Z9mTHKqB6gFutkJw` 2026-10-01 07:00:00 UTC, 39 scored. The other 10 channels have `playlist_health_enabled = f` and no scores |
+| `/health/jobs` output (paste) | below |
+
+Raw evidence, 2026-10-01 ≈09:22 UTC:
+
+```
+autopilot             success  2026-10-01T09:22:32Z
+shorts_dispatch       success  2026-10-01T09:22:32Z
+playlist_reconcile    success  2026-10-01T02:00:00Z
+metrics_poll          success  2026-10-01T05:00:00Z
+reporting_poll        success  2026-10-01T06:00:00Z
+playlist_health_score success  2026-10-01T07:00:00Z
+measurement_eval      success  2026-10-01T08:00:00Z
+nightly_db_backup     success  2026-10-01T00:00:00Z
+(all: error null, failed_channels {}, partial_errors {})
+findstr "JOB FAILED" / "JOB DEGRADED" logs\midas.log  ->  no lines
+```
 
 ---
 
