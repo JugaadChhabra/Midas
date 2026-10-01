@@ -18,7 +18,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A1 report jobs | **created 2026-09-29 13:07 UTC**: `channel_traffic_source_a3`, `playlist_traffic_source_a2`. First CSV due 09-30 to 10-01 |
 | A9 | **done 2026-10-01. PASS**: all 8 jobs `success`, Punjabi health scores fresh |
 | A0 24 h check | **done 2026-10-01. PASS**: last apply 2026-09-24 04:00 UTC, none since |
-| **A1.1 inspect** | **NEXT**: `stop.bat` / `start.bat` (picks up the `--report-type` fix), then inspect both report jobs (A1.1) |
+| A1.1 inspect | **in progress 2026-10-01**: both reports landed; columns, codes and lag recorded. **NEXT:** the `--sample-value` run, for the detail per type |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
 
@@ -417,11 +417,11 @@ created for **`playlist_traffic_source_a2`**, for the playlist half of the A1 an
 | Field | Value |
 |---|---|
 | Date (job created) | 2026-09-29T13:07:01Z (traffic source), 2026-09-29T13:07:22Z (playlist traffic source) |
-| Date (first report inspected) | |
+| Date (first report inspected) | 2026-10-01 (both jobs; newest data date 2026-09-29) |
 | Channel | `UCr5-YUqBiW7PUmeAtxUWuRg` |
 | Command / SQL | pre-filled in this section, below |
 | Raw evidence | see below |
-| Outcome | jobs created; waiting for the first report (24–48h) |
+| Outcome | reports landing. Column shape recorded below. Per-type detail samples pending (`--sample-value` run) |
 
 Raw evidence, 2026-09-29 on the office machine:
 
@@ -459,15 +459,15 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 
 | Record | Value |
 |---|---|
-| Header row (verbatim) | |
-| Distinct traffic-source-type values | |
-| Detail column exists? Its name | |
-| Detail for RELATED_VIDEO (or its real name) | |
-| Detail for PLAYLIST | |
-| Detail for SHORTS | |
-| Detail for YT_SEARCH | |
-| Sample rows (IDs are fine) | |
-| Lag: data date vs create time (min / max / median days) | |
+| Header row (verbatim) | `channel_traffic_source_a3` (15 cols): `date,channel_id,video_id,live_or_on_demand,subscribed_status,country_code,traffic_source_type,traffic_source_detail,views,engaged_views,watch_time_minutes,average_view_duration_seconds,average_view_duration_percentage,red_views,red_watch_time_minutes`. `playlist_traffic_source_a2` (16 cols): `date,channel_id,playlist_id,video_id,live_or_on_demand,subscribed_status,country_code,traffic_source_type,traffic_source_detail,views,engaged_views,watch_time_minutes,average_view_duration_seconds,playlist_starts,playlist_saves_added,playlist_saves_removed` |
+| Distinct traffic-source-type values | **Numeric codes**, not names. 2026-09-29 channel report, 52,319 rows: `14` 25,715 · `7` 21,357 · `24` 1,897 · `4` 1,129 · `3` 850 · `8` 599 · `5` 319 · `9` 170 · `0` 80 · `18` 78 · `20` 69 · `26` 18 · `32` 17 · `27` 14 · `17` 7. Playlist report, 104 rows: `4` 48 · `14` 39 · `18` 12 · `7` 3 · `20` 2. Code → name, from https://developers.google.com/youtube/reporting/v1/reports/dimensions (fetched 2026-10-01): 0 Direct or unknown · 1 YouTube advertising · 3 Browse features · 4 YouTube channels · 5 YouTube search · 7 Suggested videos · 8 Other YouTube features · 9 External · 11 Video cards and annotations · 14 Playlists · 17 Notifications · 18 Playlist pages · 19 Programming from claimed content · 20 Interactive video endscreen · 23 Stories · 24 Shorts · 25 Product Pages · 26 Hashtag Pages · 27 Sound Pages · 28 Live redirect · 29 Podcasts · 30 Remixed video · 31 Vertical live feed · 32 Related video |
+| Detail column exists? Its name | yes: `traffic_source_detail`, in both reports |
+| Detail for RELATED_VIDEO (or its real name) | Docs: type 7 (Suggested videos) = "the video ID for that video". Type 32 (Related video): not documented. Samples pending |
+| Detail for PLAYLIST | type 14 / 18: not documented. Samples pending. The playlist report carries `playlist_id` and `playlist_starts` per playlist × video × day regardless |
+| Detail for SHORTS | type 24: not documented. Samples pending |
+| Detail for YT_SEARCH | Docs: type 5 = "the search term that led to the referred traffic". Samples pending |
+| Sample rows (IDs are fine) | pending (`--sample-value` run) |
+| Lag: data date vs create time (min / max / median days) | The first batch backfilled ≈30 days at once (data 2026-08-30 → 09-28, all created 2026-09-30), so max 31 / median 14–16 is a backfill artefact. **Steady state: 2 days** (data 2026-09-29 created 2026-10-01). The playlist report has duplicate reports for some data dates (09-22, 09-25, 09-28, i.e. restatements), so ingestion must handle more than one report per day |
 
 ### A1.2 On-demand Analytics
 
