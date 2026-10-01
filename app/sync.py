@@ -2,7 +2,7 @@ import logging
 import re
 import httpx
 from fastapi import APIRouter, HTTPException
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from googleapiclient.errors import HttpError
 
 from app.content_type import is_episode
@@ -458,3 +458,60 @@ def get_video(video_id: str):
     if not row:
         raise HTTPException(404, f"Video {video_id} not found")
     return row
+
+
+# ── routine sync: when, and full vs incremental ─────────────────────────────
+#
+# Owned here rather than by autopilot: sync is a sensor, and it must keep running
+# when the title-audit path is paused. Until 2026-10-01 it ran only inside that
+# path (`autopilot._resync_if_stale`, after `can_audit`), so pausing title
+# autopilot (~2026-09-23) silently stopped every channel's video sync.
+
+#: A channel synced more recently than this is left alone.
+SYNC_STALE_AFTER = timedelta(hours=6)
+
+#: How often to run a full (snippet-rebuilding) sync instead of an incremental
+#: one. Incremental syncs miss edits to old titles/tags, so a full pass repairs
+#: them this often.
+FULL_SYNC_INTERVAL = timedelta(days=3)
+
+
+def _parse_ts(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def is_stale(channel: dict) -> bool:
+    """True if the channel has never synced, its last sync is unreadable, or the
+    last sync is older than SYNC_STALE_AFTER."""
+    last = _parse_ts(channel.get("last_synced_at"))
+    return last is None or (datetime.now(timezone.utc) - last) > SYNC_STALE_AFTER
+
+
+def needs_full_sync(channel: dict) -> bool:
+    """True if this channel has never had a full sync, or the last one is
+    unreadable or older than FULL_SYNC_INTERVAL."""
+    last = _parse_ts(channel.get("last_full_synced_at"))
+    return last is None or (datetime.now(timezone.utc) - last) > FULL_SYNC_INTERVAL
+
+
+def routine_sync(channel: dict) -> str:
+    """One routine pass for `channel` (a row with id, last_synced_at,
+    last_full_synced_at). Returns "fresh" (nothing to do), "full" or
+    "incremental". Read-only against YouTube; raises TokenExpiredError like
+    `sync_channel`.
+    """
+    if not is_stale(channel):
+        return "fresh"
+    if needs_full_sync(channel):
+        # A full pass rebuilds every snippet and refreshes stats in the same call.
+        sync_channel(channel["id"], full=True)
+        return "full"
+    # Incremental finds only new uploads, so refresh stored counts + privacy too.
+    sync_channel(channel["id"])
+    refresh_stats(channel["id"])
+    return "incremental"

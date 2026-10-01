@@ -12,7 +12,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-01 (header + §1 1B updated for A9 + A0 24 h passing on the office machine; header + §3 + §7.1 updated for the office restart: Phase A image live, freeze confirmed, A1 report jobs created; §4, §5, §8 updated for per-item poll errors (fail when a whole category fails, `degraded` when partial) and job ids on `_daily_reconcile`'s inner ERROR lines; §7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the A9-record commit on top of `8981ec2` (a commit can't cite its own SHA) · **Branch:** `main`
+**Generated:** 2026-10-01 (§4, §5 updated for the daily `video_sync` job, sync decoupled from autopilot; header + §1 1B updated for A9 + A0 24 h passing on the office machine; header + §3 + §7.1 updated for the office restart: Phase A image live, freeze confirmed, A1 report jobs created; §4, §5, §8 updated for per-item poll errors (fail when a whole category fails, `degraded` when partial) and job ids on `_daily_reconcile`'s inner ERROR lines; §7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the video_sync commit on top of `6a211b7` (a commit can't cite its own SHA) · **Branch:** `main`
 (working tree clean. `scripts/overnight_tickets.sh` is the unattended ticket runner, driven by a playbook: dev tooling, never deployed. The shipped shorts plans in `docs/superpowers/plans/` and the two `docs/agentic-workflow-*.excalidraw` diagrams were deleted, and on 2026-09-29 so were the finished one-off scripts (`export_supabase`, `import_to_local`, `backfill_is_episode`, `reconnect_evidence_loop`), the draft `PHASE_2_TRACK3_PLAYLIST_BUILD.md`, and the never-started `2026-08-24-format-scorers-design.md`. The two standalone shorts-cutter design docs moved to the shorts-cutter repo (`docs/design-history/`). All of it is in git history.)
 
 **Office deployment (2026-09-29, from `docs/PHASE_A_FINDINGS.md` A0/A1.1).** The office
@@ -26,7 +26,9 @@ so the autopilot tick still runs, for Shorts only. The office `.env` sets
 `playlist_traffic_source_a2`. `channel_traffic_source_a2` is retired: `jobs.create`
 returned 404. **A9 passed on 2026-10-01:** all 8 registered jobs `success`, and Punjabi (the only
 `playlist_health_enabled` channel) was scored 2026-10-01 07:00 UTC (39 playlists). **The A0 24 h check
-passed too:** the last apply fleet-wide was 2026-09-24 04:00 UTC. Next: A1.1 report inspection.
+passed too:** the last apply fleet-wide was 2026-09-24 04:00 UTC. A1.1 and A2 have been inspected
+(`docs/PHASE_A_FINDINGS.md`). Video sync had stopped with the title pause (the last Marathi sync was
+2026-09-24); the `video_sync` job (§4) fixes that from the next office restart.
 
 **Data caveat for this generation.** The live database runs on the office machine,
 bound to `127.0.0.1:55432` there (`docker-compose.yml:18-22`), so it can't be reached from the
@@ -243,7 +245,7 @@ All registered in `app/main.py` `_register_jobs()`, called from `lifespan()` (`B
 
 **Failure semantics.** Per-channel jobs (`playlist_reconcile`, `playlist_discovery`,
 `playlist_tuning`, `reflection`, `playlist_health_score`) fan out through
-`main._run_per_channel`. Channels stay isolated: each channel's exception is logged at ERROR
+`main._run_per_channel` (and so does `video_sync`). Channels stay isolated: each channel's exception is logged at ERROR
 with traceback as `"<label> (job <job_id>) failed for <id>: <err>"` (`job_id` is the APScheduler id,
 passed by each wrapper as `job_id=`, default `"-"`) and the loop continues. Once every channel
 has run, any failure raises one `job_status.JobRunFailed` naming the failed channels, so
@@ -295,6 +297,7 @@ flags default to false (§3), so on a default `.env` these writers are frozen.
 | `playlist_discovery` | cron Sun 03:00 local | `main._weekly_discovery` → `app/playlist_discovery.py:discover_playlists` | **frozen by `PLAYLIST_DISCOVERY_ENABLED`** (not registered when false). When on: **all channels** (`Job.EVERY`). **Creates playlists on YouTube** (≤2/run), skipped under DRY_RUN |
 | `playlist_tuning` | cron Mon 03:30 local | `app/playlists.py:tune_thresholds` | **frozen by `PLAYLIST_TUNING_ENABLED`** (not registered when false). When on: all channels. Mutates `settings.PLAYLIST_JOIN_HIGH` **in-process, globally** from one channel's churn |
 | `reflection` | cron Mon 04:00 local | `app/reflection.py:reflect` | **frozen by `REFLECTION_ENABLED`** (not registered when false). When on: all channels |
+| `video_sync` | cron 04:00 UTC | `main._daily_video_sync` → `app/sync.py:routine_sync` per channel | registered, **all channels** (`Job.EVERY`), whatever autopilot is doing. Read-only against YouTube: skips a channel synced within `sync.SYNC_STALE_AFTER` (6 h), otherwise a full pass if `sync.needs_full_sync` (`FULL_SYNC_INTERVAL` = 3 days), else incremental + `refresh_stats`. An expired token is logged and skipped, not a failure. Added 2026-10-01: until then sync ran only inside autopilot's title-audit path (`_resync_if_stale`, after `can_audit`), so the ≈09-23 title pause stopped sync on every channel (last Marathi sync 2026-09-24 03:55 UTC, `docs/PHASE_A_FINDINGS.md` A1.1) |
 | `metrics_poll` | cron 05:00 UTC | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in-measurement |
 | `reporting_poll` | cron 06:00 UTC | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` |
 | `playlist_health_score` | cron 07:00 UTC | `main._daily_playlist_health_score` → `score_channel` | registered; `playlist_health_enabled` channels (NameError crash fixed in this commit; §1 1B) |
@@ -337,7 +340,7 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
 | `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, …) |
 | `status_vocab.py` | persisted status strings (do not rename) |
 | `auth.py` | OAuth + channel flag PATCH |
-| `sync.py` | channel/video sync, `is_short` probe (`/shorts/` URL), stats refresh |
+| `sync.py` | channel/video sync, `is_short` probe (`/shorts/` URL), stats refresh, and the routine-sync rules (`is_stale`, `needs_full_sync`, `routine_sync`) shared by the `video_sync` job and autopilot's `_resync_if_stale` |
 | `content_type.py` | `is_episode` classifier (title/tag pattern) |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, `audit_video`, apply, revert, bulk ops |
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, validation, `house_format_spec()` |

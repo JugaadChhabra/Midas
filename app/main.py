@@ -9,9 +9,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app import eligibility, job_status, measurement, quota, tracing
+from app import eligibility, job_status, measurement, quota, sync, tracing
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
+from app.youtube_client import TokenExpiredError
 from app.performance import router as performance_router
 from app.autopilot import router as autopilot_router, tick as autopilot_tick
 from app.dashboard import router as dashboard_router
@@ -238,6 +239,33 @@ def _daily_playlist_health_score():
                      job_id="playlist_health_score")
 
 
+def _daily_video_sync():
+    """Sync every channel's video list once a day, independent of autopilot.
+
+    Video sync used to run only inside autopilot's title-audit path, so pausing
+    title autopilot (~2026-09-23) stopped it on every channel. This keeps the
+    sensor running whatever autopilot is doing. It's read-only against YouTube:
+    an incremental pass (new uploads + refresh_stats) normally, a full pass every
+    `sync.FULL_SYNC_INTERVAL`. Channels autopilot synced within
+    `sync.SYNC_STALE_AFTER` are skipped. An expired token is an expected skip
+    (re-consent fixes it), not a failure; anything else fails the run for that
+    channel.
+    """
+    rows = {c["id"]: c for c in eligibility.channels_for(
+        eligibility.Job.EVERY, columns="id,last_synced_at,last_full_synced_at")}
+
+    def _one(channel_id: str) -> None:
+        try:
+            kind = sync.routine_sync(rows[channel_id])
+        except TokenExpiredError:
+            _main_log.warning("video_sync %s: OAuth token expired; skipping until re-consent",
+                              channel_id)
+            return
+        _main_log.info("video_sync %s: %s", channel_id, kind)
+
+    _run_per_channel(_one, "Daily video sync", channel_ids=list(rows), job_id="video_sync")
+
+
 def _daily_measurement_eval():
     """Scheduler wrapper for the measurement pass.
 
@@ -333,6 +361,19 @@ def _register_jobs(sched) -> None:
         )
     else:
         _main_log.info("playlist_tuning not registered: PLAYLIST_TUNING_ENABLED=false")
+    sched.add_job(
+        _daily_video_sync,
+        "cron",
+        hour=4,
+        minute=0,
+        # UTC, an hour before metrics_poll, so the polls and the scorer work
+        # from today's video list. Read-only against YouTube, so it's not one
+        # of the A4 frozen writers.
+        timezone="UTC",
+        id="video_sync",
+        max_instances=1,
+        coalesce=True,
+    )
     sched.add_job(
         poll_metrics,
         "cron",

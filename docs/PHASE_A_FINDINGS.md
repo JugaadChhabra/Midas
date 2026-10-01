@@ -9,7 +9,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 
 ## Status: resume here
 
-*Last updated 2026-10-01.*
+*Last updated 2026-10-01 (end of session).*
 
 | Task | State |
 |---|---|
@@ -21,15 +21,29 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A1.1 inspect | **mostly done 2026-10-01**: columns, codes, lag and per-type detail recorded. Provisional outcomes in "A1 outcome per lever". **NEXT:** `a1-checks.txt` (are the type-32 sources Shorts? the PL vs RD share of playlist views) |
 | A1.3 description-link test | **no longer needs the SEO team**: part C of the `a1-checks2` block finds every description link in `videos.description` and checks those pairs in the report |
 | A2 | **done 2026-10-01**: not readable or writable via the Data API; set in Studio, measurable via type 32 |
+| A1.3 description links | **done 2026-10-01** (DB-based): 1,804 links on Marathi; only 4 views/day attributable to them (type 7). Backlinks look weak as they stand |
 | A1 own-catalog share | **done 2026-10-01**: our channels supply ≥23% of Marathi's suggested views and ≥6% of its Mix views; the rest is external |
-| **Finding: sync stopped with the A0 pause** | video sync runs only inside the title-audit path, so no channel has synced since ≈09-24. Proposed: a scheduled daily sync independent of autopilot (read-only). **Awaiting owner's decision** |
+| Finding: sync stopped with the A0 pause | **fixed in code 2026-10-01**: the daily `video_sync` job (04:00 UTC, all channels, read-only), merged to `main`. **Live only after the next office restart** |
 | A3 search terms | **largely answered by A1.1**: type 5 detail = the search term, per video × day × country, with low-volume terms suppressed (233/319 rows empty). Still to do: the on-demand comparison |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
 
-**Next, in order:** (1) `stop.bat`, then `start.bat` → (2) A1.1 inspect, for both
-report jobs → (3) A7 live numbers (they pick the warm video for A1.2/A3) → (4) A1.2, A1.3,
-A3 → (5) A2 (needs a Short from the SEO team) → (6) A5.
+**Next session, in order:**
+1. **Restart the office app** (`stop.bat`, then `start.bat`) so the `video_sync` job is live.
+   Check that `curl.exe -s http://localhost:8000/health/jobs` lists `video_sync`.
+2. **After its first 04:00 UTC run,** confirm `/health/jobs` shows `video_sync` `success`,
+   and that Marathi's `last_synced_at` is from that morning.
+3. **A7 live numbers,** on the fresh video list. They pick rollout channel #1 and a warm video.
+4. **A1.2 and A3 on-demand:** the Analytics API comparison, on that warm video.
+5. **A5:** the Haryanvi i18n probe, the `UPDATE`, then a NAS snapshot.
+6. **Phase A conclusion:** the A1 outcome per lever, the rollout channel, and proposed Part 2
+   changes. Measured so far: our own playlists ≈0 views, YouTube Mixes 45%, ≥23% of suggested
+   views from our own channels. Then the exit gate, the `STATE.md` §9 rewrite, and Phase B.
+
+**PowerShell blocks for the office machine:** use `$PSItem`, never `$_`, and `count(1)`,
+never `count(*)`. The copy-paste path drops `_` and `*` in pairs, treating them as markdown
+emphasis. Write output to `logs\<name>.txt` and open it in Notepad (the window can't
+scroll long output).
 
 ## Restart day: do these steps in order
 

@@ -14,6 +14,7 @@ from app import eligibility, quota, tracing
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
+from app import sync as _sync
 from app.youtube_client import TokenExpiredError
 from app.embeddings import embed_video
 from app.metrics_poll import ACTIVE_MEASUREMENT_STATUSES
@@ -50,23 +51,14 @@ def _next_yt_quota_reset() -> datetime:
     return next_midnight.astimezone(timezone.utc)
 
 
-# How often to run a full (snippet-rebuilding) sync instead of an incremental
-# one. Incremental syncs miss edits to old titles/tags, so we do a full pass
-# this often to repair them.
-FULL_SYNC_INTERVAL = timedelta(days=3)
+# The sync cadence rules live in app.sync (the daily `video_sync` job uses them
+# too). These names stay so the tick, and its tests' patch points, are unchanged.
+FULL_SYNC_INTERVAL = _sync.FULL_SYNC_INTERVAL
 
 
 def _needs_full_sync(channel: dict) -> bool:
-    """True if this channel has never had a full sync or the last one is older
-    than FULL_SYNC_INTERVAL."""
-    last = channel.get("last_full_synced_at")
-    if not last:
-        return True
-    try:
-        dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return True
-    return (datetime.now(timezone.utc) - dt) > FULL_SYNC_INTERVAL
+    """True if this channel is due a full sync (see `app.sync.needs_full_sync`)."""
+    return _sync.needs_full_sync(channel)
 
 
 UNSAFE_MODELS = {
@@ -388,15 +380,7 @@ def _resync_if_stale(ch: dict) -> bool:
     """Resync the channel if its data is stale (>6h). Returns True if the tick should
     proceed, False if it should stop (token expired, or sync failed)."""
     channel_id = ch["id"]
-    last_synced = ch.get("last_synced_at")
-    needs_sync = True
-    if last_synced:
-        try:
-            dt = datetime.fromisoformat(last_synced.replace("Z", "+00:00"))
-            needs_sync = (datetime.now(timezone.utc) - dt) > timedelta(hours=6)
-        except ValueError:
-            pass
-    if not needs_sync:
+    if not _sync.is_stale(ch):
         return True
     try:
         if _needs_full_sync(ch):
