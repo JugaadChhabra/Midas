@@ -228,6 +228,10 @@ class Settings:
         for c in (os.getenv("TRAFFIC_INGEST_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",")
         if c.strip()
     }
+    # Phase B · B2 (spec Part 2 §1.3, §8): the share of each lever's triaged
+    # videos held out as the control arm (recorded, never applied). Per lever, by
+    # a stable hash of (video_id, lever): app/interventions.assign_arm.
+    HOLDOUT_PCT = float(os.getenv("HOLDOUT_PCT") or "0.20")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).
