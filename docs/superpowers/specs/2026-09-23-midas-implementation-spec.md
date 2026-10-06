@@ -7,6 +7,10 @@ Supersedes:
 - The separate 2026-09-23 discoverability and Phase A specs (merged here)
 - As design sources: `CONTINUOUS_IMPROVEMENT_LOOP.md`, `PLAYLIST_OPTIMIZATION.md`, `plan.md` (see Part 2 §0.5)
 
+All of the superseded docs above, plus `2026-08-26-tool-using-audit-agent-design.md` and the
+`PHASE_2_TRACK2`/`TRACK4` drafts, were **deleted on 2026-10-06** once the `STATE.md` §9 rewrite
+landed (Phase A exit gate). They're in git history, e.g. `git show 8981ec2:docs/plan.md`.
+
 Diagram: `docs/midas-seo-agent-v2.excalidraw`. Step numbers (1–8) in Part 2 refer to it.
 Ground truth used: `STATE.md` @ `bddd373`.
 
@@ -454,7 +458,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 
 | Lever | Slice 1–2 (pipeline) | Slice 3+ (agent challenger, §3) |
 |---|---|---|
-| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by tag/title overlap (embeddings after re-embed, §4). A sibling is one of our channels that already sends suggested traffic to, or receives it from, the source channel, measured over the trailing 28 days of `video_traffic_source_daily` (at least `SIBLING_MIN_VIEWS`). Jev answers "would a viewer of A plausibly watch B next?" per pair. Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
+| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by tag/title overlap (embeddings after re-embed, §4). A sibling is one of our channels that already sends suggested traffic to the source channel, measured over the trailing 28 days of the source channel's own `video_traffic_source_daily` rows (at least `SIBLING_MIN_VIEWS`). Traffic in the other direction counts only once the sibling is itself in `TRAFFIC_INGEST_CHANNELS`, because a channel's report shows only its own inbound traffic. Jev answers "would a viewer of A plausibly watch B next?" per pair. Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
 | Playlist | Candidates from playlist inventory. Jev fit judgment replaces `playlists._llm_judge`. Written to `playlist_proposals`. | Agent |
 | Short link | Jev picks the best long video for each Short. Queued for the team. | Agent |
 | Title | Existing `audit_video` path, only when triage says `title` | Agent with writer model (§3.3) |
@@ -732,7 +736,10 @@ P2's sibling channels, and the human-edit ledger's measurements all read from th
    - Store `source_type` as the numeric code. Keep a code→name table in code, copied from the A1.1 table,
      with its source URL.
    - **Restatements:** when a newer report arrives for a (job, data date) that's already ingested, replace
-     that date's rows for the channel. Never add to them. Record which report a row came from.
+     that date's rows for the channel. Never add to them. Record which report a row came from. The reach
+     ingester already does latest-wins per data date (`app/reporting_poll.py` `_ingest_report`); reuse it,
+     don't re-implement it. `ensure_reach_job` handles only the reach type today, so generalise it, keeping
+     the reach behaviour.
    - Record each ingested report in the existing `reporting_reports_ingested` ledger.
 3. **Health.** Same failure semantics as `reporting_poll`: a channel crash fails the run; per-report errors
    are judged by `job_status.item_error_verdict`.
@@ -754,7 +761,8 @@ data date from the backfill to the frontier minus 2 days, and `/health/jobs` sho
 ### B2 — `interventions` table and holdout assignment
 
 **Change.**
-1. Migration for `interventions` exactly as Part 2 §7. New status values go into `app/status_vocab.py` and its
+1. Migration for `interventions` exactly as Part 2 §7, plus `channels.agent_enabled bool not null default false`
+   (Part 2 §7). The column is added now so B4 and Slice 1 have it. Nothing sets it true in Phase B. New status values go into `app/status_vocab.py` and its
    guard test: `declined`, `holdout`, `insufficient_data`, plus the intervention lifecycle statuses
    (`planned`, `applied`, `measuring`, `judged`, `cancelled`).
 2. `app/interventions.py` with:
@@ -787,6 +795,11 @@ data date from the backfill to the frontier minus 2 days, and `/health/jobs` sho
      intervention with `origin='midas'`.
 2. **Playlist memberships.** When the playlist membership walk sees a video newly added to one of our playlists
    that Midas didn't add, record `lever='playlist'` the same way.
+   - Tell "Midas added it" from `playlist_assignments` and executed `playlist_proposals`, **not** from
+     `playlists.origin`: discovery-created playlists are stored as `origin='inherited'`
+     (`app/playlist_discovery.py`), so `origin` can't separate Midas playlists from human ones.
+   - The walk runs only inside `playlist_reconcile`, for `PLAYLIST_RECONCILE_CHANNELS`. Marathi is in the
+     default allowlist. Membership detection for other channels needs them added there.
 3. **Short links** can't be read (A2), so the ledger can't see them. The team logs them by hand, for example in
    a sheet. That process is out of scope for code.
 4. **Detection timing.** Edits to old videos are seen only by a full sync, which runs every 3 days
@@ -815,8 +828,10 @@ exit-gate item: the SEO team edits continuously, so a week is enough.
 **Tests.** It excludes dormant, episode, private and in-intervention videos; the explore share is about right;
 SQL and Python agree.
 
-**Acceptance.** Tests green. On the office machine, Marathi's pool size is recorded in the findings doc. It
-should be near A7's 566 warm videos.
+**Acceptance.** Tests green. On the office machine, Marathi's pool size is recorded in the findings doc. Expect it
+near A7's 566, but not equal: A7 used 30 *calendar* days, while the filter uses `WARM_WINDOW_DAYS` *ingested*
+data days, and it also excludes episodes and in-intervention videos. `agent_enabled` isn't part of B4's filter;
+Slice 1's tick routing checks it.
 
 ### B5 — `app/decide.py` and `decision_log`
 
@@ -840,7 +855,9 @@ fails closed to the rules answer; the question-set version appears in both the l
 - Embed one consistent input (title + description + tags, the same recipe for every video) under a new
   `model_version`, for the rollout channel and its P2 sibling channels. Siblings come from B1's data; until a
   week exists, the rollout channel alone.
-- `video_embeddings` already has `model_version`, so no schema change is needed.
+- `video_embeddings` already has `model_version`, so no schema change is needed. **Use a new version value.** The
+  existing value covers two different input recipes (title + transcript in one path, title only in another),
+  so it can't identify an input and must not be reused.
 - Recalibrate `PLAYLIST_JOIN_HIGH` / `PLAYLIST_JOIN_LOW` / `PLAYLIST_LEAVE` **per channel** on the new
   distribution, and store the result, not in process-global settings.
 - Budget: estimate the OpenRouter cost before running, and record it. Run as a resumable one-off, not a
@@ -866,13 +883,18 @@ fails closed to the rules answer; the question-set version appears in both the l
 
 ### B8 — `refresh-stats` 401 fix
 
-**Problem.** A token failing *during* the stats call returns 500, because only `youtube_for_channel` is wrapped.
-This came up on the Hindi channel on 2026-10-06.
+**Problem.** Two linked bugs, both seen on the Hindi channel on 2026-10-06:
+- A token failing *during* the stats call returns 500, because only `youtube_for_channel` is wrapped.
+- `video_sync`'s `routine_sync` catches `TokenExpiredError`, but `sync_channel` and `refresh_stats` are HTTP
+  route functions that turn it into `HTTPException(401)` (`app/sync.py`). So an expired token **fails** the
+  `video_sync` run instead of being skipped. The 2026-10-01 tests mocked `TokenExpiredError` directly, which
+  hid this.
 
 **Change.** Map a token failure anywhere in the call to `HTTPException(401, "token_expired")`, and make the
 routine sync treat it as the expected skip.
 
-**Tests.** A token failure mid-call returns 401; the routine sync skips that channel and doesn't fail the run.
+**Tests.** A token failure mid-call returns 401. Using the **real** `sync_channel`/`refresh_stats` with a fake
+YouTube client that raises the token error, the routine sync skips that channel and doesn't fail the run.
 
 ### B9 — Deploy and verify
 

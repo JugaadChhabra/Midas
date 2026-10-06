@@ -1,5 +1,9 @@
 # Phase 2 · Track 1 — Unlock + Protect the Metadata Loop — Implementation Checklist
 
+> **Note (2026-10-06):** the specs this doc cites (`CONTINUOUS_IMPROVEMENT_LOOP.md`, `PLAYLIST_OPTIMIZATION.md`,
+> `plan.md`) were superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` and deleted.
+> They're in git history, e.g. `git show 8981ec2:docs/plan.md`. This doc is kept as the record of its own decisions.
+
 **Status:** SHIPPED — both pieces landed in `8ec68db` (Piece 1, reach-warmup
 certification gate: `app/reach.py:certify`, `app/auth.py`) and `facafd1` (Piece 2,
 autopilot excludes in-measurement videos: `app/autopilot.py`). Kept as the

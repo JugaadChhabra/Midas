@@ -56,9 +56,9 @@ from app.reporting_client import (
 )
 
 # Google versions report types (_a2, _a3, …) and retires old ones. On 2026-09-29
-# jobs.create returned 404 for _a2 on the office machine, so pass the live ID with
-# --report-type. Find it with scripts/probe_reporting.py.
-REPORT_TYPE_ID = "channel_traffic_source_a2"
+# jobs.create returned 404 for _a2 on the office machine. Pass another live ID with
+# --report-type (e.g. playlist_traffic_source_a2); list them with scripts/probe_reporting.py.
+REPORT_TYPE_ID = "channel_traffic_source_a3"  # _a2 retired; 404 on 2026-09-29
 
 # The four source types Part 2 §1.2 routes on, and the substrings that count
 # as "a similar name" for each. Matched case-insensitively against the values

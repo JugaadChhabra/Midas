@@ -9,7 +9,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 
 ## Status: resume here
 
-*Last updated 2026-10-06. **Phase A evidence complete; conclusion below.***
+*Last updated 2026-10-06. **Phase A CLOSED: exit gate passed.** Next: Phase B, spec Part 3.*
 
 | Task | State |
 |---|---|
@@ -956,6 +956,8 @@ Phase B starts only when all of these hold (spec Part 1, "Phase A exit gate"):
 - [x] A0 is done and recorded: no Midas applies on the channel for 24 hours after the change. *(last apply 2026-09-24 04:00 UTC)*
 - [x] A4–A6 and A8–A10 are merged, tests green, deployed to the office machine, and the frozen jobs are confirmed absent from the running scheduler's log. *(2026-09-29 startup log)*
 - [x] A9 shows fresh health scores, and `GET /health/jobs` reports every job's status. *(2026-10-01)*
-- [ ] A11's doc changes are merged. *(banners, superseded marker and diagram done; **`STATE.md` §9 rewrite pending**)*
+- [x] A11's doc changes are merged. *(2026-10-06: §9 rewritten, `STATE.md` fully regenerated from it, and the superseded specs deleted)*
+
+**Phase A exit gate: PASSED 2026-10-06.** Phase B = spec Part 3.
 - [x] A7 numbers are in the findings doc, and rollout channel #1 is chosen with the reason recorded. *(Marathi, 2026-10-06)*
 - [x] If A1 returns (c) for every routing lever, stop and revisit Part 2 before Phase B. *(not triggered: no lever is (c). The conclusion still proposes Part 2 changes, P1–P7)*

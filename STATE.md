@@ -14,78 +14,91 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (header updated for the Phase A conclusion; §4, §5 updated for the daily `video_sync` job, sync decoupled from autopilot; header + §1 1B updated for A9 + A0 24 h passing on the office machine; header + §3 + §7.1 updated for the office restart: Phase A image live, freeze confirmed, A1 report jobs created; §4, §5, §8 updated for per-item poll errors (fail when a whole category fails, `degraded` when partial) and job ids on `_daily_reconcile`'s inner ERROR lines; §7.1 updated for #24 restart-day kit: A1 traffic-source probe scripts written, not run; §4, §8 updated for #23 A8 finish: metrics_poll/reporting_poll/measurement_eval fail the run, job id on the fan-out ERROR line; §1, §3, §6, §7.3 updated for #22 prompt-text strategy stamp, `app/audits.py` line cites re-pointed; header, §7.3, §7.4 updated for A11 superseded-spec banners; §1, §5 updated for A5 `bgc` code path; §1, §3, §6, §7.3 updated for A6 derived strategy stamp; §4, §5, §7.1, §7.3, §8 for A10 quota gate; §1, §3, §4, §5, §7.1 for A4 writer freeze; §4, §5, §8 for A8 on 2026-09-28) · **Commit:** the Phase A conclusion commit on top of `49c3e96` (a commit can't cite its own SHA) · **Branch:** `main`
-(working tree clean. `scripts/overnight_tickets.sh` is the unattended ticket runner, driven by a playbook: dev tooling, never deployed. The shipped shorts plans in `docs/superpowers/plans/` and the two `docs/agentic-workflow-*.excalidraw` diagrams were deleted, and on 2026-09-29 so were the finished one-off scripts (`export_supabase`, `import_to_local`, `backfill_is_episode`, `reconnect_evidence_loop`), the draft `PHASE_2_TRACK3_PLAYLIST_BUILD.md`, and the never-started `2026-08-24-format-scorers-design.md`. The two standalone shorts-cutter design docs moved to the shorts-cutter repo (`docs/design-history/`). All of it is in git history.)
+**Generated:** 2026-10-06 (full regeneration from §9) · **Commit:** on top of `d942765` · **Branch:** `main`
+(Older design docs are deleted in the same change and live only in git history; nothing below cites them.
+`scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
-**Office deployment (2026-09-29, from `docs/PHASE_A_FINDINGS.md` A0/A1.1).** The office
-machine has run the Phase A image since 2026-09-29 11:54 UTC. The four A4 writers are
-confirmed frozen from the startup log. All 13 channels have `autopilot_enabled = f`
-(title autopilot off since ≈2026-09-23, owner). 11 have `autopilot_shorts_enabled = t`,
-so the autopilot tick still runs, for Shorts only. The office `.env` sets
-`AUTOPILOT_TICK_SECONDS` to 30. There were 1,910 audits in a measurement window on
-2026-09-29 (Marathi 1,198, Gujarati 706, Punjabi 6). Two Reporting API jobs exist on
-`UCr5-YUqBiW7PUmeAtxUWuRg`: `channel_traffic_source_a3` and
-`playlist_traffic_source_a2`. `channel_traffic_source_a2` is retired: `jobs.create`
-returned 404. **A9 passed on 2026-10-01:** all 8 registered jobs `success`, and Punjabi (the only
-`playlist_health_enabled` channel) was scored 2026-10-01 07:00 UTC (39 playlists). **The A0 24 h check
-passed too:** the last apply fleet-wide was 2026-09-24 04:00 UTC. A1.1 and A2 have been inspected
-(`docs/PHASE_A_FINDINGS.md`). Video sync had stopped with the title pause (the last Marathi sync was
-2026-09-24); the `video_sync` job (§4) fixes that, live since the 2026-10-01 restart. **Phase A evidence is
-complete (2026-10-06):** rollout channel #1 is Marathi; all three routing levers are measurable (outcome (a)), but
-today they carry ≈0 traffic; judged title verdicts are 64 wins vs 106 regressions. Conclusion and proposed Part 2
-changes: `docs/PHASE_A_FINDINGS.md` "Phase A conclusion".
+**The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Its
+status line: Part 1 (Phase A) done, exit gate passed 2026-10-06; **Part 3 (Phase B) "ready to build"**; Part 2
+the approved design, amended 2026-10-06 by P1–P7 (spec Part 2 §0.6).
 
-**Data caveat for this generation.** The live database runs on the office machine,
-bound to `127.0.0.1:55432` there (`docker-compose.yml:18-22`), so it can't be reached from the
-machine that generated this file. The rules say leave a field blank when a live count
-isn't available, so every live count below is blank. Where the repo itself records a dated
-measurement (in code comments, docs, or the dev-machine `logs/` that end 2026-08-13), it
-is quoted and labelled with its date and source. §8 ends with the SQL to fill the blanks.
+**Office deployment (from `docs/PHASE_A_FINDINGS.md`).** The office machine has run the Phase A image since
+2026-09-29 11:54 UTC, and was restarted ≈12:46 UTC on 2026-10-01 to pick up the `video_sync` job ("Status"
+table). The four A4 writers are confirmed frozen from the 2026-09-29 startup log (A0 raw evidence). All 13
+channels have `autopilot_enabled = f` (title autopilot off since ≈2026-09-23, owner); 11 have
+`autopilot_shorts_enabled = t`, so the autopilot tick still runs, for Shorts only (A0). The office `.env` sets
+`AUTOPILOT_TICK_SECONDS` to 30 (restart-day step 2, observed 2026-09-29). The last title apply fleet-wide was
+2026-09-24 04:00 UTC (A0, 24 h check PASS 2026-10-01). Two Reporting API jobs exist on Marathi
+`UCr5-YUqBiW7PUmeAtxUWuRg`, created 2026-09-29: `channel_traffic_source_a3` and `playlist_traffic_source_a2`;
+`channel_traffic_source_a2` is retired (404) (A1.1). A9 passed 2026-10-01: all 8 registered jobs `success`,
+Punjabi scored 2026-10-01 07:00 UTC (39 playlists). On 2026-10-06 `/health/jobs` showed `video_sync` **failed**
+for Hindi `UCR9qQMyP86aSt-1VgaMg7UA` (`"HTTPException: 401: token_expired"`; re-consented 2026-10-06) and
+`metrics_poll` **degraded** (A7 raw result 0). A manual sync of all channels ran 2026-10-06: Marathi has 5,804
+videos, synced 2026-10-06 07:48 UTC; Kannada and Telugu have 0 videos in `videos` ("Next session" item 2).
+Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). No Phase B code exists, so nothing of Phase B is
+deployed.
 
-Spec abbreviations: **CIL** = `docs/CONTINUOUS_IMPROVEMENT_LOOP.md`, **PO** =
-`docs/PLAYLIST_OPTIMIZATION.md`, **plan** = `docs/plan.md`. All three now open with a banner marking them
-superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` and listing the parts it keeps.
+**Data caveat for this generation.** The live database runs on the office machine, bound to
+`127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
+this file. Live figures below are quoted from `docs/PHASE_A_FINDINGS.md`, each labelled with its date and
+section; anything not recorded there is blank. §8 ends with the SQL to refresh them.
 
 ---
 
 ## 1. Phase status
 
-| Phase | Theme | Status | Evidence (paths) | Notes |
+Stages are the spec's build order (spec Part 2 §6).
+
+| Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
-| 0 | Sensor foundation | **built** (CTR via a different API than spec) | `app/analytics_client.py`, `app/metrics_poll.py`, `app/reporting_client.py`, `app/reporting_poll.py`, `app/reach.py`, migrations `20260610122433_analytics_authorized.sql`, `20260610134419_metrics_tables.sql`, `20260702174235_phase05_reporting_reach.sql` | CTR does not exist on the on-demand Analytics API. It comes from Reporting API CSVs (`channel_reach_basic_a1`) into `video_reach_daily` (`docs/PHASE_0_GAPS.md` Gap 1). The video sensor polls only in-measurement videos by default (`METRICS_POLL_MEASURED_ONLY=true`). |
-| 1A | Metadata control loop | **partial**: sense and judge built; the act half is inert | `app/measurement.py`, `app/verdicts.py`, `app/audits.py:789` (`revert_audit`), migration `20260702183233_phase1a_loop1_measurement.sql` | Verdicts are written. There is no redo path and no auto-revert: `MAX_REDO` and `AUTO_REVERT_ON_REGRESSION` are declared in `app/config.py` but never read. `OutcomeDecision.REDO_QUEUED` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`). `docs/PHASE_2_TRACK2_LOOP1_REDO.md` is still **DRAFT**. |
-| 1B | Playlist inventory + health | **built** (scorer was crashing 2026-08-06 → 2026-09-23; fixed) | `app/playlists_sync.py`, `app/playlist_health.py`, `app/playlists_router.py:521,552`, migrations `20260618115221_…`, `20260618133036_…` | From `b355f40` (rows refactor) until this commit, `score_channel` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` (seen in `logs/midas.log*`). It now reads through `rows.rows_for_ids`, covered by `tests/test_playlist_health.py`. The office deploy (2026-09-29) refreshed them: `health_computed_at` 2026-10-01 07:00 UTC on the one `playlist_health_enabled` channel (`docs/PHASE_A_FINDINGS.md` A9). Tier-2 (playlist traffic source) is disabled: `TIER2_TRAFFIC_SOURCE_SUPPORTED = False` (`app/metrics_poll.py`, Gap 6 REOPENED). |
-| 2A | Competitor research | **not started** (as spec'd) | none | Something nearby exists. `app/reflection.py` has `derive_niche_queries` and `_sample_competitors`, which call `search.list` × 2 and feed the *prompt reflection* loop, not playlists. No `playlist_competitor_reference_json`. |
-| 2B | Playlist construction | **not started** (as spec'd); a pre-spec similarity builder runs instead | `app/playlist_discovery.py` (weekly, **creates** playlists via `playlists.insert`), `app/playlists.py` (daily reconcile add/remove); both frozen by default behind A4 flags (§4) | No `playlist_interventions` table, no LLM re-rank for session continuation, no ordering or entry-point logic. `join_pass` is commented out in autopilot (`app/autopilot.py:453-455`: "Playlist allocation skipped — workflow under review"). |
-| 2C | Playlist self-eval | **not started** | none | Nothing measures playlists the optimizer created. |
-| 3A | Metadata playbook | **not started** | none | There is no `app/playbook.py` and no `playbook_json`. The only memory-like mechanism is `prompt_versions` reflection (§7.2). |
-| 3B | Playlist playbook | **not started** | none | |
-| 4 | Meta loops | **partial** (stamping only) | `audit_strategies` table + seed row (`20260702183233_…`), `app/audits.py:196-286,428-442` | Every audit is stamped with a derived `strategy_version(prompt_text, prompt_source, prompt_version_id)` = `<STRATEGY_LABEL>-<12-hex sha256>` (§3), hashing the sha256 of the system prompt actually sent plus its source (`override|shorts|generated|default`), and each distinct version gets its own `audit_strategies` row naming that source. There is no `app/eval.py`, no challenger routing, and no `/strategies` endpoints. Per-channel prompt champion/challenger exists in `app/reflection.py`; that is a different design (§7.3). |
+| **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:322-363`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:24-31`, `app/youtube_metadata.py:58-60`. A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:76-102,547-550`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **not started** | none | No `interventions`, `video_traffic_source_daily`, `playlist_traffic_daily` or `decision_log` table; no `traffic_poll` job; no `app/interventions.py` or `app/decide.py`; no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`); `refresh_stats` still wraps only `youtube_for_channel` (`app/sync.py:297-300`). Partial footholds listed in §7.1. |
+| **Slice 1** | Backlinks + no change | **not started** | none | No tick routing, no `agent_enabled`, no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
+| **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
+| **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:64-82`). |
+| **Slice 4** | Playbook | **not started** | none | No `channels.playbook_json`. `app/reflection.py` (the thing Slice 4 retires) is frozen by `REFLECTION_ENABLED=false` (§4). |
+| **Slice 5** | Fleet | **not started** | none | `JobBudget` exists (`app/quota.py:232`) but has no per-channel shares. |
 
-**Channels live.** Per-channel flags are DB columns (`channels.*`). Live values are blank
-because the DB was unreachable (see caveat). The repo does record:
+**What runs today (pre-spec machinery, all built before the spec).** The sensor layer
+(`app/metrics_poll.py`, `app/reporting_poll.py`, `app/reach.py`, `video_reach_daily`), Loop 1 title
+measurement (`app/measurement.py`, `app/verdicts.py`; 21-day CTR windows), playlist inventory and health
+scoring (`app/playlists_sync.py`, `app/playlist_health.py`), daily video sync (`app/main.py:242-266`), the Shorts
+cutter (`app/shorts/*`), and the NAS backup (`app/backup.py`). The spec keeps the sensor layer, the apply path,
+`AuditSuggestion`, quota, `status_vocab`, `reach.certify`, and the playlist write, inventory, health and proposal
+machinery (spec Part 2 §0.5 "Kept").
 
-| Channel | `analytics_authorized` | Measurement | Playlist optimizer | Thumbnails | Since |
-|---|---|---|---|---|---|
-| `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) | (blank) | (blank) | n/a: no such flag | n/a: no such flag | Phase 0 probe channel 2026-06-10 (`20260610134419_metrics_tables.sql` header). In the default reconcile allowlist (`app/config.py:134-139`). |
-| `UC8KjoL0Z9mTHKqB6gFutkJw` (Punjabi) | (blank) | (blank) | n/a | n/a | Reach CSV probe 2026-07-02 (`20260702174235_…` header). Gap 6 bisect (`docs/PHASE_0_GAPS.md`). Reconcile allowlist. |
-| `UCOVKJdzghm2gOnuaGeJTonA` (Gujarati) | (blank) | (blank) | n/a | n/a | Reconcile allowlist only. |
-| `UCc4Tv_DEGDEKrKAt-vyVNmw` (Haryanvi) | (blank) | (blank) | n/a | n/a | Reconcile allowlist. `app/audits.py:390-395` records that 57 English-only audits shipped to "a Haryanvi audience" when `default_language` was missing. The code path for `bgc` exists: `lang_display_name("bgc")` → `"Haryanvi"` (`app/transcripts.py:31` `_LANG_NAMES`), and `youtube_language_code` sends it to YouTube as `hi` (`app/youtube_metadata.py:58-71` `_NON_ISO_639_1 = {"bgc": "hi"}`). `scripts/probes/probe_i18n_languages.py` (live, not run by the suite) checks `bgc`/`hi` against `i18nLanguages.list`. |
+**Channels live** (A7 query 1, `docs/PHASE_A_FINDINGS.md`, 2026-10-06). All 13: `analytics_authorized = t`,
+`autopilot_enabled = f`, `reach_warmup = f`. Warm pool and reach frontier are from the same A7 run.
 
-Flags that actually exist on `channels`: `analytics_authorized`, `measurement_enabled`,
-`reach_warmup`, `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`,
-`sync_shorts`. None of `playlist_optimizer_enabled`, `playbook_enabled`, or any thumbnail flag
-exists (see §2).
+| Channel | id | `default_language` | `measurement_enabled` | `playlist_health_enabled` | `autopilot_shorts_enabled` | Warm videos (≥500 imp, 30 d) | Reach frontier |
+|---|---|---|---|---|---|---|---|
+| Marathi (**rollout #1**) | `UCr5-YUqBiW7PUmeAtxUWuRg` | `mr` | t | f | t | 566 | 2026-10-04 (221 days) |
+| Punjabi | `UC8KjoL0Z9mTHKqB6gFutkJw` | `pa` | t | **t** (only one) | t | 342 | 2026-10-04 (213) |
+| Gujarati | `UCOVKJdzghm2gOnuaGeJTonA` | `gu` | t | f | t | 603 | 2026-10-04 (147) |
+| English | `UCMpj6iUMCMhB0k4L5EcxJwQ` | `en` | t | f | t | 1,008 | 2026-10-04 (148) |
+| Hindi | `UCR9qQMyP86aSt-1VgaMg7UA` | NULL | t | f | t | 1,120 | 2026-09-26 (213; token expired, last synced 2026-09-24) |
+| Bhojpuri | `UC8oC7Yiz0WkH3PKb3GW42XA` | NULL | t | f | t | 471 | 2026-10-04 (183) |
+| Tamil | `UCWb0eKKkX1NE1r_Tu6oKhdQ` | NULL | t | f | t | 290 | 2026-10-04 (143) |
+| Malayalam | `UCX8BttGE4UAFdm1RRIULOPQ` | NULL | t | f | t | 70 | 2026-10-04 (143) |
+| Haryanvi | `UCc4Tv_DEGDEKrKAt-vyVNmw` | `bgc` | f | f | t | no reach data | none |
+| Rajasthani | `UCFO6AQ_KBQDEaQiTi-dBEWQ` | NULL | f | f | t | no reach data | none |
+| 3D Animated Series | `UCqtU4xCSjsSvE53Iy6NUKSg` | `hi` | f | f | t | no reach data | none |
+| Kannada | `UCo4_mZK5aAF7ugv4cTfZlEg` | `kn` | f | f | f | no reach data | none (0 videos) |
+| Telugu | `UCxK1-ftYdFvU4IuUW3POxRA` | NULL | f | f | f | no reach data | none (0 videos) |
 
-Recorded fact (`app/audits.py:311-321`): *"on 2026-08-23 the only channel with autopilot on
-was the one channel with that flag [measurement_enabled] off — 57 applies in a month, every
-one landing on the `not_applicable` default."*
+Six channels have no `default_language`, so `eligibility.can_audit` gates them out of title audits
+(`app/eligibility.py:64-82`) and `audit_video` refuses them with 400 (`app/audits.py:390-402`).
+
+Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `reach_warmup`,
+`playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`, `sync_shorts`. `agent_enabled`
+does not exist (§7.1).
 
 ---
 
 ## 2. Schema — as applied
 
-**Migrations applied** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`, `010_storage_shim.sql` run first):
+**Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
+`010_storage_shim.sql` run first). No migration has been added since `20260904000100`.
 
 ```
 20260505092756_init.sql                          channels, videos, audit_configs, audits
@@ -130,260 +143,236 @@ one landing on the `not_applicable` default."*
 20260904000100_next_audit_candidate_exclude_episodes.sql
 ```
 
-These are the migration files. The rows in the live DB's migration ledger weren't checked (DB unreachable).
+These are the files. The live DB's migration ledger was not checked (unreachable).
 
-**Tables that exist** (the columns are the union across the migrations above):
+**Tables** (columns are the union across the migrations):
 
-- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int default 1, autopilot_shorts_upload_cap int default 2, shorts_cut_mode text default 'highlights', shorts_camera_motion text default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false`.
-  - Of the spec'd columns, only **`analytics_authorized`** exists. `playbook_json`, `playbook_built_at`, `playbook_outcome_count`, `playlist_playbook_json`, `playlist_playbook_built_at`, `playlist_competitor_reference_json`, `playlist_competitor_built_at`, and `playlist_optimizer_enabled` do **not**. The `*_enabled` flags that do exist are listed in §1.
+- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false`.
 - **`videos`**: `id text pk, channel_id → channels on delete cascade, title, description, tags text[], thumbnail_url, category_id, view_count, like_count, comment_count bigint, published_at, last_fetched_at, privacy_status text, thumbnail_optimized_at, playlists_optimized_at timestamptz, duration_seconds int, is_short bool, is_episode bool (nullable; NULL = not episode)`.
-- **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
-  - **All five spec'd Loop-1 columns exist**: `measurement_status`, `measurement_result`, `outcome_decision`, `redo_of_audit_id`, `strategy_version`. `redo_of_audit_id` is never written by code.
-  - Status vocab (`app/status_vocab.py`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`.
-  - Partial index `audits_measurement_inflight_idx` on `('awaiting_window','measuring')`. Also `audits_video_created_idx (video_id, created_at desc)`.
+- **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int default 0, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
+  - Status vocab (`app/status_vocab.py:28-42`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`), and nothing writes `redo_of_audit_id`.
+  - Measurement vocab (`app/status_vocab.py:61-71`): `not_applicable|awaiting_window|measuring|win|neutral|regression`. Reason codes (`app/measurement.py:168-171`): `no_timestamp`, `coverage_lost`, `dormant`, `video_gone`, under key `reason_code` (`app/verdicts.py:47`).
+  - Partial index `audits_measurement_inflight_idx` on `('awaiting_window','measuring')`; `audits_video_created_idx (video_id, created_at desc)`.
 - **`video_metrics`** (`20260610134419`):
   ```sql
   id bigserial pk, video_id text not null → videos on delete cascade, channel_id text not null → channels,
   window_start date not null, window_end date not null,
-  impressions bigint, ctr float,               -- backfilled by reporting_poll, or written as is_pre_change baseline by measurement
+  impressions bigint, ctr float,
   views bigint, est_minutes_watched bigint, avg_view_duration_sec integer, avg_view_pct float,
   is_pre_change boolean default false, fetched_at timestamptz default now(),
   unique (video_id, window_start, window_end)
   ```
-- **`video_reach_daily`** (not in spec; this is the real CTR source): `video_id text not null (no FK), channel_id → channels, date date, impressions bigint not null, ctr double precision not null (fraction 0..1), report_id text, fetched_at, unique(video_id, date)`.
-- **`reporting_reports_ingested`** (not in spec): `report_id text pk, job_id, channel_id, data_date date, row_count int, ingested_at`.
-- **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text not null default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
-  - Roles actually assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `topic_cluster` is "deliberately left to a follow-up". `playlist_discovery` inserts rows **without** setting `origin='optimizer_created'` or `created_by_optimizer_at` (`app/playlist_discovery.py:200-205`), so every discovery-created playlist lands as `origin='inherited'`.
+- **`video_reach_daily`**: `video_id text not null (no FK), channel_id → channels, date date, impressions bigint not null, ctr double precision not null (fraction 0..1), report_id text, fetched_at, unique(video_id, date)`. Source: Reporting API `channel_reach_basic_a1` (`app/reporting_client.py:56`).
+- **`reporting_reports_ingested`**: `report_id text pk, job_id, channel_id, data_date date, row_count int, ingested_at`.
+- **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
+  - Roles assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `playlist_discovery` inserts rows without `origin` or `created_by_optimizer_at` (`app/playlist_discovery.py:198-205`), so discovery-created playlists land as `origin='inherited'`. Nothing writes `playlists.strategy_version`.
 - **`playlist_metrics`**:
   ```sql
   id bigserial pk, playlist_id text not null (no FK), channel_id → channels, window_start date, window_end date,
-  playlist_starts bigint, views_per_playlist_start float, avg_time_in_playlist_sec integer,   -- spec: avg_time_in_playlist_min FLOAT
+  playlist_starts bigint, views_per_playlist_start float, avg_time_in_playlist_sec integer,
   playlist_views bigint, playlist_est_minutes_watched bigint, is_pre_change boolean default false,
   fetched_at, unique (playlist_id, window_start, window_end)
   ```
-- **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Nothing populates it (tier-2 disabled).
-- **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed row: `('2026.07-baseline-v1', 'code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)', 'anthropic/claude-haiku-4.5', 'champion', …)`.
-- **Other tables (not in the three specs):** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `video_embeddings` (`vector(3072)`), `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`.
+- **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Nothing populates it (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`, `app/metrics_poll.py:85`).
+- **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed row `('2026.07-baseline-v1', 'code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)', 'anthropic/claude-haiku-4.5', 'champion', …)`; derived rows are upserted per audit (§6).
+- **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). `model_version` is always `EMBED_MODEL` (`app/embeddings.py:127`).
+- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`.
 
-**Spec'd tables and columns that do NOT exist:**
-- `playlist_interventions` (the whole table)
-- `channels.playbook_json`, `playbook_built_at`, `playbook_outcome_count`
-- `channels.playlist_playbook_json`, `playlist_playbook_built_at`
-- `channels.playlist_competitor_reference_json`, `playlist_competitor_built_at`
-- `channels.playlist_optimizer_enabled`
-- `video_metrics.avg_view_duration_sec FLOAT` (stored as `integer`); `playlist_metrics.avg_time_in_playlist_min FLOAT` (renamed to `_sec integer`)
+None of the spec's Phase B or Slice tables or columns exist; they are listed in §7.1.
 
 ---
 
 ## 3. Config — verbatim
 
-Defaults from `app/config.py`. Values in the local `.env` (dev machine) are noted where they
-override. The office machine's `.env` is hand-carried and was not read.
+Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.env` (not in git). The office
+`.env` is hand-carried and was not read; the only office value on record is `AUTOPILOT_TICK_SECONDS=30`
+(`docs/PHASE_A_FINDINGS.md` restart-day step 2).
 
-| Setting | Actual value (`app/config.py`) | Spec value | Differs? |
+**Settings the spec names** (spec Part 1 A4/A6, Part 2 §8):
+
+| Setting | Code (`app/config.py`) | Spec | Differs? |
 |---|---|---|---|
-| `SCOPES` | `youtube`, `youtube.readonly`, `yt-analytics.readonly` | `youtube` + add `yt-analytics.readonly` | adds `youtube.readonly` |
-| `MEASUREMENT_ENABLED` | not an env setting; per-channel `channels.measurement_enabled` (default false) | per-channel | no |
-| `MEASUREMENT_WINDOW_DAYS` | `int(os.getenv("MEASUREMENT_WINDOW_DAYS") or "21")` | 21 | no |
-| `MIN_IMPRESSIONS` | `or "500"` | 500 | no |
-| `CTR_WIN_THRESHOLD` | `float(… or "0.10")` | +0.10 | no |
-| `CTR_REGRESSION_THRESHOLD` | `float(… or "-0.10")` | -0.10 | no |
-| `MAX_REDO` | `or "2"` | 2 | value same, **never read** |
-| `AUTO_REVERT_ON_REGRESSION` | `os.getenv(…, "false")` | false | value same, **never read** |
-| `PLAYBOOK_ENABLED` / `MIN_OUTCOMES_FOR_PLAYBOOK` / `PLAYBOOK_REFRESH_DELTA` / `PLAYBOOK_MAX_EXEMPLARS` | absent | per-channel / 15 / 10 / 10 | **absent** |
-| `CHALLENGER_TRAFFIC_PCT` / `MIN_OUTCOMES_FOR_PROMOTION` / `PROMOTION_MARGIN` / `EVAL_HELDOUT_SIZE` | absent | 0.20 / 30 / +0.05 / 50 | **absent** |
-| `PLAYLIST_OPTIMIZER_ENABLED` | absent | per-channel | **absent** |
-| `PLAYLIST_MEASUREMENT_WINDOW_DAYS` | `or "35"` | 35 | value same, **never read** (only `app/config.py:166`); health uses `PLAYLIST_HEALTH_AGG_WEEKS` |
-| `MIN_PLAYLIST_STARTS` | `or "50"` | 50 | no |
-| `COMPETITOR_REFRESH_DAYS` / `COMPETITOR_DISCOVERY_QUOTA_BUDGET` / `COMPETITOR_MIN_SUBSCRIBER_MULTIPLE` | absent | 90 / 2000 / 3 | **absent** |
-| `MAX_NEW_PLAYLISTS_PER_WINDOW` | absent; hardcoded `MAX_NEW_PLAYLISTS = 2` per weekly run (`app/playlist_discovery.py:20`) | 3 per window | **differs** |
-| `PLAYLIST_AUTO_DELETE` | absent (no delete path exists) | false | absent |
-| `PLAYLIST_CHALLENGER_PCT` | absent | 0.20 | **absent** |
-| `PLAYLIST_DISCOVERY_ENABLED` | `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
-| `PLAYLIST_RECONCILE_WRITES_ENABLED` | `os.getenv("PLAYLIST_RECONCILE_WRITES_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
-| `PLAYLIST_TUNING_ENABLED` | `os.getenv("PLAYLIST_TUNING_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
-| `REFLECTION_ENABLED` | `os.getenv("REFLECTION_ENABLED", "false").lower() == "true"` | false (`docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` A4) | no |
-| `AUDIT_MODEL` | `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; **local .env: `google/gemini-3.7-flash`** | (not spec'd) | — |
+| `PLAYLIST_DISCOVERY_ENABLED` | `:115` `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | default false (Part 1 A4) | no |
+| `PLAYLIST_RECONCILE_WRITES_ENABLED` | `:116` same form, `"false"` | default false (A4) | no |
+| `PLAYLIST_TUNING_ENABLED` | `:117` same form, `"false"` | default false (A4) | no |
+| `REFLECTION_ENABLED` | `:34` same form, `"false"` | default false (A4) | no |
+| `STRATEGY_LABEL` | `:237` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
+| `MIN_IMPRESSIONS` | `:185` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | `WARM_MIN_IMPRESSIONS` absent |
+| `MEASUREMENT_WINDOW_DAYS` | `:184` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
+| `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** |
+| `AUDIT_MODEL` | `:29` `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; dev `.env`: `google/gemini-3.7-flash` | reasoning model (Part 2 §3.1) | — |
+| `WARM_MIN_IMPRESSIONS` (500), `WARM_WINDOW_DAYS` (28), `WARM_EXPLORE_PCT` (0.10), `HOLDOUT_PCT` (0.20), `BACKLINK_MAX` (3), `BACKLINK_MIN_CANDIDATES` (2), `BACKLINK_EXPERIMENT_WINDOWS` (3), `TRAFFIC_INGEST_CHANNELS` (rollout channel), `SIBLING_MIN_VIEWS` (100), `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `AGENT_MAX_TURNS` (12), `WRITER_MODEL` (= `AUDIT_MODEL`), `DECIDE_BACKEND` (`llm`), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
 
-**Settings in code with no spec home** (verbatim defaults):
+**Every other setting, verbatim defaults** (`app/config.py`; dev `.env` overrides noted):
 ```
-PROMPT_GEN_MODEL = "google/gemini-2.0-flash-001"      # local .env: anthropic/claude-opus-5:online
-REFLECTION_MODEL = "anthropic/claude-sonnet-4-6"      # local .env: anthropic/claude-sonnet-5
-OTEL_ENABLED=false  OTEL_ENDPOINT="http://phoenix:6006/v1/traces"  OTEL_SERVICE_NAME="midas"
-DRY_RUN = false (default!)   YT_DAILY_QUOTA=10000  YT_QUOTA_SAFETY_BUFFER=300  YT_QUOTA_APPLY_RESERVE=1500
-AUTOPILOT_TICK_SECONDS=120 (local .env 100; office .env 30, observed 2026-09-29)  AUTOPILOT_PICKER_USE_RPC=false (local .env true)
-AUTOPILOT_PAUSE_COOLDOWN_MINUTES=60
-SHORTS_MAX_CONCURRENT_JOBS=2  SHORTS_DISPATCH_INTERVAL_SECONDS=5  SHORTS_YT_DOWNLOAD_ENABLED=false
-SHORTS_MAX_SOURCE_SECONDS=300  SHORTS_CACHE_DIR  LOG_DIR  LOG_LEVEL
-YOUTUBE_PROXY_URL  WEBSHARE_PROXY_USERNAME/PASSWORD
-PLAYLIST_HITL=true  PLAYLIST_JOIN_HIGH=0.72  PLAYLIST_JOIN_LOW=0.55  PLAYLIST_LEAVE=0.60  PLAYLIST_MUTATION_CAP=20
-PLAYLIST_SIMS_USE_RPC=false (local .env true)  PLAYLIST_DISCOVERY_USE_RPC=false (local .env true)
-PLAYLIST_RECONCILE_CHANNELS = the four channel ids in §1 ("*" = all)
-PLAYLIST_SYNC_QUOTA_BUDGET=2000  PLAYLIST_FULL_WALK_DAYS=30
-PLAYLIST_HEALTH_AGG_WEEKS=4  PLAYLIST_HEALTH_REMOVE_PCTL=5  PLAYLIST_HEALTH_REVIVE_PCTL=20
-DASHBOARD_USE_RPC=true  MEASUREMENT_COVERAGE_GRACE_DAYS=14  REACH_STALE_AFTER_DAYS=7
-REPORTING_MEASURED_CHANNELS_ONLY=true  METRICS_POLL_MEASURED_ONLY=true
-STRATEGY_LABEL = os.getenv("STRATEGY_LABEL") or "2026.07-baseline"   # prefix of the derived stamp <STRATEGY_LABEL>-<12 hex> over prompt sha256 + source (app/audits.py strategy_version, §6)
-TRANSCRIPT_MAX_CHARS=8000  KEYFRAME_MAX_FRAMES=4  KEYFRAMES_LOCAL_DIR  KEYFRAME_FFMPEG_TIMEOUT=30
-NAS_* (MODE=smb, AUTH_PROTOCOL=ntlm, SOURCE/DESTINATION roots, LOCAL_ROOT)
-DATABASE_URL  BACKUP_ENABLED=true  BACKUP_HOUR=0  BACKUP_WORK_DIR  BACKUP_SLOTS=1 (local .env 2; CLAUDE.md says 2)
-BACKUP_PG_DUMP="pg_dump"  RESTORE_ON_EMPTY=true  RESTORE_PSQL="psql"
+SCOPES = youtube, youtube.readonly, yt-analytics.readonly          (:16-22)
+PROMPT_GEN_MODEL = os.getenv("PROMPT_GEN_MODEL") or "google/gemini-2.0-flash-001"     # dev .env: anthropic/claude-opus-5:online
+REFLECTION_MODEL = os.getenv("REFLECTION_MODEL") or "anthropic/claude-sonnet-4-6"     # dev .env: anthropic/claude-sonnet-5
+OTEL_ENABLED "false"  OTEL_ENDPOINT "http://phoenix:6006/v1/traces"  OTEL_SERVICE_NAME "midas"
+DRY_RUN = os.getenv("DRY_RUN", "false")        # default: writes go to YouTube
+YT_DAILY_QUOTA "10000"  YT_QUOTA_SAFETY_BUFFER "300"  YT_QUOTA_APPLY_RESERVE "1500"
+AUTOPILOT_TICK_SECONDS "120"            # dev .env 100; office .env 30
+AUTOPILOT_PICKER_USE_RPC "false"        # dev .env true
+AUTOPILOT_PAUSE_COOLDOWN_MINUTES "60"
+SHORTS_MAX_CONCURRENT_JOBS "2"  SHORTS_DISPATCH_INTERVAL_SECONDS "5"  SHORTS_YT_DOWNLOAD_ENABLED "false"
+SHORTS_MAX_SOURCE_SECONDS "300"  SHORTS_CACHE_DIR "./shorts_cache"  LOG_DIR "logs"  LOG_LEVEL "INFO"
+YOUTUBE_PROXY_URL ""  WEBSHARE_PROXY_USERNAME ""  WEBSHARE_PROXY_PASSWORD ""
+PLAYLIST_HITL "true"  PLAYLIST_MUTATION_CAP "20"
+PLAYLIST_SIMS_USE_RPC "false"           # dev .env true
+PLAYLIST_DISCOVERY_USE_RPC "false"      # dev .env true
+PLAYLIST_RECONCILE_CHANNELS default "UCr5-YUqBiW7PUmeAtxUWuRg,UC8KjoL0Z9mTHKqB6gFutkJw,UCOVKJdzghm2gOnuaGeJTonA,UCc4Tv_DEGDEKrKAt-vyVNmw"   ("*" = all)  (:145-155)
+PLAYLIST_SYNC_QUOTA_BUDGET "2000"  PLAYLIST_FULL_WALK_DAYS "30"
+MIN_PLAYLIST_STARTS "50"  PLAYLIST_MEASUREMENT_WINDOW_DAYS "35"  PLAYLIST_HEALTH_AGG_WEEKS "4"
+PLAYLIST_HEALTH_REMOVE_PCTL "5"  PLAYLIST_HEALTH_REVIVE_PCTL "20"
+CTR_WIN_THRESHOLD "0.10"  CTR_REGRESSION_THRESHOLD "-0.10"  MAX_REDO "2"  AUTO_REVERT_ON_REGRESSION "false"
+DASHBOARD_USE_RPC "true"  MEASUREMENT_COVERAGE_GRACE_DAYS "14"  REACH_STALE_AFTER_DAYS "7"
+REPORTING_MEASURED_CHANNELS_ONLY "true"  METRICS_POLL_MEASURED_ONLY "true"
+TRANSCRIPT_MAX_CHARS "8000"  KEYFRAME_MAX_FRAMES "4"  KEYFRAMES_LOCAL_DIR "storage/keyframes"  KEYFRAME_FFMPEG_TIMEOUT "30"
+NAS_MODE "smb"  NAS_PORT "445"  NAS_AUTH_PROTOCOL "ntlm"
+NAS_SOURCE_ROOT_PATH "Animations/SHORTS CUTTER/RHYMES"  NAS_DESTINATION_ROOT_PATH "Animations/SHORTS CUTTER/COMPLETED"  NAS_LOCAL_ROOT "./nas_data"
+DATABASE_URL ""  BACKUP_ENABLED "true"  BACKUP_HOUR "0"  BACKUP_WORK_DIR "./backups"
+BACKUP_SLOTS "1"                        # dev .env 2; CLAUDE.md says 2
+BACKUP_PG_DUMP "pg_dump"  RESTORE_ON_EMPTY "true"  RESTORE_PSQL "psql"
 ```
+Never read anywhere but `app/config.py`: `MAX_REDO`, `AUTO_REVERT_ON_REGRESSION`, `PLAYLIST_MEASUREMENT_WINDOW_DAYS`.
+
 Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NEGATIVE_MEDIAN_PCT=-2.0`,
-`_NEGATIVE_LEVER_PCT=-5.0`, `_REFLECT_COOLDOWN_DAYS=7` (`app/reflection.py:47-52`), auto-revert
-`>10pp` and `21 days` (`app/reflection.py:649,659`), `playlist_discovery.MIN_CLUSTER_SIZE=4`,
-`CLUSTER_SIM_THRESHOLD=0.75`, `reach.ROLLOVER_SLOP_DAYS=1`, `analytics_client.ANALYTICS_DATA_LAG_DAYS=2`,
-`metrics_poll.WINDOW_DAYS=7`.
-
-**Settings spec'd but absent from `config.py`:** `PLAYBOOK_ENABLED`, `MIN_OUTCOMES_FOR_PLAYBOOK`,
-`PLAYBOOK_REFRESH_DELTA`, `PLAYBOOK_MAX_EXEMPLARS`, `CHALLENGER_TRAFFIC_PCT`,
-`MIN_OUTCOMES_FOR_PROMOTION`, `PROMOTION_MARGIN`, `EVAL_HELDOUT_SIZE`,
-`PLAYLIST_OPTIMIZER_ENABLED`, `COMPETITOR_REFRESH_DAYS`, `COMPETITOR_DISCOVERY_QUOTA_BUDGET`,
-`COMPETITOR_MIN_SUBSCRIBER_MULTIPLE`, `MAX_NEW_PLAYLISTS_PER_WINDOW`, `PLAYLIST_AUTO_DELETE`,
-`PLAYLIST_CHALLENGER_PCT`.
+`_NEGATIVE_LEVER_PCT=-5.0`, `_REFLECT_COOLDOWN_DAYS=7` (`app/reflection.py:47-52`); auto-revert `21` days and
+`> 10.0` points (`app/reflection.py:649,659`); `playlist_discovery.MIN_CLUSTER_SIZE=4`, `MAX_NEW_PLAYLISTS=2`,
+`CLUSTER_SIM_THRESHOLD=0.75` (`app/playlist_discovery.py:19-21`); `playlists.JUDGE_MODEL="anthropic/claude-haiku-4.5"`
+(`app/playlists.py:28`); `metrics_poll.WINDOW_DAYS=7` (`app/metrics_poll.py:47`);
+`TIER2_TRAFFIC_SOURCE_SUPPORTED=False` (`app/metrics_poll.py:85`); `reach.ROLLOVER_SLOP_DAYS=1` (`app/reach.py:51`);
+`sync.SYNC_STALE_AFTER=timedelta(hours=6)`, `FULL_SYNC_INTERVAL=timedelta(days=3)` (`app/sync.py:471,476`);
+`audits.DECISION_QUESTION_SET_VERSION="none"` (`app/audits.py:199`); `quota.APPLY=(VIDEOS_LIST, VIDEOS_UPDATE)`
+= 51u (`app/quota.py:50-67`); `openrouter.EMBED_MODEL="google/gemini-embedding-2-preview"` (`app/openrouter.py:7`).
 
 ---
 
 ## 4. Scheduled jobs
 
-All registered in `app/main.py` `_register_jobs()`, called from `lifespan()` (`BackgroundScheduler`, `max_instances=1, coalesce=True`).
+All registered in `app/main.py:291` `_register_jobs()`, called from `lifespan()` (`app/main.py:478-489`),
+`BackgroundScheduler`, each `max_instances=1, coalesce=True`.
 
-**Failure semantics.** Per-channel jobs (`playlist_reconcile`, `playlist_discovery`,
-`playlist_tuning`, `reflection`, `playlist_health_score`) fan out through
-`main._run_per_channel` (and so does `video_sync`). Channels stay isolated: each channel's exception is logged at ERROR
-with traceback as `"<label> (job <job_id>) failed for <id>: <err>"` (`job_id` is the APScheduler id,
-passed by each wrapper as `job_id=`, default `"-"`) and the loop continues. Once every channel
-has run, any failure raises one `job_status.JobRunFailed` naming the failed channels, so
-APScheduler records the run as failed (`app/main.py`, `app/job_status.py`). The three jobs outside
-the fan-out raise the same exception. `poll_metrics` and `poll_reporting` collect each channel that
-raised anything other than the expected skips (`AnalyticsNotAuthorizedError`, `TokenExpiredError`)
-as `{channel_id: "<Type>: <message>"}` and raise `JobRunFailed("metrics_poll" | "reporting_poll", …)`
-after the last channel; "no channels" returns normally. Per-item errors *inside* a channel's poll
-are judged by `job_status.item_error_verdict` (`app/job_status.py:50`) per category, as
-`{category: (errored, attempted)}`: videos, playlists and tier-2 for `metrics_poll`
-(`_item_verdict`, `app/metrics_poll.py:351`); new reports for `reporting_poll`. If **every**
-attempted item in a category errored, the channel fails the run as
-`"ItemsFailed: <category>: all <n> failed"`. If only some did, the channel is recorded as partial
-and the poll returns `{"partial_errors": {channel_id: "<category>: <e>/<n> failed; …"}}`
-(`app/metrics_poll.py:421`, `app/reporting_poll.py:331`), which the registry turns into a
-`degraded` run. Nothing attempted is neither. Both are called only by the scheduler. `measurement_eval` registers
-`main._daily_measurement_eval`, which calls `measurement.evaluate_with_failures()` and raises
-`JobRunFailed("measurement_eval", failed)` when any audit errored, keyed by channel id with the
-audits in the message (`"audit <id>: <Type>: <message>; …"`; `unknown_channel` when the video row is
-gone). `eval_measurements()` (what `POST /measurement/evaluate` returns) still returns only the summary,
-whose `errors` is counted from the same per-channel record (`app/measurement.py:376-494`). In
-`_daily_reconcile` a channel fails if either `sync_playlists` or `reconcile_channel` raised;
-reconcile still runs after a failed sync. Its inner ERROR lines also carry the id:
-`"Daily playlist sync (job playlist_reconcile) failed for <id>: <err>"` and
-`"Daily reconcile (job playlist_reconcile) failed for <id>: <err>"`. After all `add_job` calls, `job_status.registry.watch(scheduler)`
-registers every job as `never_run` and listens for `EVENT_JOB_EXECUTED | EVENT_JOB_ERROR`. It
-records per job id `status` (`never_run|success|degraded|failed`), `last_run_at` (the event's
-`scheduled_run_time`), `error`, `failed_channels` (`{channel_id: "<Type>: <message>"}`, taken
-from the `JobRunFailed`), and `partial_errors` (taken from a successful run's return value when it
-is a dict carrying `partial_errors`; non-empty → `degraded`). It logs failures as
-`"JOB FAILED <job_id> at <time>: <error>"` and degraded runs as `"JOB DEGRADED <job_id> at <time>: …"`. The
-registry is in-memory: a restart clears it. It is served at `GET /health/jobs` (§5).
+**Failure semantics.** `_run_per_channel` (`app/main.py:76-102`) runs every channel, logs each failure at ERROR
+with traceback as `"<label> (job <job_id>) failed for <id>: <err>"`, and after the last channel raises one
+`job_status.JobRunFailed` naming the failed channels, so APScheduler records the run as failed.
+`video_sync`, `playlist_reconcile`, `playlist_discovery`, `playlist_tuning`, `reflection` and
+`playlist_health_score` use it. `metrics_poll` and `reporting_poll` collect channels that raised anything but the
+expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll", …)` (`app/metrics_poll.py:418`,
+`app/reporting_poll.py:330`). Per-item errors inside a channel's poll are judged by
+`job_status.item_error_verdict` (`app/job_status.py:50`) per category: all attempted items in a category failed →
+the channel fails as `"ItemsFailed: <category>: all <n> failed"`; some failed → the poll returns
+`{"partial_errors": {…}}` (`app/metrics_poll.py:421`, `app/reporting_poll.py:331`), recorded as `degraded`.
+`measurement_eval` raises `JobRunFailed("measurement_eval", failed)` when any audit errored
+(`app/main.py:269-278`). `job_status.registry.watch(scheduler)` (`app/main.py:489`) registers every job as
+`never_run` and records `status` (`never_run|success|degraded|failed`), `last_run_at`, `error`,
+`failed_channels`, `partial_errors`, logging `"JOB FAILED <job_id> at <time>: <error>"` /
+`"JOB DEGRADED <job_id> at <time>: …"` (`app/job_status.py:96,103`). In memory only; a restart clears it. Served
+at `GET /health/jobs` (`app/main.py:547-550`).
 
-**Freeze flags (A4).** Jobs are added by `main._register_jobs(sched)`, called from `lifespan()`.
-Three writers register only when their flag is true; when it is false startup logs one line,
-`"<job_id> not registered: <FLAG>=false"`, and the job never runs. `playlist_reconcile` always
-registers; with its flag false `_daily_reconcile` runs `sync_playlists` and skips
-`reconcile_channel` (so no `playlistItems.insert/delete` and no new proposals), logging
+**Freeze flags (A4).** With its flag false a writer is not registered and startup logs
+`"<job_id> not registered: <FLAG>=false"`. `playlist_reconcile` always registers; with
+`PLAYLIST_RECONCILE_WRITES_ENABLED=false` it runs `sync_playlists` and skips `reconcile_channel`, logging
 `"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` per channel
-(startup also logs `"playlist_reconcile registered for sync only: add/remove skipped
-(PLAYLIST_RECONCILE_WRITES_ENABLED=false)"`). All four
-flags default to false (§3), so on a default `.env` these writers are frozen.
+(`app/main.py:163-167`) and `"playlist_reconcile registered for sync only: add/remove skipped
+(PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` at startup (`app/main.py:322-324`). All four flags default false (§3);
+the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.md` A0).
 
 | Job id | Trigger | Entry point | Status |
 |---|---|---|---|
-| `autopilot` | interval `AUTOPILOT_TICK_SECONDS` | `app/autopilot.py:tick`: at most one video per tick: quota-dormancy gate → pick channel → shorts action → ledger quota gate → audit → validate → ledger quota gate → apply → re-embed | registered; per-channel gated by `eligibility.can_audit` / `can_cut_shorts`. The ledger gate (`_can_afford_apply`: `quota.can_afford(quota.cost_of(*quota.APPLY))`) runs before the audit and again right before the write; on a no it logs `quota_insufficient`, sets `tick.outcome` to `"quota_insufficient"`, and skips the tick without pausing the channel or setting fleet dormancy |
-| `shorts_dispatch` | interval 5s | `app/shorts/dispatcher.py:dispatch_tick` | registered |
-| `playlist_reconcile` | cron 02:00 server-local | `main._daily_reconcile` → `sync_playlists` (budgeted) + `reconcile_channel` | registered; channel allowlist `PLAYLIST_RECONCILE_CHANNELS`. **Writes to YouTube** (`playlistItems.insert/delete`) or queues proposals when `PLAYLIST_HITL=true`. **Add/remove step frozen by `PLAYLIST_RECONCILE_WRITES_ENABLED`** (sync still runs) |
-| `playlist_discovery` | cron Sun 03:00 local | `main._weekly_discovery` → `app/playlist_discovery.py:discover_playlists` | **frozen by `PLAYLIST_DISCOVERY_ENABLED`** (not registered when false). When on: **all channels** (`Job.EVERY`). **Creates playlists on YouTube** (≤2/run), skipped under DRY_RUN |
-| `playlist_tuning` | cron Mon 03:30 local | `app/playlists.py:tune_thresholds` | **frozen by `PLAYLIST_TUNING_ENABLED`** (not registered when false). When on: all channels. Mutates `settings.PLAYLIST_JOIN_HIGH` **in-process, globally** from one channel's churn |
-| `reflection` | cron Mon 04:00 local | `app/reflection.py:reflect` | **frozen by `REFLECTION_ENABLED`** (not registered when false). When on: all channels |
-| `video_sync` | cron 04:00 UTC | `main._daily_video_sync` → `app/sync.py:routine_sync` per channel | registered, **all channels** (`Job.EVERY`), whatever autopilot is doing. Read-only against YouTube: skips a channel synced within `sync.SYNC_STALE_AFTER` (6 h), otherwise a full pass if `sync.needs_full_sync` (`FULL_SYNC_INTERVAL` = 3 days), else incremental + `refresh_stats`. An expired token is logged and skipped, not a failure. Added 2026-10-01: until then sync ran only inside autopilot's title-audit path (`_resync_if_stale`, after `can_audit`), so the ≈09-23 title pause stopped sync on every channel (last Marathi sync 2026-09-24 03:55 UTC, `docs/PHASE_A_FINDINGS.md` A1.1) |
-| `metrics_poll` | cron 05:00 UTC | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in-measurement |
-| `reporting_poll` | cron 06:00 UTC | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` |
-| `playlist_health_score` | cron 07:00 UTC | `main._daily_playlist_health_score` → `score_channel` | registered; `playlist_health_enabled` channels (NameError crash fixed in this commit; §1 1B) |
-| `measurement_eval` | cron 08:00 UTC | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered; fails the run if any audit errored |
-| `nightly_db_backup` | cron `BACKUP_HOUR` local | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
-| `pot_provider_refresh` | interval 2h | `main._refresh_pot_provider` | **gated**: only if env `BGUTIL_POT_HTTP_BASE_URL` set |
+| `autopilot` | interval `AUTOPILOT_TICK_SECONDS` (`app/main.py:297`) | `app/autopilot.py:496` `tick`: quota-dormancy gate → pick channel (`Job.AUTOPILOT` = `can_audit or can_cut_shorts`) → Shorts action → `can_audit` gate → `_resync_if_stale` → daily cap → pick video → ledger quota gate → unsafe-model gate → `audit_video` → validate → ledger quota gate → apply → re-embed | registered. With `autopilot_enabled = f` everywhere it runs only the Shorts action. `_can_afford_apply` (`app/autopilot.py:480-493`) logs `quota_insufficient` and skips without pausing |
+| `shorts_dispatch` | interval `SHORTS_DISPATCH_INTERVAL_SECONDS` (5 s) (`:305`) | `app/shorts/dispatcher.py:dispatch_tick` | registered |
+| `playlist_reconcile` | cron 02:00 server-local (`:313`) | `main._daily_reconcile` (`:130`) → `sync_playlists` (shared `JobBudget("playlist_sync", PLAYLIST_SYNC_QUOTA_BUDGET, reserve=YT_QUOTA_APPLY_RESERVE)`) + `reconcile_channel` | registered; channels = `PLAYLIST_RECONCILE_CHANNELS` allowlist (`app/eligibility.py:174-184`). **Add/remove frozen** by `PLAYLIST_RECONCILE_WRITES_ENABLED`; inventory sync and the budgeted membership walk still run |
+| `playlist_discovery` | cron Sun 03:00 local (`:326`) | `main._weekly_discovery` → `app/playlist_discovery.py:152` `discover_playlists` | **frozen** (`PLAYLIST_DISCOVERY_ENABLED`). When on: every channel; **creates playlists** (≤2/run), skipped under `DRY_RUN` |
+| `reflection` | cron Mon 04:00 local (`:339`) | `app/reflection.py:702` `reflect` | **frozen** (`REFLECTION_ENABLED`). When on: every channel |
+| `playlist_tuning` | cron Mon 03:30 local (`:352`) | `app/playlists.py:463` `tune_thresholds` | **frozen** (`PLAYLIST_TUNING_ENABLED`). When on: writes `settings.PLAYLIST_JOIN_HIGH` process-globally (`app/playlists.py:518`) |
+| `video_sync` | cron 04:00 UTC (`:364`) | `main._daily_video_sync` (`:242`) → `app/sync.py:502` `routine_sync` per channel | registered, every channel. Read-only: `"fresh"` if synced within 6 h, else a full pass if the last full sync is >3 days old, else incremental + `refresh_stats`. Catches `TokenExpiredError` as an expected skip (`app/main.py:259-263`), but `sync_channel`/`refresh_stats` convert token failures to `HTTPException(401, "token_expired")` (`app/sync.py:96-97,119-120,299-300`), so an expired token **fails** the run (observed 2026-10-06 for Hindi, §8) |
+| `metrics_poll` | cron 05:00 UTC (`:377`) | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in a measurement window (`METRICS_POLL_MEASURED_ONLY`) |
+| `reporting_poll` | cron 06:00 UTC (`:398`) | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` (`app/eligibility.py:152-166`). Ingests only `channel_reach_basic_a1` |
+| `playlist_health_score` | cron 07:00 UTC (`:417`) | `main._daily_playlist_health_score` (`:219`) → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
+| `measurement_eval` | cron 08:00 UTC (`:436`) | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
+| `nightly_db_backup` | cron `BACKUP_HOUR` local (`:451`) | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
+| `pot_provider_refresh` | interval 2 h (`:467`) | `main._refresh_pot_provider` | only if env `BGUTIL_POT_HTTP_BASE_URL` is set; absent on the office machine (`docs/PHASE_A_FINDINGS.md` A0 step 12) |
 
-Startup side effects: `provision.ensure_database_populated()` (restore from NAS if DB empty),
-`shorts.runner.reap_stuck_jobs()`.
+Startup side effects: `provision.ensure_database_populated()` (restore from NAS if the DB is empty,
+`app/main.py:484`), `shorts.runner.reap_stuck_jobs()` (`:490-494`), `tracing.configure()`.
 
-Not registered (spec'd): competitor refresh, playlist measurement eval, playbook rebuild (weekly), strategy eval.
+Spec'd jobs not registered: `traffic_poll` (Part 3 B1), `niche_reference_refresh` (Part 2 §3.6), weekly lever
+measurement and playbook rebuild (Part 2 §1.1, §5).
 
 ---
 
 ## 5. Surface area
 
-**Routes** (`app/main.py` mounts every router below):
+**Routes** (`app/main.py:513-526` mounts every router):
 
-- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}` from the in-process registry (`app/job_status.py`, §4); `GET /autoshorts` (`shorts/autoshorts.py`); `/static/*`.
-- **Auth/channels** (`app/auth.py`, prefix `/auth` for login/callback): `GET /auth/login` starts OAuth. `GET /auth/callback` stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause. `GET /auth/channels` lists channels with flags. `PATCH /auth/channels/{id}` sets flags; enabling `measurement_enabled` returns 409 unless `reach.certify` passes.
+- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
+- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels`, `PATCH /auth/channels/{id}` (enabling `measurement_enabled` returns 409 unless `reach.certify` passes, `app/auth.py:166-174`).
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
-- **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate` (LLM builds prompt from notes), `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply`, `POST /channels/{id}/audits/apply-pending`, `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk`, `POST /audits/{id}/revert` (409 `"quota_insufficient: revert needs 50 units, <n> remaining today"` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false; no YouTube call), `GET /quota-cost-preview`.
-- **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes` (counts + `pending_review` regressions + 25 recent), `POST /measurement/evaluate` (manual run).
-- **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`. Promote and trigger return 409 `"Reflection is frozen: REFLECTION_ENABLED=false"` while the flag is false (`_require_reflection_enabled`).
-- **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate` (runs the scorer), `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile` (409 `"Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false"` while that flag is false), `GET /channels/{id}/playlists/proposals`, `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube; not frozen, these are human decisions).
+- **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply`, `POST /channels/{id}/audits/apply-pending`, `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk`, `POST /audits/{id}/revert` (409 `"quota_insufficient: revert needs <n> units, <m> remaining today"` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:830-837`), `GET /quota-cost-preview`.
+- **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes`, `POST /measurement/evaluate`.
+- **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`. Promote and trigger return 409 `"Reflection is frozen: REFLECTION_ENABLED=false"` while frozen (`_require_reflection_enabled`, `app/reflection.py:792`).
+- **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate`, `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile` (409 `"Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false"`, `:263-267`), `GET /channels/{id}/playlists/proposals`, `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube; not frozen).
 - **Autopilot** (`app/autopilot.py`): `POST /channels/{id}/autopilot/resume`, `GET /channels/{id}/autopilot/log`.
-- **Ops** : `GET /dashboard` (`app/dashboard.py`, 30s cache, RPC-first), `GET /quota` (`app/quota.py`), `GET /channels/{id}/performance`, `/performance/summary`, `/performance.csv` (`app/performance.py`).
-- **Shorts** (`app/shorts/routes.py`, prefix `/shorts`): `POST|GET /shorts/jobs`, `POST /shorts/cut`, `GET /shorts/languages`, `POST /shorts/jobs/clear-failed`, `GET /shorts/jobs/{id}`, `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`, `POST /videos/{id}/short`, `POST /autoshorts/jobs`.
+- **Ops:** `GET /dashboard` (`app/dashboard.py:94`), `GET /quota` (`app/quota.py:295`), `GET /channels/{id}/performance`, `/performance/summary`, `/performance.csv` (`app/performance.py`).
+- **Shorts** (`app/shorts/routes.py`, prefix `/shorts`): `POST|GET /shorts/jobs`, `POST /shorts/cut`, `GET /shorts/languages`, `POST /shorts/jobs/clear-failed`, `GET /shorts/jobs/{id}`, `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`, `POST /videos/{id}/short`; `POST /autoshorts/jobs` (`app/shorts/autoshorts.py:49`).
 
 **Modules** (`app/`):
 
 | File | Owns |
 |---|---|
-| `main.py` | FastAPI app, logging, scheduler registration, per-channel job fan-out |
-| `job_status.py` | `JobRunFailed` + in-memory job-status registry (APScheduler listener) behind `/health/jobs` |
+| `main.py` | FastAPI app, logging, job registration, per-channel fan-out, `video_sync` wrapper |
+| `job_status.py` | `JobRunFailed`, `item_error_verdict`, in-memory registry behind `/health/jobs` |
 | `config.py` | `Settings` (env) |
-| `db.py` | thread-local PostgREST (`supabase-py`) client with retry. The app talks to Postgres **only** via PostgREST on `SUPABASE_URL` |
+| `db.py` | thread-local PostgREST (`supabase-py`) client with retry. The app talks to Postgres only via PostgREST on `SUPABASE_URL` |
 | `rows.py` | the 1000-row cap: `all_rows`, `all_rows_parallel`, `rows_for_ids` |
-| `channel_audits.py` | `audits_for_channel` join-scoped query. `fetch_all` is a **deprecated alias** of `rows.all_rows` |
-| `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, …) |
-| `status_vocab.py` | persisted status strings (do not rename) |
+| `channel_audits.py` | `audits_for_channel`; `fetch_all` is a deprecated alias of `rows.all_rows` |
+| `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`) |
+| `status_vocab.py` | persisted status strings and their mirrors (guarded by `tests/test_status_vocab.py`) |
 | `auth.py` | OAuth + channel flag PATCH |
-| `sync.py` | channel/video sync, `is_short` probe (`/shorts/` URL), stats refresh, and the routine-sync rules (`is_stale`, `needs_full_sync`, `routine_sync`) shared by the `video_sync` job and autopilot's `_resync_if_stale` |
-| `content_type.py` | `is_episode` classifier (title/tag pattern) |
-| `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, `audit_video`, apply, revert, bulk ops |
-| `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, validation, `house_format_spec()` |
+| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`is_stale`, `needs_full_sync`, `routine_sync`) |
+| `content_type.py` | `is_episode` classifier |
+| `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops |
+| `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, `rejection()`, `house_format_spec()` |
 | `apply_outcome.py` | typed `ApplyError`/`ApplyOutcome` |
-| `youtube_metadata.py` | `videos.update` payload (category, language code, madeForKids). Content language → YouTube code via `_NON_ISO_639_1 = {"bgc": "hi"}` (`app/youtube_metadata.py:58-60`); unmapped codes pass through |
+| `youtube_metadata.py` | `videos.update` payload; `_NON_ISO_639_1 = {"bgc": "hi"}` (`:58-60`) |
 | `youtube_client.py` | Data API wrappers + quota charging |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
-| `reporting_client.py` / `reporting_poll.py` | Reporting API job + CSV ingestion → `video_reach_daily`, `video_metrics` backfill |
+| `reporting_client.py` / `reporting_poll.py` | Reporting API reach job (`ensure_reach_job`, reach type only) + CSV ingestion → `video_reach_daily`, `video_metrics` backfill |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` |
-| `metrics_poll.py` | Loop 0 daily poll |
-| `measurement.py` / `verdicts.py` | Loop 1 verdicts; the `measurement_result` shape and rollups |
-| `performance.py` | per-channel performance table/CSV (view deltas descriptive; verdicts from Loop 1) |
-| `dashboard.py` | `/dashboard`. `_aggregate_legacy` is kept as fallback/oracle (duplicate of the SQL RPC by design) |
-| `reflection.py` | weekly per-channel prompt rewrite (shadow/live/auto) + auto-revert |
-| `transcripts.py` | transcript fetch + `video_transcripts` cache. Falls back to Data API captions (`captions.list` 50u + `captions.download` 200u) when IP-blocked |
-| `embeddings.py` / `openrouter.py` | embeddings (`google/gemini-embedding-2-preview`) and `chat_json`/`chat_text` via OpenRouter |
-| `playlists.py` | similarity assignment engine: `join_pass` (**unused**, call commented out), `reconcile_channel`, `tune_thresholds` |
+| `metrics_poll.py` | daily Analytics poll |
+| `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
+| `performance.py` | per-channel performance table/CSV |
+| `dashboard.py` | `/dashboard`; `_aggregate_legacy` kept as fallback/oracle for the RPC |
+| `reflection.py` | weekly per-channel prompt rewrite (shadow/live/auto) + auto-revert; `derive_niche_queries`, `_sample_competitors` (frozen) |
+| `transcripts.py` | transcript fetch + `video_transcripts` cache; `lang_display_name` (`_LANG_NAMES`, `:24-31`); Data API captions fallback |
+| `embeddings.py` / `openrouter.py` | embeddings and `chat_json`/`chat_text` via OpenRouter |
+| `playlists.py` | similarity engine: `join_pass` (call commented out, `app/autopilot.py:438-439`), `reconcile_channel`, `tune_thresholds`, `_llm_judge` |
 | `playlists_sync.py` | playlist inventory sync, budgeted membership walk, role heuristic |
-| `playlist_discovery.py` | weekly orphan clustering → **creates** playlists |
-| `playlist_health.py` | Phase 1B scorer (recommend-only; tier-1 score) |
+| `playlist_discovery.py` | weekly orphan clustering → creates playlists (frozen) |
+| `playlist_health.py` | playlist health scorer (recommend-only) |
 | `playlists_router.py` | playlist HTTP endpoints |
 | `autopilot.py` | the tick loop |
 | `tracing.py` | OpenTelemetry → Phoenix spans (off by default) |
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
-| `keyframes.py` | **dead**: not imported anywhere ("reserved for thumbnail generation (Block D)", `app/audits.py:23-25`) |
-| `shorts/*` | shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` is gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard (`index.html`, `channel.html`, `autoshorts.html`, `theme.css`, …) |
+| `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
+| `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
+| `static/*` | vanilla-JS dashboard |
+
+**Scripts:** `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`),
+`scripts/probe_reporting.py`, `scripts/probe_analytics.py`, `scripts/verify_reach_coverage.py`,
+`scripts/apply_migrations.py`, backfills, and the Phase A live probes in `scripts/probes/`
+(`probe_traffic_source_report.py` defaults to `channel_traffic_source_a3` since 2026-10-06,
+`scripts/probes/probe_traffic_source_report.py:61`).
 
 ---
 
 ## 6. Prompts and LLM calls
 
-- **Audit prompt**: `app/audits.py:44` `DEFAULT_PROMPT`. It is used when the channel has no
-  `audit_configs.generated_prompt`. Precedence is `prompt_override` > `shorts_prompt` (if is_short) >
-  `generated_prompt` > `DEFAULT_PROMPT` (`app/audits.py:368-375`). **The per-channel
-  `generated_prompt` (DB, possibly rewritten by reflection) is what actually runs on any channel that has one.
-  Its current text lives in the DB, not the repo.** Verbatim `DEFAULT_PROMPT`:
+- **Audit prompt**: `app/audits.py:44` `DEFAULT_PROMPT`, used when the channel has no `audit_configs.generated_prompt`.
+  Precedence: `prompt_override` > `shorts_prompt` (if `is_short`) > `generated_prompt` > `DEFAULT_PROMPT`
+  (`app/audits.py:368-375`). Per-channel `generated_prompt` text lives in the DB, not the repo. Verbatim:
 
   ```
   You are a YouTube SEO expert for nursery-rhyme / kids 3D-rhyme channels.
@@ -410,8 +399,8 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
   - Be specific and actionable, not generic. Preserve the channel's voice.
   ```
 
-  `house_format_spec()` (`app/audit_suggestion.py:49`), rendered with `TITLE_MAX=100`,
-  `HASHTAG_LIMIT=15`, `TAGS_TOTAL_CHARS_MAX=500`, `TAGS_MAX=30`:
+  `house_format_spec()` (`app/audit_suggestion.py:49-94`), rendered with `TITLE_MAX=100`, `HASHTAG_LIMIT=15`,
+  `TAGS_TOTAL_CHARS_MAX=500`, `TAGS_MAX=30` (`app/audit_suggestion.py:36-40`):
 
   ```
   === REQUIRED TITLE FORMAT ===
@@ -437,20 +426,24 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
   Return strictly a JSON object with this exact shape:
   {
     "comparisons": {
-      "title":       { "current_problems": "...", "suggested": "your rewrite in the required title format", "why_better": "1-2 sentences" },
-      "description": { "current_problems": "...", "suggested": "the FULL multi-line description following all 5 blocks above", "why_better": "..." },
-      "tags":        { "current_problems": "...", "suggested": ["tag1","tag2",...], "why_better": "..." }
+      "title":       { "current_problems": "what's weak about the current title", "suggested": "your rewrite in the required title format", "why_better": "1-2 sentences" },
+      "description": { "current_problems": "what the current description is missing or doing badly", "suggested": "the FULL multi-line description following all 5 blocks above", "why_better": "..." },
+      "tags":        { "current_problems": "gaps or noise in the current tag list", "suggested": ["tag1","tag2",...], "why_better": "..." }
     },
     "issues":   [ { "field":"title|description|tags", "severity":"high|medium|low", "problem":"...", "fix":"..." } ],
     "reasoning": "short overall summary"
   }
   ```
-  (The `current_problems` strings are elided above; they are the full sentences in the source.)
 
 - **`_build_user_block()`**, verbatim (`app/audits.py:144-193`):
 
   ```python
-  def _build_user_block(video, transcript, transcript_lang, channel_language) -> str:
+  def _build_user_block(
+      video: dict,
+      transcript: str | None,
+      transcript_lang: str | None,
+      channel_language: str,
+  ) -> str:
       """Audit user message: language rule first, then metadata, transcript."""
       channel_lang_name = lang_display_name(channel_language)
       transcript_lang_name = lang_display_name(transcript_lang)
@@ -473,10 +466,19 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
           f"Likes: {video.get('like_count', 0)}",
           f"Published: {video.get('published_at') or ''}",
       ]
+
       if transcript:
-          lines += ["", f"VIDEO TRANSCRIPT (detected language: {transcript_lang_name} — content signal only):", transcript]
+          lines += [
+              "",
+              f"VIDEO TRANSCRIPT (detected language: {transcript_lang_name} — content signal only):",
+              transcript,
+          ]
       else:
-          lines += ["", "VIDEO TRANSCRIPT: not available — base content judgment on metadata only."]
+          lines += [
+              "",
+              "VIDEO TRANSCRIPT: not available — base content judgment on metadata only.",
+          ]
+
       lines += [
           "",
           "The current title and description may be placeholder or poorly written.",
@@ -487,158 +489,282 @@ Not registered (spec'd): competitor refresh, playlist measurement eval, playbook
       ]
       return "\n".join(lines)
   ```
-  - The `default_language` rule is injected as the **first block of the user message**. `DEFAULT_PROMPT`'s LANGUAGE section restates it in the system prompt. A missing `default_language` makes `audit_video` refuse with 400 instead of defaulting (`app/audits.py:390-402`), and `eligibility.can_audit` gates such channels out of autopilot.
-  - Transcript language is labelled "content signal only" in both prompts. It is also persisted to `audits.transcript_lang` and used nowhere else in output selection. **Confirmed.**
-  - The per-channel `generated_prompt` or a reflection candidate replaces the *system* prompt, but `_build_user_block` still carries the language rule, so the rule survives prompt rewrites.
-  - The user block never includes CTR, impressions, or traffic-source data. It includes lifetime `view_count` and `like_count`.
+  - A missing `default_language` makes `audit_video` refuse with 400 (`app/audits.py:390-402`); `eligibility.can_audit` gates such channels out of autopilot (`app/eligibility.py:64-82`).
+  - The user block carries no CTR, impressions or traffic-source data; it carries lifetime `view_count` and `like_count`.
 
-- **Known SEO-prompt issues:**
-  - *Hashtag cap*: **fixed and enforced in code.** `AuditSuggestion._make` calls `cap_description_hashtags` (`app/audit_suggestion.py:147`) on every construction path, including apply-time overrides (`from_fields`, `app/audits.py:507-516`). It keeps the first 15 (`HASHTAG_LIMIT = 15`, line 40), and its regex is Indic-safe (`#[^\s#]+`). The prompt asks for **exactly** 15, but code only enforces ≤15. `rejection()` does not check for too few.
-  - *Search vs browse/suggested*: **not fixed.** The house format optimises for search: "keyword-rich sentences" (`audit_suggestion.py:74`), "high-value search phrases" (`:76`), a tag list maximised to ~500 chars (`:82`). Reflection's guidance query asks "what drives search discovery and click-through rate" (`app/reflection.py:349`). No prompt mentions browse, suggested, or packaging-for-CTR.
-  - *No "no change recommended" option*: **not fixed for audits.** `DEFAULT_PROMPT` says "rewrite it to a FIXED house format", and the JSON schema has no no-op field. Every audit produces a rewrite, and autopilot applies any valid one. (Reflection *does* have a no-change output: an empty `candidate_prompt`, `app/reflection.py:497-520`.)
-  - *Tag weighting*: **not addressed.** The only instruction is "A list mixing broad and specific tags … Maximize coverage up to ~500 characters". There is no ordering or weighting guidance. Validation checks only count ≤30 and total chars ≤500 (`rejection()`).
+- **Audit output handling.** `AuditSuggestion._make` applies `cap_description_hashtags` (keeps the first 15,
+  Indic-safe regex `#[^\s#]+`) on every construction path (`app/audit_suggestion.py:46,97-118,143-147`).
+  `rejection()` checks title 1–100 chars, description 1–5000 chars, tags a list of strings, ≤30 tags, ≤500 total
+  tag chars (`app/audit_suggestion.py:211-230`); it does not check for fewer than 15 hashtags. There is no
+  "no change" output: every audit is a rewrite.
 
-- **Other LLM calls** (all via OpenRouter, `app/openrouter.py`):
+- **Strategy stamp** (`app/audits.py:199-286`). `strategy_version(prompt_text, prompt_source, prompt_version_id=None)`
+  returns `f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}"`, the hash being the first 12 hex of sha256 over
+  `json.dumps(inputs, sort_keys=True, separators=(",", ":"))`. `inputs` = `label`, `prompt_source`
+  (`override|shorts|generated|default`; anything else raises `ValueError`), `prompt_sha256` (of the system prompt
+  actually sent), `audit_model` (`settings.AUDIT_MODEL`), `decision_question_set_version` (`"none"`),
+  `prompt_version_id`, plus `writer_model` only if a `WRITER_MODEL` setting exists (it doesn't).
+  `_stamp_strategy` upserts `{version, prompt_template, model: settings.AUDIT_MODEL, config: inputs, status:
+  "champion", notes: "auto-registered by _stamp_strategy (derived from config)"}` with `ignore_duplicates=True`,
+  once per version per process. `prompt_template` is one of `"audit_video prompt_override (caller-supplied, e.g.
+  reflection shadow candidate)"`, `"audit_configs.shorts_prompt (per-channel)"`, `"audit_configs.generated_prompt
+  (per-channel)"`, `"code:app/audits.py DEFAULT_PROMPT"` (`app/audits.py:216-221`).
 
-  | Call | Model | Path | Prompt location |
+- **Other LLM calls** (all via OpenRouter, `app/openrouter.py`; `chat_json`/`chat_text` default to
+  `settings.AUDIT_MODEL`, `app/openrouter.py:93,175`):
+
+  | Call | Model | Path | Prompt |
   |---|---|---|---|
-  | Audit | `settings.AUDIT_MODEL` (chat_json default) | `audit_video` → `chat_json(user, system=audit_prompt)` | `app/audits.py:44,144` + DB `audit_configs` |
-  | Prompt elaboration | `settings.PROMPT_GEN_MODEL` | `POST /audit-config/elaborate` | `app/audits.py:107-125` |
-  | Niche queries | hardcoded `anthropic/claude-haiku-4.5` | reflection | `app/reflection.py:264-272` |
-  | Platform guidance | hardcoded `perplexity/sonar` (`chat_text`, no JSON mode) | reflection | `app/reflection.py:346-352` |
-  | Reflection candidate prompt | `settings.REFLECTION_MODEL` | reflection | `app/reflection.py:465-507` |
-  | Playlist membership judge | hardcoded `JUDGE_MODEL = "anthropic/claude-haiku-4.5"` | reconcile (and dead `join_pass`) | `app/playlists.py:188-224` |
-  | Playlist title/description proposal | hardcoded `anthropic/claude-haiku-4.5` | weekly discovery | `app/playlist_discovery.py:124-149` |
-  | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | embed on apply, bootstrap | `app/openrouter.py:7` |
-  | Playbook distillation, thumbnail generation or validation, session re-ranking, competitor fit filter | **do not exist** | — | — |
+  | Audit | `settings.AUDIT_MODEL` | `audit_video` → `chat_json(user, system=audit_prompt)` (`app/audits.py:416`) | above + DB `audit_configs` |
+  | Prompt elaboration | `settings.PROMPT_GEN_MODEL` | `POST /audit-config/elaborate` | `app/audits.py:107-125` (renders `house_format_spec()`) |
+  | Niche queries | hardcoded `anthropic/claude-haiku-4.5` | reflection (frozen) | `app/reflection.py:264-272`, below |
+  | Platform guidance | hardcoded `perplexity/sonar` via `chat_text` | reflection (frozen) | `app/reflection.py:346-352`, below |
+  | Reflection candidate prompt | `settings.REFLECTION_MODEL` | reflection (frozen) | `app/reflection.py:465-507` |
+  | Playlist membership judge | `JUDGE_MODEL = "anthropic/claude-haiku-4.5"` | `reconcile_channel` (frozen) and dead `join_pass` | `app/playlists.py:206-213`, below |
+  | Playlist title/description proposal | `JUDGE_MODEL` | `discover_playlists` (frozen) | `app/playlist_discovery.py:137-142`, below |
+  | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | `embed_video` after apply; `bootstrap_embeddings` | input: title + `"\n\n"` + transcript[:6000] (`app/embeddings.py:112-114`); bootstrap passes `use_transcript=False`, so title only (`app/embeddings.py:176`) |
 
-  Playlist proposals ignore `default_language`: the proposal prompt (`playlist_discovery.py:136-141`) carries no language rule.
+  Verbatim short prompts:
+  ```
+  # niche queries (app/reflection.py:264-269)
+  This YouTube channel's most-used tags: {top_tags}
+  Sample video titles: {titles[:10]}
 
-- **Models in use vs defaults.** Code defaults are `AUDIT_MODEL=anthropic/claude-haiku-4.5`, `PROMPT_GEN_MODEL=google/gemini-2.0-flash-001`, `REFLECTION_MODEL=anthropic/claude-sonnet-4-6`. The dev-machine `.env` sets `google/gemini-3.7-flash`, `anthropic/claude-opus-5:online`, and `anthropic/claude-sonnet-5`. **The office machine's `.env` was not read.** The strategy stamp now records the model actually in use. `app/audits.py` `strategy_version(prompt_text, prompt_source, prompt_version_id=None) -> (version, inputs)` returns `f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}"`, where `_strategy_hash` is the first 12 hex chars of sha256 over `json.dumps(inputs, sort_keys=True, separators=(",", ":"))` and `inputs` = `label`, `prompt_source` (one of `PROMPT_SOURCE_OVERRIDE = "override"`, `PROMPT_SOURCE_SHORTS = "shorts"`, `PROMPT_SOURCE_GENERATED = "generated"`, `PROMPT_SOURCE_DEFAULT = "default"`; anything else raises `ValueError`), `prompt_sha256` (sha256 of the system prompt text actually passed to `chat_json`; the text itself is never stored), `audit_model` (`settings.AUDIT_MODEL`), `decision_question_set_version` (placeholder `DECISION_QUESTION_SET_VERSION = "none"`), `prompt_version_id` (the audit's own), plus `writer_model` only if a `WRITER_MODEL` setting exists (it doesn't yet). `audit_video` picks `(audit_prompt, prompt_source)` in its precedence order (§6 above) and calls `_stamp_strategy(audit_prompt, prompt_source, prompt_version_id)` right before the insert: it upserts `{version, prompt_template, model: settings.AUDIT_MODEL, config: inputs, status: "champion", notes}`, where `prompt_template` names the source (`_PROMPT_SOURCE_TEMPLATES`: `"audit_video prompt_override (caller-supplied, e.g. reflection shadow candidate)"`, `"audit_configs.shorts_prompt (per-channel)"`, `"audit_configs.generated_prompt (per-channel)"`, `"code:app/audits.py DEFAULT_PROMPT"`), with `ignore_duplicates=True`, once per version per process (`_strategy_rows_ensured`). So an `AUDIT_MODEL` swap yields a new version and a new row. The `2026.07-baseline-v1` seed row (model `anthropic/claude-haiku-4.5`) is left in place for history; nothing stamps it any more. A change to the prompt text, its source, or the model gives a new version and a new row (§7.3 #6).
+  Produce 2-3 YouTube search queries that would find similar channels and videos. Be specific to the actual content niche, not the broad category. Return JSON: {"queries": ["query1", "query2"]}
+
+  # platform guidance (app/reflection.py:346-350)
+  What are the current best practices for YouTube metadata optimisation (titles, descriptions, tags) for {niche_description} channels in 2025? Focus on what drives search discovery and click-through rate. Be specific and practical.
+
+  # membership judge (app/playlists.py:206-213)
+  Playlist: "{playlist["title"]}"
+  Playlist description: "{playlist.get("description") or ""}"
+  Sample members:
+  {members_str}
+
+  Candidate video: "{video["title"]}"
+
+  Does this video thematically belong in this playlist? Answer JSON: {"belong": true/false, "reason": "one sentence"}
+
+  # playlist proposal (app/playlist_discovery.py:137-142)
+  These YouTube videos form a thematic cluster:
+  {titles_str}
+
+  Propose a concise, descriptive YouTube playlist title and a one-sentence description that captures what they have in common. Answer JSON: {"title": "...", "description": "..."}
+  ```
+  The judge and proposal prompts carry no `default_language` rule.
+
+- **Models in use.** Code defaults: `AUDIT_MODEL=anthropic/claude-haiku-4.5`, `PROMPT_GEN_MODEL=google/gemini-2.0-flash-001`,
+  `REFLECTION_MODEL=anthropic/claude-sonnet-4-6`. Dev `.env`: `google/gemini-3.7-flash`,
+  `anthropic/claude-opus-5:online`, `anthropic/claude-sonnet-5`. Office `.env`: blank (not read).
 
 ---
 
 ## 7. Delta vs the specs
 
+Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2" is the design as amended by
+§0.6 (P1–P7); "Part 3" is Phase B, the Part marked ready to build.
+
 ### 7.1 Spec'd but not built
 
-**Phase 0**
-- CIL §0.2 `videoThumbnailImpressions*` via `reports.query`: impossible on the live API (Gap 1). Replaced by the Reporting API (see 7.3).
-- CIL §0.4 "for each video currently under measurement": built. The v0 "every public video" wide net is now off by default.
-- PO §Sensor traffic-source=PLAYLIST member breakdown: the code is built but disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED=False`). The table exists but stays empty. The Reporting-API replacement probe is in progress (Gap 6). `channel_traffic_source_a2` is retired (404 on 2026-09-29). Jobs for `channel_traffic_source_a3` and `playlist_traffic_source_a2` were created on the probe channel on 2026-09-29 with `scripts/create_reporting_job.py --report-type <id>`, and no report has been inspected yet; `scripts/probes/probe_traffic_source_report.py` / `scripts/probes/probe_traffic_source_analytics.py` read it; commands and answer slots are in `docs/PHASE_A_FINDINGS.md`.
-- Phase 0 exit gate ("≥1 week trustworthy CTR on one channel"): `PHASE_0_GAPS.md` Gap 1 still reads "CLOSING … exit gate pending". The live gate state is unverified here.
+**Phase B (Part 3)**
+- **B1 traffic-source ingestion.** Not built: no `video_traffic_source_daily` / `playlist_traffic_daily`
+  tables, no `traffic_poll` job (06:30 UTC), no code→name table, no restatement replace, no
+  `TRAFFIC_INGEST_CHANNELS`. *Partial footholds:* the two Marathi jobs exist on YouTube
+  (`docs/PHASE_A_FINDINGS.md` A1.1); `scripts/create_reporting_job.py` takes `--report-type`; but
+  `ensure_reach_job` is not generalised to a report type (it matches only `REACH_REPORT_TYPE_ID`,
+  `app/reporting_client.py:153-178`), and `reporting_poll` has no traffic path. The reach ingester already
+  does what B1's restatement rule asks, for reach: a reissued report for an ingested day wins in both directions
+  (upsert, then delete rows the correction no longer lists, `app/reporting_poll.py:84-96`).
+- **B2 `interventions` + holdout.** Not built: no table, no `app/interventions.py` (`assign_arm`, `record`,
+  `active_for`), no `HOLDOUT_PCT`, no `declined|holdout|insufficient_data|planned|judged|cancelled` in
+  `app/status_vocab.py`.
+- **B3 human-edit ledger.** Not built: `sync_channel` overwrites descriptions without diffing links
+  (`app/sync.py:80+`); the membership walk does not record human adds. *Constraint on the build:* the membership
+  walk runs only inside `playlist_reconcile`, i.e. for the four allowlisted channels (`app/config.py:145-155`),
+  and the full sync B3 relies on runs every 3 days (`app/sync.py:476`).
+- **B4 warm filter.** Not built. The picker is newest-first with no impressions filter
+  (`supabase/migrations/20260904000100_next_audit_candidate_exclude_episodes.sql:37`
+  `order by v.published_at desc, v.id`) and excludes in-window audits rather than active interventions
+  (`:35-36`). No `WARM_*` settings.
+- **B5 `app/decide.py` + `decision_log`.** Not built. `DECISION_QUESTION_SET_VERSION = "none"` is the placeholder
+  B5 replaces (`app/audits.py:199`). No `DECIDE_BACKEND`.
+- **B6 scoped re-embed.** Not built. One `model_version` (= `EMBED_MODEL`) holds vectors from two input recipes
+  (title + transcript vs title only, §6), neither the spec's title + description + tags. Thresholds are still
+  process-global (`app/playlists.py:518`).
+- **B7 missing `default_language`.** Code half not built: no `bho`/`raj` in `_LANG_NAMES`
+  (`app/transcripts.py:24-31`) or `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Data half: six channels
+  NULL on 2026-10-06 (§1).
+- **B8 `refresh-stats` 401.** Not built: `refresh_stats` wraps only `youtube_for_channel` (`app/sync.py:297-300`),
+  and `_daily_video_sync` only skips `TokenExpiredError`, which `sync_channel`/`refresh_stats` never let escape
+  (§4). The spec's second half ("make the routine sync treat it as the expected skip") is the bit that
+  failed `video_sync` on 2026-10-06.
+- **B9/B10.** Nothing to deploy; this file is B10's only output so far.
+- **B2's persistence of the A8 registry** ("Persisting it is Phase B work", Part 1 A8): not built; registry is
+  in-memory (`app/job_status.py`).
 
-**Phase 1A**
-- CIL §1.5 auto-revert on regression: not built. `AUTO_REVERT_ON_REGRESSION` is never read. Manual revert exists (`app/audits.py` `revert_audit`).
-- CIL §1.6 redo: not built. There is no `POST /audits/{id}/redo`, no failure-context injection, and nothing reads `MAX_REDO`. Nothing writes `redo_of_audit_id` or `outcome_decision='redo_queued'`. `docs/PHASE_2_TRACK2_LOOP1_REDO.md` is still **DRAFT**.
-- CIL §1.7 "include `redo_queued` audits as work items": not built. The "exclude awaiting_window/measuring" half is built, in both the SQL and in-app pickers.
-- CIL §1.4 v2 two-proportion z-test: not built (v1 relative threshold only).
-- CIL §1.2 warm-video targeting: see 7.3. Dormancy is detected only *after* the window, not at selection.
-- CIL §1.7 "per-channel flag … one channel first": the flag exists. Whether rollout followed that cadence can't be verified from the repo.
+**Slice 1 (Part 2 §1–§2, §3.4, §6.1)**
+- Tick routing on `agent_enabled` (§6.1): not built; no `channels.agent_enabled`.
+- Rules triage, `no_change` as a `declined` intervention (§2.2): not built.
+- Backlink candidate pipeline, fleet siblings (P2, `SIBLING_MIN_VIEWS`), Jev next-watch scoring (§2.3): not built.
+- Code checks for links (§2.4): not built. Partially present: `DESCRIPTION_MAX = 5000`, the 15-hashtag cap and
+  `rejection()` (`app/audit_suggestion.py`).
+- Canonical backlink block renderer (§3.4) and description-only apply (§2.5): not built. `build_update_payload`
+  always takes title, description, tags (`app/youtube_metadata.py`).
+- Weekly lever measurement with holdout (§1.3), the P1 stop rule (`BACKLINK_EXPERIMENT_WINDOWS`), the §1.7
+  `insufficient_data` extension: not built.
+- `reach_warmup` on human-run channels (§1.4): not done; all 13 have `reach_warmup = f` (A7, 2026-10-06).
 
-**Phase 1B**
-- The health scorer raised `NameError` from 2026-08-06 until this commit, so recommendations on the live DB haven't been refreshed since then. Fixed now; takes effect after deploy.
-- The score uses tier-1 only (`avg_time_in_playlist_sec × views_per_playlist_start`). Tier-2 "playlist-source views to members" is not collected.
-- The `topic_cluster` role is not classified.
-- Nothing reads `PLAYLIST_MEASUREMENT_WINDOW_DAYS`. Health aggregates `PLAYLIST_HEALTH_AGG_WEEKS=4` (28 days), not 35.
+**Slice 2 (Part 2 §4)**
+- The P3 curated-playlist test: not built. Jev fit check replacing `playlists._llm_judge`: not built.
+- Short → video links recommend-only to the team (P4): no code path.
+- Per-channel auto-apply flip for playlist adds: not built (`PLAYLIST_HITL` is one global setting,
+  `app/config.py:109`).
 
-**Phase 2A: competitor research.** Nothing is built: no niche characterisation for playlists, no `search.list`→`channels.list` subscriber filter, no LLM fit/language filter, no harvesting of competitors' `playlists.list`, no distillation, no `playlist_competitor_reference_json`, no `COMPETITOR_*` config, no scheduled job, no sub-budget, no endpoints.
+**Slice 3 (Part 2 §3)**
+- `app/agent/loop.py`, `openrouter.chat_tools`, `AGENT_MAX_TURNS`, tools (`get_traffic_mix`, `get_search_terms`,
+  `get_niche_reference`, `get_channel_playbook`, `submit_change`, `decline`): none exist.
+- `WRITER_MODEL` and the writer bake-off (§3.3): not built (the stamp reads it via `getattr`, `app/audits.py:247`).
+- Title objective aimed at browse/suggested CTR (P5): not built; the house format optimises for search
+  ("keyword-rich sentences", "high-value search phrases", `app/audit_suggestion.py:74-76`).
+- Niche reference (§3.6): no `app/niche_reference.py`, no `niche_reference_refresh` job, no `channels.niche_reference_*`
+  columns. `derive_niche_queries` and `_sample_competitors` still live in the frozen `app/reflection.py:239-339`.
 
-**Phase 2B: construction + intervention lifecycle.** Not built: no `playlist_interventions` table, no intervention stamping or pre-change baselines, no LLM session-continuation re-rank, no ordering or entry-point logic, no `default_language`-ruled playlist metadata, no `PLAYLIST_OPTIMIZER_ENABLED` flag, no `MAX_NEW_PLAYLISTS_PER_WINDOW`. Also missing: `POST /channels/{id}/playlists/build`, `/playlist-competitor-reference`, `/playlist-playbook`, `/playlist-interventions/{id}/measurement`, and `/playlist-interventions/{id}/confirm-delete`. (A similarity-only builder runs anyway; see 7.2.)
+**Slice 4 (Part 2 §5)**: no `channels.playbook_json`, no distiller, no weekly rebuild; `reflection.py` not retired.
 
-**Phase 2C: playlist self-eval.** Nothing is built.
-
-**Phase 3A: metadata playbook.** No `app/playbook.py`, no `playbook_*` columns, no distiller prompt, no lazy rebuild, no cold-start floor, no "WHAT WORKS ON THIS CHANNEL" block in `_build_user_block`, no exemplars, no endpoints, no `PLAYBOOK_*` config.
-
-**Phase 3B: playlist playbook.** Nothing is built.
-
-**Phase 4: meta loops.**
-- `audit_strategies` exists and audits are stamped. Nothing else is built: no challenger routing by id hash, no offline eval harness (`app/eval.py`), no different-family judge, no backtest, no promotion rule, no `/strategies*` endpoints, no `CHALLENGER_*`/`PROMOTION_*`/`EVAL_*` config.
-- Playlists: `playlists.strategy_version` exists but is never written.
-
-**Cross-cutting (plan §Cross-cutting)**
-- "`default_language` survives everything": holds for audits and reflection (via `_build_user_block` + `house_format_spec`). **Violated** for playlist proposal titles and descriptions (`playlist_discovery._propose_playlist`) and the membership judge.
-- "auto-delete default off": vacuously true, because no delete path exists. But `reconcile_channel` **removes** videos from playlists (LLM-confirmed, not human) when `PLAYLIST_HITL=false` and `PLAYLIST_RECONCILE_WRITES_ENABLED=true` (default false, §4).
+**Slice 5 (Part 2 §6)**: no per-channel quota shares in `JobBudget`.
 
 ### 7.2 Built but not spec'd
 
-| Item | Where | Deliberate or drift |
+| Item | Where | Note |
 |---|---|---|
-| Reporting API reach pipeline (`video_reach_daily`, `reporting_reports_ingested`, `reach.py`, `certify`, `reach_warmup`) | `app/reporting_*.py`, `app/reach.py`, migrations `20260702174235`, `20260730000000` | **Deliberate**: the spec is stale. Recorded in `PHASE_0_GAPS.md` Gap 1 and `PHASE_2_TRACK1_METADATA_UNLOCK.md` (SHIPPED). |
-| Per-channel prompt reflection loop: weekly LLM rewrite of `generated_prompt`, `prompt_versions` shadow/live/auto, shadow audits on 10 recent videos, auto-revert on cohort median | `app/reflection.py`, `prompt_versions` | **Pre-dates the specs** (migration 20260519). It has since been rewired to read Loop 1 verdicts. It occupies the design space of both Loop 2 (memory) and Loop 3 (strategy A/B) without being either. The specs don't mention it. `PHASE_2_TRACK4_MEMORY_META.md` (DRAFT) acknowledges it. |
-| Similarity playlist engine: daily reconcile add/remove, `playlist_proposals` HITL queue, weekly `tune_thresholds`, weekly orphan-cluster **playlist creation** | `app/playlists.py`, `app/playlist_discovery.py` | Pre-dates the specs. PO says it should be "demoted to candidate generation" but it **still acts on YouTube** unmeasured. Drift. |
-| Competitor sampling via `search.list` (200u per reflection) | `app/reflection.py:301-339` | Not in CIL. Uncapped by any competitor sub-budget. |
-| Perplexity "platform guidance" web search injected into prompt rewrites | `app/reflection.py:344-355` | Not spec'd. Unmeasured external input into the prompt. |
-| House-format contract as code (`AuditSuggestion`, quarantine on invalid) | `app/audit_suggestion.py` | Deliberate hardening. |
-| Episode exclusion (`is_episode`) | `app/content_type.py`, migrations 20260904* | Deliberate (the SEO flow is for rhymes only). |
-| Transcript cache + captions-API fallback (250u per video when IP-blocked) | `app/transcripts.py`, `video_transcripts` | Deliberate. The quota exposure isn't spec'd. |
-| Shorts cutter (NAS source, parallel worker queue, autopilot shorts, upload) | `app/shorts/*`, 7 migrations | A separate product line with no home in the three docs. Specs live in `docs/superpowers/`. |
-| Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Deliberate infra (plan.md is silent). |
-| Egress RPCs (`dashboard_summary`, `next_audit_candidate`, `playlist_video_sims`, `discover_orphan_clusters`) with in-app parity fallbacks | migrations 202607*, `app/dashboard.py`, `app/autopilot.py` | Deliberate (Supabase free-tier era). The duplicate Python paths are kept as oracles. |
-| OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Deliberate. |
-| Quota `JobBudget` + apply reserve | `app/quota.py`, `YT_QUOTA_APPLY_RESERVE` | Deliberate (reconcile starved applies on 2026-08-03/04, per migration `20260812000000` header). |
-| Dead code: `app/keyframes.py`; `audits.keyframes_extracted`, `video_keyframes`, `videos.thumbnail_optimized_at`/`playlists_optimized_at`, `shorts_jobs.wayinvideo_project_id`; statuses `approved`/`rejected`; `playlists.join_pass` | various | Drift / reserved. |
+| Title measurement loop (21-day CTR verdicts, `awaiting_window` stamping on apply) | `app/measurement.py`, `app/verdicts.py`, migration `20260702183233` | Kept only indirectly ("Title … CTR vs a comparable window … Built", Part 2 §1.2). Its windows are not the spec's weekly cadence (7.3) |
+| Prompt reflection loop (weekly `generated_prompt` rewrite, `prompt_versions` shadow/live/auto, shadow audits, auto-revert on cohort median) | `app/reflection.py`, `prompt_versions` | **Frozen** (`REFLECTION_ENABLED`). Spec scraps it as the memory (Part 2 §0.5 item 3) and retires it in Slice 4 (§5) |
+| Similarity playlist engine: daily add/remove, `tune_thresholds`, `join_pass` | `app/playlists.py` | Add/remove and tuning **frozen**; `join_pass` call commented out (`app/autopilot.py:438-439`) |
+| Weekly orphan-cluster playlist **creation** | `app/playlist_discovery.py` | **Frozen** (`PLAYLIST_DISCOVERY_ENABLED`). Spec: "New-playlist creation … stay human-confirmed" (Part 2 §4) |
+| Competitor sampling via `search.list` (100u each) and Perplexity guidance | `app/reflection.py:301-352` | Frozen with reflection. Spec moves the competitor half to Slice 3's niche reference |
+| `video_traffic_source_playlist` table + tier-2 poller | `20260618133036_…`, `app/metrics_poll.py:85,228` | Disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`); never populated. The spec's `playlist_traffic_daily` replaces it in name and shape |
+| Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py`, `docs/PHASE_1B_PLAN.md` | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
+| `video_sync` daily job | `app/main.py:242-266,364-375` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
+| Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
+| Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
+| OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
+| Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:92-106` | Supabase free-tier era |
+| Transcript cache + captions-API fallback (250u per video) | `app/transcripts.py`, `video_transcripts` | Quota exposure unspecified |
+| Episode exclusion | `app/content_type.py`, migrations `20260904*` | Matches Part 2 §2.1 "not an episode" |
+| `/dashboard`, `/performance*`, `/autoshorts` UIs | `app/dashboard.py`, `app/performance.py`, `app/static/*` | |
+| Dead code: `app/keyframes.py`, `video_keyframes`, `audits.keyframes_extracted`, `videos.thumbnail_optimized_at`/`playlists_optimized_at`, statuses `approved`/`rejected`, `outcome_decision='redo_queued'`, `redo_of_audit_id`, `MAX_REDO`, `AUTO_REVERT_ON_REGRESSION`, `PLAYLIST_MEASUREMENT_WINDOW_DAYS`, `playlists.strategy_version` | various | Pre-spec reservations nothing writes or reads |
 
-### 7.3 Built differently from spec
+### 7.3 Built differently from the spec
 
-1. **CTR source.** Spec: the Analytics API `reports.query`. Built: Reporting API daily CSVs aggregated over arbitrary windows (`reach.aggregate`, impression-weighted CTR). **The code is correct; the spec is stale.**
-2. **Measurement windows.** Spec: a post window of `MEASUREMENT_WINDOW_DAYS` vs "N days before". Built: symmetric pre/post windows from `reach.window_for(applied)`. Each side excludes the apply day ±`ROLLOVER_SLOP_DAYS=1` (because of the LA-vs-UTC day rollover). **Code is correct.**
-3. **Coverage failure → `not_applicable`, not `neutral`.** Spec §1.3 says insufficient data → neutral. Built: *post*-window impressions under the floor → `neutral` (matches spec), but lost reach coverage → `not_applicable` with `reason_code='coverage_lost'`, and the grace period runs in *ingested* time (`measurement.py:204-243`). **Code is correct.** It is a deliberate change, documented in the `measurement.py` docstring.
-4. **Where dormancy is enforced.** Spec §1.2: at apply ("If the video had ~no impressions pre-change → not_applicable"), keeping dormant videos out of the loop. Built: the apply path stamps `awaiting_window` unconditionally on measurement-enabled channels. Dormancy is only discovered by `measurement_eval` **after** the post window closes. The picker selects **newest-published first** with no impressions filter (`next_audit_candidate`, `20260904000100…sql`: `order by v.published_at desc`). So dormant videos are audited and applied (and each spends ~50 Data API units), then block re-audit for ≥3 weeks. **Neither side is fully right.** The spec's intent (target warm videos) is unmet. This is the targeting problem.
-5. **Loop 2 / Loop 3.** Spec: a per-channel playbook injected into the user block (data), plus fleet-level `audit_strategies` champion/challenger (machinery). Built: `reflection.py` rewrites the per-channel **system prompt** (so it mutates the strategy, not data). Candidates are tested by shadow audits that are never applied or measured. Promotion is manual or `auto` mode, not measured win-rate. Auto-revert compares cohort median CTR deltas per `prompt_version_id`. **The spec is the intended target.** `docs/superpowers/specs/2026-09-22-discoverability-agent-spec.md` (status line now "superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`") proposed yet another direction, itself now superseded by that 09-23 spec; see 7.4.
-6. **Strategy attribution.** Spec: stamp every audit with the strategy (prompt template + model + logic). Built (A6): a derived stamp, `<STRATEGY_LABEL>-<short hash>` over the sha256 of the system prompt text actually sent and its source (`override|shorts|generated|default`), the audit's `prompt_version_id` when present, `AUDIT_MODEL`, `WRITER_MODEL` if present, and a placeholder decision question-set version (`app/audits.py` `strategy_version`, §6). Each distinct version gets an `audit_strategies` row with the real `model` and `config` = the hashed inputs. The spec says "derive at startup", and names "`DEFAULT_PROMPT` text hash" as the prompt identity; built instead: the prompt is only known at audit time, so the stamp is derived per audit, and it hashes whichever prompt ran (#22), so shorts, override and unversioned `generated_prompt` audits no longer stamp the same as a `DEFAULT_PROMPT` audit. Every other input is fixed for the process. Audits stamped before A6 still carry `2026.07-baseline-v1`.
-7. **Playlist construction.** Spec: embeddings for recall → LLM session re-rank → ordering → language-ruled metadata, measured as interventions. Built: centroid cosine ≥0.72 add, Haiku-confirmed removal <0.60, orphan clusters ≥4 at 0.75 → new playlist with a Haiku title. No ordering, no measurement, no provenance stamp (`origin` stays `inherited`). **The spec is correct.**
-8. **Playlist health cadence and window.** Spec: `PLAYLIST_MEASUREMENT_WINDOW_DAYS=35` gate. Built: a 4-week aggregate plus per-channel percentile bands (remove ≤5th, revive ≤20th), a design from `PHASE_1B_PLAN.md`. Deliberate; the plan doc is the record.
-9. **Apply cost.** `quota.APPLY = (VIDEOS_LIST, VIDEOS_UPDATE)` = 51u (`app/quota.py`), but `apply_audit_internal` no longer fetches stats (`app/audits.py:537-543`). The preview, `apply-pending` and autopilot (`_can_afford_apply`) gates overestimate by 1u per apply. Minor drift; left as-is (errs on the safe side).
-10. **Metric storage units.** `avg_time_in_playlist_sec integer` (spec: `_min FLOAT`) and `avg_view_duration_sec integer` (spec: FLOAT). The live API returns integer seconds (Gap 3). **Code is correct.**
+1. **Strategy stamp timing (Part 1 A6, Part 2 §8).** Spec: derive at startup from the `DEFAULT_PROMPT` hash and the
+   per-channel prompt-version id. Built: derived per audit, hashing the prompt text actually sent and its source
+   (`app/audits.py:224-253`), so shorts/override/generated audits stamp differently. Audits before A6 still carry
+   `2026.07-baseline-v1`.
+2. **Measurement cadence (Part 2 §1.1, §1.7).** Spec: weekly windows, extended once to 14 days. Built: symmetric
+   21-day pre/post windows (`MEASUREMENT_WINDOW_DAYS`, `app/reach.py:59-81`) plus `ROLLOVER_SLOP_DAYS=1`, judged
+   on CTR only.
+3. **Dormancy (Part 2 §2.1).** Spec: keep dormant videos out at selection. Built: dormancy is found only after the
+   window (`REASON_DORMANT`, `app/measurement.py:280`); the picker is newest-first (7.1 B4). A7 (2026-10-06):
+   4,254 applies landed on dormant videos.
+4. **Embedding input (Part 3 B6).** Spec: one recipe (title + description + tags) for every video. Built: two
+   recipes under one `model_version` (§6), so `model_version` does not identify the input.
+5. **Playlist thresholds (Part 2 §4, B6).** Spec: per channel. Built: process-global, and `tune_thresholds`
+   overwrites the global from one channel (`app/playlists.py:518`), frozen.
+6. **Discovery provenance.** Created playlists are stored as `origin='inherited'` (`app/playlist_discovery.py:200-205`),
+   so a human-edit ledger (B3) could not tell Midas-created playlists from human ones by `origin`.
+7. **Reporting job helper (Part 3 B1).** Spec: generalise `ensure_reach_job` to a report type. Built: reach-only;
+   the traffic jobs were created by hand with `scripts/create_reporting_job.py`, and
+   `scripts/probes/probe_traffic_source_report.py:61` defaults to `channel_traffic_source_a3` (changed 2026-10-06; `_a2` is retired).
+8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats (`app/audits.py:535-543`):
+   the gates overestimate by 1u. Spec Part 1 A10 says note it only.
+9. **Token failures in `video_sync`.** `_daily_video_sync` treats `TokenExpiredError` as a skip
+    (`app/main.py:259-263`; `routine_sync`'s docstring says it raises that, `app/sync.py:505`), but the sync
+    functions raise `HTTPException(401)` instead, so the expected skip fails the run (2026-10-06, Hindi).
 
-### 7.4 Contradictions between the specs
+### 7.4 Contradictions within the spec
 
-- **Build-order independence.** plan says 1A and 1B are "independent" and "build whichever channel is re-consented first". CIL and PO agree. The code followed this.
-- **Playlist measurement window.** PO uses 35 days + `MIN_PLAYLIST_STARTS` for *interventions*. plan §1B reuses `MIN_PLAYLIST_STARTS` for *inventory health* but gives no window. The code resolved this with its own 4-week window (`PHASE_1B_PLAN.md`).
-- **`MAX_NEW_PLAYLISTS_PER_WINDOW`.** PO sets it to 3 per channel with an undefined "window". The code uses a hardcoded 2 per weekly run, from the pre-spec discovery engine rather than either doc.
-- **The competitor reference and the prompt loop.** PO's competitor research is a *playlist* input (requirement 2). CIL has no competitor input to audits at all. The code's only competitor research feeds the *metadata prompt* (reflection), which contradicts both specs' separation of measured from inferred inputs.
-- **CIL §1.4 vs §1.3 on insufficient data.** §1.3 says "insufficient impressions even after the window → neutral". §1.4's table implies all non-win/non-regression is neutral. Neither covers lost ingestion. The code split this into post-floor→neutral and coverage-lost→not_applicable.
-- **The newer direction supersedes all three docs on scope and clock.** All three, and the 09-22 spec below, are now superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` (their banners and status line say so). `docs/superpowers/specs/2026-09-22-discoverability-agent-spec.md` (status line: "superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` (2026-09-23); kept for history") replaces the 21-day/months-to-playbook clock with a weekly leading-indicator loop. It scopes an agent across three levers: metadata, description backlinks, and playlist placement via `playlistItems.insert`, behind a new `channels.agent_enabled`. It also moves playlists from "second action type measured at 5 weeks" to a per-video placement lever. **None of it is built** (no `agent_enabled` column, no LangGraph dependency in `requirements*.txt`). It conflicts with plan's phase ordering (Phases 3–4 would be superseded, not sequenced). The code today follows plan/CIL/PO through Phase 1. The 09-22 spec's §0.5 records two dissents it left unresolved: revert LangGraph → hand-rolled loop, and cut the paid `search_competitors` tool from v1 (that doc keeps both, per an explicit user override). The 09-23 spec resolves both the other way under "Resolved dissents (decided 2026-09-23)": item 6 "**LangGraph: out.**" and item 7 "**`search_competitors`: out of v1.**" (Part 2 §0.5).
+- **`agent_enabled` has no Phase B task.** Part 2 §7 is headed "Data model (Phase B)" and lists
+  `channels.agent_enabled`, and §2.1's eligibility requires it, but Part 3 has no task that adds it and B4's warm
+  filter omits it. Same heading also lists the Slice 3 `niche_reference_*` columns.
+- **Re-embed scope.** Part 2 §4: "Embed one consistent input for every video". Part 3 B6: the rollout channel and
+  its siblings only. Part 3 says Part 2 "is corrected in the same change"; it wasn't.
+- **Sibling detection vs ingestion scope.** P2 / Part 2 §2.3 define a sibling by suggested traffic "to, or …
+  from" the source channel over 28 days of `video_traffic_source_daily`. B1 ingests only
+  `TRAFFIC_INGEST_CHANNELS` (default: Marathi), so traffic from Marathi into other channels is never ingested, and
+  "either direction" (§8 `SIBLING_MIN_VIEWS`) can't be measured until widening.
+- **Playbook storage.** Part 2 §5 puts it in `channels.playbook_json`; Part 2 §7 (data model) doesn't list it.
+- **Warm window definition.** §8 `WARM_WINDOW_DAYS` = 28 "ingested data-days", and A7's query is labelled
+  "28 ingested days", but the query uses `date > current_date - 30` (calendar days). B4's acceptance compares
+  against that query's 566.
+- **Intervention status vs measurement status.** Part 2 §7 gives `interventions` both `status` and
+  `measurement_status`; B2's lifecycle statuses (`planned`, `applied`, `measuring`, `judged`, `cancelled`) put
+  measurement state into `status` too, reusing strings already in `AuditStatus` and `MeasurementStatus`.
+- **What counts as a Midas edit in B3.** B3 skips "every apply" in Phase B, yet Phase B allows no applies. The
+  manual paths that still write to YouTube (`POST /audits/{id}/apply`, `/apply-pending`,
+  `/playlists/proposals/decide`) are human-triggered through Midas: B3 doesn't say whether they are `human` or
+  `midas`.
+- **"Active intervention" exclusion.** Part 2 §1.6 limits *Midas* interventions to one per video; §2.1 and B4
+  exclude videos with "an active intervention" of any origin, which would let human edits block Midas picks.
+- **`get_search_terms`.** A3 answered yes (Part 2 §11.1), but §6's Slice 3 row doesn't list the tool and §7 has
+  no storage for terms.
+- **`WARM_MIN_IMPRESSIONS`** says "Revisit after Phase A live numbers" (§8); Phase A is done and it wasn't revisited.
+- **Document framing.** "This file has two parts" (How to use) while it has three; "Ground truth used:
+  `STATE.md` @ `bddd373`" predates Phase A.
 
 ---
 
 ## 8. Operational reality
 
-The live DB was unreachable (see caveat), so live counts are blank. Figures below come from the repo and are labelled with their source.
+The live DB is unreachable from here. Every figure is from `docs/PHASE_A_FINDINGS.md`, labelled.
 
-- **Outcome volume**
-  - Live win / neutral / regression / awaiting_window / measuring / not_applicable counts: blank. Run the SQL below.
-  - Recorded 2026-08-23 (`app/reflection.py:32-34`): *"171 verdicts … 147 neutral / 21 win / 3 regression, a win rate of 12.3%."*
-  - Recorded in `app/measurement.py:162-165,359-361`: an investigation found *"381 dormant, of which 184 published inside their own pre-window"*, and dormant was *"381 of 381"* of the `not_applicable` verdicts on the measure path. This is the targeting ratio (7.3 #4).
-  - Recorded 2026-08-23 (`app/audits.py:315-319`): 57 applies in a month on the one autopilot channel. None were measured, because `measurement_enabled` was off there.
-  - Dev-machine logs (`logs/midas.log.2`, 2026-07-14 → 07-28): `measurement_eval: {'evaluated': 557, 'errors': 0, 'awaiting_window': 557}`, unchanged across that span.
-  - Reflection: *"five candidate prompts, none promoted"* from 2026-05 onward (`app/reflection.py:35-37`).
-- **Sensor health**
-  - **CTR arrives only via Reporting API CSVs**, 1–6 days late (`app/config.py:193-194`, 2026-07-02 probe).
-  - The metric-name probe **failed** as spec'd: `videoThumbnailImpressions*` return 400 on `reports.query` (Gap 1). Retention and playlist metrics pass. Types are integer seconds (Gap 3).
-  - The **`isCurated` probe returned 400**: the deprecation is final, and the filter is not used (Gap 2).
-  - Tier-2 playlist traffic-source returns **400 "The query is not supported."** (Gap 6, 2026-07-02).
-  - Current reach frontier and staleness per channel: blank. `measurement_eval` logs `reach_stalled_channels` when a channel is more than `REACH_STALE_AFTER_DAYS=7` behind.
-  - Open: Gap 10 (~12.5% transient DNS failures on first poll) and Gap 5 (no FK on `playlist_metrics.playlist_id`).
-- **Quota**
-  - Typical daily Data API burn: blank.
-  - Recorded: the playlist reconcile alone consumed *"8.5k-9.2k of the 10k/day"* on 2026-08-03/04 and starved applies (`20260812000000_playlist_membership_walked_at.sql` header). It is now capped at `PLAYLIST_SYNC_QUOTA_BUDGET=2000` with a 1500u apply reserve.
-  - Earlier: *"~8k units/day fleet-wide"* for the reconcile (`app/config.py:128-131`).
-  - Autopilot checks the quota ledger before the audit and before the apply (`_can_afford_apply`, `app/autopilot.py`); a no skips the tick with `quota_insufficient` and pauses nothing. A real YouTube `quotaExceeded` still makes the whole fleet dormant until the Pacific reset (the Data API quota is project-wide), logged as `"YouTube quotaExceeded: the Data API quota is project-wide, so autopilot is dormant fleet-wide (every channel, not just %s) until %s"`. A ledger skip at the second gate (after the audit) leaves that audit `pending`, which the picker excludes (`AUDIT_PICKER_SKIP_STATUSES`, `app/status_vocab.py`); it waits for `apply-pending`, as a quotaExceeded apply already did (`app/audits.py`).
-  - Shorts uploads (`videos.insert` via `upload_short`, `app/shorts/youtube_upload.py`) are not reached from the autopilot tick: `_run_shorts_action` only inserts `shorts_jobs` rows, and the upload runs in the worker subprocess that `shorts_dispatch` spawns (`app/shorts/dispatcher.py`, `app/shorts/runner.py`). They have no `quota.can_afford` gate and no `Op` in `quota.UNIT_COST`, so they are not charged to the ledger.
-- **Failures**
-  - `playlist_health_score` raised `NameError: name 'METRIC_ROW_PAGE' is not defined` daily from `b355f40` (2026-08-06) until this commit (`logs/midas.log*`). APScheduler logged it as "executed successfully" because `_run_per_channel` caught per-channel exceptions and returned normally. That silent-failure pattern applied to every `_run_per_channel` job until A8: it now raises `JobRunFailed` after the fan-out, and `GET /health/jobs` shows each job's last status and failed channels (§4). `metrics_poll`, `reporting_poll` and `measurement_eval` now end failed too: a channel that crashes either poll, or any audit that errors in the measurement pass, raises `JobRunFailed` after the pass (§4), so `/health/jobs` lists the failing channels (and, for measurement, the audit ids). Per-item errors inside a channel's poll (`videos_err`, `tier2_err`, `playlists_err`, `reports_err`) now count too: a category where every item errored fails the channel, and some-but-not-all marks the run `degraded` with the counts (§4). A trickle of per-item errors is expected (deleted or privacy-flipped videos, Gap 10's transient DNS), which is why a partial error degrades the run rather than failing it.
-  - `join_pass` is disabled, so applied videos are no longer placed into playlists (`app/autopilot.py:455`).
-  - Quarantine count: blank (the `/dashboard` `quarantined_count` has it live).
-  - `threshold_history` tuning writes one channel's FPR into the **process-global** `settings.PLAYLIST_JOIN_HIGH` (`app/playlists.py:tune_thresholds`), so the last channel tuned sets the threshold for all of them until restart.
-- **Surprises vs spec assumptions**
-  1. Neutral dominates (86% of verdicts on 2026-08-23), so a win-rate trigger or a "win-rate > champion" promotion rule is structurally uninformative.
-  2. Dormant videos are the bulk of `not_applicable`, and the picker keeps choosing them (newest-first, no warmth filter).
-  3. The team reports seeing SEO impact in about a week (`2026-09-22-discoverability-agent-spec.md` §0). That contradicts CIL's "~3 weeks per outcome, playbook in months" clock.
-  4. On-demand Analytics exposes no CTR at all. The whole CTR pipeline rests on an erratic, out-of-order bulk CSV feed.
+- **Outcome volume** (A7 query 2, 2026-10-06; applied/reverted audits): `awaiting_window` 575 · `neutral` 652 ·
+  `not_applicable/dormant` 4,254 · `not_applicable/other` 2,461 · `regression` 106 · `win` 64. Judged (822):
+  win 7.8% · regression 12.9% · neutral 79.3%.
+- **Per channel** (A7 query 3, 2026-10-06, excluding `not_applicable`): Punjabi awaiting 6 · neutral 147 ·
+  regression 4 · win 21; Bhojpuri neutral 1 · regression 3; English regression 4; Gujarati neutral 260 ·
+  regression 75 · win 29; Marathi awaiting 569 · neutral 244 · regression 20 · win 14.
+- **Dormant applies, last 90 days** (A7 warm-pool query 2, 2026-10-06): Gujarati 3,902 of 4,277 (91%) · Marathi
+  352 of 1,201 (29%) · Punjabi 0 of 563 · Haryanvi 0 of 68 · English 0 of 10 · Bhojpuri 0 of 8.
+- **Warm pool** (A7, 2026-10-06, ≥500 impressions, last 30 days): Hindi 1,120 · English 1,008 · Gujarati 603 ·
+  Marathi 566 · Bhojpuri 471 · Punjabi 342 · Tamil 290 · Malayalam 70; the other five have no reach data.
+- **Reach frontier** (A7 query 4, 2026-10-06): 2026-10-04 for Punjabi (213 days), Bhojpuri (183), English (148),
+  Gujarati (147), Marathi (221), Tamil (143), Malayalam (143); Hindi 2026-09-26 (213; token). No other channel
+  ingests reach.
+- **Audit statuses** (A7 query 6, 2026-10-06): applied 8,109 · failed 715 · pending 201 · quarantined 199 ·
+  shadow_pending 87 · reverted 3 · blocked_test_and_compare 1.
+- **Prompt versions** (A7 query 7, 2026-10-06): shadow only (Punjabi 3, Gujarati 1, Marathi 4) + Marathi retired 1;
+  none live.
+- **In-window audits at the pause** (A0, 2026-09-29): 1,910 (Marathi 1,198, Gujarati 706, Punjabi 6); last
+  window closes 2026-10-16.
+- **Data API burn** (A7 query 5, 2026-10-06): ≈8.5k–12.5k/day 09-06 → 09-20 (applies + reconcile); ≤1.4k/day
+  since 09-21 except 09-27 (4,374) and 10-06 (3,667, the manual sync). Ceiling 10k/day.
+- **Job health** (A7 raw result 0, 2026-10-06): all `success` except `video_sync` **failed** for Hindi
+  (`"HTTPException: 401: token_expired"`) and `metrics_poll` **degraded** (Bhojpuri playlists 1/48 · Gujarati
+  playlists 1/36 · Marathi videos 3/632 · Malayalam playlists 1/20). On 2026-10-01 all 8 then-registered jobs were
+  `success` (A9).
+- **Traffic mix** (A1.1, Marathi, data date 2026-09-29, 52,319 report rows, 259,868 views): 14 Playlists 118,342
+  (45.5%) · 24 Shorts feed 49,292 (19.0%) · 7 Suggested 48,862 (18.8%) · 3 Browse 17,652 (6.8%) · 8 Other 12,851
+  (4.9%) · 4 Channels 7,432 (2.9%) · 5 Search 2,911 (1.1%) · 0 Direct 1,368 · 9 External 668 · 20 Endscreen 254 ·
+  18 Playlist pages 148 · 27 Sound 33 · 32 Related video 27 · 26 Hashtag 20 · 17 Notifications 8. Type 14 split:
+  `RD…` Mixes 117,929 · our `PL…` playlists **50** · other 363.
+- **Routing levers today** (A1.1/A1.3, 2026-09-29): 1,804 description-link pairs on Marathi → 4 attributable
+  views (type 7); Short → video (type 32) 27 views from 12 Shorts, none uploaded through Midas. Type-7 suggested
+  views from any of our channels: 11,113 of 48,862 (22.7%); Mixes seeded from our videos: 7,024 of 117,929 (6.0%).
+- **Sensor shape** (A1.1): `channel_traffic_source_a3` has 15 columns, `playlist_traffic_source_a2` 16; source
+  types are numeric codes; steady lag 2 days; the playlist report restates some data dates; ≈52k raw rows per
+  Marathi channel-day. On-demand detail for PLAYLIST and SHORTS returns 400; RELATED_VIDEO and YT_SEARCH detail
+  work (A1.2, 2026-10-06). Search terms are available, with low-volume suppression in the report (233 of 319
+  type-5 rows empty) (A3).
+- **Short → video link field** (A2, 2026-10-01): not readable or writable via the Data API.
+- **Older recorded facts still in code comments:** the 2026-08-23 verdicts (*"147 neutral / 21 win / 3
+  regression"*, `app/reflection.py:32-34`); *"381 dormant, of which 184 published inside their own pre-window"*
+  (`app/measurement.py:163-164`); reconcile consumed *"8.5k-9.2k"* units on 2026-08-03/04
+  (`supabase/migrations/20260812000000_playlist_membership_walked_at.sql:5`).
+- **Blank:** Shorts upload volume and its Data API cost (not charged to the ledger, §7.2); quarantine reasons;
+  playlist proposal queue size; the office `.env` contents beyond the tick setting.
 
-**SQL to fill the blanks** (run on the office machine against `midas`, e.g. `docker compose exec db psql -U midas midas`):
+**SQL to refresh** (run on the office machine against `midas`, e.g. `docker compose exec db psql -U midas midas`;
+`count(1)`, because the office copy-paste path drops `*`):
 
 ```sql
 -- channels live
@@ -647,29 +773,40 @@ select id, name, default_language, analytics_authorized, measurement_enabled, re
 from channels order by name;
 
 -- outcome volume + dormancy ratio
-select measurement_status, measurement_result->>'reason_code' as reason, count(*)
+select measurement_status, measurement_result->>'reason_code' as reason, count(1)
 from audits where status in ('applied','reverted') group by 1,2 order by 1,2;
 
 -- per-channel outcomes
-select v.channel_id, a.measurement_status, count(*)
+select v.channel_id, a.measurement_status, count(1)
 from audits a join videos v on v.id=a.video_id
 where a.measurement_status <> 'not_applicable' group by 1,2 order by 1,2;
 
 -- reach frontier per channel
-select channel_id, max(data_date) frontier, count(*) days_covered
+select channel_id, max(data_date) frontier, count(1) days_covered
 from reporting_reports_ingested group by 1;
 
 -- daily Data API burn, last 30 days
-select date_trunc('day', occurred_at) d, sum(units) units, count(*) filter (where not success) failures
+select date_trunc('day', occurred_at) d, sum(units) units, count(1) filter (where not success) failures
 from quota_log where units > 0 and occurred_at > now() - interval '30 days' group by 1 order by 1;
 
 -- quarantine + prompt versions
-select status, count(*) from audits group by 1;
-select channel_id, status, count(*) from prompt_versions group by 1,2;
+select status, count(1) from audits group by 1;
+select channel_id, status, count(1) from prompt_versions group by 1,2;
 
--- playlist health freshness (stale until the fixed scorer deploys and runs)
-select channel_id, max(health_computed_at), count(*) filter (where health_recommendation is not null)
+-- playlist health freshness
+select channel_id, max(health_computed_at), count(1) filter (where health_recommendation is not null)
 from playlists group by 1;
+
+-- warm pool size per channel (>= 500 impressions, last 30 days of video_reach_daily)
+select channel_id, count(1) warm_videos
+from (select channel_id, video_id, sum(impressions) imp
+      from video_reach_daily where date > current_date - 30 group by 1,2) t
+where imp >= 500 group by 1 order by 2 desc;
+
+-- applied audits in the last 90 days that landed on dormant videos
+select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total
+from audits a join videos v on v.id = a.video_id
+where a.applied_at > now() - interval '90 days' group by 1;
 ```
 
 ---

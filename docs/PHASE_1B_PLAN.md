@@ -1,5 +1,9 @@
 # Phase 1B — Playlist Inventory + Health (Recommend-Only) — Planning Doc
 
+> **Note (2026-10-06):** the specs this doc cites (`CONTINUOUS_IMPROVEMENT_LOOP.md`, `PLAYLIST_OPTIMIZATION.md`,
+> `plan.md`) were superseded by `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` and deleted.
+> They're in git history, e.g. `git show 8981ec2:docs/plan.md`. This doc is kept as the record of its own decisions.
+
 **Status:** SHIPPED — all three steps landed (`f3ccb4f` step 2 health scorer,
 `dc18cdf` step B tier-2 traffic-source, `d669b74` step 3 evaluate/health endpoints
 + UI card). Kept as the planning record; steps below read as history, not TODO.

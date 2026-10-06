@@ -94,7 +94,7 @@ class OutcomeDecision:
     KEPT = "kept"
     REVERTED = "reverted"
     #: Reserved by the Loop-1 redo spec; nothing writes it yet
-    #: (docs/PHASE_2_TRACK2_LOOP1_REDO.md).
+    #: (the redo design draft, docs/PHASE_2_TRACK2_LOOP1_REDO.md, was deleted 2026-10-06; see git history).
     REDO_QUEUED = "redo_queued"
 
 
