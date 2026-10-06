@@ -6,8 +6,10 @@
 > **Rules for whoever regenerates this:**
 > 1. Every claim must be verifiable by reading a file in this repo. Cite the path.
 > 2. If something is planned but not built, it goes in §7 (Delta) — never in §2–§6.
-> 3. Do not summarise the specs. `CONTINUOUS_IMPROVEMENT_LOOP.md`, `PLAYLIST_OPTIMIZATION.md`
->    and `plan.md` hold intent; this file holds reality. The gap between them is §7.
+> 3. Do not summarise the spec. `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`
+>    holds intent (Part 2 = the design as amended in §0.6; the Part marked "ready to build" = the
+>    current build task). `docs/PHASE_A_FINDINGS.md` holds measured evidence. This file holds
+>    reality. The gap between the spec and the code is §7.
 > 4. Verbatim over paraphrase for config values, metric names, and prompt text.
 >
 > **Regenerate with:** Claude Code, prompt in §9.
@@ -678,9 +680,16 @@ Run in Claude Code at the repo root:
 
 > Read this repo and rewrite `STATE.md` in place, keeping its exact section structure.
 > Rules: every claim must be verifiable from a file in this repo, cited by path; if you
-> can't verify it, leave the field blank rather than inferring it. Do not summarise the
-> spec docs — read `CONTINUOUS_IMPROVEMENT_LOOP.md`, `PLAYLIST_OPTIMIZATION.md` and
-> `plan.md` only to compute §7. For §7 be exhaustive and uncharitable: list every
-> spec'd-but-not-built item including partial implementations, every built-but-not-spec'd
-> item, and every substantive divergence. Paste config values, prompt text and DDL
-> verbatim rather than describing them. For §8, query the database for the actual counts.
+> can't verify it, leave the field blank rather than inferring it. The only spec is
+> `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Read it only to compute
+> §1 and §7, and don't summarise it. §1's phase table follows the spec's stages (Phase A, Phase B,
+> Slices 1–5, spec Part 2 §6), not any older phase numbering. For §7, compare the code against
+> Part 2 (as amended in §0.6) and the Part marked "ready to build". Be exhaustive and
+> uncharitable: list every spec'd-but-not-built item including partial implementations,
+> every built-but-not-spec'd item (including pre-spec machinery that is frozen but still in
+> the code), and every substantive divergence. 7.4 lists contradictions *within* the spec,
+> for example between Part 2 and the build Part. Older design docs that were deleted are in git history
+> only; don't cite or reconstruct them. Paste config values, prompt text and DDL verbatim
+> rather than describing them. For §8, query the database for the actual counts if you can
+> reach it. Otherwise quote the dated live figures in `docs/PHASE_A_FINDINGS.md` (A7, A1.1),
+> labelled with their date and section, and leave the rest blank.
