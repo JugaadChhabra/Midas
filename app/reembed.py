@@ -24,7 +24,7 @@ from app.db import supabase
 from app.embeddings import POOLED, embedded_video_ids, pooled_embeddings
 from app.openrouter import EMBED_MODEL, embed
 from app.playlists import _cosine_sim
-from app.rows import all_rows
+from app.rows import all_rows, rows_for_ids
 
 log = logging.getLogger("midas.reembed")
 
@@ -149,14 +149,23 @@ def reembed_channel(channel_id: str) -> dict:
 
 
 def _members(channel_id: str) -> dict[str, list[str]]:
-    """{playlist_id: [video_id]} of current members: each pair's latest
-    `playlist_assignments` action is `added` (as `playlists._current_members`)."""
-    rows = all_rows(
-        supabase().table("playlist_assignments")
-        .select("playlist_id,video_id,action,decided_at")
-        .eq("channel_id", channel_id)
-        .order("decided_at")
+    """{playlist_id: [video_id]} of current members of the channel's playlists:
+    each pair's latest `playlist_assignments` action is `added` (as
+    `playlists._current_members`).
+
+    `playlist_assignments` has no channel_id, so the channel's playlists come
+    from `playlists`, as in the `playlist_video_sims` RPC.
+    """
+    playlist_ids = [r["id"] for r in all_rows(
+        supabase().table("playlists").select("id").eq("channel_id", channel_id))]
+    rows = rows_for_ids(
+        lambda chunk: supabase().table("playlist_assignments")
+        .select("id,playlist_id,video_id,action,decided_at")
+        .in_("playlist_id", chunk),
+        playlist_ids,
     )
+    # Order across chunks isn't meaningful (rows_for_ids), so sort here.
+    rows.sort(key=lambda r: (r.get("decided_at") or "", r["id"]))
     latest: dict[tuple[str, str], str] = {}
     for r in rows:
         latest[(r["playlist_id"], r["video_id"])] = r["action"]

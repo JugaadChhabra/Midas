@@ -887,7 +887,11 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    comes from the other distribution, so its order against `join_high` isn't guaranteed. p50 lets a non-member
    as close as the median member join without the judge: a starting value for the owner to review before
    anything reads it. Members are the latest `playlist_assignments` action per
-   (playlist, video) being `added`, as `playlists._current_members`; a playlist needs 3 embedded members. Stored as a
+   (playlist, video) being `added`, as `playlists._current_members`, over the playlists whose `playlists.channel_id`
+   is the channel (`playlist_assignments` has no `channel_id`, `20260518000000_playlists.sql:25-35`; the same join
+   as the `playlist_video_sims` RPC); a playlist needs 3 embedded members. The frozen `tune_thresholds` filters
+   `playlist_assignments` on `channel_id` (`app/playlists.py:470-474`), a column the table lacks, so it would fail
+   if unfrozen; B6 doesn't touch it. Stored as a
    `channels` jsonb column rather than `threshold_history`, which `tune_thresholds` owns.
 6. **Discovery provenance.** Created playlists are stored as `origin='inherited'` (`app/playlist_discovery.py:200-205`),
    so a human-edit ledger (B3) could not tell Midas-created playlists from human ones by `origin`. B3b reads

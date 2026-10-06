@@ -198,9 +198,18 @@ def test_token_estimate_counts_bytes_so_indic_text_costs_more():
 
 # ── calibration ───────────────────────────────────────────────────────────
 
-def _assign(pid, vid, channel, action="added", at="2026-10-01T00:00:00+00:00"):
-    return {"playlist_id": pid, "video_id": vid, "channel_id": channel,
+_ASSIGN_IDS = iter(range(1, 10**6))
+
+
+def _assign(pid, vid, action="added", at="2026-10-01T00:00:00+00:00"):
+    """A playlist_assignments row, with its real columns: no channel_id (the
+    table has none; a channel's rows are found through `playlists`)."""
+    return {"id": next(_ASSIGN_IDS), "playlist_id": pid, "video_id": vid,
             "action": action, "decided_at": at}
+
+
+def _playlist(pid, channel):
+    return {"id": pid, "channel_id": channel}
 
 
 def _emb(vid, vec):
@@ -213,19 +222,20 @@ def _calibration_db(n=12):
     """Two channels, one playlist each, with differently spread members."""
     assignments, embeddings = [], []
     for i in range(n):
-        assignments.append(_assign("PLmr", f"m{i}", MR))
+        assignments.append(_assign("PLmr", f"m{i}"))
         embeddings.append(_emb(f"m{i}", [1.0, i * 0.05]))       # tight cluster
-        assignments.append(_assign("PLpa", f"p{i}", PA))
+        assignments.append(_assign("PLpa", f"p{i}"))
         embeddings.append(_emb(f"p{i}", [1.0, i * 0.4]))        # loose cluster
     # A removed member and a production-version vector must both be ignored.
-    assignments.append(_assign("PLmr", "gone", MR, "added", "2026-09-01T00:00:00+00:00"))
-    assignments.append(_assign("PLmr", "gone", MR, "removed", "2026-09-02T00:00:00+00:00"))
+    assignments.append(_assign("PLmr", "gone", "added", "2026-09-01T00:00:00+00:00"))
+    assignments.append(_assign("PLmr", "gone", "removed", "2026-09-02T00:00:00+00:00"))
     embeddings.append(_emb("gone", [-1.0, 0.0]))
     embeddings.append({"video_id": "m0", "chunk_index": "pooled",
                        "model_version": EMBED_MODEL, "embedding": "[-1,0]"})
     return FakeSupabase({
         "channels": [{"id": MR, "playlist_thresholds": None},
                      {"id": PA, "playlist_thresholds": None}],
+        "playlists": [_playlist("PLmr", MR), _playlist("PLpa", PA)],
         "playlist_assignments": assignments,
         "video_embeddings": embeddings,
     })
@@ -260,7 +270,8 @@ def test_member_similarity_is_measured_apart_and_included():
     `included` as reconcile scores it against PLAYLIST_LEAVE (centroid of all)."""
     sb = FakeSupabase({
         "channels": [{"id": MR}],
-        "playlist_assignments": [_assign("PL", v, MR) for v in ("a", "b", "c")],
+        "playlists": [_playlist("PL", MR)],
+        "playlist_assignments": [_assign("PL", v) for v in ("a", "b", "c")],
         "video_embeddings": [_emb("a", [1, 0]), _emb("b", [1, 0]), _emb("c", [0, 1])],
     })
     with patch.object(reembed, "supabase", return_value=sb), \
@@ -321,10 +332,51 @@ def test_script_estimate_needs_a_price():
 def test_script_run_embeds_then_calibrates_each_channel(capsys):
     from scripts import reembed as script
     sb = FakeSupabase({"videos": [_video("v1")], "video_embeddings": [],
-                       "channels": [{"id": MR}], "playlist_assignments": []})
+                       "channels": [{"id": MR}], "playlists": [],
+                       "playlist_assignments": []})
     with patch.object(reembed, "supabase", return_value=sb), \
          patch("app.embeddings.supabase", return_value=sb), \
          patch.object(reembed, "embed", FakeEmbed()):
         assert script.main(["--channels", MR]) == 0
     out = capsys.readouterr().out
     assert '"embedded": 1' in out and "insufficient_data" in out
+
+
+def test_members_are_found_through_the_channels_playlists():
+    """playlist_assignments has no channel_id: a channel's members are those of
+    the playlists whose `playlists.channel_id` is the channel."""
+    sb = FakeSupabase({
+        "playlists": [_playlist("PLmr", MR), _playlist("PLpa", PA)],
+        "playlist_assignments": [
+            _assign("PLmr", "m1"), _assign("PLmr", "m2"), _assign("PLpa", "p1"),
+            # Latest action wins, ordered by decided_at, not by row order.
+            _assign("PLmr", "m3", "removed", "2026-10-02T00:00:00+00:00"),
+            _assign("PLmr", "m3", "added", "2026-10-01T00:00:00+00:00"),
+        ],
+    })
+    with patch.object(reembed, "supabase", return_value=sb):
+        assert reembed._members(MR) == {"PLmr": ["m1", "m2"]}
+        assert reembed._members(PA) == {"PLpa": ["p1"]}
+    assert all("channel_id" not in r for r in sb.rows("playlist_assignments"))
+
+
+def test_script_a_calibration_error_is_reported_and_the_next_channel_still_runs(capsys, monkeypatch):
+    from scripts import reembed as script
+    sb = FakeSupabase({"videos": [_video("v1"), _video("p1", PA)], "video_embeddings": [],
+                       "channels": [{"id": MR}, {"id": PA}], "playlists": [],
+                       "playlist_assignments": []})
+    calls = []
+
+    def calibrate(cid):
+        calls.append(cid)
+        if cid == MR:
+            raise RuntimeError("PGRST204")
+        return {"skipped": True}
+
+    monkeypatch.setattr(reembed, "calibrate_channel", calibrate)
+    with patch.object(reembed, "supabase", return_value=sb), \
+         patch("app.embeddings.supabase", return_value=sb), \
+         patch.object(reembed, "embed", FakeEmbed()):
+        assert script.main(["--channels", f"{MR},{PA}"]) == 1
+    assert calls == [MR, PA]
+    assert "calibration_error" in capsys.readouterr().out

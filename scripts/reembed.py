@@ -61,16 +61,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"total: ~${total:.4f} at ${args.usd_per_mtok}/M tokens")
         return 0
 
-    failed = 0
+    failed = calibration_failed = 0
     for cid in channels:
         r = reembed.reembed_channel(cid)
         failed += r["failed"]
         print(json.dumps(r))
-        if not args.skip_calibrate:
-            print(json.dumps({"channel_id": cid, "thresholds": reembed.calibrate_channel(cid)}))
+        if args.skip_calibrate:
+            continue
+        try:
+            thresholds = reembed.calibrate_channel(cid)
+        except Exception as e:
+            calibration_failed += 1
+            print(json.dumps({"channel_id": cid, "calibration_error": f"{type(e).__name__}: {e}"}))
+            continue
+        print(json.dumps({"channel_id": cid, "thresholds": thresholds}))
     if failed:
         print(f"{failed} videos failed to embed; rerun to retry them")
-    return 1 if failed else 0
+    if calibration_failed:
+        print(f"{calibration_failed} channels failed to calibrate; rerun to retry them")
+    return 1 if failed or calibration_failed else 0
 
 
 if __name__ == "__main__":
