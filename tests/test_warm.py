@@ -242,7 +242,7 @@ def test_rpc_path_pages_the_function_and_passes_the_settings():
         "p_channel_id": CH,
         "p_min_impressions": warm.settings.WARM_MIN_IMPRESSIONS,
         "p_window_days": warm.settings.WARM_WINDOW_DAYS,
-        "p_measurement_window_days": warm.settings.MEASUREMENT_WINDOW_DAYS,
+        "p_measurement_window_days": warm.reach.window_length(),
     }
 
 
@@ -265,7 +265,9 @@ def test_flag_off_never_touches_the_rpc():
 
 def test_the_warm_filter_is_not_called_from_the_tick():
     autopilot = (REPO / "app/autopilot.py").read_text()
-    assert "warm" not in autopilot.lower(), "Phase B must not wire the warm filter into the tick"
+    # Not a bare "warm": autopilot may well mention channels.reach_warmup.
+    assert not re.search(r"\bwarm\b|warm_pool|ranked_pool|explore_order", autopilot), (
+        "Phase B must not wire the warm filter into the tick")
 
 
 def test_nothing_in_the_app_uses_the_warm_filter_yet():
