@@ -37,9 +37,12 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
    and Telugu `UCxK1-ftYdFvU4IuUW3POxRA` have 0 videos in `videos`. Minor bug: `refresh-stats`
    returns 500 rather than 401 when the token fails during the API call (it only catches
    `TokenExpiredError` around `youtube_for_channel`).
-3. **A7 live numbers,** on the fresh video list. They pick rollout channel #1 and a warm video.
+3. ~~A7 live numbers.~~ **Done 2026-10-06.** Rollout #1 proposed as Marathi; **owner to confirm**.
+   Judged title verdicts: 64 wins vs 106 regressions. Gujarati: 91% of applies hit dormant videos.
 4. **A1.2 and A3 on-demand:** the Analytics API comparison, on that warm video.
-5. **A5:** the Haryanvi i18n probe, the `UPDATE`, then a NAS snapshot.
+5. **A5:** `default_language = 'bgc'` was **already set** on Haryanvi (A7 query 1). Only the optional
+   i18n probe remains. Six channels have **no** `default_language` (Hindi, Bhojpuri, Malayalam,
+   Tamil, Rajasthani, Telugu), so audits are blocked on them. Relevant only once the title lever returns.
 6. **Phase A conclusion:** the A1 outcome per lever, the rollout channel, and proposed Part 2
    changes. Measured so far: our own playlists ≈0 views, YouTube Mixes 45%, ≥23% of suggested
    views from our own channels. Then the exit gate, the `STATE.md` §9 rewrite, and Phase B.
@@ -672,11 +675,11 @@ app container: `docker compose exec midas python -c "from app.backup import snap
 
 | Field | Value |
 |---|---|
-| Date | |
+| Date | 2026-10-06 ≈09:00 UTC |
 | Channel | all |
-| Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome (rollout channel #1 and the reason) | |
+| Command / SQL | the `logs\a7-numbers.txt` block (STATE §8 SQL with `count(1)`, plus the two warm-pool queries) |
+| Raw evidence | below |
+| Outcome (rollout channel #1 and the reason) | **Proposed: Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`; awaiting owner confirmation.** See the table at the end of this section |
 
 **Dormancy literal, confirmed.** A dormant verdict stores
 `measurement_result->>'reason_code' = 'dormant'`: the key is
@@ -719,9 +722,49 @@ select channel_id, max(health_computed_at), count(*) filter (where health_recomm
 from playlists group by 1;
 ```
 
-Raw results (paste each):
+Raw results, 2026-10-06 (`logs\a7-numbers.txt` on the office machine):
 
 ```
+# 0. /health/jobs: all success except
+#    video_sync  failed   UCR9qQMyP86aSt-1VgaMg7UA "HTTPException: 401: token_expired" (Hindi; re-consented 2026-10-06)
+#    metrics_poll degraded  Bhojpuri playlists 1/48 · Gujarati playlists 1/36 · Marathi videos 3/632 · Malayalam playlists 1/20
+
+# 1. channels (default_language · measurement_enabled · playlist_health_enabled · autopilot_shorts_enabled)
+3D Animated Series UCqtU4xCSjsSvE53Iy6NUKSg  hi    f f t
+Bhojpuri   UC8oC7Yiz0WkH3PKb3GW42XA  NULL  t f t
+Gujarati   UCOVKJdzghm2gOnuaGeJTonA  gu    t f t
+Haryanvi   UCc4Tv_DEGDEKrKAt-vyVNmw  bgc   f f t
+Malayalam  UCX8BttGE4UAFdm1RRIULOPQ  NULL  t f t
+Marathi    UCr5-YUqBiW7PUmeAtxUWuRg  mr    t f t
+Punjabi    UC8KjoL0Z9mTHKqB6gFutkJw  pa    t t t
+Tamil      UCWb0eKKkX1NE1r_Tu6oKhdQ  NULL  t f t
+Rajasthani UCFO6AQ_KBQDEaQiTi-dBEWQ  NULL  f f t
+English    UCMpj6iUMCMhB0k4L5EcxJwQ  en    t f t
+Kannada    UCo4_mZK5aAF7ugv4cTfZlEg  kn    f f f
+Hindi      UCR9qQMyP86aSt-1VgaMg7UA  NULL  t f t   (last_synced 2026-09-24: token expired)
+Telugu     UCxK1-ftYdFvU4IuUW3POxRA  NULL  f f f
+All 13: analytics_authorized = t, autopilot_enabled = f, reach_warmup = f.
+
+# 2. applied/reverted audits by measurement outcome
+awaiting_window 575 · neutral 652 · not_applicable/dormant 4,254 · not_applicable/other 2,461 · regression 106 · win 64
+# judged (win+neutral+regression = 822): win 7.8% · regression 12.9% · neutral 79.3%
+
+# 3. per channel (excluding not_applicable)
+Punjabi  awaiting 6 · neutral 147 · regression 4  · win 21
+Bhojpuri neutral 1 · regression 3
+English  regression 4
+Gujarati neutral 260 · regression 75 · win 29
+Marathi  awaiting 569 · neutral 244 · regression 20 · win 14
+
+# 4. reach frontier: 2026-10-04 for Punjabi (213 days), Bhojpuri (183), English (148), Gujarati (147),
+#    Marathi (221), Tamil (143), Malayalam (143). Hindi 2026-09-26 (213; token). No other channel ingests reach.
+
+# 5. Data API burn: ≈8.5k–12.5k/day 09-06 → 09-20 (applies + reconcile); ≤1.4k/day since 09-21
+#    except 09-27 (4,374) and 10-06 (3,667, the manual sync). 10k/day ceiling; plenty of headroom now.
+
+# 6. audits by status: applied 8,109 · failed 715 · pending 201 · quarantined 199 · shadow_pending 87 · reverted 3 · blocked_test_and_compare 1
+
+# 7. prompt_versions: shadow only (Punjabi 3, Gujarati 1, Marathi 4) + Marathi retired 1; none live
 ```
 
 **[office]** The two warm-pool queries from spec Part 1 A7:
@@ -739,14 +782,22 @@ from audits a join videos v on v.id = a.video_id
 where a.applied_at > now() - interval '90 days' group by 1;
 ```
 
-Raw results (paste):
+Raw results, 2026-10-06:
 
 ```
+# warm pool (>= 500 impressions, last 30 ingested days)
+Hindi 1,120 · English 1,008 · Gujarati 603 · Marathi 566 · Bhojpuri 471 · Punjabi 342 · Tamil 290 · Malayalam 70
+# (Haryanvi, Rajasthani, 3D Animated, Kannada, Telugu: no reach data)
+
+# applied audits in the last 90 days that landed on dormant videos
+Gujarati 3,902 of 4,277 (91%) · Marathi 352 of 1,201 (29%) · Punjabi 0 of 563 · Haryanvi 0 of 68 · English 0 of 10 · Bhojpuri 0 of 8
+# (0 dormant where measurement was off or windows are still open: not_applicable
+#  without a reason code doesn't count as dormant)
 ```
 
 | Rollout channel #1 | Reason |
 |---|---|
-| | |
+| **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg` (proposed, awaiting owner confirmation)** | Spec Part 2 §11.3: "certified reach and the most warm videos" between Haryanvi and Marathi. Haryanvi has **no reach data** (measurement off, no warm-up), so it can't be measured without weeks of warm-up. Marathi: reach current (frontier 2026-10-04, 221 days), 566 warm videos, `default_language = mr`, all A1 traffic-source jobs and evidence already on it; its 569 in-window audits all close by 2026-10-13. Alternative: English (1,008 warm, reach current), but its traffic-source jobs would need to be set up from scratch, and it could stay human-run as the benchmark (§11.4) |
 
 ---
 
