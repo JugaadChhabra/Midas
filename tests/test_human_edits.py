@@ -294,10 +294,30 @@ def test_rerunning_the_full_sync_does_not_duplicate():
     assert len(sb.rows("interventions")) == 1
 
 
+def test_a_link_to_a_video_uploaded_in_the_same_sync_counts():
+    """The ledger runs before the upsert, so the new upload isn't in `videos` yet."""
+    new = "newUpload01"
+    sb = _sync_sb("Lyrics")
+    with patch.object(sync, "supabase", return_value=sb), \
+         patch.object(he, "supabase", return_value=sb), \
+         patch.object(iv, "supabase", return_value=sb), \
+         patch.object(sync, "youtube_for_channel", return_value=MagicMock()), \
+         patch.object(sync, "yt_channels_list_uploads",
+                      return_value={"uploads_playlist_id": "UP", "default_language": None}), \
+         patch.object(sync, "yt_playlist_items_page",
+                      return_value={"items": [{"contentDetails": {"videoId": v}}
+                                              for v in (new, SRC, OURS_A)]}), \
+         patch.object(sync, "is_actually_short", return_value=False), \
+         patch.object(sync, "yt_videos_list_full",
+                      side_effect=lambda yt, cid, ids: [
+                          _item(v, f"Lyrics {_url(new)}" if v == SRC else "") for v in ids]):
+        sync.sync_channel(CH, full=True)
+    assert [r["payload"]["target_video_id"] for r in sb.rows("interventions")] == [new]
+
+
 def test_a_ledger_error_never_fails_the_sync(caplog):
     sb = _sync_sb("Lyrics")
-    with patch.object(he.interventions, "record", side_effect=RuntimeError("ledger down")), \
-         patch.object(he, "_our_videos", side_effect=RuntimeError("db down")):
+    with patch.object(he, "_our_videos", side_effect=RuntimeError("db down")):
         result = _sync(sb, f"Lyrics\n{_url(OURS_A)}")
     assert result == {"synced": 2}
     stored = {v["id"]: v["description"] for v in sb.rows("videos")}
@@ -307,7 +327,7 @@ def test_a_ledger_error_never_fails_the_sync(caplog):
 
 def test_incremental_sync_reads_no_stored_descriptions():
     """Only a full sync re-reads old videos; the incremental one never fetches
-    them, so it has nothing to diff and shouldn't pull every description."""
+    them, so it has nothing to hand the ledger."""
     sb = _sync_sb("Lyrics")
     with patch.object(he, "record_description_edits") as ledger:
         _sync(sb, f"Lyrics\n{_url(OURS_A)}", full=False)

@@ -291,7 +291,8 @@ def _record_human_edits(channel_id: str, stored: dict[str, str | None], rows: li
     if not changes:
         return
     try:
-        human_edits.record_description_edits(channel_id, changes)
+        human_edits.record_description_edits(
+            channel_id, changes, also_ours={r["id"] for r in rows})
     except Exception as e:
         log.exception("sync %s: human-edit ledger failed; sync continues: %s", channel_id, e)
 

@@ -156,8 +156,13 @@ def _record_one(channel_id: str, video_id: str, after: str | None,
 
 
 def record_description_edits(channel_id: str,
-                             changes: list[tuple[str, str | None, str | None]]) -> int:
+                             changes: list[tuple[str, str | None, str | None]],
+                             also_ours: set[str] = frozenset()) -> int:
     """Record the links the team added, for (video_id, before, after) descriptions.
+
+    `also_ours` are ids known to be ours that may not be in `videos` yet: the
+    sync calls this before its upsert, so a link to a video uploaded in the
+    same batch would otherwise be dropped, and never seen again.
 
     Returns the number of interventions written. A failure on one video is
     logged and the others still run.
@@ -172,7 +177,8 @@ def record_description_edits(channel_id: str,
     if not diffs:
         return 0
 
-    ours = _our_videos({t for _, added, removed in diffs.values() for t in added | removed})
+    linked = {t for _, added, removed in diffs.values() for t in added | removed}
+    ours = (linked & set(also_ours)) | _our_videos(linked - set(also_ours))
     now = datetime.now(timezone.utc).isoformat()
     recorded = 0
     for video_id, (after, added, removed) in diffs.items():
