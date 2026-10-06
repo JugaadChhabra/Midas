@@ -156,8 +156,8 @@ These are the files. The live DB's migration ledger was not checked (unreachable
 - **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false`.
 - **`videos`**: `id text pk, channel_id → channels on delete cascade, title, description, tags text[], thumbnail_url, category_id, view_count, like_count, comment_count bigint, published_at, last_fetched_at, privacy_status text, thumbnail_optimized_at, playlists_optimized_at timestamptz, duration_seconds int, is_short bool, is_episode bool (nullable; NULL = not episode)`.
 - **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int default 0, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
-  - Status vocab (`app/status_vocab.py:28-42`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`), and nothing writes `redo_of_audit_id`.
-  - Measurement vocab (`app/status_vocab.py:61-71`): `not_applicable|awaiting_window|measuring|win|neutral|regression`. Reason codes (`app/measurement.py:168-171`): `no_timestamp`, `coverage_lost`, `dormant`, `video_gone`, under key `reason_code` (`app/verdicts.py:47`).
+  - Status vocab (`app/status_vocab.py:30-44`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:98-100`), and nothing writes `redo_of_audit_id`.
+  - Measurement vocab (`app/status_vocab.py:63-73`): `not_applicable|awaiting_window|measuring|win|neutral|regression`. Reason codes (`app/measurement.py:168-171`): `no_timestamp`, `coverage_lost`, `dormant`, `video_gone`, under key `reason_code` (`app/verdicts.py:47`).
   - Partial index `audits_measurement_inflight_idx` on `('awaiting_window','measuring')`; `audits_video_created_idx (video_id, created_at desc)`.
 - **`video_metrics`** (`20260610134419`):
   ```sql
@@ -191,28 +191,42 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   Index `(channel_id, date desc)`. Source: Reporting API `playlist_traffic_source_a2` (`app/reporting_client.py:100`), summed over the same three dimensions (`app/reporting_client.py:460` `parse_playlist_traffic_csv`); `engaged_views`, `average_view_duration_seconds` and `playlist_saves_*` are not stored.
 - **`interventions`** (`20261006020000`, B2):
   ```sql
-  id                  bigserial   primary key,
-  video_id            text        not null references videos(id) on delete cascade,
-  channel_id          text        not null references channels(id),
-  lever               text        not null,   -- backlinks|playlist|short_link|title
-  origin              text        not null,   -- midas|human
-  arm                 text        not null,   -- treated|holdout|n/a
-  status              text        not null,
-  payload             jsonb,
-  before_state        jsonb,
-  audit_id            bigint      references audits(id),
-  strategy_version    text        references audit_strategies(version),
-  triage_json         jsonb,
-  applied_at          timestamptz,
-  detected_at         timestamptz,
-  measurement_status  text,
-  measurement_result  jsonb,
-  created_at          timestamptz default now()
+  create table if not exists interventions (
+      id                  bigserial   primary key,
+      video_id            text        not null references videos(id) on delete cascade,
+      channel_id          text        not null references channels(id),
+      lever               text        not null,   -- backlinks|playlist|short_link|title
+      origin              text        not null,   -- midas|human
+      arm                 text        not null,   -- treated|holdout|n/a
+      status              text        not null,
+      payload             jsonb,
+      before_state        jsonb,
+      -- Title lever only.
+      audit_id            bigint      references audits(id),
+      strategy_version    text        references audit_strategies(version),
+      -- Rules choice, Jev choice and probabilities.
+      triage_json         jsonb,
+      applied_at          timestamptz,
+      -- Human interventions: when sync saw the edit, not when it was made.
+      detected_at         timestamptz,
+      measurement_status  text,
+      measurement_result  jsonb,
+      created_at          timestamptz default now()
+  );
 
-  create unique index interventions_one_active_midas_per_video on interventions (video_id)
+  -- Spec Part 2 §1.6: at most one active Midas intervention per video, of any
+  -- lever. app/interventions.record checks this first; the index makes it hold
+  -- under concurrent writers too. The status list mirrors
+  -- status_vocab.ACTIVE_INTERVENTION_STATUSES (tests/test_status_vocab.py).
+  -- Human interventions are outside it: they never block a Midas change.
+  create unique index if not exists interventions_one_active_midas_per_video
+      on interventions (video_id)
       where origin = 'midas' and status in ('planned', 'applied', 'measuring', 'holdout');
+
+  -- Backs the on-delete-cascade from videos, and per-video reads of any origin.
+  create index if not exists interventions_video_idx on interventions (video_id);
   ```
-  Plus indexes `(video_id)` and `(channel_id, created_at desc)`. Vocab (`app/status_vocab.py:143-220`): lever
+  Vocab (`app/status_vocab.py:143-220`): lever
   `backlinks|playlist|short_link|title`; origin `midas|human`; arm `treated|holdout|n/a`; status
   `planned|applied|measuring|judged|cancelled|declined|holdout|insufficient_data`, of which
   `ACTIVE_INTERVENTION_STATUSES` = `planned|applied|measuring|holdout`. The partial unique index is the SQL mirror
@@ -397,7 +411,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
 | `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`, `ensure_playlist_traffic_job`), CSV parsing (reach; video and playlist traffic with aggregation, `_aggregate_traffic_csv`, and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`) |
 | `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
-| `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`). No caller outside tests |
+| `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). No caller outside tests |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |

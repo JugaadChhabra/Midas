@@ -89,6 +89,9 @@ def record(*, video_id: str, channel_id: str, lever: str, origin: str, arm: str,
     _require(origin, ALL_INTERVENTION_ORIGINS, "origin")
     _require(arm, ALL_INTERVENTION_ARMS, "arm")
     _require(status, ALL_INTERVENTION_STATUSES, "status")
+    if origin == InterventionOrigin.HUMAN and arm != InterventionArm.NOT_APPLICABLE:
+        # §1.4: human edits have no holdout; they're compared against unchanged videos.
+        raise ValueError(f"human interventions take arm {InterventionArm.NOT_APPLICABLE!r}, not {arm!r}")
 
     if origin == InterventionOrigin.MIDAS and status in ACTIVE_INTERVENTION_STATUSES:
         existing = active_for(video_id)

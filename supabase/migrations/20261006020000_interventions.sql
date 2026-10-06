@@ -41,9 +41,8 @@ create unique index if not exists interventions_one_active_midas_per_video
     on interventions (video_id)
     where origin = 'midas' and status in ('planned', 'applied', 'measuring', 'holdout');
 
+-- Backs the on-delete-cascade from videos, and per-video reads of any origin.
 create index if not exists interventions_video_idx on interventions (video_id);
-create index if not exists interventions_channel_created_idx
-    on interventions (channel_id, created_at desc);
 
 grant all on interventions to service_role;
 grant all on sequence interventions_id_seq to service_role;

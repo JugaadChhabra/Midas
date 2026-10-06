@@ -212,3 +212,12 @@ def test_record_refuses_values_outside_the_vocabulary(field, value):
     with patch.object(iv, "supabase", return_value=_sb()):
         with pytest.raises(ValueError):
             _record_midas(**{field: value})
+
+
+@pytest.mark.parametrize("arm", ["treated", "holdout"])
+def test_human_interventions_have_no_arm(arm):
+    """Spec Part 2 §1.4: there's no holdout for human edits."""
+    with patch.object(iv, "supabase", return_value=_sb()):
+        with pytest.raises(ValueError):
+            iv.record(video_id="v1", channel_id="c1", lever="backlinks", origin="human",
+                      arm=arm, status="applied")

@@ -22,7 +22,7 @@ Three mirrors live outside Python and cannot import this module:
   * `supabase/migrations/20261006020000_interventions.sql` re-types
     ACTIVE_INTERVENTION_STATUSES in its one-active-Midas-intervention index.
 
-`tests/test_status_vocab.py` parses all three and fails if either drifts.
+`tests/test_status_vocab.py` parses all three and fails if any drifts.
 """
 from __future__ import annotations
 
