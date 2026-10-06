@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta, timezone
 from googleapiclient.errors import HttpError
 
+from app import human_edits
 from app.content_type import is_episode
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -139,10 +140,17 @@ def sync_channel(channel_id: str, full: bool = False):
     # changes for a video, so we reuse the stored value and only probe genuinely
     # new ids (see is_actually_short) — an incremental sync also uses these ids
     # to stop paginating early once it reaches known videos.
+    # A full sync also reads the stored descriptions, so the human-edit ledger
+    # can diff them against what YouTube returns (B3). Incremental syncs never
+    # re-fetch a known video, so they skip that read.
     existing_rows = all_rows(
-        supabase().table("videos").select("id,is_short").eq("channel_id", channel_id)
+        supabase().table("videos").select("id,is_short,description" if full else "id,is_short")
+        .eq("channel_id", channel_id)
     )
     existing_is_short: dict[str, bool | None] = {r["id"]: r.get("is_short") for r in existing_rows}
+    stored_descriptions: dict[str, str | None] = (
+        {r["id"]: r.get("description") for r in existing_rows} if full else {}
+    )
     known_ids: set[str] = set(existing_is_short) if not full else set()
 
     try:
@@ -251,6 +259,10 @@ def sync_channel(channel_id: str, full: bool = False):
 
     if rows:
         deduped = list({r["id"]: r for r in rows}.values())
+        # Before the upsert overwrites the stored descriptions. If the upsert
+        # then fails, the next sync sees the same edit and the ledger key
+        # dedupes it.
+        _record_human_edits(channel_id, stored_descriptions, deduped)
         for i in range(0, len(deduped), 100):
             supabase().table("videos").upsert(deduped[i:i+100]).execute()
 
@@ -271,6 +283,17 @@ def sync_channel(channel_id: str, full: bool = False):
     supabase().table("channels").update(channel_patch).eq("id", channel_id).execute()
 
     return {"synced": len(rows)}
+
+
+def _record_human_edits(channel_id: str, stored: dict[str, str | None], rows: list[dict]) -> None:
+    """Hand re-read descriptions to the human-edit ledger. Never fails the sync."""
+    changes = [(r["id"], stored[r["id"]], r["description"]) for r in rows if r["id"] in stored]
+    if not changes:
+        return
+    try:
+        human_edits.record_description_edits(channel_id, changes)
+    except Exception as e:
+        log.exception("sync %s: human-edit ledger failed; sync continues: %s", channel_id, e)
 
 
 def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:
