@@ -43,7 +43,7 @@ BATCH_SIZE = 50
 #: than the usual 4 to err on the expensive side.
 _BYTES_PER_TOKEN = 3
 
-#: Calibration percentiles of leave-one-out member similarity (see
+#: Calibration percentiles of member similarity (`MemberSims`; see
 #: `calibrate_channel`), and the fewest member similarities to calibrate from.
 JOIN_HIGH_PCTL = 50
 LEAVE_PCTL = 10
@@ -226,8 +226,9 @@ def calibrate_channel(channel_id: str) -> dict:
     typical member is added directly) and `join_low` its 5th percentile (below
     it the judge isn't asked); `leave` is the 10th percentile of `included` (a
     member below it is an outlier, sent to the judge for removal), measured as
-    reconcile measures it. Same order as the global defaults, 0.55 < 0.60 <
-    0.72, though `leave` comes from the other distribution.
+    reconcile measures it. `join_low` <= `join_high` always, and `join_low` <=
+    `leave` in practice; `leave` against `join_high` isn't guaranteed, since
+    the two come from different distributions.
 
     Stored on `channels.playlist_thresholds`; `settings` is never written.
     """
