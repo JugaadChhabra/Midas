@@ -36,6 +36,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.config import settings
 from app.db import supabase
+from app.reporting_client import REACH_REPORT_TYPE_ID
 from app.rows import all_rows
 
 log = logging.getLogger("midas.reach")
@@ -121,7 +122,10 @@ def coverage(channel_id: str) -> set[str]:
     rows = all_rows(
         supabase().table("reporting_reports_ingested")
         .select("data_date")
-        .eq("channel_id", channel_id),
+        .eq("channel_id", channel_id)
+        # The ledger also holds traffic-source reports (B1); only a reach
+        # report makes a day covered.
+        .eq("report_type", REACH_REPORT_TYPE_ID),
         # The one paged table without an `id` primary key.
         order_by="report_id",
     )

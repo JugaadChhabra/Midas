@@ -68,6 +68,68 @@ _REACH_CSV_COLUMNS = [
 ]
 
 
+# Phase B · B1 (#30): per-video daily views by traffic source. `_a2` was
+# retired (404 on 2026-09-29, docs/PHASE_A_FINDINGS.md A1.1).
+TRAFFIC_REPORT_TYPE_ID = "channel_traffic_source_a3"
+# The name Marathi's job was created with on 2026-09-29 (A1.1).
+TRAFFIC_JOB_NAME = "midas-traffic-source"
+
+# Exact 15-column header recorded in A1.1 (2026-10-01). Asserted like the
+# reach header.
+_TRAFFIC_CSV_COLUMNS = [
+    "date",
+    "channel_id",
+    "video_id",
+    "live_or_on_demand",
+    "subscribed_status",
+    "country_code",
+    "traffic_source_type",
+    "traffic_source_detail",
+    "views",
+    "engaged_views",
+    "watch_time_minutes",
+    "average_view_duration_seconds",
+    "average_view_duration_percentage",
+    "red_views",
+    "red_watch_time_minutes",
+]
+
+# traffic_source_type code → name. The report carries numeric codes only.
+# Source: https://developers.google.com/youtube/reporting/v1/reports/dimensions
+# (fetched 2026-10-01, copied from docs/PHASE_A_FINDINGS.md A1.1).
+TRAFFIC_SOURCE_TYPES: dict[int, str] = {
+    0: "Direct or unknown",
+    1: "YouTube advertising",
+    3: "Browse features",
+    4: "YouTube channels",
+    5: "YouTube search",
+    7: "Suggested videos",
+    8: "Other YouTube features",
+    9: "External",
+    11: "Video cards and annotations",
+    14: "Playlists",
+    17: "Notifications",
+    18: "Playlist pages",
+    19: "Programming from claimed content",
+    20: "Interactive video endscreen",
+    23: "Stories",
+    24: "Shorts",
+    25: "Product Pages",
+    26: "Hashtag Pages",
+    27: "Sound Pages",
+    28: "Live redirect",
+    29: "Podcasts",
+    30: "Remixed video",
+    31: "Vertical live feed",
+    32: "Related video",
+}
+
+
+def traffic_source_name(code: int) -> str | None:
+    """Name for a traffic_source_type code; None for a code the table lacks."""
+    return TRAFFIC_SOURCE_TYPES.get(code)
+
+
 class ReportingHandle(NamedTuple):
     """Service + creds pair; creds are needed for raw media downloads."""
     service: object
@@ -125,7 +187,7 @@ def list_jobs(handle: ReportingHandle, channel_id: str) -> list[dict]:
     """All non-system-managed reporting jobs for the channel, across pages.
 
     Paginated even though 1-2 jobs is the realistic count: a job missed on
-    a hypothetical page 2 would make ensure_reach_job CREATE A DUPLICATE —
+    a hypothetical page 2 would make ensure_job CREATE A DUPLICATE —
     a write-side consequence, so the read is made airtight.
     """
     jobs: list[dict] = []
@@ -150,8 +212,9 @@ def list_jobs(handle: ReportingHandle, channel_id: str) -> list[dict]:
     return jobs
 
 
-def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
-    """Find (or create) this channel's reach reporting job. Returns job id.
+def ensure_job(handle: ReportingHandle, channel_id: str, report_type: str,
+               job_name: str) -> str | None:
+    """Find (or create) this channel's reporting job for `report_type`. Returns job id.
 
     Creation is a write to the channel's Reporting API config, so it respects
     DRY_RUN like every other write path: in DRY_RUN mode a missing job is
@@ -160,7 +223,7 @@ def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
     idempotent-by-check, not blind: we always list first.
     """
     for j in list_jobs(handle, channel_id):
-        if j.get("reportTypeId") == REACH_REPORT_TYPE_ID:
+        if j.get("reportTypeId") == report_type:
             return j["id"]
 
     if settings.DRY_RUN:
@@ -168,15 +231,15 @@ def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
             "[DRY_RUN] channel %s has no %s reporting job; would create one. "
             "Reports only accrue after the job exists — create it soon "
             "(scripts/create_reporting_job.py or lift DRY_RUN).",
-            channel_id, REACH_REPORT_TYPE_ID,
+            channel_id, report_type,
         )
         return None
 
     success = False
     try:
         created = handle.service.jobs().create(body={
-            "reportTypeId": REACH_REPORT_TYPE_ID,
-            "name": REACH_JOB_NAME,
+            "reportTypeId": report_type,
+            "name": job_name,
         }).execute()
         success = True
     except Exception as e:
@@ -185,8 +248,19 @@ def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
     finally:
         _log_quota(channel_id, "youtubeReporting.jobs.create", success)
 
-    log.info("created reach reporting job %s for channel %s", created.get("id"), channel_id)
+    log.info("created %s reporting job %s for channel %s",
+             report_type, created.get("id"), channel_id)
     return created["id"]
+
+
+def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
+    """`ensure_job` for the reach report type."""
+    return ensure_job(handle, channel_id, REACH_REPORT_TYPE_ID, REACH_JOB_NAME)
+
+
+def ensure_traffic_job(handle: ReportingHandle, channel_id: str) -> str | None:
+    """`ensure_job` for the traffic-source report type."""
+    return ensure_job(handle, channel_id, TRAFFIC_REPORT_TYPE_ID, TRAFFIC_JOB_NAME)
 
 
 # ── Reports ───────────────────────────────────────────────────────────────
@@ -286,3 +360,51 @@ def parse_reach_csv(text: str) -> list[dict]:
             "ctr": float(raw[4]),
         })
     return rows
+
+
+def parse_traffic_csv(text: str) -> list[dict]:
+    """Parse a channel_traffic_source_a3 CSV into per-day rows ready for upsert.
+
+    Sums views, engaged_views and watch_time_minutes over country_code,
+    subscribed_status and live_or_on_demand, so there is one row per
+    (video_id, date, source_type, source_detail). The average and red_*
+    columns are dropped. Returns [{"video_id", "date" (ISO), "source_type"
+    (int code), "source_detail" ('' when blank), "views", "engaged_views",
+    "watch_time_minutes"}]. Any bad header or value raises, so a malformed
+    report writes nothing.
+    """
+    reader = csv.reader(io.StringIO(text))
+    header = next(reader, [])
+    if header != _TRAFFIC_CSV_COLUMNS:
+        raise ValueError(
+            f"unexpected traffic CSV header {header!r} — expected {_TRAFFIC_CSV_COLUMNS!r}. "
+            "Re-probe with scripts/probes/probe_traffic_source_report.py before trusting ingestion."
+        )
+    sums: dict[tuple[str, str, int, str], list] = {}
+    for raw in reader:
+        if not raw:
+            continue  # trailing blank line
+        # Unlike the reach parser, a short row fails the report: skipping it
+        # would undercount the day with no error.
+        if len(raw) != len(_TRAFFIC_CSV_COLUMNS):
+            raise ValueError(f"traffic CSV row has {len(raw)} columns, want {len(_TRAFFIC_CSV_COLUMNS)}")
+        d = raw[0]  # YYYYMMDD
+        if len(d) != 8 or not d.isdigit():
+            raise ValueError(f"unexpected traffic CSV date {d!r} (want YYYYMMDD)")
+        key = (raw[2], f"{d[0:4]}-{d[4:6]}-{d[6:8]}", int(raw[6]), raw[7])
+        acc = sums.setdefault(key, [0, 0, 0.0])
+        acc[0] += int(raw[8])
+        acc[1] += int(raw[9])
+        acc[2] += float(raw[10])
+    return [
+        {
+            "video_id": video_id,
+            "date": day,
+            "source_type": source_type,
+            "source_detail": detail,
+            "views": views,
+            "engaged_views": engaged,
+            "watch_time_minutes": minutes,
+        }
+        for (video_id, day, source_type, detail), (views, engaged, minutes) in sums.items()
+    ]

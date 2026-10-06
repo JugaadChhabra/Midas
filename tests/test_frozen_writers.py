@@ -71,7 +71,7 @@ def test_reconcile_registers_regardless_of_writes_flag(writes):
 def test_unfrozen_jobs_still_register_with_every_flag_off():
     ids = _registered_ids(**{flag: False for flag in ALL_FLAGS})
     assert {"autopilot", "shorts_dispatch", "playlist_reconcile", "metrics_poll",
-            "reporting_poll", "playlist_health_score", "measurement_eval",
+            "reporting_poll", "traffic_poll", "playlist_health_score", "measurement_eval",
             "nightly_db_backup"} <= ids
 
 

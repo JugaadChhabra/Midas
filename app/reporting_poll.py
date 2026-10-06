@@ -40,6 +40,7 @@ from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
 from app.reporting_client import (
+    REACH_REPORT_TYPE_ID,
     download_report_csv,
     ensure_reach_job,
     list_reports,
@@ -59,7 +60,7 @@ _UPSERT_CHUNK = 500
 _BACKFILL_LOOKBACK_DAYS = 90
 
 
-def _ingested_report_ids(channel_id: str) -> set[str]:
+def ingested_report_ids(channel_id: str) -> set[str]:
     """Report ids already ingested for this channel — the dedup set.
 
     Ingestion's own concern, deliberately NOT part of `app.reach`: a report id
@@ -68,7 +69,7 @@ def _ingested_report_ids(channel_id: str) -> set[str]:
 
     Costs a second read of this (small) ledger per channel per pass, where the
     old tuple-returning version got both sets from one. Accepted: the table
-    holds one row per channel per data-day, and the alternative was a shared
+    holds one row per channel per data-day per report type, and the alternative was a shared
     function returning two sets for two unrelated callers.
     """
     rows = all_rows(
@@ -81,29 +82,76 @@ def _ingested_report_ids(channel_id: str) -> set[str]:
     return {r["report_id"] for r in rows}
 
 
+def superseded_reports(channel_id: str, report_type: str, data_date: str,
+                       report_id: str) -> list[str]:
+    """Ids of reports of `report_type` already ingested for this channel's
+    data-day, other than `report_id`. Non-empty means `report_id` is a reissue
+    (a restatement). Scoped by type because the ledger is shared: a traffic
+    report for the day is not an earlier version of its reach report."""
+    rows = (
+        supabase().table("reporting_reports_ingested")
+        .select("report_id")
+        .eq("channel_id", channel_id)
+        .eq("report_type", report_type)
+        .eq("data_date", data_date)
+        .neq("report_id", report_id)
+        .execute()
+        .data or []
+    )
+    return [r["report_id"] for r in rows]
+
+
+def replace_data_day(table: str, channel_id: str, data_date: str, report_id: str,
+                     payload: list[dict], on_conflict: str) -> None:
+    """Make `payload` the whole of `table`'s rows for one channel data-day.
+
+    Latest-wins in both directions: the upsert overwrites rows present in the
+    new report, and the sweep removes rows the report no longer lists (a video
+    corrected down to nothing would otherwise keep its stale row forever).
+    Every row in `payload` must carry `report_id`.
+    """
+    for i in range(0, len(payload), _UPSERT_CHUNK):
+        supabase().table(table).upsert(
+            payload[i : i + _UPSERT_CHUNK], on_conflict=on_conflict
+        ).execute()
+
+    # Sweep rows for this day that the current report did not (re)write.
+    # Rows for a date can only originate from a report of that same data-day,
+    # so report_id != current means superseded.
+    supabase().table(table).delete().eq("channel_id", channel_id).eq(
+        "date", data_date
+    ).neq("report_id", report_id).execute()
+
+
+def record_ingested(report: dict, job_id: str, channel_id: str, report_type: str,
+                    data_date: str, row_count: int) -> None:
+    """Ledger a report as ingested. Call LAST — if the process dies mid-ingest,
+    the report is retried next run and every step before this is idempotent."""
+    supabase().table("reporting_reports_ingested").upsert(
+        {
+            "report_id": report["id"],
+            "job_id": job_id,
+            "channel_id": channel_id,
+            "report_type": report_type,
+            "data_date": data_date,
+            "row_count": row_count,
+        },
+        on_conflict="report_id",
+    ).execute()
+
+
 def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
     """Download + land one report CSV. Returns rows written.
 
     Reissue handling: YouTube can emit a CORRECTED report for a data-day
-    already ingested under a different report id. Latest-wins is enforced in
-    both directions — the upsert overwrites videos present in the new CSV,
-    and the delete below removes daily rows the correction no longer lists
-    (a video corrected down to 0 impressions would otherwise keep its stale
-    row forever). If the day was previously ingested, any video_metrics
+    already ingested under a different report id. `replace_data_day` makes the
+    latest report win. If the day was previously ingested, any video_metrics
     windows containing it are re-NULLed so the backfill pass recomputes them
     from corrected data — without this, already-filled windows would keep
     baselining Loop 1 on superseded numbers.
     """
     data_date = report_data_date(report).isoformat()
-    prior = (
-        supabase().table("reporting_reports_ingested")
-        .select("report_id")
-        .eq("channel_id", channel_id)
-        .eq("data_date", data_date)
-        .neq("report_id", report["id"])
-        .execute()
-        .data or []
-    )
+    prior = superseded_reports(channel_id, REACH_REPORT_TYPE_ID, data_date, report["id"])
 
     csv_text = download_report_csv(handle, channel_id, report["downloadUrl"])
     rows = parse_reach_csv(csv_text)
@@ -122,23 +170,14 @@ def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
         }
         for r in rows
     ]
-    for i in range(0, len(payload), _UPSERT_CHUNK):
-        supabase().table("video_reach_daily").upsert(
-            payload[i : i + _UPSERT_CHUNK], on_conflict="video_id,date"
-        ).execute()
-
-    # Sweep rows for this day that the current report did not (re)write.
-    # Rows for a date can only originate from a report of that same data-day,
-    # so report_id != current means superseded.
-    supabase().table("video_reach_daily").delete().eq("channel_id", channel_id).eq(
-        "date", data_date
-    ).neq("report_id", report["id"]).execute()
+    replace_data_day("video_reach_daily", channel_id, data_date, report["id"],
+                     payload, on_conflict="video_id,date")
 
     if prior:
         log.info(
             "reissued report for %s data-day %s (supersedes %s); re-NULLing "
             "overlapping video_metrics windows for recompute",
-            channel_id, data_date, [p["report_id"] for p in prior],
+            channel_id, data_date, prior,
         )
         supabase().table("video_metrics").update(
             {"impressions": None, "ctr": None}
@@ -146,18 +185,7 @@ def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
             "window_end", data_date
         ).execute()
 
-    # Ledger row LAST — if the process dies mid-ingest, the report is retried
-    # next run and every step above is idempotent.
-    supabase().table("reporting_reports_ingested").upsert(
-        {
-            "report_id": report["id"],
-            "job_id": job_id,
-            "channel_id": channel_id,
-            "data_date": data_date,
-            "row_count": len(payload),
-        },
-        on_conflict="report_id",
-    ).execute()
+    record_ingested(report, job_id, channel_id, REACH_REPORT_TYPE_ID, data_date, len(payload))
     return len(payload)
 
 
@@ -252,7 +280,7 @@ def _poll_channel(channel_id: str) -> dict:
         return {"job": None, "reports_new": 0, "rows_ingested": 0}
 
     reports = list_reports(handle, channel_id, job_id)
-    seen = _ingested_report_ids(channel_id)
+    seen = ingested_report_ids(channel_id)
     covered = reach.coverage(channel_id)
     new = [r for r in reports if r["id"] not in seen]
     # Oldest data-day first, so coverage grows contiguously and a mid-run
