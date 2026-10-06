@@ -125,7 +125,7 @@ def list_jobs(handle: ReportingHandle, channel_id: str) -> list[dict]:
     """All non-system-managed reporting jobs for the channel, across pages.
 
     Paginated even though 1-2 jobs is the realistic count: a job missed on
-    a hypothetical page 2 would make ensure_reach_job CREATE A DUPLICATE —
+    a hypothetical page 2 would make ensure_job CREATE A DUPLICATE —
     a write-side consequence, so the read is made airtight.
     """
     jobs: list[dict] = []
@@ -150,8 +150,9 @@ def list_jobs(handle: ReportingHandle, channel_id: str) -> list[dict]:
     return jobs
 
 
-def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
-    """Find (or create) this channel's reach reporting job. Returns job id.
+def ensure_job(handle: ReportingHandle, channel_id: str, report_type: str,
+               job_name: str) -> str | None:
+    """Find (or create) this channel's reporting job for `report_type`. Returns job id.
 
     Creation is a write to the channel's Reporting API config, so it respects
     DRY_RUN like every other write path: in DRY_RUN mode a missing job is
@@ -160,7 +161,7 @@ def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
     idempotent-by-check, not blind: we always list first.
     """
     for j in list_jobs(handle, channel_id):
-        if j.get("reportTypeId") == REACH_REPORT_TYPE_ID:
+        if j.get("reportTypeId") == report_type:
             return j["id"]
 
     if settings.DRY_RUN:
@@ -168,15 +169,15 @@ def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
             "[DRY_RUN] channel %s has no %s reporting job; would create one. "
             "Reports only accrue after the job exists — create it soon "
             "(scripts/create_reporting_job.py or lift DRY_RUN).",
-            channel_id, REACH_REPORT_TYPE_ID,
+            channel_id, report_type,
         )
         return None
 
     success = False
     try:
         created = handle.service.jobs().create(body={
-            "reportTypeId": REACH_REPORT_TYPE_ID,
-            "name": REACH_JOB_NAME,
+            "reportTypeId": report_type,
+            "name": job_name,
         }).execute()
         success = True
     except Exception as e:
@@ -185,8 +186,14 @@ def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
     finally:
         _log_quota(channel_id, "youtubeReporting.jobs.create", success)
 
-    log.info("created reach reporting job %s for channel %s", created.get("id"), channel_id)
+    log.info("created %s reporting job %s for channel %s",
+             report_type, created.get("id"), channel_id)
     return created["id"]
+
+
+def ensure_reach_job(handle: ReportingHandle, channel_id: str) -> str | None:
+    """`ensure_job` for the reach report type."""
+    return ensure_job(handle, channel_id, REACH_REPORT_TYPE_ID, REACH_JOB_NAME)
 
 
 # ── Reports ───────────────────────────────────────────────────────────────
