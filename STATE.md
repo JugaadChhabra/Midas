@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`) · **Commit:** on top of `c525965` · **Branch:** `phase-b/30-phase-b-b1a-video-traffic-source-ingesti`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`) · **Commit:** on top of `6a5432f` · **Branch:** `phase-b/30-phase-b-b1a-video-traffic-source-ingesti`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -822,6 +822,20 @@ where imp >= 500 group by 1 order by 2 desc;
 -- traffic-source rows per data-day (B1; after the 20261006000000 migration is applied)
 select channel_id, date, count(1) rows_, sum(views) views, max(report_id) report
 from video_traffic_source_daily group by 1,2 order by 1,2 desc;
+
+-- B9a acceptance: traffic frontier per channel, from the ledger (a day whose report had 0 rows is ingested
+-- but has no table rows), and the data-days missing between the first ingested day and current_date - 2
+select channel_id, min(data_date) first_day, max(data_date) frontier, count(1) days_ingested
+from reporting_reports_ingested where report_type = 'channel_traffic_source_a3' group by 1;
+
+select d::date missing_day
+from generate_series(
+       (select min(data_date) from reporting_reports_ingested
+        where report_type = 'channel_traffic_source_a3' and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg'),
+       current_date - 2, interval '1 day') d
+where d::date not in (select data_date from reporting_reports_ingested
+                      where report_type = 'channel_traffic_source_a3' and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
+order by 1;
 
 -- applied audits in the last 90 days that landed on dormant videos
 select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total
