@@ -46,12 +46,11 @@ class TokenExpired(HTTPException, TokenExpiredError):
     `HTTPException(401)` escaped those handlers and failed the run (B8).
     """
 
-    def __init__(self, channel_id: str):
+    def __init__(self):
         super().__init__(401, "token_expired")
-        self.channel_id = channel_id
 
 
-def _token_failure_is_401(route):
+def _token_failure_as_401(route):
     """Map a token failure anywhere in `route` to `TokenExpired`.
 
     The token can fail at `youtube_for_channel` or mid-call, when google-auth
@@ -66,7 +65,7 @@ def _token_failure_is_401(route):
         except TokenExpired:
             raise
         except TokenExpiredError as e:
-            raise TokenExpired(str(e)) from e
+            raise TokenExpired() from e
     return wrapper
 
 
@@ -111,7 +110,7 @@ router = APIRouter(tags=["sync"])
 
 
 @router.post("/channels/{channel_id}/sync")
-@_token_failure_is_401
+@_token_failure_as_401
 def sync_channel(channel_id: str, full: bool = False):
     """Sync a channel's videos.
 
@@ -309,7 +308,7 @@ def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:
 
 
 @router.post("/channels/{channel_id}/refresh-stats")
-@_token_failure_is_401
+@_token_failure_as_401
 def refresh_stats(channel_id: str):
     """Refresh view/like/comment counts and privacy_status for every synced
     video on the channel. Cheap: 1 quota unit per 50 videos, and no playlist
@@ -326,7 +325,7 @@ def refresh_stats(channel_id: str):
 
 
 @router.post("/channels/{channel_id}/refresh-applied-stats")
-@_token_failure_is_401
+@_token_failure_as_401
 def refresh_applied_stats(channel_id: str):
     """Refresh stats only for videos with applied audits. Cheap: 1 quota unit per 50 videos."""
     # Find video ids in this channel that have an applied audit

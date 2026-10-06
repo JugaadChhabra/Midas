@@ -7,6 +7,7 @@ never happened and Hindi failed the run on 2026-10-06. These drive the REAL
 `routine_sync` -> `sync_channel` / `refresh_stats` -> `yt_*` helpers; only the
 YouTube client and the database are faked.
 """
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from googleapiclient.errors import HttpError
 
 from app import main, quota, sync
 from app.job_status import JobRunFailed
+from app.youtube_client import TokenExpiredError
 from tests.fakes import FakeSupabase
 
 
@@ -48,19 +50,22 @@ class _Request:
 
 
 class FakeYouTube:
-    """The Data API client the yt_* helpers call. `fail` maps a resource name
-    ("channels", "playlistItems", "videos") to the exception its `.execute()`
-    raises; everything else answers from `uploads`, newest first."""
+    """The Data API client the yt_* helpers call, answering from `uploads`
+    (newest first). `fail` maps a resource name ("channels", "playlistItems",
+    "videos") to `(ok_calls, exc)`: that resource answers `ok_calls` times,
+    then every `.execute()` raises `exc`."""
 
-    def __init__(self, uploads: list[str], fail: dict[str, Exception] | None = None):
+    def __init__(self, uploads: list[str], fail: dict[str, tuple[int, Exception]] | None = None):
         self.uploads = uploads
         self.fail = fail or {}
+        self.calls: dict[str, int] = {}
 
     def _resource(self, name, respond):
         def _list(**kw):
             def _go():
-                if name in self.fail:
-                    raise self.fail[name]
+                n = self.calls[name] = self.calls.get(name, 0) + 1
+                if name in self.fail and n > self.fail[name][0]:
+                    raise self.fail[name][1]
                 return respond(**kw)
             return _Request(_go)
         return type("R", (), {"list": staticmethod(_list)})()
@@ -89,23 +94,20 @@ def _db(channels: list[dict], videos: list[dict] | None = None, **tables) -> Fak
     return FakeSupabase({"channels": channels, "videos": videos or [], "quota_log": [], **tables})
 
 
-def _patched(sb: FakeSupabase, clients: dict[str, FakeYouTube]):
-    return [
-        patch.object(sync, "supabase", return_value=sb),
-        patch.object(quota, "supabase", return_value=sb),
-        patch.object(sync, "youtube_for_channel", side_effect=lambda cid: clients[cid]),
-    ]
-
-
-def _enter(patches):
-    for p in patches:
-        p.start()
-
-
 @pytest.fixture
-def stop_patches():
-    yield
-    patch.stopall()
+def edges():
+    """Install the fake database and per-channel fake YouTube clients."""
+    with ExitStack() as stack:
+        def install(sb: FakeSupabase, clients: dict):
+            def client_for(channel_id):
+                c = clients[channel_id]
+                if isinstance(c, Exception):          # the token fails at youtube_for_channel
+                    raise c
+                return c
+            stack.enter_context(patch.object(sync, "supabase", return_value=sb))
+            stack.enter_context(patch.object(quota, "supabase", return_value=sb))
+            stack.enter_context(patch.object(sync, "youtube_for_channel", side_effect=client_for))
+        yield install
 
 
 # ── HTTP: a token failure mid-call is 401, not 500 ───────────────────────────
@@ -114,9 +116,9 @@ def _client():
     return TestClient(main.app, raise_server_exceptions=False)
 
 
-def test_refresh_stats_token_failure_mid_call_returns_401(stop_patches):
-    sb = _db([{"id": "UC1"}], [{"id": "v1", "channel_id": "UC1"}])
-    _enter(_patched(sb, {"UC1": FakeYouTube([], fail={"videos": _revoked()})}))
+def test_refresh_stats_token_failure_mid_call_returns_401(edges):
+    edges(_db([{"id": "UC1"}], [{"id": "v1", "channel_id": "UC1"}]),
+          {"UC1": FakeYouTube([], fail={"videos": (0, _revoked())})})
 
     r = _client().post("/channels/UC1/refresh-stats")
 
@@ -124,10 +126,10 @@ def test_refresh_stats_token_failure_mid_call_returns_401(stop_patches):
     assert r.json() == {"detail": "token_expired"}
 
 
-def test_refresh_applied_stats_token_failure_mid_call_returns_401(stop_patches):
-    sb = _db([{"id": "UC1"}], [{"id": "v1", "channel_id": "UC1"}],
-             audits=[{"video_id": "v1", "status": "applied"}])
-    _enter(_patched(sb, {"UC1": FakeYouTube([], fail={"videos": _revoked()})}))
+def test_refresh_applied_stats_token_failure_mid_call_returns_401(edges):
+    edges(_db([{"id": "UC1"}], [{"id": "v1", "channel_id": "UC1"}],
+              audits=[{"video_id": "v1", "status": "applied"}]),
+          {"UC1": FakeYouTube([], fail={"videos": (0, _revoked())})})
 
     r = _client().post("/channels/UC1/refresh-applied-stats")
 
@@ -136,9 +138,8 @@ def test_refresh_applied_stats_token_failure_mid_call_returns_401(stop_patches):
 
 
 @pytest.mark.parametrize("resource", ["channels", "playlistItems", "videos"])
-def test_sync_token_failure_mid_call_returns_401(stop_patches, resource):
-    sb = _db([{"id": "UC1"}])
-    _enter(_patched(sb, {"UC1": FakeYouTube(["v1"], fail={resource: _revoked()})}))
+def test_sync_token_failure_mid_call_returns_401(edges, resource):
+    edges(_db([{"id": "UC1"}]), {"UC1": FakeYouTube(["v1"], fail={resource: (0, _revoked())})})
 
     r = _client().post("/channels/UC1/sync")
 
@@ -146,56 +147,53 @@ def test_sync_token_failure_mid_call_returns_401(stop_patches, resource):
     assert r.json() == {"detail": "token_expired"}
 
 
-def test_a_youtube_401_that_is_not_a_token_failure_is_not_token_expired(stop_patches):
-    sb = _db([{"id": "UC1"}], [{"id": "v1", "channel_id": "UC1"}])
-    _enter(_patched(sb, {"UC1": FakeYouTube([], fail={"videos": _http_error(401)})}))
+def test_a_youtube_401_that_is_not_a_token_failure_is_not_token_expired(edges):
+    edges(_db([{"id": "UC1"}], [{"id": "v1", "channel_id": "UC1"}]),
+          {"UC1": FakeYouTube([], fail={"videos": (0, _http_error(401))})})
 
     with pytest.raises(HTTPException) as exc:
         sync.refresh_stats("UC1")
     assert exc.value.detail != "token_expired"
+    assert not isinstance(exc.value, TokenExpiredError)
 
 
 # ── video_sync: the expired channel is skipped, the rest still sync ──────────
 
-def _run_video_sync(sb: FakeSupabase, channels: list[dict]):
+def _run_video_sync(channels: list[dict]):
     with patch.object(main.eligibility, "channels_for", return_value=channels):
         main._daily_video_sync()
 
 
-def test_video_sync_skips_expired_tokens_and_syncs_the_rest(stop_patches):
-    # Three channels, all stale: "full_expired" dies mid-sync on a full pass,
-    # "stats_expired" syncs fine but dies mid-refresh_stats on an incremental
-    # pass, and "ok" must still be synced after both.
+def test_video_sync_skips_expired_tokens_and_syncs_the_rest(edges):
+    # Four channels, all stale. "full_expired" dies mid-sync on a full pass;
+    # "stats_expired" syncs its new upload, then its token is revoked before the
+    # incremental pass's refresh_stats; "consent_expired" fails at
+    # youtube_for_channel; "ok" must still be synced after all three.
     channels = [
         {"id": "full_expired", "last_synced_at": _ago(days=2), "last_full_synced_at": None},
         {"id": "stats_expired", "last_synced_at": _ago(days=2), "last_full_synced_at": _ago(days=1)},
+        {"id": "consent_expired", "last_synced_at": _ago(days=2), "last_full_synced_at": None},
         {"id": "ok", "last_synced_at": _ago(days=2), "last_full_synced_at": None},
     ]
     sb = _db([dict(c) for c in channels], [{"id": "s0", "channel_id": "stats_expired"}])
-    stats_client = FakeYouTube(["s1", "s0"])
-    clients = {
-        "full_expired": FakeYouTube(["f1"], fail={"playlistItems": _revoked()}),
+    stats_client = FakeYouTube(["s1", "s0"], fail={"videos": (1, _revoked())})
+    edges(sb, {
+        "full_expired": FakeYouTube(["f1"], fail={"playlistItems": (0, _revoked())}),
         "stats_expired": stats_client,
+        "consent_expired": TokenExpiredError("consent_expired"),
         "ok": FakeYouTube(["o1", "o2"]),
-    }
-    _enter(_patched(sb, clients))
-    real_refresh = sync.refresh_stats
+    })
 
-    def refresh_then_revoke(channel_id):
-        # The token is revoked between sync_channel and refresh_stats.
-        stats_client.fail["videos"] = _revoked()
-        return real_refresh(channel_id)
+    _run_video_sync(channels)                  # no JobRunFailed
 
-    with patch.object(sync, "refresh_stats", side_effect=refresh_then_revoke) as rs:
-        _run_video_sync(sb, channels)          # no JobRunFailed
-
-    rs.assert_called_once_with("stats_expired")
+    assert stats_client.calls["videos"] == 2   # the full fetch of s1, then the failed stats call
     videos = {v["id"]: v["channel_id"] for v in sb.rows("videos")}
     assert videos["o1"] == "ok" and videos["o2"] == "ok"
     assert "f1" not in videos
     last_synced = {c["id"]: c["last_synced_at"] for c in sb.rows("channels")}
-    assert last_synced["ok"] > channels[2]["last_synced_at"]
+    assert last_synced["ok"] > channels[3]["last_synced_at"]
     assert last_synced["full_expired"] == channels[0]["last_synced_at"]
+    assert last_synced["consent_expired"] == channels[2]["last_synced_at"]
 
 
 @pytest.mark.parametrize("error", [
@@ -203,17 +201,17 @@ def test_video_sync_skips_expired_tokens_and_syncs_the_rest(stop_patches):
     _http_error(401),                                 # a 401 that is not a token failure
     RefreshError("invalid_client: The OAuth client was not found."),
 ], ids=["http-500", "http-401", "refresh-not-invalid-grant"])
-def test_video_sync_still_fails_on_a_non_token_error(stop_patches, error):
+def test_video_sync_still_fails_on_a_non_token_error(edges, error):
     channels = [
         {"id": "bad", "last_synced_at": _ago(days=2), "last_full_synced_at": None},
         {"id": "ok", "last_synced_at": _ago(days=2), "last_full_synced_at": None},
     ]
     sb = _db([dict(c) for c in channels])
-    _enter(_patched(sb, {"bad": FakeYouTube(["b1"], fail={"videos": error}),
-                         "ok": FakeYouTube(["o1"])}))
+    edges(sb, {"bad": FakeYouTube(["b1"], fail={"videos": (0, error)}),
+               "ok": FakeYouTube(["o1"])})
 
     with pytest.raises(JobRunFailed) as exc:
-        _run_video_sync(sb, channels)
+        _run_video_sync(channels)
 
     assert list(exc.value.failed_channels) == ["bad"]
     assert {v["id"] for v in sb.rows("videos")} == {"o1"}
