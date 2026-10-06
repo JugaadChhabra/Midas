@@ -103,6 +103,23 @@ def _ledger_key(video_id: str, target: str, description: str | None) -> str:
     return f"{InterventionLever.BACKLINKS}:{video_id}:{target}:{digest}"
 
 
+def _record_human(channel_id: str, video_id: str, lever: str, *, payload: dict,
+                  now: str, ledger_key: str) -> int:
+    """Write one human intervention; 1 if stored, 0 if its ledger key already was."""
+    row = interventions.record(
+        video_id=video_id,
+        channel_id=channel_id,
+        lever=lever,
+        origin=InterventionOrigin.HUMAN,
+        arm=InterventionArm.NOT_APPLICABLE,
+        status=InterventionStatus.APPLIED,
+        payload=payload,
+        detected_at=now,
+        ledger_key=ledger_key,
+    )
+    return 0 if row is None else 1
+
+
 def _mark_removed(video_id: str, target: str, now: str) -> None:
     """Stamp the removal on the link's earlier human intervention, if any."""
     rows = all_rows(
@@ -128,13 +145,8 @@ def _record_one(channel_id: str, video_id: str, after: str | None,
         return 0
     recorded = 0
     for target in sorted(added):
-        row = interventions.record(
-            video_id=video_id,
-            channel_id=channel_id,
-            lever=InterventionLever.BACKLINKS,
-            origin=InterventionOrigin.HUMAN,
-            arm=InterventionArm.NOT_APPLICABLE,
-            status=InterventionStatus.APPLIED,
+        recorded += _record_human(
+            channel_id, video_id, InterventionLever.BACKLINKS,
             payload={
                 "source_video_id": video_id,
                 "target_video_id": target,
@@ -142,11 +154,9 @@ def _record_one(channel_id: str, video_id: str, after: str | None,
                 "removed_targets": sorted(removed),
                 "timing": DETECTION_TIMING,
             },
-            detected_at=now,
+            now=now,
             ledger_key=_ledger_key(video_id, target, after),
         )
-        if row is not None:
-            recorded += 1
     for target in sorted(removed):
         _mark_removed(video_id, target, now)
     if recorded:
