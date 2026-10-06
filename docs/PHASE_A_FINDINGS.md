@@ -9,7 +9,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 
 ## Status: resume here
 
-*Last updated 2026-10-01 (end of session).*
+*Last updated 2026-10-06.*
 
 | Task | State |
 |---|---|
@@ -30,8 +30,13 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 
 **Next session, in order:**
 1. ~~Restart the office app.~~ Done 2026-10-01 ≈12:46 UTC; `video_sync` is registered.
-2. **After its first 04:00 UTC run (2026-10-02),** confirm `/health/jobs` shows `video_sync` `success`,
-   and that Marathi's `last_synced_at` is from that morning.
+2. ~~Confirm sync is fresh.~~ Done 2026-10-06 with a manual sync of all channels (`logs\manual-sync.txt`):
+   Marathi `last_synced_at` 2026-10-06 07:48 UTC, 5,804 videos (was 5,676 on 10-01), newest
+   2026-10-06 07:30. **Hindi `UCR9qQMyP86aSt-1VgaMg7UA`: `token_expired`**, so it needs re-consent via
+   `/auth/login` (it's the top cross-channel referrer into Marathi). Kannada `UCo4_mZK5aAF7ugv4cTfZlEg`
+   and Telugu `UCxK1-ftYdFvU4IuUW3POxRA` have 0 videos in `videos`. Minor bug: `refresh-stats`
+   returns 500 rather than 401 when the token fails during the API call (it only catches
+   `TokenExpiredError` around `youtube_for_channel`).
 3. **A7 live numbers,** on the fresh video list. They pick rollout channel #1 and a warm video.
 4. **A1.2 and A3 on-demand:** the Analytics API comparison, on that warm video.
 5. **A5:** the Haryanvi i18n probe, the `UPDATE`, then a NAS snapshot.
