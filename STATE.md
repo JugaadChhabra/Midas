@@ -286,7 +286,7 @@ at `GET /health/jobs` (`app/main.py:562-565`).
 `"<job_id> not registered: <FLAG>=false"`. `playlist_reconcile` always registers; with
 `PLAYLIST_RECONCILE_WRITES_ENABLED=false` it runs `sync_playlists` and skips `reconcile_channel`, logging
 `"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` per channel
-(`app/main.py:164-168`) and `"playlist_reconcile registered for sync only: add/remove skipped
+(`app/main.py:165-169`) and `"playlist_reconcile registered for sync only: add/remove skipped
 (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` at startup (`app/main.py:323-325`). All four flags default false (§3);
 the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.md` A0).
 
