@@ -8,7 +8,8 @@ and compared here instead:
   * the next_audit_candidate() SQL function re-types the picker's skip lists,
   * app/static/status.js maps audit statuses to pills,
   * the interventions migration's partial unique index re-types the active
-    intervention statuses (spec Part 2 §1.6).
+    intervention statuses (spec Part 2 §1.6), and so does the warm_pool()
+    SQL function (B4).
 
 The live parity tests (test_autopilot_picker_parity_live.py,
 test_autopilot_measurement_exclusion_parity_live.py) exist because those copies
@@ -31,6 +32,7 @@ REPO = Path(__file__).resolve().parents[1]
 PICKER_SQL = REPO / "supabase/migrations/20260730010000_next_audit_candidate_exclude_measurement.sql"
 STATUS_JS = REPO / "app/static/status.js"
 INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql"
+WARM_POOL_SQL = REPO / "supabase/migrations/20261006040000_warm_pool_rpc.sql"
 
 
 def _sql_not_in_lists(sql: str) -> list[set[str]]:
@@ -133,6 +135,19 @@ def test_sql_active_intervention_index_matches_python():
     assert {v.strip().strip("'") for v in statuses.group(1).split(",")} == \
         set(sv.ACTIVE_INTERVENTION_STATUSES), (
         "the partial unique index's status list has drifted from "
+        "ACTIVE_INTERVENTION_STATUSES")
+
+
+def test_sql_warm_pool_intervention_exclusion_matches_python():
+    sql = WARM_POOL_SQL.read_text()
+    m = re.search(r"from interventions i\s+where(.*?)\)\s*order by", sql, re.S | re.I)
+    assert m, "warm_pool()'s intervention exclusion not found"
+    where = m.group(1)
+    assert re.search(r"origin\s*=\s*'midas'", where)
+    statuses = re.search(r"status\s+in\s*\(([^)]*)\)", where, re.I)
+    assert {v.strip().strip("'") for v in statuses.group(1).split(",")} == \
+        set(sv.ACTIVE_INTERVENTION_STATUSES), (
+        "warm_pool()'s intervention exclusion has drifted from "
         "ACTIVE_INTERVENTION_STATUSES")
 
 

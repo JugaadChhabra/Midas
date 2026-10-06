@@ -232,6 +232,19 @@ class Settings:
     # videos held out as the control arm (recorded, never applied). Per lever, by
     # a stable hash of (video_id, lever): app/interventions.assign_arm.
     HOLDOUT_PCT = float(os.getenv("HOLDOUT_PCT") or "0.20")
+    # Phase B · B4 (spec Part 2 §2.1, §8): the warm filter, app/warm.py. A video
+    # is warm with >= WARM_MIN_IMPRESSIONS over the channel's latest
+    # WARM_WINDOW_DAYS ingested reach data-days (not calendar days);
+    # WARM_EXPLORE_PCT of picks come from the rest of the pool, not the top.
+    WARM_MIN_IMPRESSIONS = int(os.getenv("WARM_MIN_IMPRESSIONS") or "500")
+    WARM_WINDOW_DAYS     = int(os.getenv("WARM_WINDOW_DAYS")     or "28")
+    WARM_EXPLORE_PCT     = float(os.getenv("WARM_EXPLORE_PCT")   or "0.10")
+    # When true, app/warm.py ranks the pool in Postgres via the warm_pool() RPC
+    # instead of reading videos + 28 days of video_reach_daily into the app. The
+    # in-app path stays as the fallback and parity oracle (as for
+    # AUTOPILOT_PICKER_USE_RPC); tests/test_warm_pool_parity_live.py is the gate
+    # for flipping it on.
+    WARM_POOL_USE_RPC = os.getenv("WARM_POOL_USE_RPC", "false").lower() == "true"
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).
