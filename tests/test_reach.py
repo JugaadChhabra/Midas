@@ -246,9 +246,11 @@ def test_aggregate_reads_one_video_over_the_window():
 
 def test_coverage_reads_the_ledger_scoped_to_the_channel():
     """Shape, not rows. The ledger has no `id` column, so paging must be
-    ordered by report_id or all_rows' total order is undefined."""
+    ordered by report_id or all_rows' total order is undefined. It also holds
+    traffic-source reports (B1), so only the reach type counts."""
     sb = MagicMock()
-    eq = sb.table.return_value.select.return_value.eq.return_value
+    first_eq = sb.table.return_value.select.return_value.eq
+    eq = first_eq.return_value.eq.return_value
     with patch.object(reach, "supabase", return_value=sb), \
          patch.object(reach, "all_rows", return_value=[
              {"data_date": "2026-06-01"}, {"data_date": "2026-06-02"},
@@ -257,7 +259,8 @@ def test_coverage_reads_the_ledger_scoped_to_the_channel():
 
     sb.table.assert_called_once_with("reporting_reports_ingested")
     sb.table.return_value.select.assert_called_once_with("data_date")
-    sb.table.return_value.select.return_value.eq.assert_called_once_with("channel_id", "c1")
+    first_eq.assert_called_once_with("channel_id", "c1")
+    first_eq.return_value.eq.assert_called_once_with("report_type", "channel_reach_basic_a1")
     assert all_rows.call_args[0][0] is eq
     assert all_rows.call_args[1]["order_by"] == "report_id"
 

@@ -30,6 +30,7 @@ from app.backup import run_nightly_backup
 from app.provision import ensure_database_populated
 from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
+from app.traffic_poll import poll_traffic
 from app.measurement import router as measurement_router
 from app.playlist_health import score_channel as playlist_health_score_channel
 
@@ -411,6 +412,20 @@ def _register_jobs(sched) -> None:
         # heals next day since backfill re-scans NULL-impression windows.
         timezone="UTC",
         id="reporting_poll",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        poll_traffic,
+        "cron",
+        hour=6,
+        minute=30,
+        # UTC, after reporting_poll (spec Part 3 B1) but not dependent on it:
+        # the two read different report types and write different tables.
+        # Read-only against YouTube apart from the Reporting API job
+        # subscription, so it is not one of the A4 frozen writers.
+        timezone="UTC",
+        id="traffic_poll",
         max_instances=1,
         coalesce=True,
     )

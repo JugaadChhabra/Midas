@@ -44,6 +44,8 @@ class Job:
     AUTOPILOT = "autopilot"
     #: reporting_poll — reach CSV ingestion
     REACH = "reach"
+    #: traffic_poll — traffic-source CSV ingestion
+    TRAFFIC = "traffic"
     #: metrics_poll — on-demand Analytics (views/retention)
     ANALYTICS = "analytics"
     #: playlist_health scoring
@@ -164,6 +166,16 @@ def channels_for(job: str, columns: str = "id") -> list[dict]:
         if settings.REPORTING_MEASURED_CHANNELS_ONLY:
             q = q.or_("measurement_enabled.eq.true,reach_warmup.eq.true")
         return all_rows(q)
+
+    if job == Job.TRAFFIC:
+        # analytics_authorized (the Reporting API's scope) AND the env allowlist.
+        # An allowlist rather than a DB flag: Phase B ingests for the rollout
+        # channel only, and widening is a config change (spec Part 3).
+        rows = all_rows(
+            supabase().table("channels").select(columns)
+            .eq("analytics_authorized", True)
+        )
+        return [c for c in rows if c["id"] in settings.TRAFFIC_INGEST_CHANNELS]
 
     if job == Job.PLAYLIST_HEALTH:
         return all_rows(

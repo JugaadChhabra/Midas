@@ -222,3 +222,8 @@ def test_no_module_selects_channels_by_a_gating_flag(path):
         f"{path.name} selects channels by a gating flag — ask "
         "app.eligibility.channels_for(Job.X) so eligibility has one owner"
     )
+
+
+def test_traffic_is_the_allowlist_among_consented_channels():
+    # shorts_only is allowlisted but has not granted the analytics scope.
+    assert _ids(Job.TRAFFIC, TRAFFIC_INGEST_CHANNELS={"idle", "shorts_only", "nope"}) == ["idle"]

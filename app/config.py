@@ -220,6 +220,14 @@ class Settings:
     # accruing that day — allow ~1 pre-change window (MEASUREMENT_WINDOW_DAYS) of
     # warmup before its first measurements are reliable.
     REPORTING_MEASURED_CHANNELS_ONLY = os.getenv("REPORTING_MEASURED_CHANNELS_ONLY", "true").lower() == "true"
+    # Phase B · B1 (spec Part 2 §8): channels whose channel_traffic_source_a3
+    # reports traffic_poll ingests into video_traffic_source_daily. Comma-separated
+    # channel ids. Default: the rollout channel, Marathi. Widening is a config change.
+    TRAFFIC_INGEST_CHANNELS = {
+        c.strip()
+        for c in (os.getenv("TRAFFIC_INGEST_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",")
+        if c.strip()
+    }
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

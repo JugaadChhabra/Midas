@@ -40,6 +40,7 @@ from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
 from app.reporting_client import (
+    REACH_REPORT_TYPE_ID,
     download_report_csv,
     ensure_reach_job,
     list_reports,
@@ -59,7 +60,7 @@ _UPSERT_CHUNK = 500
 _BACKFILL_LOOKBACK_DAYS = 90
 
 
-def _ingested_report_ids(channel_id: str) -> set[str]:
+def ingested_report_ids(channel_id: str) -> set[str]:
     """Report ids already ingested for this channel — the dedup set.
 
     Ingestion's own concern, deliberately NOT part of `app.reach`: a report id
@@ -81,13 +82,17 @@ def _ingested_report_ids(channel_id: str) -> set[str]:
     return {r["report_id"] for r in rows}
 
 
-def superseded_reports(channel_id: str, data_date: str, report_id: str) -> list[str]:
-    """Ids of reports already ingested for this channel's data-day, other than
-    `report_id`. Non-empty means `report_id` is a reissue (a restatement)."""
+def superseded_reports(channel_id: str, report_type: str, data_date: str,
+                       report_id: str) -> list[str]:
+    """Ids of reports of `report_type` already ingested for this channel's
+    data-day, other than `report_id`. Non-empty means `report_id` is a reissue
+    (a restatement). Scoped by type because the ledger is shared: a traffic
+    report for the day is not an earlier version of its reach report."""
     rows = (
         supabase().table("reporting_reports_ingested")
         .select("report_id")
         .eq("channel_id", channel_id)
+        .eq("report_type", report_type)
         .eq("data_date", data_date)
         .neq("report_id", report_id)
         .execute()
@@ -118,8 +123,8 @@ def replace_data_day(table: str, channel_id: str, data_date: str, report_id: str
     ).neq("report_id", report_id).execute()
 
 
-def record_ingested(report: dict, job_id: str, channel_id: str, data_date: str,
-                    row_count: int) -> None:
+def record_ingested(report: dict, job_id: str, channel_id: str, report_type: str,
+                    data_date: str, row_count: int) -> None:
     """Ledger a report as ingested. Call LAST — if the process dies mid-ingest,
     the report is retried next run and every step before this is idempotent."""
     supabase().table("reporting_reports_ingested").upsert(
@@ -127,6 +132,7 @@ def record_ingested(report: dict, job_id: str, channel_id: str, data_date: str,
             "report_id": report["id"],
             "job_id": job_id,
             "channel_id": channel_id,
+            "report_type": report_type,
             "data_date": data_date,
             "row_count": row_count,
         },
@@ -145,7 +151,7 @@ def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
     baselining Loop 1 on superseded numbers.
     """
     data_date = report_data_date(report).isoformat()
-    prior = superseded_reports(channel_id, data_date, report["id"])
+    prior = superseded_reports(channel_id, REACH_REPORT_TYPE_ID, data_date, report["id"])
 
     csv_text = download_report_csv(handle, channel_id, report["downloadUrl"])
     rows = parse_reach_csv(csv_text)
@@ -179,7 +185,7 @@ def _ingest_report(handle, channel_id: str, job_id: str, report: dict) -> int:
             "window_end", data_date
         ).execute()
 
-    record_ingested(report, job_id, channel_id, data_date, len(payload))
+    record_ingested(report, job_id, channel_id, REACH_REPORT_TYPE_ID, data_date, len(payload))
     return len(payload)
 
 
@@ -274,7 +280,7 @@ def _poll_channel(channel_id: str) -> dict:
         return {"job": None, "reports_new": 0, "rows_ingested": 0}
 
     reports = list_reports(handle, channel_id, job_id)
-    seen = _ingested_report_ids(channel_id)
+    seen = ingested_report_ids(channel_id)
     covered = reach.coverage(channel_id)
     new = [r for r in reports if r["id"] not in seen]
     # Oldest data-day first, so coverage grows contiguously and a mid-run

@@ -137,3 +137,39 @@ def test_reach_first_ingest_of_a_day_leaves_windows_alone():
     ledger = sb.rows("reporting_reports_ingested")
     assert [(r["report_id"], r["job_id"], r["data_date"], r["row_count"]) for r in ledger] == \
         [("r1", "reach-1", "2026-09-29", 1)]
+
+
+# ── the shared ledger: traffic reports must not leak into reach ───────────
+
+TRAFFIC_LEDGER_ROW = {"report_id": "t1", "job_id": "3647f5d8-d935-43dc-8745-38ba143ca5ec",
+                      "channel_id": CH, "data_date": "2026-09-29", "row_count": 5,
+                      "report_type": "channel_traffic_source_a3"}
+
+
+def test_reach_ledger_rows_record_their_report_type():
+    sb = FakeSupabase({"video_reach_daily": [], "reporting_reports_ingested": [],
+                       "video_metrics": []})
+    _ingest_reach(sb, _report("r1"), _reach_csv(("a", 10, 0.1)))
+    assert sb.rows("reporting_reports_ingested")[0]["report_type"] == "channel_reach_basic_a1"
+
+
+def test_a_traffic_report_for_the_same_day_is_not_a_reach_reissue():
+    sb = FakeSupabase({
+        "video_reach_daily": [],
+        "reporting_reports_ingested": [dict(TRAFFIC_LEDGER_ROW)],
+        "video_metrics": [{"id": 1, "channel_id": CH, "window_start": "2026-09-23",
+                           "window_end": "2026-09-29", "impressions": 99, "ctr": 0.1}],
+    })
+    _ingest_reach(sb, _report("r1"), _reach_csv(("a", 10, 0.1)))
+    assert sb.rows("video_metrics")[0]["impressions"] == 99
+
+
+def test_traffic_reports_do_not_count_as_reach_coverage():
+    import app.reach as reach
+    sb = FakeSupabase({"reporting_reports_ingested": [
+        dict(TRAFFIC_LEDGER_ROW),
+        {"report_id": "r1", "job_id": "reach-1", "channel_id": CH,
+         "data_date": "2026-09-28", "row_count": 1, "report_type": "channel_reach_basic_a1"},
+    ]})
+    with patch.object(reach, "supabase", return_value=sb):
+        assert reach.coverage(CH) == {"2026-09-28"}
