@@ -24,7 +24,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 | A1.3 description links | **done 2026-10-01** (DB-based): 1,804 links on Marathi; only 4 views/day attributable to them (type 7). Backlinks look weak as they stand |
 | A1 own-catalog share | **done 2026-10-01**: our channels supply ≥23% of Marathi's suggested views and ≥6% of its Mix views; the rest is external |
 | Finding: sync stopped with the A0 pause | **fixed 2026-10-01**: the daily `video_sync` job (04:00 UTC, all channels, read-only). **Office restarted ≈12:46 UTC on 2026-10-01**; `/health/jobs` lists `video_sync` (`never_run`; first run 2026-10-02 04:00 UTC) |
-| A3 search terms | **largely answered by A1.1**: type 5 detail = the search term, per video × day × country, with low-volume terms suppressed (233/319 rows empty). Still to do: the on-demand comparison |
+| A3 search terms | **done 2026-10-06**: available via both the report (type 5, suppressed) and on-demand (top 25) |
 | A1.2, A1.3, A2, A3, A5, A7 | not started |
 | STATE.md §9 rewrite + exit gate | after all of the above |
 
@@ -39,7 +39,9 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
    `TokenExpiredError` around `youtube_for_channel`).
 3. ~~A7 live numbers.~~ **Done 2026-10-06.** Rollout #1 proposed as Marathi; **owner to confirm**.
    Judged title verdicts: 64 wins vs 106 regressions. Gujarati: 91% of applies hit dormant videos.
-4. **A1.2 and A3 on-demand:** the Analytics API comparison, on that warm video.
+4. ~~A1.2 and A3 on-demand.~~ **Done 2026-10-06:** by type, by day × type, and RELATED_VIDEO / YT_SEARCH
+   detail all OK; PLAYLIST and SHORTS detail return 400. The Reporting API is the playlist sensor.
+   A3: search terms are available.
 5. **A5:** `default_language = 'bgc'` was **already set** on Haryanvi (A7 query 1). Only the optional
    i18n probe remains. Six channels have **no** `default_language` (Hindi, Bhojpuri, Malayalam,
    Tamil, Rajasthani, Telugu), so audits are blocked on them. Relevant only once the title lever returns.
@@ -506,12 +508,12 @@ code that the Reporting API docs map to related video, playlist, Shorts and sear
 
 | Field | Value |
 |---|---|
-| Date | |
-| Channel | |
-| Video (warm) | |
-| Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome | |
+| Date | 2026-10-06 |
+| Channel | `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) |
+| Video (warm) | `jpLTeyEOQa0`, "धोबी आला \| Dhobi Ala Marathi Rhyme For Kids \| TMKOC Balgeet" (the warmest Marathi video, last 30 ingested days); window 2026-09-07 → 2026-10-04 |
+| Command / SQL | the `logs\a1-ondemand.txt` block |
+| Raw evidence | below |
+| Outcome | On-demand gives per-video totals **by type, and by day × type**, plus **detail for RELATED_VIDEO (referring video ids) and YT_SEARCH (terms)**. **Detail for PLAYLIST and SHORTS returns 400** ("The query is not supported"), the same as Gap 6. So the **Reporting API is the sensor for playlist detail**; on-demand is fine for ad-hoc per-video suggested/search checks (top 25 per call) |
 
 **[office, in the container: see "Running the other probes"]** Pick a warm video (≥500 impressions in the last 30 days: the A7 warm-pool
 query lists the channel's). Then:
@@ -523,12 +525,12 @@ PYTHONPATH=. venv/bin/python scripts/probes/probe_traffic_source_analytics.py \
 
 | Variant | OK / HTTP status + message |
 |---|---|
-| 1. `dimensions=insightTrafficSourceType`, `filters=video==<id>` | |
-| 2. `dimensions=day,insightTrafficSourceType`, `filters=video==<id>` | |
-| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==RELATED_VIDEO` | |
-| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==PLAYLIST` | |
-| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==SHORTS` | |
-| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==YT_SEARCH` (A3) | |
+| 1. `dimensions=insightTrafficSourceType`, `filters=video==<id>` | **OK**, 9 rows (28-day totals, views): PLAYLIST 1,348,085 · RELATED_VIDEO 372,078 · SUBSCRIBER 112,989 · YT_OTHER_PAGE 51,879 · NO_LINK_OTHER 15,881 · YT_CHANNEL 8,313 · YT_SEARCH 8,256 · EXT_URL 488 · END_SCREEN 60 |
+| 2. `dimensions=day,insightTrafficSourceType`, `filters=video==<id>` | **OK**, 241 rows (daily, e.g. 2026-09-07 PLAYLIST 50,443 · RELATED_VIDEO 15,278 · SUBSCRIBER 4,081) |
+| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==RELATED_VIDEO` | **OK**, 25 rows (top 25): `luejg9NsRxo` 7,729 (Bhojpuri) · `HY1CBgG0SlA` 4,453 (English) · `bouK7ze9CfY` 4,043 · `__CQNaHUVDk` 3,579 · `0DO_WVyblqg` 3,328 · `2zsjXodGQ6k` 3,181 · `4b1Wfqzsvq0` 3,175 · `73GN7-DjIgA` 2,750 · `wAYpWjLBM28` 2,691 · `yeX5GpYcBSU` 2,270. The top two are our own other-language channels |
+| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==PLAYLIST` | **FAILED HTTP 400** "The query is not supported. Check the documentation at https://developers.google.com/youtube/analytics/v2/available_reports …" |
+| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==SHORTS` | **FAILED HTTP 400**, same message |
+| 3. `insightTrafficSourceDetail`, `insightTrafficSourceType==YT_SEARCH` (A3) | **OK**, 25 rows: `dhobi aaya dhobi aaya` 1,241 · `dhobi wala` 514 · `dhobi aaya` 366 · `dhobi wala dhobi wala` 266 · `dhobi aaya dhobi aaya kitne kapde laya` 218 · `poem` 191 · `cartoon` 147 · `tarak mehta ka ulta chashma rhymes` 137 · `taarak mehta ka ooltah chashmah` 106 · `dhobi ala ala` 97 |
 
 ### A1.3 Description-link attribution
 
@@ -598,12 +600,12 @@ Then check the current `videos.update` reference for any writable field matching
 
 | Field | Value |
 |---|---|
-| Date | |
-| Channel | |
-| Video (warm) | |
-| Command / SQL | pre-filled in this section, below |
-| Raw evidence | |
-| Outcome | |
+| Date | 2026-10-06 |
+| Channel | `UCr5-YUqBiW7PUmeAtxUWuRg` (Marathi) |
+| Video (warm) | `jpLTeyEOQa0` (as A1.2) |
+| Command / SQL | variant 3 YT_SEARCH of the `logs\a1-ondemand.txt` block, plus A1.1's report type 5 |
+| Raw evidence | below |
+| Outcome | **Available: yes, by both routes.** So `get_search_terms` (Part 2 §3.2) can be built |
 
 **[office, in the container: see "Running the other probes"]** The `YT_SEARCH` variant of the A1.2 probe is this probe. To run only it:
 
@@ -616,10 +618,10 @@ Also record what the A1.1 report's detail column holds for its search type.
 
 | Question | Answer |
 |---|---|
-| Available? (yes/no) | |
-| Shape (columns, granularity: per video, per day or per window) | |
-| Minimum-volume suppression seen? | |
-| Via the A1 report? | |
+| Available? (yes/no) | **yes** |
+| Shape (columns, granularity: per video, per day or per window) | **On-demand:** per video, aggregated over the requested window, top N by views (`maxResults` 25), columns `insightTrafficSourceDetail, views, estimatedMinutesWatched`. **Report:** per video × day × country × subscribed status, type 5 rows with the term in `traffic_source_detail` |
+| Minimum-volume suppression seen? | **Report: yes.** 233 of 319 type-5 rows on 2026-09-29 have an empty detail. On-demand: none visible in the top 25. Note the searches are mostly **Hindi phrasings** ("dhobi aaya") of a Marathi rhyme ("dhobi ala"), which bears on the title lever's language mix |
+| Via the A1 report? | yes (type 5, A1.1) |
 
 This decides whether `get_search_terms` (Part 2 §3.2) is built.
 
