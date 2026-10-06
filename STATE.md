@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`) · **Commit:** on top of `6a5432f` · **Branch:** `phase-b/30-phase-b-b1a-video-traffic-source-ingesti`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`) · **Commit:** on top of `d788e9f` · **Branch:** `phase-b/31-phase-b-b1b-playlist-traffic-ingestion-p`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -35,8 +35,9 @@ Punjabi scored 2026-10-01 07:00 UTC (39 playlists). On 2026-10-06 `/health/jobs`
 for Hindi `UCR9qQMyP86aSt-1VgaMg7UA` (`"HTTPException: 401: token_expired"`; re-consented 2026-10-06) and
 `metrics_poll` **degraded** (A7 raw result 0). A manual sync of all channels ran 2026-10-06: Marathi has 5,804
 videos, synced 2026-10-06 07:48 UTC; Kannada and Telugu have 0 videos in `videos` ("Next session" item 2).
-Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far is B1's video half (#30:
-`app/traffic_poll.py`, migration `20261006000000`); none of it is deployed and the migration is not applied.
+Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far is B1, both halves (#30 video,
+#31 playlist: `app/traffic_poll.py`, migrations `20261006000000`, `20261006010000`); none of it is deployed and the
+migrations are not applied.
 
 **Data caveat for this generation.** The live database runs on the office machine, bound to
 `127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
@@ -52,7 +53,7 @@ Stages are the spec's build order (spec Part 2 §6).
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:24-31`, `app/youtube_metadata.py:58-60`. A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 video half built, not deployed) | B1a: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py` | No `interventions`, `playlist_traffic_daily` or `decision_log` table; no playlist-traffic ingestion; no `app/interventions.py` or `app/decide.py`; no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`); `refresh_stats` still wraps only `youtube_for_channel` (`app/sync.py:297-300`). Partial footholds listed in §7.1. |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py` | No `interventions` or `decision_log` table; no `app/interventions.py` or `app/decide.py`; no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`); `refresh_stats` still wraps only `youtube_for_channel` (`app/sync.py:297-300`). Partial footholds listed in §7.1. |
 | **Slice 1** | Backlinks + no change | **not started** | none | No tick routing, no `agent_enabled`, no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
@@ -98,8 +99,8 @@ does not exist (§7.1).
 ## 2. Schema — as applied
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). The latest is `20261006000000` (B1, #30); it is a file only, not yet applied on the
-office machine.
+`010_storage_shim.sql` run first). The latest is `20261006010000` (B1b, #31). It and `20261006000000` (B1a, #30) are
+files only, not yet applied on the office machine.
 
 ```
 20260505092756_init.sql                          channels, videos, audit_configs, audits
@@ -143,6 +144,7 @@ office machine.
 20260904000000_video_is_episode.sql
 20260904000100_next_audit_candidate_exclude_episodes.sql
 20261006000000_video_traffic_source_daily.sql   video_traffic_source_daily, reporting_reports_ingested.report_type
+20261006010000_playlist_traffic_daily.sql       playlist_traffic_daily
 ```
 
 These are the files. The live DB's migration ledger was not checked (unreachable).
@@ -165,7 +167,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   unique (video_id, window_start, window_end)
   ```
 - **`video_reach_daily`**: `video_id text not null (no FK), channel_id → channels, date date, impressions bigint not null, ctr double precision not null (fraction 0..1), report_id text, fetched_at, unique(video_id, date)`. Source: Reporting API `channel_reach_basic_a1` (`app/reporting_client.py:56`).
-- **`reporting_reports_ingested`**: `report_id text pk, job_id, channel_id, data_date date, row_count int, ingested_at, report_type text not null default 'channel_reach_basic_a1'` (`report_type` added by `20261006000000`). Shared by reach and traffic reports; `reach.coverage` counts only `report_type = 'channel_reach_basic_a1'` (`app/reach.py:122-130`).
+- **`reporting_reports_ingested`**: `report_id text pk, job_id, channel_id, data_date date, row_count int, ingested_at, report_type text not null default 'channel_reach_basic_a1'` (`report_type` added by `20261006000000`). Shared by reach and both traffic report types; `reach.coverage` counts only `report_type = 'channel_reach_basic_a1'` (`app/reach.py:122-130`).
 - **`video_traffic_source_daily`** (`20261006000000`, B1):
   ```sql
   id bigserial primary key, video_id text not null (no FK), channel_id text not null references channels(id),
@@ -174,7 +176,17 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   report_id text not null, ingested_at timestamptz default now(),
   unique (video_id, date, source_type, source_detail)
   ```
-  Index `(channel_id, date desc)`. Source: Reporting API `channel_traffic_source_a3` (`app/reporting_client.py:73`), summed over `country_code`, `subscribed_status`, `live_or_on_demand` (`app/reporting_client.py:365`).
+  Index `(channel_id, date desc)`. Source: Reporting API `channel_traffic_source_a3` (`app/reporting_client.py:73`), summed over `country_code`, `subscribed_status`, `live_or_on_demand` (`app/reporting_client.py:443` `parse_traffic_csv` → `:397` `_aggregate_traffic_csv`).
+- **`playlist_traffic_daily`** (`20261006010000`, B1b):
+  ```sql
+  id bigserial primary key, playlist_id text not null (no FK), video_id text not null (no FK),
+  channel_id text not null references channels(id),
+  date date not null, source_type smallint not null, source_detail text not null default '',
+  views bigint not null, playlist_starts bigint not null, watch_time_minutes double precision not null,
+  report_id text not null, ingested_at timestamptz default now(),
+  unique (playlist_id, video_id, date, source_type, source_detail)
+  ```
+  Index `(channel_id, date desc)`. Source: Reporting API `playlist_traffic_source_a2` (`app/reporting_client.py:100`), summed over the same three dimensions (`app/reporting_client.py:460` `parse_playlist_traffic_csv`); `engaged_views`, `average_view_duration_seconds` and `playlist_saves_*` are not stored.
 - **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
   - Roles assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `playlist_discovery` inserts rows without `origin` or `created_by_optimizer_at` (`app/playlist_discovery.py:198-205`), so discovery-created playlists land as `origin='inherited'`. Nothing writes `playlists.strategy_version`.
 - **`playlist_metrics`**:
@@ -189,7 +201,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
 - **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). `model_version` is always `EMBED_MODEL` (`app/embeddings.py:127`).
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`.
 
-Of the spec's Phase B tables only `video_traffic_source_daily` exists; the rest, and the Slice tables and columns, are listed in §7.1.
+Of the spec's Phase B tables only `video_traffic_source_daily` and `playlist_traffic_daily` exist; the rest, and the Slice tables and columns, are listed in §7.1.
 
 ---
 
@@ -270,7 +282,7 @@ with traceback as `"<label> (job <job_id>) failed for <id>: <err>"`, and after t
 `job_status.JobRunFailed` naming the failed channels, so APScheduler records the run as failed.
 `video_sync`, `playlist_reconcile`, `playlist_discovery`, `playlist_tuning`, `reflection` and
 `playlist_health_score` use it. `metrics_poll`, `reporting_poll` and `traffic_poll` collect channels that raised anything but the
-expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:150`, `app/metrics_poll.py:418`,
+expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:207`, `app/metrics_poll.py:418`,
 `app/reporting_poll.py:358`). Per-item errors inside a channel's poll are judged by
 `job_status.item_error_verdict` (`app/job_status.py:50`) per category: all attempted items in a category failed →
 the channel fails as `"ItemsFailed: <category>: all <n> failed"`; some failed → the poll returns
@@ -301,7 +313,7 @@ the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.m
 | `video_sync` | cron 04:00 UTC (`:365`) | `main._daily_video_sync` (`:243`) → `app/sync.py:502` `routine_sync` per channel | registered, every channel. Read-only: `"fresh"` if synced within 6 h, else a full pass if the last full sync is >3 days old, else incremental + `refresh_stats`. Catches `TokenExpiredError` as an expected skip (`app/main.py:260-264`), but `sync_channel`/`refresh_stats` convert token failures to `HTTPException(401, "token_expired")` (`app/sync.py:96-97,119-120,299-300`), so an expired token **fails** the run (observed 2026-10-06 for Hindi, §8) |
 | `metrics_poll` | cron 05:00 UTC (`:378`) | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in a measurement window (`METRICS_POLL_MEASURED_ONLY`) |
 | `reporting_poll` | cron 06:00 UTC (`:399`) | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` (`app/eligibility.py:154-168`). Ingests only `channel_reach_basic_a1` |
-| `traffic_poll` | cron 06:30 UTC (`:418`) | `app/traffic_poll.py:121` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Ensures the `channel_traffic_source_a3` job (`midas-traffic-source`; found, not created, on Marathi), ingests each data-day's newest not-yet-ingested report into `video_traffic_source_daily`, a restatement replacing the day (`app/traffic_poll.py:53` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with `report_type = 'channel_traffic_source_a3'`. Logs `"traffic_poll <id> data-day <d>: <n> rows written (report <r>)"` (`app/traffic_poll.py:82`). Independent of `reporting_poll` |
+| `traffic_poll` | cron 06:30 UTC (`:418`) | `app/traffic_poll.py:173` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Two feeds per channel (`_FEEDS`, `app/traffic_poll.py:74`): **video** ensures the `channel_traffic_source_a3` job (`midas-traffic-source`, Marathi `3647f5d8…`) → `video_traffic_source_daily`; **playlist** ensures the `playlist_traffic_source_a2` job (`midas-playlist-traffic-source`, Marathi `381cf084…`) → `playlist_traffic_daily`. Both Marathi jobs are found, not created. Each feed ingests each data-day's newest not-yet-ingested report, a restatement replacing the day (`app/traffic_poll.py:89` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with its own `report_type`. Logs `"traffic_poll <id> data-day <d>: <n> rows written to <table> (report <r>)"` (`app/traffic_poll.py:118`). Feeds are isolated (`_poll_channel`, `app/traffic_poll.py:155`): a feed crash is recorded as `"<feed>: <Type>: <msg>"` and fails the channel, but the other feed still runs; per-report errors are judged per feed (categories `video reports`, `playlist reports`). Independent of `reporting_poll` |
 | `playlist_health_score` | cron 07:00 UTC (`:432`) | `main._daily_playlist_health_score` (`:220`) → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
 | `measurement_eval` | cron 08:00 UTC (`:451`) | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
 | `nightly_db_backup` | cron `BACKUP_HOUR` local (`:466`) | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
@@ -352,8 +364,8 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `youtube_client.py` | Data API wrappers + quota charging |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
-| `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`), CSV parsing (reach; traffic with aggregation and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`) |
-| `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily` |
+| `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`, `ensure_playlist_traffic_job`), CSV parsing (reach; video and playlist traffic with aggregation, `_aggregate_traffic_csv`, and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`) |
+| `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
@@ -581,12 +593,10 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 ### 7.1 Spec'd but not built
 
 **Phase B (Part 3)**
-- **B1 traffic-source ingestion, playlist half.** Not built: no `playlist_traffic_daily` table, nothing ensures
-  the `playlist_traffic_source_a2` job (it exists on Marathi, created by hand 2026-09-29,
-  `docs/PHASE_A_FINDINGS.md` A1.1), no playlist CSV parser. The video half is built (§2, §4: `traffic_poll`,
-  `video_traffic_source_daily`) and not deployed; its office acceptance (Marathi rows from the backfill to the
-  frontier minus 2 days, `traffic_poll` `success`) is B9a. The aggregated rows-per-day figure for the findings
-  doc and the retention decision wait for a week of data.
+- **B1 traffic-source ingestion: office acceptance.** Both halves are built (§2, §4: `traffic_poll`,
+  `video_traffic_source_daily`, `playlist_traffic_daily`) and not deployed. The office acceptance (Marathi rows
+  from the backfill to the frontier minus 2 days, `traffic_poll` `success`) is B9a. The aggregated rows-per-day
+  figure for the findings doc and the retention decision wait for a week of data.
 - **B2 `interventions` + holdout.** Not built: no table, no `app/interventions.py` (`assign_arm`, `record`,
   `active_for`), no `HOLDOUT_PCT`, no `declined|holdout|insufficient_data|planned|judged|cancelled` in
   `app/status_vocab.py`.
@@ -654,7 +664,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Similarity playlist engine: daily add/remove, `tune_thresholds`, `join_pass` | `app/playlists.py` | Add/remove and tuning **frozen**; `join_pass` call commented out (`app/autopilot.py:438-439`) |
 | Weekly orphan-cluster playlist **creation** | `app/playlist_discovery.py` | **Frozen** (`PLAYLIST_DISCOVERY_ENABLED`). Spec: "New-playlist creation … stay human-confirmed" (Part 2 §4) |
 | Competitor sampling via `search.list` (100u each) and Perplexity guidance | `app/reflection.py:301-352` | Frozen with reflection. Spec moves the competitor half to Slice 3's niche reference |
-| `video_traffic_source_playlist` table + tier-2 poller | `20260618133036_…`, `app/metrics_poll.py:85,228` | Disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`); never populated. The spec's `playlist_traffic_daily` replaces it in name and shape |
+| `video_traffic_source_playlist` table + tier-2 poller | `20260618133036_…`, `app/metrics_poll.py:85,228` | Disabled (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`); never populated. Superseded by `playlist_traffic_daily` (B1b), which is populated; the old table and poller are still in the code |
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py`, `docs/PHASE_1B_PLAN.md` | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
@@ -688,9 +698,15 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    column the spec's list lacks (`app/rows.py` pages in `id` order). The shared ledger gained `report_type`
    (not in the spec) so traffic reports don't count as reach coverage or as reach reissues (`app/reach.py:122-130`,
    `app/reporting_poll.py:85`). Restatements: when a data-day's original and restated reports are both new, only
-   the newest by `createTime` is ingested (`app/traffic_poll.py:53`); the spec says only that the newer replaces.
+   the newest by `createTime` (parsed, not compared as text, `app/traffic_poll.py:83` `_created`) is ingested
+   (`app/traffic_poll.py:89`); the spec says only that the newer replaces.
+   `playlist_traffic_daily` also has an `id bigserial`. The two report types are ingested as isolated feeds of one
+   job: a crash in one feed fails the channel's run but doesn't stop the other (`app/traffic_poll.py:155`); the spec
+   says only "same failure semantics as `reporting_poll`".
    **Deploy order:** the reach path now reads and writes `report_type`, so `20261006000000` must be applied (and
    PostgREST restarted) before the app restarts on this code, or `reporting_poll` and `measurement_eval` fail.
+   Apply `20261006010000` in the same window: without `playlist_traffic_daily` the playlist feed fails every
+   report, so `traffic_poll` fails Marathi daily (video rows still land).
 8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats (`app/audits.py:535-543`):
    the gates overestimate by 1u. Spec Part 1 A10 says note it only.
 9. **Token failures in `video_sync`.** `_daily_video_sync` treats `TokenExpiredError` as a skip
@@ -823,19 +839,25 @@ where imp >= 500 group by 1 order by 2 desc;
 select channel_id, date, count(1) rows_, sum(views) views, max(report_id) report
 from video_traffic_source_daily group by 1,2 order by 1,2 desc;
 
--- B9a acceptance: traffic frontier per channel, from the ledger (a day whose report had 0 rows is ingested
--- but has no table rows), and the data-days missing between the first ingested day and current_date - 2
-select channel_id, min(data_date) first_day, max(data_date) frontier, count(1) days_ingested
-from reporting_reports_ingested where report_type = 'channel_traffic_source_a3' group by 1;
+-- playlist traffic rows per data-day (B1b; after the 20261006010000 migration is applied)
+select channel_id, date, count(1) rows_, sum(views) views, sum(playlist_starts) starts, max(report_id) report
+from playlist_traffic_daily group by 1,2 order by 1,2 desc;
 
-select d::date missing_day
-from generate_series(
+-- B9a acceptance: traffic frontier per channel and report type, from the ledger (a day whose report had 0 rows is ingested
+-- but has no table rows), and the data-days missing between the first ingested day and current_date - 2
+select channel_id, report_type, min(data_date) first_day, max(data_date) frontier, count(distinct data_date) days_ingested
+from reporting_reports_ingested
+where report_type in ('channel_traffic_source_a3', 'playlist_traffic_source_a2') group by 1,2;
+
+select t.report_type, d::date missing_day
+from (values ('channel_traffic_source_a3'), ('playlist_traffic_source_a2')) t(report_type)
+cross join lateral generate_series(
        (select min(data_date) from reporting_reports_ingested
-        where report_type = 'channel_traffic_source_a3' and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg'),
+        where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg'),
        current_date - 2, interval '1 day') d
 where d::date not in (select data_date from reporting_reports_ingested
-                      where report_type = 'channel_traffic_source_a3' and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
-order by 1;
+                      where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
+order by 1, 2;
 
 -- applied audits in the last 90 days that landed on dormant videos
 select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total

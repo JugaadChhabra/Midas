@@ -220,8 +220,8 @@ class Settings:
     # accruing that day — allow ~1 pre-change window (MEASUREMENT_WINDOW_DAYS) of
     # warmup before its first measurements are reliable.
     REPORTING_MEASURED_CHANNELS_ONLY = os.getenv("REPORTING_MEASURED_CHANNELS_ONLY", "true").lower() == "true"
-    # Phase B · B1 (spec Part 2 §8): channels whose channel_traffic_source_a3
-    # reports traffic_poll ingests into video_traffic_source_daily. Comma-separated
+    # Phase B · B1 (spec Part 2 §8): channels whose channel_traffic_source_a3 and
+    # playlist_traffic_source_a2 reports traffic_poll ingests. Comma-separated
     # channel ids. Default: the rollout channel, Marathi. Widening is a config change.
     TRAFFIC_INGEST_CHANNELS = {
         c.strip()

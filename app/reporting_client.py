@@ -94,6 +94,32 @@ _TRAFFIC_CSV_COLUMNS = [
     "red_watch_time_minutes",
 ]
 
+# Phase B · B1b (#31): per playlist × video daily views and playlist starts by
+# traffic source. Marathi's job (381cf084…) was created by hand on 2026-09-29
+# under this name (A1.1).
+PLAYLIST_TRAFFIC_REPORT_TYPE_ID = "playlist_traffic_source_a2"
+PLAYLIST_TRAFFIC_JOB_NAME = "midas-playlist-traffic-source"
+
+# Exact 16-column header recorded in A1.1 (2026-10-01).
+_PLAYLIST_TRAFFIC_CSV_COLUMNS = [
+    "date",
+    "channel_id",
+    "playlist_id",
+    "video_id",
+    "live_or_on_demand",
+    "subscribed_status",
+    "country_code",
+    "traffic_source_type",
+    "traffic_source_detail",
+    "views",
+    "engaged_views",
+    "watch_time_minutes",
+    "average_view_duration_seconds",
+    "playlist_starts",
+    "playlist_saves_added",
+    "playlist_saves_removed",
+]
+
 # traffic_source_type code → name. The report carries numeric codes only.
 # Source: https://developers.google.com/youtube/reporting/v1/reports/dimensions
 # (fetched 2026-10-01, copied from docs/PHASE_A_FINDINGS.md A1.1).
@@ -263,6 +289,12 @@ def ensure_traffic_job(handle: ReportingHandle, channel_id: str) -> str | None:
     return ensure_job(handle, channel_id, TRAFFIC_REPORT_TYPE_ID, TRAFFIC_JOB_NAME)
 
 
+def ensure_playlist_traffic_job(handle: ReportingHandle, channel_id: str) -> str | None:
+    """`ensure_job` for the playlist traffic-source report type."""
+    return ensure_job(handle, channel_id, PLAYLIST_TRAFFIC_REPORT_TYPE_ID,
+                      PLAYLIST_TRAFFIC_JOB_NAME)
+
+
 # ── Reports ───────────────────────────────────────────────────────────────
 
 def list_reports(handle: ReportingHandle, channel_id: str, job_id: str) -> list[dict]:
@@ -362,6 +394,52 @@ def parse_reach_csv(text: str) -> list[dict]:
     return rows
 
 
+def _aggregate_traffic_csv(text: str, report_type: str, columns: list[str], label: str,
+                           id_columns: tuple[str, ...], metrics: dict[str, type]) -> list[dict]:
+    """Parse a traffic-source CSV and sum `metrics` over every column not in the key.
+
+    The key is `id_columns` + date + traffic_source_type + traffic_source_detail,
+    stored as `date` (ISO), `source_type` (int code) and `source_detail` ('' when
+    blank). Any bad header, short row or bad value raises, so a malformed report
+    writes nothing.
+    """
+    reader = csv.reader(io.StringIO(text))
+    header = next(reader, [])
+    if header != columns:
+        raise ValueError(
+            f"unexpected {label} CSV header {header!r} — expected {columns!r}. "
+            "Re-probe with scripts/probes/probe_traffic_source_report.py "
+            f"--report-type {report_type} before trusting ingestion."
+        )
+    col = {c: i for i, c in enumerate(columns)}
+    sums: dict[tuple, list] = {}
+    for raw in reader:
+        if not raw:
+            continue  # trailing blank line
+        # Unlike the reach parser, a short row fails the report: skipping it
+        # would undercount the day with no error.
+        if len(raw) != len(columns):
+            raise ValueError(f"{label} CSV row has {len(raw)} columns, want {len(columns)}")
+        d = raw[col["date"]]  # YYYYMMDD
+        if len(d) != 8 or not d.isdigit():
+            raise ValueError(f"unexpected {label} CSV date {d!r} (want YYYYMMDD)")
+        key = (tuple(raw[col[c]] for c in id_columns), f"{d[0:4]}-{d[4:6]}-{d[6:8]}",
+               int(raw[col["traffic_source_type"]]), raw[col["traffic_source_detail"]])
+        acc = sums.setdefault(key, [kind(0) for kind in metrics.values()])
+        for i, (name, kind) in enumerate(metrics.items()):
+            acc[i] += kind(raw[col[name]])
+    return [
+        {
+            **dict(zip(id_columns, ids)),
+            "date": day,
+            "source_type": source_type,
+            "source_detail": detail,
+            **dict(zip(metrics, acc)),
+        }
+        for (ids, day, source_type, detail), acc in sums.items()
+    ]
+
+
 def parse_traffic_csv(text: str) -> list[dict]:
     """Parse a channel_traffic_source_a3 CSV into per-day rows ready for upsert.
 
@@ -373,38 +451,22 @@ def parse_traffic_csv(text: str) -> list[dict]:
     "watch_time_minutes"}]. Any bad header or value raises, so a malformed
     report writes nothing.
     """
-    reader = csv.reader(io.StringIO(text))
-    header = next(reader, [])
-    if header != _TRAFFIC_CSV_COLUMNS:
-        raise ValueError(
-            f"unexpected traffic CSV header {header!r} — expected {_TRAFFIC_CSV_COLUMNS!r}. "
-            "Re-probe with scripts/probes/probe_traffic_source_report.py before trusting ingestion."
-        )
-    sums: dict[tuple[str, str, int, str], list] = {}
-    for raw in reader:
-        if not raw:
-            continue  # trailing blank line
-        # Unlike the reach parser, a short row fails the report: skipping it
-        # would undercount the day with no error.
-        if len(raw) != len(_TRAFFIC_CSV_COLUMNS):
-            raise ValueError(f"traffic CSV row has {len(raw)} columns, want {len(_TRAFFIC_CSV_COLUMNS)}")
-        d = raw[0]  # YYYYMMDD
-        if len(d) != 8 or not d.isdigit():
-            raise ValueError(f"unexpected traffic CSV date {d!r} (want YYYYMMDD)")
-        key = (raw[2], f"{d[0:4]}-{d[4:6]}-{d[6:8]}", int(raw[6]), raw[7])
-        acc = sums.setdefault(key, [0, 0, 0.0])
-        acc[0] += int(raw[8])
-        acc[1] += int(raw[9])
-        acc[2] += float(raw[10])
-    return [
-        {
-            "video_id": video_id,
-            "date": day,
-            "source_type": source_type,
-            "source_detail": detail,
-            "views": views,
-            "engaged_views": engaged,
-            "watch_time_minutes": minutes,
-        }
-        for (video_id, day, source_type, detail), (views, engaged, minutes) in sums.items()
-    ]
+    return _aggregate_traffic_csv(
+        text, TRAFFIC_REPORT_TYPE_ID, _TRAFFIC_CSV_COLUMNS, "traffic", ("video_id",),
+        {"views": int, "engaged_views": int, "watch_time_minutes": float},
+    )
+
+
+def parse_playlist_traffic_csv(text: str) -> list[dict]:
+    """Parse a playlist_traffic_source_a2 CSV into per-day rows ready for upsert.
+
+    Aggregated like parse_traffic_csv, one row per (playlist_id, video_id, date,
+    source_type, source_detail), keeping views, playlist_starts and
+    watch_time_minutes (Part 2 §7). engaged_views, the average and the
+    playlist_saves_* columns are dropped.
+    """
+    return _aggregate_traffic_csv(
+        text, PLAYLIST_TRAFFIC_REPORT_TYPE_ID, _PLAYLIST_TRAFFIC_CSV_COLUMNS, "playlist traffic",
+        ("playlist_id", "video_id"),
+        {"views": int, "playlist_starts": int, "watch_time_minutes": float},
+    )
