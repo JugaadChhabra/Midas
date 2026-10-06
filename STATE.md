@@ -270,7 +270,7 @@ with traceback as `"<label> (job <job_id>) failed for <id>: <err>"`, and after t
 `job_status.JobRunFailed` naming the failed channels, so APScheduler records the run as failed.
 `video_sync`, `playlist_reconcile`, `playlist_discovery`, `playlist_tuning`, `reflection` and
 `playlist_health_score` use it. `metrics_poll`, `reporting_poll` and `traffic_poll` collect channels that raised anything but the
-expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:150`, (`app/metrics_poll.py:418`,
+expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:150`, `app/metrics_poll.py:418`,
 `app/reporting_poll.py:358`). Per-item errors inside a channel's poll are judged by
 `job_status.item_error_verdict` (`app/job_status.py:50`) per category: all attempted items in a category failed →
 the channel fails as `"ItemsFailed: <category>: all <n> failed"`; some failed → the poll returns
@@ -301,7 +301,7 @@ the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.m
 | `video_sync` | cron 04:00 UTC (`:365`) | `main._daily_video_sync` (`:243`) → `app/sync.py:502` `routine_sync` per channel | registered, every channel. Read-only: `"fresh"` if synced within 6 h, else a full pass if the last full sync is >3 days old, else incremental + `refresh_stats`. Catches `TokenExpiredError` as an expected skip (`app/main.py:260-264`), but `sync_channel`/`refresh_stats` convert token failures to `HTTPException(401, "token_expired")` (`app/sync.py:96-97,119-120,299-300`), so an expired token **fails** the run (observed 2026-10-06 for Hindi, §8) |
 | `metrics_poll` | cron 05:00 UTC (`:378`) | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in a measurement window (`METRICS_POLL_MEASURED_ONLY`) |
 | `reporting_poll` | cron 06:00 UTC (`:399`) | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` (`app/eligibility.py:154-168`). Ingests only `channel_reach_basic_a1` |
-| `traffic_poll` | cron 06:30 UTC (`:418`) | `app/traffic_poll.py:121` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Ensures the `channel_traffic_source_a3` job (`midas-traffic-source`; found, not created, on Marathi), ingests each data-day's newest not-yet-ingested report into `video_traffic_source_daily`, a restatement replacing the day (`app/reporting_poll.py:104` `replace_data_day`), and ledgers it with `report_type = 'channel_traffic_source_a3'`. Logs `"traffic_poll <id> data-day <d>: <n> rows written (report <r>)"` (`app/traffic_poll.py:82`). Independent of `reporting_poll` |
+| `traffic_poll` | cron 06:30 UTC (`:418`) | `app/traffic_poll.py:121` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Ensures the `channel_traffic_source_a3` job (`midas-traffic-source`; found, not created, on Marathi), ingests each data-day's newest not-yet-ingested report into `video_traffic_source_daily`, a restatement replacing the day (`app/traffic_poll.py:53` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with `report_type = 'channel_traffic_source_a3'`. Logs `"traffic_poll <id> data-day <d>: <n> rows written (report <r>)"` (`app/traffic_poll.py:82`). Independent of `reporting_poll` |
 | `playlist_health_score` | cron 07:00 UTC (`:432`) | `main._daily_playlist_health_score` (`:220`) → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
 | `measurement_eval` | cron 08:00 UTC (`:451`) | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
 | `nightly_db_backup` | cron `BACKUP_HOUR` local (`:466`) | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
@@ -689,6 +689,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    (not in the spec) so traffic reports don't count as reach coverage or as reach reissues (`app/reach.py:122-130`,
    `app/reporting_poll.py:85`). Restatements: when a data-day's original and restated reports are both new, only
    the newest by `createTime` is ingested (`app/traffic_poll.py:53`); the spec says only that the newer replaces.
+   **Deploy order:** the reach path now reads and writes `report_type`, so `20261006000000` must be applied (and
+   PostgREST restarted) before the app restarts on this code, or `reporting_poll` and `measurement_eval` fail.
 8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats (`app/audits.py:535-543`):
    the gates overestimate by 1u. Spec Part 1 A10 says note it only.
 9. **Token failures in `video_sync`.** `_daily_video_sync` treats `TokenExpiredError` as a skip

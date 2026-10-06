@@ -69,7 +69,7 @@ def ingested_report_ids(channel_id: str) -> set[str]:
 
     Costs a second read of this (small) ledger per channel per pass, where the
     old tuple-returning version got both sets from one. Accepted: the table
-    holds one row per channel per data-day, and the alternative was a shared
+    holds one row per channel per data-day per report type, and the alternative was a shared
     function returning two sets for two unrelated callers.
     """
     rows = all_rows(

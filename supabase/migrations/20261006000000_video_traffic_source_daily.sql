@@ -47,5 +47,10 @@ grant all on sequence video_traffic_source_daily_id_seq to service_role;
 -- traffic report for a day would count as reach coverage for that day and let the
 -- video_metrics backfill certify a window whose reach never landed. Every row
 -- before this migration is a reach report.
+--
+-- DEPLOY ORDER: the reach path (app/reach.py coverage, app/reporting_poll.py) reads
+-- and writes report_type from this commit on. Apply this migration and restart
+-- PostgREST BEFORE the app restarts on the new image, or reporting_poll and
+-- measurement_eval fail on the missing column.
 alter table reporting_reports_ingested
     add column if not exists report_type text not null default 'channel_reach_basic_a1';

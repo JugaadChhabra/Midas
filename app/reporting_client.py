@@ -382,8 +382,12 @@ def parse_traffic_csv(text: str) -> list[dict]:
         )
     sums: dict[tuple[str, str, int, str], list] = {}
     for raw in reader:
-        if not raw or len(raw) != len(_TRAFFIC_CSV_COLUMNS):
-            continue  # trailing blank line etc.
+        if not raw:
+            continue  # trailing blank line
+        # Unlike the reach parser, a short row fails the report: skipping it
+        # would undercount the day with no error.
+        if len(raw) != len(_TRAFFIC_CSV_COLUMNS):
+            raise ValueError(f"traffic CSV row has {len(raw)} columns, want {len(_TRAFFIC_CSV_COLUMNS)}")
         d = raw[0]  # YYYYMMDD
         if len(d) != 8 or not d.isdigit():
             raise ValueError(f"unexpected traffic CSV date {d!r} (want YYYYMMDD)")

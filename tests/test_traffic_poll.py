@@ -75,6 +75,11 @@ def test_an_unexpected_header_is_rejected():
         rc.parse_traffic_csv("date,channel_id,video_id\n20260929,c,v\n")
 
 
+def test_a_short_row_fails_the_report_instead_of_undercounting():
+    with pytest.raises(ValueError, match="columns"):
+        rc.parse_traffic_csv(_csv(_row("v1", 7, "a", 1, 1, 1.0)) + "20260929,x,v2\n")
+
+
 def test_codes_map_to_names():
     # From docs/PHASE_A_FINDINGS.md A1.1, which copied
     # https://developers.google.com/youtube/reporting/v1/reports/dimensions
@@ -308,3 +313,26 @@ def test_traffic_poll_is_registered_at_0630_utc_and_reaches_health_jobs():
 def test_default_ingest_channel_is_marathi():
     from app.config import Settings
     assert Settings.TRAFFIC_INGEST_CHANNELS == {"UCr5-YUqBiW7PUmeAtxUWuRg"}
+
+
+def test_a_malformed_report_degrades_the_run_end_to_end():
+    """Real _poll_channel into the real poll_traffic: one bad report of two is
+    `degraded` via item_error_verdict; both bad is `failed`."""
+    good = _csv(_row("v1", 7, "a", 1, 1, 1.0))
+    sb = _sb()
+    reports = [_report("bad", day="2026-09-28"), _report("good")]
+    bodies = {"bad": "nope\n", "good": good}
+    with patch.object(tp.eligibility, "channels_for", return_value=[{"id": CH}]), \
+         patch.object(rp, "supabase", return_value=sb), \
+         patch.object(tp, "reporting_for_channel",
+                      return_value=_handle([dict(j) for j in MARATHI_JOBS])), \
+         patch.object(tp, "list_reports", return_value=reports), \
+         patch.object(tp, "download_report_csv",
+                      side_effect=lambda _h, _c, url: bodies[url.rsplit("/", 1)[1]]):
+        assert tp.poll_traffic() == {"partial_errors": {CH: "reports: 1/2 failed"}}
+        bodies["good"] = "nope\n"
+        sb2 = _sb()
+        with patch.object(rp, "supabase", return_value=sb2), \
+             pytest.raises(JobRunFailed) as exc_info:
+            tp.poll_traffic()
+    assert exc_info.value.failed_channels == {CH: "ItemsFailed: reports: all 2 failed"}
