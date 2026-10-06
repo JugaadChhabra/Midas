@@ -797,9 +797,9 @@ select v.channel_id, a.measurement_status, count(1)
 from audits a join videos v on v.id=a.video_id
 where a.measurement_status <> 'not_applicable' group by 1,2 order by 1,2;
 
--- reach frontier per channel
+-- reach frontier per channel (the ledger also holds traffic reports since 20261006000000)
 select channel_id, max(data_date) frontier, count(1) days_covered
-from reporting_reports_ingested group by 1;
+from reporting_reports_ingested where report_type = 'channel_reach_basic_a1' group by 1;
 
 -- daily Data API burn, last 30 days
 select date_trunc('day', occurred_at) d, sum(units) units, count(1) filter (where not success) failures
