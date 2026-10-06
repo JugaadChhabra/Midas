@@ -218,3 +218,16 @@ ACTIVE_INTERVENTION_STATUSES = frozenset({
     InterventionStatus.PLANNED, InterventionStatus.APPLIED,
     InterventionStatus.MEASURING, InterventionStatus.HOLDOUT,
 })
+
+
+class DecisionUsed:
+    """`decision_log.used` — whose answer a decision acted on (spec Part 2 §7).
+
+    Always `rules` while decide() runs in shadow (Phase B, app/decide.py).
+    """
+
+    RULES = "rules"
+    JEV = "jev"
+
+
+ALL_DECISION_USED = frozenset({DecisionUsed.RULES, DecisionUsed.JEV})

@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`) · **Commit:** on top of `2a69c67` · **Branch:** `phase-b/35-phase-b-b4-warm-filter-sql-python-parity`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version) · **Commit:** on top of `13de8d3` · **Branch:** `phase-b/36-phase-b-b5-decide-decision-log-shadow-on`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -40,7 +40,8 @@ Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far i
 `TokenExpired`), B2 (#32: `app/interventions.py`, migration `20261006020000`), B3a (#33: `app/human_edits.py`,
 migration `20261006030000`) and B3b (#34: `app/human_edits.py` `record_playlist_additions`, called from the
 membership walk in `app/playlists_sync.py`; no migration) and B4 (#35: `app/warm.py`, the `warm_pool()` function in
-migration `20261006040000`; not called by anything yet); none of it is deployed and the migrations are not applied.
+migration `20261006040000`; not called by anything yet) and B5 (#36: `app/decide.py`, `decision_log` in migration
+`20261006050000`; nothing calls `decide()` yet); none of it is deployed and the migrations are not applied.
 
 **Data caveat for this generation.** The live database runs on the office machine, bound to
 `127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
@@ -56,7 +57,7 @@ Stages are the spec's build order (spec Part 2 §6).
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:24-31`, `app/youtube_metadata.py:58-60`. A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3 (both halves), B4 and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py` | No `decision_log` table; no `app/decide.py`; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing calls it (`tests/test_warm.py` guards that); no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3 (both halves), B4, B5 and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:223-233`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:248-255`), `tests/test_decide.py` | Nothing calls `decide()` (no production caller; Slice 1's triage is the first), so `decision_log` gets no rows in Phase B; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing calls it (`tests/test_warm.py` guards that); no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
 | **Slice 1** | Backlinks + no change | **not started** | none | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it; the warm filter exists, B4, but nothing calls it), no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
@@ -102,7 +103,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 ## 2. Schema — as applied
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). The latest is `20261006040000` (B4, #35). It, `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
+`010_storage_shim.sql` run first). The latest is `20261006050000` (B5, #36). It, `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
 `20261006010000` (B1b, #31) and `20261006000000` (B1a, #30) are files only, not yet applied on the office machine.
 
 ```
@@ -151,6 +152,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261006020000_interventions.sql                interventions, channels.agent_enabled
 20261006030000_interventions_ledger_key.sql     interventions.ledger_key + unique index
 20261006040000_warm_pool_rpc.sql                warm_pool() function (B4)
+20261006050000_decision_log.sql                 decision_log (B5)
 ```
 
 These are the files. The live DB's migration ledger was not checked (unreachable).
@@ -324,7 +326,25 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   grant  execute on function warm_pool(text, bigint, int, int) to service_role;
   ```
 
-Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_daily` and `interventions` exist (plus `channels.agent_enabled`); the rest, and the Slice tables and columns, are listed in §7.1.
+- **`decision_log`** (`20261006050000`, B5), verbatim without its header comment. Written only by
+  `app/decide.py` `decide()`, which nothing calls yet (§5):
+  ```sql
+  create table if not exists decision_log (
+      id                    bigserial   primary key,
+      decided_at            timestamptz not null default now(),
+      question_set_version  text        not null,
+      subject               text        not null,   -- video / pair / candidate
+      rules_answer          text        not null,
+      jev_answer            text,
+      jev_probs             jsonb,
+      used                  text        not null,   -- rules|jev
+      intervention_id       bigint      references interventions(id) on delete set null
+  );
+  ```
+  `used` vocab (`app/status_vocab.py:223-233`, `DecisionUsed`): `rules|jev`; always `rules` in shadow. `jev_answer`
+  / `jev_probs` hold the configured backend's answer (`llm` by default), NULL when the backend failed.
+
+Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_daily`, `interventions` and `decision_log` exist (plus `channels.agent_enabled`); the rest, and the Slice tables and columns, are listed in §7.1.
 
 ---
 
@@ -351,8 +371,10 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `WARM_MIN_IMPRESSIONS` | `:239` `int(os.getenv("WARM_MIN_IMPRESSIONS") or "500")` | 500 (Part 2 §8) | no. Read only by `app/warm.py` |
 | `WARM_WINDOW_DAYS` | `:240` `int(os.getenv("WARM_WINDOW_DAYS")     or "28")` | 28 "Ingested data-days" (Part 2 §8) | no: the latest 28 reach data-days in the ledger (`app/warm.py`) |
 | `WARM_EXPLORE_PCT` | `:241` `float(os.getenv("WARM_EXPLORE_PCT")   or "0.10")` | 0.10 "Picks from the non-top warm pool" (Part 2 §8) | no. Read only by `app/warm.py` `warm_pool` |
+| `DECIDE_BACKEND` | `:252` `os.getenv("DECIDE_BACKEND") or "llm"` | `llm`; `jev` once access is set up (Part 2 §8) | no. Read only by `app/decide.py`; `jev` is a stub raising `NotConfigured`, an unknown value is a backend failure (rules answer stands) |
+| `BACKLINK_MIN_CANDIDATES` | `:255` `int(os.getenv("BACKLINK_MIN_CANDIDATES") or "2")` | 2 (Part 2 §8) | no. Read only by `app/decide.py` `TRIAGE` rules |
 | `AUDIT_MODEL` | `:29` `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; dev `.env`: `google/gemini-3.7-flash` | reasoning model (Part 2 §3.1) | — |
-| `BACKLINK_MAX` (3), `BACKLINK_MIN_CANDIDATES` (2), `BACKLINK_EXPERIMENT_WINDOWS` (3), `SIBLING_MIN_VIEWS` (100), `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `AGENT_MAX_TURNS` (12), `WRITER_MODEL` (= `AUDIT_MODEL`), `DECIDE_BACKEND` (`llm`), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
+| `BACKLINK_MAX` (3), `BACKLINK_EXPERIMENT_WINDOWS` (3), `SIBLING_MIN_VIEWS` (100), `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `AGENT_MAX_TURNS` (12), `WRITER_MODEL` (= `AUDIT_MODEL`), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
 
 **Every other setting, verbatim defaults** (`app/config.py`; dev `.env` overrides noted):
 ```
@@ -395,7 +417,7 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 (`app/playlists.py:28`); `metrics_poll.WINDOW_DAYS=7` (`app/metrics_poll.py:47`);
 `TIER2_TRAFFIC_SOURCE_SUPPORTED=False` (`app/metrics_poll.py:85`); `reach.ROLLOVER_SLOP_DAYS=1` (`app/reach.py:52`);
 `sync.SYNC_STALE_AFTER=timedelta(hours=6)`, `FULL_SYNC_INTERVAL=timedelta(days=3)` (`app/sync.py:515,520`);
-`audits.DECISION_QUESTION_SET_VERSION="none"` (`app/audits.py:199`); `quota.APPLY=(VIDEOS_LIST, VIDEOS_UPDATE)`
+`decide.QUESTION_SET_VERSION="2026.10-b5-v1"` (`app/decide.py:36`); `quota.APPLY=(VIDEOS_LIST, VIDEOS_UPDATE)`
 = 51u (`app/quota.py:50-67`); `openrouter.EMBED_MODEL="google/gemini-embedding-2-preview"` (`app/openrouter.py:7`).
 
 ---
@@ -497,6 +519,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
 | `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). With `ledger_key` it upserts `on_conflict="ledger_key", ignore_duplicates=True` and returns None for a key already stored. Caller: `app/human_edits.py` |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` (`certify_covered` over a coverage set already read; `window_length` for SQL callers) |
+| `decide.py` | B5: `decide(question_set, subject, context, intervention_id=None) -> Decision` (`question_set`, `answer`, `probs`). Answers with the question set's rules (probability 1.0), asks the `DECIDE_BACKEND` backend in shadow (`llm` via `openrouter.chat_json`, validated against the allowed answers and probabilities in [0, 1]; `jev` raises `NotConfigured`), writes one `decision_log` row with `used = 'rules'` and `QUESTION_SET_VERSION`, and returns the rules answer. A backend failure is logged `"decide <set> <subject>: <backend> backend failed; rules answer stands: …"` and logged as a row with NULL `jev_answer`; a failed log write is logged and doesn't change the answer. One question set, `TRIAGE` (`backlinks|no_change`, rules from Part 2 §2.2). Not called by anything: Slice 1's triage calls it |
 | `warm.py` | B4 warm filter: `ranked_pool` (`{id, impressions}`, most impressions first, id tie-break; `warm_pool()` RPC paged through `all_rows` when `WARM_POOL_USE_RPC`, else in-app, and in-app if the RPC errors), `explore_order` (each pick is the best left or, with probability `WARM_EXPLORE_PCT`, a random one from the rest, flagged `explore`; injectable `random.Random`), `warm_pool` (both). Not called by anything: Slice 1's tick routing wires it in |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
@@ -655,17 +678,17 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
   tag chars (`app/audit_suggestion.py:211-230`); it does not check for fewer than 15 hashtags. There is no
   "no change" output: every audit is a rewrite.
 
-- **Strategy stamp** (`app/audits.py:199-286`). `strategy_version(prompt_text, prompt_source, prompt_version_id=None)`
+- **Strategy stamp** (`app/audits.py:196-281`). `strategy_version(prompt_text, prompt_source, prompt_version_id=None)`
   returns `f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}"`, the hash being the first 12 hex of sha256 over
   `json.dumps(inputs, sort_keys=True, separators=(",", ":"))`. `inputs` = `label`, `prompt_source`
   (`override|shorts|generated|default`; anything else raises `ValueError`), `prompt_sha256` (of the system prompt
-  actually sent), `audit_model` (`settings.AUDIT_MODEL`), `decision_question_set_version` (`"none"`),
+  actually sent), `audit_model` (`settings.AUDIT_MODEL`), `decision_question_set_version` (`decide.QUESTION_SET_VERSION`, read at call time; `"2026.10-b5-v1"`, `app/decide.py:36`),
   `prompt_version_id`, plus `writer_model` only if a `WRITER_MODEL` setting exists (it doesn't).
   `_stamp_strategy` upserts `{version, prompt_template, model: settings.AUDIT_MODEL, config: inputs, status:
   "champion", notes: "auto-registered by _stamp_strategy (derived from config)"}` with `ignore_duplicates=True`,
   once per version per process. `prompt_template` is one of `"audit_video prompt_override (caller-supplied, e.g.
   reflection shadow candidate)"`, `"audit_configs.shorts_prompt (per-channel)"`, `"audit_configs.generated_prompt
-  (per-channel)"`, `"code:app/audits.py DEFAULT_PROMPT"` (`app/audits.py:216-221`).
+  (per-channel)"`, `"code:app/audits.py DEFAULT_PROMPT"` (`app/audits.py:210-215`).
 
 - **Other LLM calls** (all via OpenRouter, `app/openrouter.py`; `chat_json`/`chat_text` default to
   `settings.AUDIT_MODEL`, `app/openrouter.py:93,175`):
@@ -679,6 +702,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
   | Reflection candidate prompt | `settings.REFLECTION_MODEL` | reflection (frozen) | `app/reflection.py:465-507` |
   | Playlist membership judge | `JUDGE_MODEL = "anthropic/claude-haiku-4.5"` | `reconcile_channel` (frozen) and dead `join_pass` | `app/playlists.py:206-213`, below |
   | Playlist title/description proposal | `JUDGE_MODEL` | `discover_playlists` (frozen) | `app/playlist_discovery.py:137-142`, below |
+  | Decide shadow answer (B5) | `settings.AUDIT_MODEL` (the `chat_json` default) | `decide()` with `DECIDE_BACKEND=llm`; nothing calls `decide()` yet | `app/decide.py:102-119`, below |
   | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | `embed_video` after apply; `bootstrap_embeddings` | input: title + `"\n\n"` + transcript[:6000] (`app/embeddings.py:112-114`); bootstrap passes `use_transcript=False`, so title only (`app/embeddings.py:176`) |
 
   Verbatim short prompts:
@@ -707,6 +731,21 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
   {titles_str}
 
   Propose a concise, descriptive YouTube playlist title and a one-sentence description that captures what they have in common. Answer JSON: {"title": "...", "description": "..."}
+  ```
+  ```
+  # decide llm backend (app/decide.py:102-119), label "decide.<question set name>"
+  # system:
+  You answer one multiple-choice question about a YouTube video for a kids' nursery-rhyme channel network. Choose exactly one of the allowed answers and give your probability for each allowed answer.
+  # user:
+  QUESTION: {question_set.question}
+  ALLOWED ANSWERS: {', '.join(question_set.answers)}
+  SUBJECT: {subject}
+  CONTEXT: {json.dumps(context, sort_keys=True, default=str)}
+
+  Return only JSON: {"answer": "<one allowed answer>", "probs": {"<allowed answer>": <probability 0..1>, ...}}
+
+  # TRIAGE.question (app/decide.py:74-81); answers backlinks, no_change
+  Which lever, if any, should change this video's metadata this week to route more viewers to it? Answer `backlinks` to add a related-videos block to its description, or `no_change` to leave it alone.
   ```
   The judge and proposal prompts carry no `default_language` rule.
 
@@ -742,8 +781,9 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   Not wired into the tick (Slice 1): the picker is still newest-first with no impressions filter
   (`supabase/migrations/20260904000100_next_audit_candidate_exclude_episodes.sql:37`
   `order by v.published_at desc, v.id`) and excludes in-window audits rather than active interventions (`:35-36`).
-- **B5 `app/decide.py` + `decision_log`.** Not built. `DECISION_QUESTION_SET_VERSION = "none"` is the placeholder
-  B5 replaces (`app/audits.py:199`). No `DECIDE_BACKEND`.
+- **B5 `decide()` + `decision_log`: office acceptance.** Built (§2 `decision_log`, §3 `DECIDE_BACKEND`, §5
+  `app/decide.py`, §6) and not deployed; the acceptance is applying `20261006050000` (after `20261006020000`, for the
+  `interventions` FK). Nothing calls `decide()`, so no rows until Slice 1's triage.
 - **B6 scoped re-embed.** Not built. One `model_version` (= `EMBED_MODEL`) holds vectors from two input recipes
   (title + transcript vs title only, §6), neither the spec's title + description + tags. Thresholds are still
   process-global (`app/playlists.py:518`).
@@ -775,7 +815,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 **Slice 3 (Part 2 §3)**
 - `app/agent/loop.py`, `openrouter.chat_tools`, `AGENT_MAX_TURNS`, tools (`get_traffic_mix`, `get_search_terms`,
   `get_niche_reference`, `get_channel_playbook`, `submit_change`, `decline`): none exist.
-- `WRITER_MODEL` and the writer bake-off (§3.3): not built (the stamp reads it via `getattr`, `app/audits.py:247`).
+- `WRITER_MODEL` and the writer bake-off (§3.3): not built (the stamp reads it via `getattr`, `app/audits.py:242`).
 - Title objective aimed at browse/suggested CTR (P5): not built; the house format optimises for search
   ("keyword-rich sentences", "high-value search phrases", `app/audit_suggestion.py:74-76`).
 - Niche reference (§3.6): no `app/niche_reference.py`, no `niche_reference_refresh` job, no `channels.niche_reference_*`
@@ -810,7 +850,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 
 1. **Strategy stamp timing (Part 1 A6, Part 2 §8).** Spec: derive at startup from the `DEFAULT_PROMPT` hash and the
    per-channel prompt-version id. Built: derived per audit, hashing the prompt text actually sent and its source
-   (`app/audits.py:224-253`), so shorts/override/generated audits stamp differently. Audits before A6 still carry
+   (`app/audits.py:218-248`), so shorts/override/generated audits stamp differently. Audits before A6 still carry
    `2026.07-baseline-v1`.
 2. **Measurement cadence (Part 2 §1.1, §1.7).** Spec: weekly windows, extended once to 14 days. Built: symmetric
    21-day pre/post windows (`MEASUREMENT_WINDOW_DAYS`, `app/reach.py:60-82`) plus `ROLLOVER_SLOP_DAYS=1`, judged
@@ -897,6 +937,16 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    uniformly from all but the best remaining video. Settings are function parameters (SQL can't read `settings`).
    The `WARM_POOL_USE_RPC` switch (default false) isn't in the spec; it follows `AUTOPILOT_PICKER_USE_RPC`.
    Parity is tested offline on a throwaway local Postgres (`tests/test_warm_pool_parity.py`), not only live.
+13. **`decide()` and `decision_log` (Part 3 B5).** The spec gives `decide(question_set, subject, context)` and no
+   question sets. Built: a `QuestionSet` (name, question, allowed answers, rules function) and one set, `TRIAGE`
+   (Part 2 §2.2's rules: `backlinks` with no related block and at least `BACKLINK_MIN_CANDIDATES` candidates, else
+   `no_change`; context keys `has_related_block`, `backlink_candidates`), so `BACKLINK_MIN_CANDIDATES` is added in
+   Phase B rather than Slice 1. One `QUESTION_SET_VERSION` covers every set in `app/decide.py` and replaces the A6
+   placeholder (`DECISION_QUESTION_SET_VERSION` is gone from `app/audits.py`). `decide()` takes an optional
+   `intervention_id` for the log row. A failing backend still writes a row (NULL `jev_answer`/`jev_probs`), so the log
+   counts failures too; a failed `decision_log` write is logged, never raised. `intervention_id` is
+   `on delete set null` (an intervention cascades away with its video). Column types and `not null`s aren't in the
+   spec (Part 2 §7 lists names only).
 
 ### 7.4 Contradictions within the spec
 
@@ -939,6 +989,10 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 - **`get_search_terms`.** A3 answered yes (Part 2 §11.1), but §6's Slice 3 row doesn't list the tool and §7 has
   no storage for terms.
 - **`WARM_MIN_IMPRESSIONS`** says "Revisit after Phase A live numbers" (§8); Phase A is done and it wasn't revisited.
+- **`decision_log` columns vs backends.** Part 2 §7 names the backend column `jev_answer`/`jev_probs`, while B5's
+  default backend is `llm`; and it has no column for the backend's name or the question set's name. As built
+  (exact DDL), `jev_answer` holds whichever backend answered; the backend is `DECIDE_BACKEND` at the time and the
+  question set is implied by `question_set_version` while `TRIAGE` is the only set (7.3 item 13).
 - **Document framing.** "This file has two parts" (How to use) while it has three; "Ground truth used:
   `STATE.md` @ `bddd373`" predates Phase A.
 

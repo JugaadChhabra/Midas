@@ -90,6 +90,13 @@ def test_intervention_values_are_the_persisted_strings():
     }
 
 
+def test_decision_used_values_are_the_persisted_strings():
+    """decision_log.used (B5, spec Part 2 §7)."""
+    assert sv.DecisionUsed.RULES == "rules"
+    assert sv.DecisionUsed.JEV == "jev"
+    assert sv.ALL_DECISION_USED == {"rules", "jev"}
+
+
 def test_active_intervention_statuses_are_the_open_ones():
     """Spec Part 2 §1.6. A held-out video is in the experiment; a declined,
     judged, cancelled or insufficient_data one is not."""

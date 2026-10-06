@@ -245,6 +245,14 @@ class Settings:
     # AUTOPILOT_PICKER_USE_RPC); tests/test_warm_pool_parity_live.py is the gate
     # for flipping it on.
     WARM_POOL_USE_RPC = os.getenv("WARM_POOL_USE_RPC", "false").lower() == "true"
+    # Phase B · B5 (spec Part 2 §8, Part 3 B5): the backend app/decide.py asks
+    # in shadow next to the rules: `llm` (openrouter.chat_json) or `jev` (a stub
+    # that raises NotConfigured until access exists). Its answer is logged to
+    # decision_log, never used.
+    DECIDE_BACKEND = os.getenv("DECIDE_BACKEND") or "llm"
+    # Spec Part 2 §2.2, §8: below this many backlink candidates, the triage
+    # rules say `no_change` (app/decide.py TRIAGE).
+    BACKLINK_MIN_CANDIDATES = int(os.getenv("BACKLINK_MIN_CANDIDATES") or "2")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

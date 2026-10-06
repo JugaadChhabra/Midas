@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app import tracing
+from app import decide, tracing
 from app.config import settings
 from app.db import supabase
 from app.channel_audits import audits_for_channel, fetch_all
@@ -193,12 +193,6 @@ def _build_user_block(
     return "\n".join(lines)
 
 
-# Version of the decision question set that `decide()` will ask (Phase B). It
-# does not exist yet; the placeholder is hashed now so bumping it changes the
-# stamp the day the question set does.
-DECISION_QUESTION_SET_VERSION = "none"
-
-
 def _strategy_hash(inputs: dict) -> str:
     """Short, key-order-independent hash of the strategy inputs."""
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
@@ -230,9 +224,10 @@ def strategy_version(
     prompt text sent to the model and which source it came from (a
     PROMPT_SOURCE_* value), the audit's prompt_versions id when it has one,
     AUDIT_MODEL, WRITER_MODEL when that setting exists (Phase B), and the
-    decision question-set version. The prompt is known only at audit time, so
-    the version is derived per audit rather than once at startup. The inputs
-    carry the prompt's hash, never its text. Pure: same inputs, same version.
+    decision question-set version (app/decide.py QUESTION_SET_VERSION). The
+    prompt is known only at audit time, so the version is derived per audit
+    rather than once at startup. The inputs carry the prompt's hash, never its
+    text. Pure: same inputs, same version.
     """
     if prompt_source not in _PROMPT_SOURCE_TEMPLATES:
         raise ValueError(f"unknown prompt source {prompt_source!r}")
@@ -241,7 +236,7 @@ def strategy_version(
         "prompt_source": prompt_source,
         "prompt_sha256": hashlib.sha256(prompt_text.encode("utf-8")).hexdigest(),
         "audit_model": settings.AUDIT_MODEL,
-        "decision_question_set_version": DECISION_QUESTION_SET_VERSION,
+        "decision_question_set_version": decide.QUESTION_SET_VERSION,
         "prompt_version_id": prompt_version_id,
     }
     writer_model = getattr(settings, "WRITER_MODEL", None)
