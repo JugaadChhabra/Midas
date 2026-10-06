@@ -82,6 +82,15 @@ def window_for(applied: date) -> tuple[Window, Window]:
     return pre, post
 
 
+def window_length() -> int:
+    """How many data-days every window here spans.
+
+    For a caller that has to hand the length to SQL instead of calling
+    `window_ending`: the warm filter's certify twin in warm_pool() (B4).
+    """
+    return settings.MEASUREMENT_WINDOW_DAYS
+
+
 def window_ending(end: date) -> Window:
     """The MEASUREMENT_WINDOW_DAYS window whose last data-day is `end`.
 
@@ -90,7 +99,7 @@ def window_ending(end: date) -> Window:
     what lets certification ask a question the evaluator will later answer the
     same way — see `certify`.
     """
-    start = end - timedelta(days=settings.MEASUREMENT_WINDOW_DAYS - 1)
+    start = end - timedelta(days=window_length() - 1)
     return start.isoformat(), end.isoformat()
 
 
