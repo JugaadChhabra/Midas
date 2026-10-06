@@ -29,9 +29,9 @@ _LANG_NAMES = {
     # ISO 639-3. No two-letter code exists — app.youtube_metadata adapts it for
     # the YouTube boundary.
     "bgc": "Haryanvi",
-    # Also no two-letter code (ISO 639-2/3). Unused for now: the owner chose
-    # plain `hi` for both channels (2026-10-06); these let them switch later
-    # without a code change.
+    # ISO 639-2/3, also adapted by app.youtube_metadata. Unused for now: the
+    # owner chose plain `hi` for both channels (2026-10-06); these let them
+    # switch later without a code change.
     "bho": "Bhojpuri", "raj": "Rajasthani",
 }
 
