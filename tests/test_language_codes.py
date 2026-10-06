@@ -35,6 +35,12 @@ def test_haryanvi_is_sent_to_youtube_as_hindi():
     assert youtube_language_code("bgc") == "hi"
 
 
+@pytest.mark.parametrize("code,name", [("bho", "Bhojpuri"), ("raj", "Rajasthani")])
+def test_bhojpuri_and_rajasthani_have_display_names(code, name):
+    """Same precedent as Haryanvi: ISO 639-2/3 codes with no 639-1 code."""
+    assert lang_display_name(code) == name
+
+
 @pytest.mark.parametrize("code", ["en", "hi", "mr", "pa", "bn", "ta", "te", "gu", "kn", "ml", "ur"])
 def test_two_letter_codes_pass_through_untouched(code):
     """Every language already in use is ISO 639-1 and needs no translation."""
