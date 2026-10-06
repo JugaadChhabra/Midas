@@ -111,7 +111,7 @@ def test_pooled_embeddings_chunks_past_the_row_cap():
     """Unpaginated, a channel with >1000 embedded videos lost its tail."""
     seen = []
 
-    def build(chunk):
+    def build(chunk, *_a, **_kw):
         seen.append(list(chunk))
         b = MagicMock()
         b.order.return_value.range.return_value.execute.return_value.data = [
@@ -129,6 +129,19 @@ def test_embedded_video_ids_returns_only_ids():
     rows = [{"video_id": "v1"}, {"video_id": "v3"}]
     with patch.object(e, "supabase", return_value=_sb(rows)):
         assert e.embedded_video_ids(["v1", "v2", "v3"]) == {"v1", "v3"}
+
+
+def test_batch_readers_filter_on_a_given_model_version():
+    """app/reembed.py reads its own model_version; the default stays EMBED_MODEL."""
+    for reader in (e.pooled_embeddings, e.embedded_video_ids):
+        cap = {}
+        with patch.object(e, "supabase", return_value=_sb([], cap)):
+            reader(["v1"], model_version="m|recipe")
+        assert ("eq", ("model_version", "m|recipe")) in cap["calls"]
+        cap = {}
+        with patch.object(e, "supabase", return_value=_sb([], cap)):
+            reader(["v1"])
+        assert ("eq", ("model_version", e.EMBED_MODEL)) in cap["calls"]
 
 
 # ── invalidation ──────────────────────────────────────────────────────────
