@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`) · **Commit:** on top of `f4b89cb` · **Branch:** `phase-b/33-phase-b-b3a-human-edit-ledger-descriptio`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk) · **Commit:** on top of `e9d2ca0` · **Branch:** `phase-b/34-phase-b-b3b-human-edit-ledger-playlist-m`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -37,8 +37,9 @@ for Hindi `UCR9qQMyP86aSt-1VgaMg7UA` (`"HTTPException: 401: token_expired"`; re-
 videos, synced 2026-10-06 07:48 UTC; Kannada and Telugu have 0 videos in `videos` ("Next session" item 2).
 Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far is B1, both halves (#30 video,
 #31 playlist: `app/traffic_poll.py`, migrations `20261006000000`, `20261006010000`), B8 (#39: `app/sync.py`
-`TokenExpired`), B2 (#32: `app/interventions.py`, migration `20261006020000`) and B3a (#33: `app/human_edits.py`,
-migration `20261006030000`); none of it is deployed and the migrations are not applied.
+`TokenExpired`), B2 (#32: `app/interventions.py`, migration `20261006020000`), B3a (#33: `app/human_edits.py`,
+migration `20261006030000`) and B3b (#34: `app/human_edits.py` `record_playlist_additions`, called from the
+membership walk in `app/playlists_sync.py`; no migration); none of it is deployed and the migrations are not applied.
 
 **Data caveat for this generation.** The live database runs on the office machine, bound to
 `127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
@@ -54,7 +55,7 @@ Stages are the spec's build order (spec Part 2 §6).
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:24-31`, `app/youtube_metadata.py:58-60`. A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3a and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py` | No `decision_log` table; no `app/decide.py`; only B3a's description-link ledger writes `interventions` (`human` rows, on full syncs); the playlist-membership half of B3 (B3b) is not built; no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3 (both halves) and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-326,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py` | No `decision_log` table; no `app/decide.py`; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
 | **Slice 1** | Backlinks + no change | **not started** | none | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it), no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
@@ -238,12 +239,17 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   `backlinks|playlist|short_link|title`; origin `midas|human`; arm `treated|holdout|n/a`; status
   `planned|applied|measuring|judged|cancelled|declined|holdout|insufficient_data`, of which
   `ACTIVE_INTERVENTION_STATUSES` = `planned|applied|measuring|holdout`. The partial unique index is the SQL mirror
-  of that set (`tests/test_status_vocab.py`). The only writer is B3a's human ledger (`app/human_edits.py`): one
+  of that set (`tests/test_status_vocab.py`). The only writer is the B3 human ledger (`app/human_edits.py`, two
+  row kinds). **B3a:** one
   row per link to one of our videos that the team added to a description, `origin='human'`, `lever='backlinks'`,
   `arm='n/a'`, `status='applied'`, `applied_at` NULL, `detected_at` = when the sync saw it, and `payload`
   `{source_video_id, target_video_id, added_targets, removed_targets, timing}` (plus `removed_detected_at` once a
   later sync sees the link gone). `ledger_key` = `backlinks:<source>:<target>:<first 16 hex of sha256 of the new
-  description, whitespace collapsed>`; NULL on any other row. `measurement_status` has no vocab yet.
+  description, whitespace collapsed>`. **B3b:** one row per membership of one of the channel's videos in one of its
+  playlists that the membership walk sees for the first time, in a playlist it has walked before, and that Midas
+  didn't add: `lever='playlist'`, same `origin`/`arm`/`status`/`applied_at`/`detected_at` as B3a, `payload`
+  `{playlist_id, video_id, playlist_item_id, timing}`, `ledger_key` = `playlist:<playlist_id>:<video_id>:<playlist_item_id>`.
+  `ledger_key` is NULL on any other row. `measurement_status` has no vocab yet.
 - **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
   - Roles assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `playlist_discovery` inserts rows without `origin` or `created_by_optimizer_at` (`app/playlist_discovery.py:198-205`), so discovery-created playlists land as `origin='inherited'`. Nothing writes `playlists.strategy_version`.
 - **`playlist_metrics`**:
@@ -364,7 +370,7 @@ the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.m
 |---|---|---|---|
 | `autopilot` | interval `AUTOPILOT_TICK_SECONDS` (`app/main.py:298`) | `app/autopilot.py:496` `tick`: quota-dormancy gate → pick channel (`Job.AUTOPILOT` = `can_audit or can_cut_shorts`) → Shorts action → `can_audit` gate → `_resync_if_stale` → daily cap → pick video → ledger quota gate → unsafe-model gate → `audit_video` → validate → ledger quota gate → apply → re-embed | registered. With `autopilot_enabled = f` everywhere it runs only the Shorts action. `_can_afford_apply` (`app/autopilot.py:480-493`) logs `quota_insufficient` and skips without pausing |
 | `shorts_dispatch` | interval `SHORTS_DISPATCH_INTERVAL_SECONDS` (5 s) (`:306`) | `app/shorts/dispatcher.py:dispatch_tick` | registered |
-| `playlist_reconcile` | cron 02:00 server-local (`:314`) | `main._daily_reconcile` (`:131`) → `sync_playlists` (shared `JobBudget("playlist_sync", PLAYLIST_SYNC_QUOTA_BUDGET, reserve=YT_QUOTA_APPLY_RESERVE)`) + `reconcile_channel` | registered; channels = `PLAYLIST_RECONCILE_CHANNELS` allowlist (`app/eligibility.py:186-195`). **Add/remove frozen** by `PLAYLIST_RECONCILE_WRITES_ENABLED`; inventory sync and the budgeted membership walk still run |
+| `playlist_reconcile` | cron 02:00 server-local (`:314`) | `main._daily_reconcile` (`:131`) → `sync_playlists` (shared `JobBudget("playlist_sync", PLAYLIST_SYNC_QUOTA_BUDGET, reserve=YT_QUOTA_APPLY_RESERVE)`) + `reconcile_channel` | registered; channels = `PLAYLIST_RECONCILE_CHANNELS` allowlist (`app/eligibility.py:186-195`). **Add/remove frozen** by `PLAYLIST_RECONCILE_WRITES_ENABLED`; inventory sync and the budgeted membership walk still run. **Human-edit ledger (B3b):** for a playlist walked before (`membership_walked_at` not NULL at plan time), each page's memberships the walk has no `playlist_assignments` row for go to `human_edits.record_playlist_additions` before the walk seeds its `sync` rows (`app/playlists_sync.py:297-326`); a playlist's first walk is the baseline and records none. A ledger error is logged as `"sync_playlists <id>: human-edit ledger failed; walk continues: <err>"` and never fails the walk (`_record_human_memberships`, `app/playlists_sync.py:359-368`). The manual `POST /channels/{id}/playlists/bootstrap` runs the same walk (`app/playlists_router.py:192`) |
 | `playlist_discovery` | cron Sun 03:00 local (`:327`) | `main._weekly_discovery` → `app/playlist_discovery.py:152` `discover_playlists` | **frozen** (`PLAYLIST_DISCOVERY_ENABLED`). When on: every channel; **creates playlists** (≤2/run), skipped under `DRY_RUN` |
 | `reflection` | cron Mon 04:00 local (`:340`) | `app/reflection.py:702` `reflect` | **frozen** (`REFLECTION_ENABLED`). When on: every channel |
 | `playlist_tuning` | cron Mon 03:30 local (`:353`) | `app/playlists.py:463` `tune_thresholds` | **frozen** (`PLAYLIST_TUNING_ENABLED`). When on: writes `settings.PLAYLIST_JOIN_HIGH` process-globally (`app/playlists.py:518`) |
@@ -423,7 +429,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
 | `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`, `ensure_playlist_traffic_job`), CSV parsing (reach; video and playlist traffic with aggregation, `_aggregate_traffic_csv`, and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`) |
-| `human_edits.py` | B3a human-edit ledger, description links: `video_links` (11-character ids from `watch?v=`, `youtu.be/`, `shorts/`, `embed/`, `live/`, `v/` URLs), `made_by_midas` (the description equals an applied audit's `suggested_description` or a reverted one's `description_before`, whitespace collapsed; the seam for Slice 1's `origin='midas'` interventions), `record_description_edits` (diff, keep targets in `videos` on any channel, write `human` backlinks rows with a `ledger_key`, stamp removals on the earlier row). Called only from `sync_channel` on a full sync |
+| `human_edits.py` | B3a human-edit ledger, description links: `video_links` (11-character ids from `watch?v=`, `youtu.be/`, `shorts/`, `embed/`, `live/`, `v/` URLs), `made_by_midas` (the description equals an applied audit's `suggested_description` or a reverted one's `description_before`, whitespace collapsed; the seam for Slice 1's `origin='midas'` interventions), `record_description_edits` (diff, keep targets in `videos` on any channel, write `human` backlinks rows with a `ledger_key`, stamp removals on the earlier row). Called only from `sync_channel` on a full sync. B3b, playlist memberships: `added_by_midas` (a `playlist_assignments` `added` row whose `decision_source` isn't `sync`, i.e. `embedding`, `llm_confirmed` or `discovery`, or an `approved` `add` `playlist_proposals` row; never `playlists.origin`), `record_playlist_additions` (write `human` playlist rows with a `ledger_key`). Called only from the membership walk (`app/playlists_sync.py`). Both write through `_record_human` |
 | `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
 | `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). With `ledger_key` it upserts `on_conflict="ledger_key", ignore_duplicates=True` and returns None for a key already stored. Caller: `app/human_edits.py` |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` |
@@ -435,7 +441,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `transcripts.py` | transcript fetch + `video_transcripts` cache; `lang_display_name` (`_LANG_NAMES`, `:24-31`); Data API captions fallback |
 | `embeddings.py` / `openrouter.py` | embeddings and `chat_json`/`chat_text` via OpenRouter |
 | `playlists.py` | similarity engine: `join_pass` (call commented out, `app/autopilot.py:438-439`), `reconcile_channel`, `tune_thresholds`, `_llm_judge` |
-| `playlists_sync.py` | playlist inventory sync, budgeted membership walk, role heuristic |
+| `playlists_sync.py` | playlist inventory sync, budgeted membership walk, role heuristic; hands memberships new since a playlist's previous walk to the human-edit ledger (`_record_human_memberships`) |
 | `playlist_discovery.py` | weekly orphan clustering → creates playlists (frozen) |
 | `playlist_health.py` | playlist health scorer (recommend-only) |
 | `playlists_router.py` | playlist HTTP endpoints |
@@ -658,13 +664,14 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   from the backfill to the frontier minus 2 days, `traffic_poll` `success`) is B9a. The aggregated rows-per-day
   figure for the findings doc and the retention decision wait for a week of data.
 - **B2 `interventions` + holdout: office acceptance.** Built (§2, §3, §5) and not deployed; the acceptance is
-  applying `20261006020000` on the office machine (B9). Its only writer is B3a's human ledger.
-- **B3 human-edit ledger.** Description links (B3a) built (§2, §4, §5: `app/human_edits.py`) and not deployed;
-  the office acceptance is applying `20261006030000` (after `20261006020000`) and, after a week, at least one
-  `human` intervention (B9, exit gate). The playlist-membership half (B3b) is not built: the membership walk does
-  not record human adds. *Constraint on B3b:* the walk runs only inside `playlist_reconcile`, i.e. for the four
-  allowlisted channels (`app/config.py:145-155`). Both halves see an old video's edit only on a full sync, every
-  3 days (`app/sync.py:520`).
+  applying `20261006020000` on the office machine (B9). Its only writer is the B3 human ledger.
+- **B3 human-edit ledger: office acceptance.** Both halves built (§2, §4, §5: `app/human_edits.py`; B3a description
+  links, B3b playlist memberships) and not deployed; the office acceptance is applying `20261006030000` (after
+  `20261006020000`) and, after a week, at least one `human` intervention (B9, exit gate). B3b adds no migration.
+  *Scope of B3b:* the walk runs only inside `playlist_reconcile`, i.e. for the four allowlisted channels
+  (`app/config.py:145-155`; Marathi is in the default). Membership detection for any other channel needs it added
+  to `PLAYLIST_RECONCILE_CHANNELS`. B3a sees an old video's edit only on a full sync, every 3 days
+  (`app/sync.py:520`).
 - **B4 warm filter.** Not built. The picker is newest-first with no impressions filter
   (`supabase/migrations/20260904000100_next_audit_candidate_exclude_episodes.sql:37`
   `order by v.published_at desc, v.id`) and excludes in-window audits rather than active interventions
@@ -750,7 +757,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 5. **Playlist thresholds (Part 2 §4, B6).** Spec: per channel. Built: process-global, and `tune_thresholds`
    overwrites the global from one channel (`app/playlists.py:518`), frozen.
 6. **Discovery provenance.** Created playlists are stored as `origin='inherited'` (`app/playlist_discovery.py:200-205`),
-   so a human-edit ledger (B3) could not tell Midas-created playlists from human ones by `origin`.
+   so a human-edit ledger (B3) could not tell Midas-created playlists from human ones by `origin`. B3b reads
+   `playlist_assignments` (`decision_source='discovery'`) instead (`app/human_edits.py` `added_by_midas`).
 7. **Traffic ingestion details (Part 2 §7, Part 3 B1).** `video_traffic_source_daily` has an `id bigserial`
    column the spec's list lacks (`app/rows.py` pages in `id` order). The shared ledger gained `report_type`
    (not in the spec) so traffic reports don't count as reach coverage or as reach reissues (`app/reach.py:122-130`,
@@ -788,6 +796,21 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    **Deploy order:** apply `20261006030000` with `20261006020000`, before the app restarts on this code, and restart
    PostgREST. Without it every ledger write fails (no `ledger_key` column); the sync still succeeds and logs the
    error per video, but no human edit is recorded until the migration lands, and edits synced meanwhile are lost.
+11. **Human-edit ledger, playlist memberships (Part 3 B3.2; B3b).** "Newly added" is "the walk has no
+   `playlist_assignments` row of any action for the (video, playlist) pair", which is what the walk already used
+   to decide what to seed (`app/playlists_sync.py:297-307`); the walk has no removal detection, so a video the
+   team removes and re-adds, or that Midas once removed, is never seen as new. Baseline rule (the spec has none): a
+   playlist with `membership_walked_at` NULL at plan time, including one new to the DB, is walked as a baseline and
+   records nothing, so a human add made before a playlist's first walk is never recorded. Playlists the walk has
+   already stamped (`20260812000000`) are not re-baselined after deploy: their existing memberships already have
+   `sync` rows. Only the channel's own videos count (the walk's `known_videos`), and a membership of a video not yet
+   in `videos` is skipped; when that video is synced later the next walk of the playlist records it, even if the
+   add predates the previous walk. "Midas added it" counts every non-`sync` `added` assignment and every approved
+   `add` proposal, including those a person approved through `/playlists/proposals/decide`. Detection timing:
+   `detected_at` is the walk that saw it, which re-reads a playlist only when its item count changes or every
+   `PLAYLIST_FULL_WALK_DAYS` (30), within `PLAYLIST_SYNC_QUOTA_BUDGET`; an equal-count swap waits for rotation. The
+   payload's `timing` says so. A walk cut short by the budget mid-playlist has already recorded the pages it read
+   (the ledger runs per page).
 
 ### 7.4 Contradictions within the spec
 
@@ -815,7 +838,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   manual paths that still write to YouTube (`POST /audits/{id}/apply`, `/apply-pending`,
   `/playlists/proposals/decide`) are human-triggered through Midas: B3 doesn't say whether they are `human` or
   `midas`. As built (B3a), a description written by any apply or revert counts as Midas's, however it was
-  triggered (`app/human_edits.py` `made_by_midas`).
+  triggered (`app/human_edits.py` `made_by_midas`); likewise (B3b) a membership from an approved proposal counts
+  as Midas's, as B3.2 says (`app/human_edits.py` `added_by_midas`).
 - **"Active intervention" exclusion.** Part 2 §1.6 limits *Midas* interventions to one per video; §2.1 and B4
   exclude videos with "an active intervention" of any origin, which would let human edits block Midas picks.
   Part 3 B2's test says "a second active intervention", no origin. As built (B2), §1.6's reading: `active_for`
@@ -953,6 +977,10 @@ select origin, lever, arm, status, count(1) from interventions group by 1,2,3,4 
 -- B3a: human backlinks detected, newest first (after 20261006030000 is applied); the exit gate needs at least one
 select channel_id, video_id, payload->>'target_video_id' target, detected_at, payload->>'removed_detected_at' removed
 from interventions where origin = 'human' and lever = 'backlinks' order by detected_at desc limit 50;
+
+-- B3b: human playlist memberships detected, newest first (after 20261006030000 is applied)
+select channel_id, video_id, payload->>'playlist_id' playlist, payload->>'playlist_item_id' item, detected_at
+from interventions where origin = 'human' and lever = 'playlist' order by detected_at desc limit 50;
 
 -- applied audits in the last 90 days that landed on dormant videos
 select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total

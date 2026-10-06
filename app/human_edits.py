@@ -1,4 +1,4 @@
-"""Phase B · B3a — the human-edit ledger, description links (spec Part 2 §1.4, Part 3 B3; #33).
+"""Phase B · B3 — the human-edit ledger (spec Part 2 §1.4, Part 3 B3; B3a #33, B3b #34).
 
 The SEO team edits descriptions by hand, and those edits are the benchmark
 Midas has to beat. When sync re-reads a description, a link to one of our
@@ -19,6 +19,16 @@ saw the edit, not when it was made, and every row says so in its payload.
 Idempotent: each row carries a `ledger_key` fixed by the edit (source, target,
 the new description's hash), and the insert skips a key already stored
 (migration 20261006030000).
+
+B3b, playlist memberships: when the membership walk (app/playlists_sync.py)
+sees one of our videos newly in one of our playlists, and Midas didn't put it
+there, that's one `human` playlist intervention:
+
+    added_by_midas(playlist_id, video_ids)          -- assignments + executed proposals
+    record_playlist_additions(channel_id, ...)      -- record the rest
+
+The walk hands over only memberships it has never seen, and only for a
+playlist it has walked before: a playlist's first walk is the baseline.
 """
 from __future__ import annotations
 
@@ -54,6 +64,18 @@ DETECTION_TIMING = (
     "detected_at is when a full sync saw this edit, not when it was made: old "
     "videos are re-read only by a full sync, every FULL_SYNC_INTERVAL (3 days)"
 )
+
+
+PLAYLIST_DETECTION_TIMING = (
+    "detected_at is when the playlist membership walk saw this membership, not "
+    "when it was added: the walk runs in playlist_reconcile (02:00 daily) for "
+    "PLAYLIST_RECONCILE_CHANNELS only, and re-reads a playlist when its item "
+    "count changes or every PLAYLIST_FULL_WALK_DAYS, as the quota budget allows"
+)
+
+# playlist_assignments rows the walk itself writes for what it observed. Every
+# other decision_source (embedding, llm_confirmed, discovery) is a Midas write.
+_OBSERVED = "sync"
 
 
 def video_links(text: str | None) -> set[str]:
@@ -199,4 +221,76 @@ def record_description_edits(channel_id: str,
             recorded += _record_one(channel_id, video_id, after, added, removed, now)
         except Exception as e:
             log.exception("human_edits %s: ledger failed for %s: %s", channel_id, video_id, e)
+    return recorded
+
+
+def added_by_midas(playlist_id: str, video_ids: list[str]) -> set[str]:
+    """The subset of `video_ids` that Midas itself added to `playlist_id`.
+
+    Midas added a video if it has a playlist_assignments 'added' row from a
+    Midas decision, or an executed (approved) 'add' proposal. Never from
+    `playlists.origin`: discovery stores the playlists it creates as
+    'inherited' (app/playlist_discovery.py), so origin can't tell them apart.
+    """
+    assigned = rows_for_ids(
+        lambda c: supabase().table("playlist_assignments")
+        .select("video_id")
+        .eq("playlist_id", playlist_id)
+        .eq("action", "added")
+        .neq("decision_source", _OBSERVED)
+        .in_("video_id", c),
+        sorted(video_ids),
+    )
+    proposed = rows_for_ids(
+        lambda c: supabase().table("playlist_proposals")
+        .select("video_id")
+        .eq("playlist_id", playlist_id)
+        .eq("action", "add")
+        .eq("status", "approved")
+        .in_("video_id", c),
+        sorted(video_ids),
+    )
+    return {r["video_id"] for r in assigned} | {r["video_id"] for r in proposed}
+
+
+def record_playlist_additions(channel_id: str, playlist_id: str,
+                              added: list[tuple[str, str]]) -> int:
+    """Record the memberships the team added, for (video_id, playlist_item_id) pairs.
+
+    The caller (the membership walk) passes only memberships new since the
+    playlist's previous walk. The playlist item id is in the ledger key, so a
+    rerun dedupes, while a removal and a later re-add is a new membership.
+
+    Returns the number of interventions written. A failure on one membership
+    is logged and the others still run.
+    """
+    if not added:
+        return 0
+    midas = added_by_midas(playlist_id, [v for v, _ in added])
+    now = datetime.now(timezone.utc).isoformat()
+    recorded = 0
+    for video_id, playlist_item_id in added:
+        if video_id in midas:
+            log.info("human_edits %s: %s added to %s by Midas; not a human edit",
+                     channel_id, video_id, playlist_id)
+            continue
+        try:
+            recorded += _record_human(
+                channel_id, video_id, InterventionLever.PLAYLIST,
+                payload={
+                    "playlist_id": playlist_id,
+                    "video_id": video_id,
+                    "playlist_item_id": playlist_item_id,
+                    "timing": PLAYLIST_DETECTION_TIMING,
+                },
+                now=now,
+                ledger_key=(f"{InterventionLever.PLAYLIST}:{playlist_id}:"
+                            f"{video_id}:{playlist_item_id}"),
+            )
+        except Exception as e:
+            log.exception("human_edits %s: ledger failed for %s in %s: %s",
+                          channel_id, video_id, playlist_id, e)
+    if recorded:
+        log.info("human_edits %s: %d human playlist membership(s) recorded in %s",
+                 channel_id, recorded, playlist_id)
     return recorded
