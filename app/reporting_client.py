@@ -394,7 +394,7 @@ def parse_reach_csv(text: str) -> list[dict]:
     return rows
 
 
-def _aggregate_traffic_csv(text: str, columns: list[str], label: str,
+def _aggregate_traffic_csv(text: str, report_type: str, columns: list[str], label: str,
                            id_columns: tuple[str, ...], metrics: dict[str, type]) -> list[dict]:
     """Parse a traffic-source CSV and sum `metrics` over every column not in the key.
 
@@ -408,7 +408,8 @@ def _aggregate_traffic_csv(text: str, columns: list[str], label: str,
     if header != columns:
         raise ValueError(
             f"unexpected {label} CSV header {header!r} — expected {columns!r}. "
-            "Re-probe with scripts/probes/probe_traffic_source_report.py before trusting ingestion."
+            "Re-probe with scripts/probes/probe_traffic_source_report.py "
+            f"--report-type {report_type} before trusting ingestion."
         )
     col = {c: i for i, c in enumerate(columns)}
     sums: dict[tuple, list] = {}
@@ -422,20 +423,20 @@ def _aggregate_traffic_csv(text: str, columns: list[str], label: str,
         d = raw[col["date"]]  # YYYYMMDD
         if len(d) != 8 or not d.isdigit():
             raise ValueError(f"unexpected {label} CSV date {d!r} (want YYYYMMDD)")
-        key = (*(raw[col[c]] for c in id_columns), f"{d[0:4]}-{d[4:6]}-{d[6:8]}",
+        key = (tuple(raw[col[c]] for c in id_columns), f"{d[0:4]}-{d[4:6]}-{d[6:8]}",
                int(raw[col["traffic_source_type"]]), raw[col["traffic_source_detail"]])
         acc = sums.setdefault(key, [kind(0) for kind in metrics.values()])
         for i, (name, kind) in enumerate(metrics.items()):
             acc[i] += kind(raw[col[name]])
     return [
         {
-            **dict(zip(id_columns, key)),
-            "date": key[-3],
-            "source_type": key[-2],
-            "source_detail": key[-1],
+            **dict(zip(id_columns, ids)),
+            "date": day,
+            "source_type": source_type,
+            "source_detail": detail,
             **dict(zip(metrics, acc)),
         }
-        for key, acc in sums.items()
+        for (ids, day, source_type, detail), acc in sums.items()
     ]
 
 
@@ -451,7 +452,7 @@ def parse_traffic_csv(text: str) -> list[dict]:
     report writes nothing.
     """
     return _aggregate_traffic_csv(
-        text, _TRAFFIC_CSV_COLUMNS, "traffic", ("video_id",),
+        text, TRAFFIC_REPORT_TYPE_ID, _TRAFFIC_CSV_COLUMNS, "traffic", ("video_id",),
         {"views": int, "engaged_views": int, "watch_time_minutes": float},
     )
 
@@ -465,6 +466,7 @@ def parse_playlist_traffic_csv(text: str) -> list[dict]:
     playlist_saves_* columns are dropped.
     """
     return _aggregate_traffic_csv(
-        text, _PLAYLIST_TRAFFIC_CSV_COLUMNS, "playlist traffic", ("playlist_id", "video_id"),
+        text, PLAYLIST_TRAFFIC_REPORT_TYPE_ID, _PLAYLIST_TRAFFIC_CSV_COLUMNS, "playlist traffic",
+        ("playlist_id", "video_id"),
         {"views": int, "playlist_starts": int, "watch_time_minutes": float},
     )

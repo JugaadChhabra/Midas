@@ -601,3 +601,19 @@ def test_a_playlist_failure_fails_the_channel_end_to_end_after_video_lands():
         run(sb3)
     assert exc_info.value.failed_channels == {CH: "playlist: RuntimeError: reports.list 500"}
     assert [r["report_id"] for r in sb3.rows("video_traffic_source_daily")] == ["r1"]
+
+
+def test_the_newest_restatement_wins_even_when_create_times_differ_in_precision():
+    # As text, "…10:00:00.5Z" < "…10:00:00Z" ('.' sorts before 'Z'), so a string
+    # compare would land the older report. Parsed, the fractional one is newer.
+    sb = _sb()
+    _poll(sb, [], {"p-old": _ORIGINAL, "p-new": _RESTATED}, playlist_reports=[
+        _pl_report("p-old", created="2026-10-02T09:40:00Z"),
+        _pl_report("p-new", created="2026-10-02T09:40:00.5Z"),
+    ])
+    assert {r["report_id"] for r in sb.rows("playlist_traffic_daily")} == {"p-new"}
+
+
+def test_the_playlist_header_error_names_the_report_type_to_reprobe():
+    with pytest.raises(ValueError, match="--report-type playlist_traffic_source_a2"):
+        rc.parse_playlist_traffic_csv("date\n")

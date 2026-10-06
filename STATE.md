@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`) · **Commit:** on top of `670e189` · **Branch:** `phase-b/31-phase-b-b1b-playlist-traffic-ingestion-p`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`) · **Commit:** on top of `d788e9f` · **Branch:** `phase-b/31-phase-b-b1b-playlist-traffic-ingestion-p`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -176,7 +176,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   report_id text not null, ingested_at timestamptz default now(),
   unique (video_id, date, source_type, source_detail)
   ```
-  Index `(channel_id, date desc)`. Source: Reporting API `channel_traffic_source_a3` (`app/reporting_client.py:73`), summed over `country_code`, `subscribed_status`, `live_or_on_demand` (`app/reporting_client.py:442` `parse_traffic_csv` → `:397` `_aggregate_traffic_csv`).
+  Index `(channel_id, date desc)`. Source: Reporting API `channel_traffic_source_a3` (`app/reporting_client.py:73`), summed over `country_code`, `subscribed_status`, `live_or_on_demand` (`app/reporting_client.py:443` `parse_traffic_csv` → `:397` `_aggregate_traffic_csv`).
 - **`playlist_traffic_daily`** (`20261006010000`, B1b):
   ```sql
   id bigserial primary key, playlist_id text not null (no FK), video_id text not null (no FK),
@@ -186,7 +186,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   report_id text not null, ingested_at timestamptz default now(),
   unique (playlist_id, video_id, date, source_type, source_detail)
   ```
-  Index `(channel_id, date desc)`. Source: Reporting API `playlist_traffic_source_a2` (`app/reporting_client.py:100`), summed over the same three dimensions (`app/reporting_client.py:459` `parse_playlist_traffic_csv`); `engaged_views`, `average_view_duration_seconds` and `playlist_saves_*` are not stored.
+  Index `(channel_id, date desc)`. Source: Reporting API `playlist_traffic_source_a2` (`app/reporting_client.py:100`), summed over the same three dimensions (`app/reporting_client.py:460` `parse_playlist_traffic_csv`); `engaged_views`, `average_view_duration_seconds` and `playlist_saves_*` are not stored.
 - **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
   - Roles assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `playlist_discovery` inserts rows without `origin` or `created_by_optimizer_at` (`app/playlist_discovery.py:198-205`), so discovery-created playlists land as `origin='inherited'`. Nothing writes `playlists.strategy_version`.
 - **`playlist_metrics`**:
@@ -282,7 +282,7 @@ with traceback as `"<label> (job <job_id>) failed for <id>: <err>"`, and after t
 `job_status.JobRunFailed` naming the failed channels, so APScheduler records the run as failed.
 `video_sync`, `playlist_reconcile`, `playlist_discovery`, `playlist_tuning`, `reflection` and
 `playlist_health_score` use it. `metrics_poll`, `reporting_poll` and `traffic_poll` collect channels that raised anything but the
-expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:201`, `app/metrics_poll.py:418`,
+expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:207`, `app/metrics_poll.py:418`,
 `app/reporting_poll.py:358`). Per-item errors inside a channel's poll are judged by
 `job_status.item_error_verdict` (`app/job_status.py:50`) per category: all attempted items in a category failed →
 the channel fails as `"ItemsFailed: <category>: all <n> failed"`; some failed → the poll returns
@@ -313,7 +313,7 @@ the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.m
 | `video_sync` | cron 04:00 UTC (`:365`) | `main._daily_video_sync` (`:243`) → `app/sync.py:502` `routine_sync` per channel | registered, every channel. Read-only: `"fresh"` if synced within 6 h, else a full pass if the last full sync is >3 days old, else incremental + `refresh_stats`. Catches `TokenExpiredError` as an expected skip (`app/main.py:260-264`), but `sync_channel`/`refresh_stats` convert token failures to `HTTPException(401, "token_expired")` (`app/sync.py:96-97,119-120,299-300`), so an expired token **fails** the run (observed 2026-10-06 for Hindi, §8) |
 | `metrics_poll` | cron 05:00 UTC (`:378`) | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in a measurement window (`METRICS_POLL_MEASURED_ONLY`) |
 | `reporting_poll` | cron 06:00 UTC (`:399`) | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` (`app/eligibility.py:154-168`). Ingests only `channel_reach_basic_a1` |
-| `traffic_poll` | cron 06:30 UTC (`:418`) | `app/traffic_poll.py:167` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Two feeds per channel (`_FEEDS`, `app/traffic_poll.py:74`): **video** ensures the `channel_traffic_source_a3` job (`midas-traffic-source`, Marathi `3647f5d8…`) → `video_traffic_source_daily`; **playlist** ensures the `playlist_traffic_source_a2` job (`midas-playlist-traffic-source`, Marathi `381cf084…`) → `playlist_traffic_daily`. Both Marathi jobs are found, not created. Each feed ingests each data-day's newest not-yet-ingested report, a restatement replacing the day (`app/traffic_poll.py:83` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with its own `report_type`. Logs `"traffic_poll <id> data-day <d>: <n> rows written to <table> (report <r>)"` (`app/traffic_poll.py:112`). Feeds are isolated (`_poll_channel`, `app/traffic_poll.py:149`): a feed crash is recorded as `"<feed>: <Type>: <msg>"` and fails the channel, but the other feed still runs; per-report errors are judged per feed (categories `video reports`, `playlist reports`). Independent of `reporting_poll` |
+| `traffic_poll` | cron 06:30 UTC (`:418`) | `app/traffic_poll.py:173` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Two feeds per channel (`_FEEDS`, `app/traffic_poll.py:74`): **video** ensures the `channel_traffic_source_a3` job (`midas-traffic-source`, Marathi `3647f5d8…`) → `video_traffic_source_daily`; **playlist** ensures the `playlist_traffic_source_a2` job (`midas-playlist-traffic-source`, Marathi `381cf084…`) → `playlist_traffic_daily`. Both Marathi jobs are found, not created. Each feed ingests each data-day's newest not-yet-ingested report, a restatement replacing the day (`app/traffic_poll.py:89` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with its own `report_type`. Logs `"traffic_poll <id> data-day <d>: <n> rows written to <table> (report <r>)"` (`app/traffic_poll.py:118`). Feeds are isolated (`_poll_channel`, `app/traffic_poll.py:155`): a feed crash is recorded as `"<feed>: <Type>: <msg>"` and fails the channel, but the other feed still runs; per-report errors are judged per feed (categories `video reports`, `playlist reports`). Independent of `reporting_poll` |
 | `playlist_health_score` | cron 07:00 UTC (`:432`) | `main._daily_playlist_health_score` (`:220`) → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
 | `measurement_eval` | cron 08:00 UTC (`:451`) | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
 | `nightly_db_backup` | cron `BACKUP_HOUR` local (`:466`) | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
@@ -698,9 +698,10 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    column the spec's list lacks (`app/rows.py` pages in `id` order). The shared ledger gained `report_type`
    (not in the spec) so traffic reports don't count as reach coverage or as reach reissues (`app/reach.py:122-130`,
    `app/reporting_poll.py:85`). Restatements: when a data-day's original and restated reports are both new, only
-   the newest by `createTime` is ingested (`app/traffic_poll.py:83`); the spec says only that the newer replaces.
+   the newest by `createTime` (parsed, not compared as text, `app/traffic_poll.py:83` `_created`) is ingested
+   (`app/traffic_poll.py:89`); the spec says only that the newer replaces.
    `playlist_traffic_daily` also has an `id bigserial`. The two report types are ingested as isolated feeds of one
-   job: a crash in one feed fails the channel's run but doesn't stop the other (`app/traffic_poll.py:149`); the spec
+   job: a crash in one feed fails the channel's run but doesn't stop the other (`app/traffic_poll.py:155`); the spec
    says only "same failure semantics as `reporting_poll`".
    **Deploy order:** the reach path now reads and writes `report_type`, so `20261006000000` must be applied (and
    PostgREST restarted) before the app restarts on this code, or `reporting_poll` and `measurement_eval` fail.
@@ -848,14 +849,15 @@ select channel_id, report_type, min(data_date) first_day, max(data_date) frontie
 from reporting_reports_ingested
 where report_type in ('channel_traffic_source_a3', 'playlist_traffic_source_a2') group by 1,2;
 
-select d::date missing_day
-from generate_series(
+select t.report_type, d::date missing_day
+from (values ('channel_traffic_source_a3'), ('playlist_traffic_source_a2')) t(report_type)
+cross join lateral generate_series(
        (select min(data_date) from reporting_reports_ingested
-        where report_type = 'channel_traffic_source_a3' and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg'),
+        where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg'),
        current_date - 2, interval '1 day') d
 where d::date not in (select data_date from reporting_reports_ingested
-                      where report_type = 'channel_traffic_source_a3' and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
-order by 1;
+                      where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
+order by 1, 2;
 
 -- applied audits in the last 90 days that landed on dormant videos
 select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total

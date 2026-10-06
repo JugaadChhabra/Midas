@@ -65,7 +65,7 @@ class _Feed(NamedTuple):
     """One report type and the table it lands in."""
     key: str
     report_type: str
-    ensure_job: Callable
+    ensure_job: Callable[..., str | None]
     parse: Callable[[str], list[dict]]
     table: str
     on_conflict: str
@@ -80,12 +80,18 @@ _FEEDS = (
 )
 
 
+def _created(report: dict) -> datetime:
+    """A report's createTime, parsed: as text, "…00.5Z" sorts before "…00Z"."""
+    raw = report.get("createTime")
+    return datetime.fromisoformat(raw) if raw else datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _newest_per_day(reports: list[dict]) -> list[dict]:
     """The newest report (by createTime) for each data-day, oldest day first."""
     newest: dict = {}
     for r in reports:
         day = report_data_date(r)
-        if day not in newest or (r.get("createTime") or "") > (newest[day].get("createTime") or ""):
+        if day not in newest or _created(r) > _created(newest[day]):
             newest[day] = r
     return [newest[d] for d in sorted(newest)]
 
