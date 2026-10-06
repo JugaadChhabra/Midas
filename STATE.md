@@ -519,7 +519,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
 | `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). With `ledger_key` it upserts `on_conflict="ledger_key", ignore_duplicates=True` and returns None for a key already stored. Caller: `app/human_edits.py` |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` (`certify_covered` over a coverage set already read; `window_length` for SQL callers) |
-| `decide.py` | B5: `decide(question_set, subject, context, intervention_id=None) -> Decision` (`question_set`, `answer`, `probs`). Answers with the question set's rules (probability 1.0), asks the `DECIDE_BACKEND` backend in shadow (`llm` via `openrouter.chat_json`, validated against the allowed answers and probabilities in [0, 1]; `jev` raises `NotConfigured`), writes one `decision_log` row with `used = 'rules'` and `QUESTION_SET_VERSION`, and returns the rules answer. A backend failure is logged `"decide <set> <subject>: <backend> backend failed; rules answer stands: …"` and logged as a row with NULL `jev_answer`; a failed log write is logged and doesn't change the answer. One question set, `TRIAGE` (`backlinks|no_change`, rules from Part 2 §2.2). Not called by anything: Slice 1's triage calls it |
+| `decide.py` | B5: `decide(question_set, subject, context, intervention_id=None) -> Decision` (`question_set`, `answer`, `probs`). Answers with the question set's rules (probability 1.0), asks the `DECIDE_BACKEND` backend in shadow (`llm` via `openrouter.chat_json`, validated against the allowed answers and probabilities in [0, 1]; `jev` raises `NotConfigured`), writes one `decision_log` row with `used = 'rules'` and `QUESTION_SET_VERSION`, and returns the rules answer. A backend failure is logged `"decide <set> <subject>: <backend> backend failed; rules answer stands: …"` and logged as a row with NULL `jev_answer`; a failed log write is logged and doesn't change the answer. One question set, `TRIAGE` (answers `no_change|backlinks|playlist|short_link|title`, Part 2 §2.2; the rules choose only `backlinks` or `no_change`). Every answer needs a probability; the rules answer is 1.0 on itself, 0.0 elsewhere. Not called by anything: Slice 1's triage calls it |
 | `warm.py` | B4 warm filter: `ranked_pool` (`{id, impressions}`, most impressions first, id tie-break; `warm_pool()` RPC paged through `all_rows` when `WARM_POOL_USE_RPC`, else in-app, and in-app if the RPC errors), `explore_order` (each pick is the best left or, with probability `WARM_EXPLORE_PCT`, a random one from the rest, flagged `explore`; injectable `random.Random`), `warm_pool` (both). Not called by anything: Slice 1's tick routing wires it in |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
@@ -702,7 +702,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
   | Reflection candidate prompt | `settings.REFLECTION_MODEL` | reflection (frozen) | `app/reflection.py:465-507` |
   | Playlist membership judge | `JUDGE_MODEL = "anthropic/claude-haiku-4.5"` | `reconcile_channel` (frozen) and dead `join_pass` | `app/playlists.py:206-213`, below |
   | Playlist title/description proposal | `JUDGE_MODEL` | `discover_playlists` (frozen) | `app/playlist_discovery.py:137-142`, below |
-  | Decide shadow answer (B5) | `settings.AUDIT_MODEL` (the `chat_json` default) | `decide()` with `DECIDE_BACKEND=llm`; nothing calls `decide()` yet | `app/decide.py:102-119`, below |
+  | Decide shadow answer (B5) | `settings.AUDIT_MODEL` (the `chat_json` default) | `decide()` with `DECIDE_BACKEND=llm`; nothing calls `decide()` yet | `app/decide.py:111-129`, below |
   | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | `embed_video` after apply; `bootstrap_embeddings` | input: title + `"\n\n"` + transcript[:6000] (`app/embeddings.py:112-114`); bootstrap passes `use_transcript=False`, so title only (`app/embeddings.py:176`) |
 
   Verbatim short prompts:
@@ -733,7 +733,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
   Propose a concise, descriptive YouTube playlist title and a one-sentence description that captures what they have in common. Answer JSON: {"title": "...", "description": "..."}
   ```
   ```
-  # decide llm backend (app/decide.py:102-119), label "decide.<question set name>"
+  # decide llm backend (app/decide.py:111-129), label "decide.<question set name>"
   # system:
   You answer one multiple-choice question about a YouTube video for a kids' nursery-rhyme channel network. Choose exactly one of the allowed answers and give your probability for each allowed answer.
   # user:
@@ -744,8 +744,8 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 
   Return only JSON: {"answer": "<one allowed answer>", "probs": {"<allowed answer>": <probability 0..1>, ...}}
 
-  # TRIAGE.question (app/decide.py:74-81); answers backlinks, no_change
-  Which lever, if any, should change this video's metadata this week to route more viewers to it? Answer `backlinks` to add a related-videos block to its description, or `no_change` to leave it alone.
+  # TRIAGE.question (app/decide.py:74-86); answers no_change, backlinks, playlist, short_link, title
+  Which lever, if any, should change this video this week to route more viewers to it? `backlinks`: add a related-videos block to its description. `playlist`: add it to a playlist. `short_link`: link a Short to it. `title`: rewrite its title. `no_change`: leave it alone.
   ```
   The judge and proposal prompts carry no `default_language` rule.
 
@@ -850,7 +850,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 
 1. **Strategy stamp timing (Part 1 A6, Part 2 §8).** Spec: derive at startup from the `DEFAULT_PROMPT` hash and the
    per-channel prompt-version id. Built: derived per audit, hashing the prompt text actually sent and its source
-   (`app/audits.py:218-248`), so shorts/override/generated audits stamp differently. Audits before A6 still carry
+   (`app/audits.py:218-245`), so shorts/override/generated audits stamp differently. Audits before A6 still carry
    `2026.07-baseline-v1`.
 2. **Measurement cadence (Part 2 §1.1, §1.7).** Spec: weekly windows, extended once to 14 days. Built: symmetric
    21-day pre/post windows (`MEASUREMENT_WINDOW_DAYS`, `app/reach.py:60-82`) plus `ROLLOVER_SLOP_DAYS=1`, judged
@@ -942,7 +942,11 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    (Part 2 §2.2's rules: `backlinks` with no related block and at least `BACKLINK_MIN_CANDIDATES` candidates, else
    `no_change`; context keys `has_related_block`, `backlink_candidates`), so `BACKLINK_MIN_CANDIDATES` is added in
    Phase B rather than Slice 1. One `QUESTION_SET_VERSION` covers every set in `app/decide.py` and replaces the A6
-   placeholder (`DECISION_QUESTION_SET_VERSION` is gone from `app/audits.py`). `decide()` takes an optional
+   placeholder (`DECISION_QUESTION_SET_VERSION` is gone from `app/audits.py`), so after deploy every audit source stamps a new
+   `strategy_version` (and `_stamp_strategy` upserts a new `audit_strategies` row) though no prompt changed.
+   `TRIAGE` offers §2.2's five options; its rules choose only `backlinks` or `no_change` (the Slice 1 baseline), so a
+   backend's other choices are logged but can't agree with the rules. A backend answer must give a probability
+   for every option (§2.2), not necessarily summing to 1; anything else is a backend failure. `decide()` takes an optional
    `intervention_id` for the log row. A failing backend still writes a row (NULL `jev_answer`/`jev_probs`), so the log
    counts failures too; a failed `decision_log` write is logged, never raised. `intervention_id` is
    `on delete set null` (an intervention cascades away with its video). Column types and `not null`s aren't in the
@@ -993,6 +997,9 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   default backend is `llm`; and it has no column for the backend's name or the question set's name. As built
   (exact DDL), `jev_answer` holds whichever backend answered; the backend is `DECIDE_BACKEND` at the time and the
   question set is implied by `question_set_version` while `TRIAGE` is the only set (7.3 item 13).
+- **B5 vs the Phase B exit gate.** Part 3's exit gate wants "`decide()` logs shadow decisions", but B5 adds no
+  caller and "Not doing in Phase B" excludes tick routing, so `decision_log` stays empty in Phase B. As built, the
+  gate can be met only by `tests/test_decide.py`.
 - **Document framing.** "This file has two parts" (How to use) while it has three; "Ground truth used:
   `STATE.md` @ `bddd373`" predates Phase A.
 

@@ -38,10 +38,10 @@ QUESTION_SET_VERSION = "2026.10-b5-v1"
 
 @dataclass(frozen=True)
 class Decision:
-    """One answer to a question set: the answer and a probability per answer.
+    """One answer to a question set: the answer and a probability per allowed answer.
 
-    The rules answer carries probability 1.0 on itself; a backend's carries
-    what it reports.
+    The rules answer carries 1.0 on itself and 0.0 on the rest; a backend's
+    carries what it reports.
     """
 
     question_set: str
@@ -66,7 +66,7 @@ def _triage_rules(context: dict) -> str:
     """Spec Part 2 §2.2: backlinks if the description has no related block and
     at least BACKLINK_MIN_CANDIDATES candidates exist; otherwise no_change."""
     if (not context.get("has_related_block")
-            and context.get("backlink_candidates", 0) >= settings.BACKLINK_MIN_CANDIDATES):
+            and (context.get("backlink_candidates") or 0) >= settings.BACKLINK_MIN_CANDIDATES):
         return "backlinks"
     return "no_change"
 
@@ -74,17 +74,24 @@ def _triage_rules(context: dict) -> str:
 TRIAGE = QuestionSet(
     name="triage",
     question=(
-        "Which lever, if any, should change this video's metadata this week to "
-        "route more viewers to it? Answer `backlinks` to add a related-videos "
-        "block to its description, or `no_change` to leave it alone."
+        "Which lever, if any, should change this video this week to route more "
+        "viewers to it? `backlinks`: add a related-videos block to its "
+        "description. `playlist`: add it to a playlist. `short_link`: link a "
+        "Short to it. `title`: rewrite its title. `no_change`: leave it alone."
     ),
-    answers=("backlinks", "no_change"),
+    # Spec Part 2 §2.2's options. The rules choose only backlinks or no_change
+    # (Slice 1); the backend may choose any.
+    answers=("no_change", "backlinks", "playlist", "short_link", "title"),
     rules=_triage_rules,
 )
 
 
 def _validated(question_set: QuestionSet, answer, probs) -> Decision:
-    """A Decision, or ValueError when the answer or probabilities are malformed."""
+    """A Decision, or ValueError when the answer or probabilities are malformed.
+
+    Every allowed answer needs a probability (spec Part 2 §2.2); they aren't
+    required to sum to 1.
+    """
     if answer not in question_set.answers:
         raise ValueError(f"answer {answer!r} not in {list(question_set.answers)}")
     if not isinstance(probs, dict):
@@ -96,6 +103,8 @@ def _validated(question_set: QuestionSet, answer, probs) -> Decision:
         if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1:
             raise ValueError(f"probability for {key!r} must be in [0, 1], got {p!r}")
         clean[key] = float(p)
+    if set(clean) != set(question_set.answers):
+        raise ValueError(f"probs must cover every answer {list(question_set.answers)}, got {sorted(clean)}")
     return Decision(question_set=question_set.name, answer=answer, probs=clean)
 
 
@@ -133,10 +142,12 @@ _BACKENDS: dict[str, Callable[[QuestionSet, str, dict], Decision]] = {
 def _backend_answer(question_set: QuestionSet, subject: str, context: dict) -> Decision | None:
     """The configured backend's answer, or None (logged) if it failed."""
     name = settings.DECIDE_BACKEND
+    backend = _BACKENDS.get(name)
+    if backend is None:
+        log.warning("decide %s %s: unknown DECIDE_BACKEND %r (expected one of %s); rules answer stands",
+                    question_set.name, subject, name, sorted(_BACKENDS))
+        return None
     try:
-        backend = _BACKENDS.get(name)
-        if backend is None:
-            raise NotConfigured(f"unknown DECIDE_BACKEND {name!r}; expected one of {sorted(_BACKENDS)}")
         return backend(question_set, subject, context)
     except Exception as e:
         log.warning("decide %s %s: %s backend failed; rules answer stands: %s: %s",
@@ -152,7 +163,8 @@ def decide(question_set: QuestionSet, subject: str, context: dict,
     used = rules). A failed log write is logged and doesn't change the answer.
     """
     answer = question_set.rules(context)
-    rules = _validated(question_set, answer, {answer: 1.0})
+    rules = _validated(question_set, answer,
+                       {a: 1.0 if a == answer else 0.0 for a in question_set.answers})
     shadow = _backend_answer(question_set, subject, context)
     row = {
         "question_set_version": QUESTION_SET_VERSION,
