@@ -242,7 +242,15 @@ def certify(channel_id: str) -> dict:
     "Covered" is data presence, not signal strength; the MIN_IMPRESSIONS floor
     is applied per video, later, by `measurement`.
     """
-    covered = coverage(channel_id)
+    return certify_covered(coverage(channel_id))
+
+
+def certify_covered(covered: set[str]) -> dict:
+    """`certify` over a coverage set the caller already read.
+
+    For callers that need the covered days themselves as well (the warm filter,
+    `app/warm.py`), so they read the ledger once and still ask the gate's question.
+    """
     latest = frontier(covered)
     if latest is None:
         return {
