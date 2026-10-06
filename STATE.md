@@ -55,7 +55,7 @@ Stages are the spec's build order (spec Part 2 §6).
 | **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 video half built, not deployed) | B1a: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py` | No `interventions`, `playlist_traffic_daily` or `decision_log` table; no playlist-traffic ingestion; no `app/interventions.py` or `app/decide.py`; no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`); `refresh_stats` still wraps only `youtube_for_channel` (`app/sync.py:297-300`). Partial footholds listed in §7.1. |
 | **Slice 1** | Backlinks + no change | **not started** | none | No tick routing, no `agent_enabled`, no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
-| **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:64-82`). |
+| **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
 | **Slice 4** | Playbook | **not started** | none | No `channels.playbook_json`. `app/reflection.py` (the thing Slice 4 retires) is frozen by `REFLECTION_ENABLED=false` (§4). |
 | **Slice 5** | Fleet | **not started** | none | `JobBudget` exists (`app/quota.py:232`) but has no per-channel shares. |
 
@@ -87,7 +87,7 @@ machinery (spec Part 2 §0.5 "Kept").
 | Telugu | `UCxK1-ftYdFvU4IuUW3POxRA` | NULL | f | f | f | no reach data | none (0 videos) |
 
 Six channels have no `default_language`, so `eligibility.can_audit` gates them out of title audits
-(`app/eligibility.py:64-82`) and `audit_video` refuses them with 400 (`app/audits.py:390-402`).
+(`app/eligibility.py:66-84`) and `audit_video` refuses them with 400 (`app/audits.py:390-402`).
 
 Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `reach_warmup`,
 `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`, `sync_shorts`. `agent_enabled`
@@ -207,7 +207,7 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `PLAYLIST_RECONCILE_WRITES_ENABLED` | `:116` same form, `"false"` | default false (A4) | no |
 | `PLAYLIST_TUNING_ENABLED` | `:117` same form, `"false"` | default false (A4) | no |
 | `REFLECTION_ENABLED` | `:34` same form, `"false"` | default false (A4) | no |
-| `STRATEGY_LABEL` | `:237` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
+| `STRATEGY_LABEL` | `:245` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
 | `MIN_IMPRESSIONS` | `:185` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | `WARM_MIN_IMPRESSIONS` absent |
 | `MEASUREMENT_WINDOW_DAYS` | `:184` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
 | `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** |
@@ -503,7 +503,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
       ]
       return "\n".join(lines)
   ```
-  - A missing `default_language` makes `audit_video` refuse with 400 (`app/audits.py:390-402`); `eligibility.can_audit` gates such channels out of autopilot (`app/eligibility.py:64-82`).
+  - A missing `default_language` makes `audit_video` refuse with 400 (`app/audits.py:390-402`); `eligibility.can_audit` gates such channels out of autopilot (`app/eligibility.py:66-84`).
   - The user block carries no CTR, impressions or traffic-source data; it carries lifetime `view_count` and `like_count`.
 
 - **Audit output handling.** `AuditSuggestion._make` applies `cap_description_hashtags` (keeps the first 15,
