@@ -1,7 +1,7 @@
 # Midas — implementation spec: the discoverability agent
 
 Date: 2026-09-23
-Status: Part 1 ready to build · Part 2 approved design, not started
+Status: Part 1 done (exit gate passed 2026-10-06) · **Part 3 (Phase B) ready to build** · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
 Supersedes:
 - `2026-09-22-discoverability-agent-spec.md`
 - The separate 2026-09-23 discoverability and Phase A specs (merged here)
@@ -16,14 +16,18 @@ Ground truth used: `STATE.md` @ `bddd373`.
 
 This file has two parts, and they are used differently.
 
-- **Part 1 is the build task.** It is the only part to implement now: Phase A, in the run order given.
-- **Part 2 is the design.** It describes the whole target system and the order its stages arrive. Read it for context: *why* each Phase A task exists, and what later work depends on it. **Do not implement anything from Part 2.** That includes Phase B and Slices 1–5, and it holds even where Part 2 describes code in detail.
+- **Part 1 is Phase A, now done.** It is kept as the record of what Phase A did; evidence is in `docs/PHASE_A_FINDINGS.md`.
+- **Part 2 is the design.** It describes the whole target system and the order its stages arrive, amended by Phase A's findings (§0.6). **Do not implement anything from Part 2 directly.** That holds even where Part 2 describes code in detail.
+- **Part 3 is the build task: Phase B.** It is the only part to implement now, in its run order.
 
 **After Phase A's exit gate**, the Phase B build section is written into this file as a new Part, using Phase A's findings. Each later slice follows the same pattern. Part 2 is updated if a finding changes the design. At any time, exactly one Part is marked "ready to build."
 
 ---
 
-## Part 1 — Phase A: gates (ready to build)
+## Part 1 — Phase A: gates (done 2026-10-06)
+
+> **Done.** Exit gate passed 2026-10-06. Rollout channel #1: Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`. Evidence, per-task
+> records and the conclusion are in `docs/PHASE_A_FINDINGS.md`. Part 1 is kept as the record of what was asked.
 
 **Purpose.** Answer the questions everything else depends on, and stop changes we can't measure, *before* building anything new. Phase A adds no new levers and makes no new writes to YouTube.
 
@@ -348,6 +352,24 @@ The job is **"improve this video's discoverability using the channel's own catal
 
 ---
 
+### 0.6 Amendments from Phase A (decided 2026-10-06)
+
+Phase A found every routing lever **measurable (outcome (a))**, but carrying **≈0 traffic today** on Marathi:
+<0.05% of views between them. The traffic is algorithmic: Mixes 45%, Shorts feed 19%, Suggested 19%, Browse 7%,
+Search 1.1%. At least 23% of suggested views come from our own other channels, and judged title verdicts were 64
+wins vs 106 regressions. Evidence: `docs/PHASE_A_FINDINGS.md` ("Phase A conclusion" and A1–A7). The owner accepted these
+amendments; the sections they touch are edited in place and marked **(P#)**.
+
+| # | Amendment | Changes |
+|---|---|---|
+| P1 | Slice 1 (backlinks) runs as a **time-boxed experiment with a stop rule**: if treated pairs' attributable views don't beat holdout after `BACKLINK_EXPERIMENT_WINDOWS` weekly windows, stop the lever | §1.2, §6, §8 |
+| P2 | Backlink (and Short-link) **candidates may come from any of our channels**, restricted to channels that already exchange suggested traffic with the source channel | §2.3, §2.4 |
+| P3 | **Slice 2's playlist work shrinks to one test:** can a curated `PL…` playlist earn `playlist_starts` at all? The rest of §4 is deferred until it can | §4, §6 |
+| P4 | **Short → video links are recommend-only, permanently.** The Data API can't read or set them (A2) | §2.5, §6 |
+| P5 | When the title lever returns (Slice 3), its **objective is browse/suggested click-through, not search keywords**, and the house format is unproven. **Reverting the 106 regressions was considered and deferred** (owner, 2026-10-06) | §3.3, §11.5 |
+| P6 | **Traffic-source ingestion is specified:** `channel_traffic_source_a3` + `playlist_traffic_source_a2`, numeric codes, newest report wins for restated days, 2-day lag, aggregate out `country_code` / `subscribed_status` / `live_or_on_demand` before storage | §7, Part 3 |
+| P7 | **Set `default_language` on the six channels without one** (Hindi, Bhojpuri, Malayalam, Tamil, Rajasthani, Telugu), with API-code mappings for the codes YouTube doesn't take | Part 3 |
+
 ### 1. Measurement and learning loop
 
 #### 1.1 Cadence
@@ -360,15 +382,16 @@ The job is **"improve this video's discoverability using the channel's own catal
 
 | Lever | Primary indicator | Source | Status |
 |---|---|---|---|
-| Description backlinks | Views arriving at linked videos *from* the source video's description | Traffic source + detail (see note below) | **Depends on Phase A probe** |
-| Playlist placement | Video's views from `PLAYLIST` traffic; joined playlist's `playlistStarts`, `viewsPerPlaylistStart` | Traffic source; `playlist_metrics` | Traffic source depends on probe; playlist metrics built |
-| Short → video link | Long video's views arriving from the Short | Traffic source + detail | Depends on probe |
+| Description backlinks | Views arriving at the target with `traffic_source_detail` = the source video (type 7 Suggested) | `video_traffic_source_daily` | **(a), confirmed by A1.** Today ≈0: 1,804 links → 4 views/day |
+| Playlist placement | Views with type 14/18 detail = our `PL…` id; `playlist_starts` per playlist × video × day | `video_traffic_source_daily`, `playlist_traffic_daily` (P6) | **(a), confirmed by A1.** On-demand playlist detail returns 400, so the Reporting API is the sensor |
+| Short → video link | Long video's views with type 32 (Related video) detail = the Short | `video_traffic_source_daily` | **(a), confirmed by A1.** Not automatable (A2) |
 | Title | CTR vs a comparable window | `video_reach_daily` | Built |
 
-**What the backlink indicator becomes, by probe outcome:**
-- **(a)** Views can be attributed to the referring video. The indicator is used as defined, and it's attributable per link.
-- **(b)** Only target-level totals by source type are available. Use the lift in targets' views from the relevant source type. This is a weaker, pooled signal: commit only on channel-level patterns, never per link.
-- **(c)** Nothing usable. Backlinks become a lever we **do but can't learn from**. They keep a fixed conservative policy and are excluded from the playbook. This is a conscious decision, recorded in the Phase A findings.
+**Phase A result: (a) for every routing lever.** A link's views are attributable per pair, but the
+algorithm's own suggestions of B next to A land in the same type-7 rows, so a pair's views count only as the
+treated arm's change minus the holdout arm's (§1.3), never raw. **(P1)** Because today's pair-level traffic is
+≈0, Slice 1 is an experiment: if treated pairs' attributable views don't beat holdout after
+`BACKLINK_EXPERIMENT_WINDOWS` weekly windows, the backlink lever stops and the result is recorded as a finding.
 
 #### 1.3 Control group (new)
 
@@ -431,7 +454,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 
 | Lever | Slice 1–2 (pipeline) | Slice 3+ (agent challenger, §3) |
 |---|---|---|
-| Backlinks | Candidates = channel top performers above the floor, filtered by tag/title overlap (embeddings after re-embed, §4). Jev answers "would a viewer of A plausibly watch B next?" per pair. Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
+| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by tag/title overlap (embeddings after re-embed, §4). A sibling is one of our channels that already sends suggested traffic to, or receives it from, the source channel, measured over the trailing 28 days of `video_traffic_source_daily` (at least `SIBLING_MIN_VIEWS`). Jev answers "would a viewer of A plausibly watch B next?" per pair. Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
 | Playlist | Candidates from playlist inventory. Jev fit judgment replaces `playlists._llm_judge`. Written to `playlist_proposals`. | Agent |
 | Short link | Jev picks the best long video for each Short. Queued for the team. | Agent |
 | Title | Existing `audit_video` path, only when triage says `title` | Agent with writer model (§3.3) |
@@ -439,7 +462,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 #### 2.4 Step 4: checks (code first, then Jev)
 
 - **Code (hard rules):**
-  - Every link target is a public video on the same channel and not the video itself.
+  - Every link target is a public video on the source's channel or one of its sibling channels (P2, §2.3), and not the video itself.
   - At most `BACKLINK_MAX` links.
   - Description ≤ 5,000 chars.
   - 15-hashtag cap still holds.
@@ -457,7 +480,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 
 - **Backlinks.** `videos.update` changing only the description: the current description plus the canonical block (§3.4). The payload builder (`youtube_metadata.py`) must send the current title and category unchanged. Charged through the existing quota gate (50u).
 - **Playlist.** Recommend-only (Slice 2). Confirmed proposals apply via `yt_playlist_items_insert` (50u).
-- **Short link.** Recommend-only to the team, unless Phase A2 finds an API field. It enters the §1.4 human ledger when the team applies it.
+- **Short link.** Recommend-only to the team, **permanently (P4)**: Phase A2 found no readable or writable API field. The team sets it in Studio. It enters the §1.4 human ledger when the team applies it, and it's measured through type 32.
 - **Title.** The existing apply path, unchanged.
 
 ---
@@ -492,6 +515,8 @@ Each tool is pure, hard-capped, returns compact results, and returns errors rath
   `decline` moves forward from Slice 4 to exist from Slice 3 day one. In Slices 1–2 its equivalent is triage's `no_change`.
 
 #### 3.3 Writer model (title lever only)
+
+**Objective (P5).** The title lever optimises browse/suggested click-through, not search keywords: search was 1.1% of Marathi's views, and viewers search Hindi phrasings of Marathi rhymes (A3). The house format is unproven: the old rewrites scored 64 wins vs 106 regressions (A7). The 106 regressions stay applied for now (owner, 2026-10-06).
 
 `write_candidates(lever, context)` is a tool backed by a configurable `WRITER_MODEL`. It is distinct from the reasoning model. The bake-off happens in Slice 3:
 - Offline first, candidates from 3–4 model families on the same context.
@@ -531,6 +556,7 @@ The replacement for `search_competitors`. Only the agent's title work reads it, 
 
 As 2026-09-22 §4, with these changes:
 
+- **(P3) One test first.** Our `PL…` playlists got 50 of 259,868 Marathi views (A1.1), and YouTube's Mixes 45%. Slice 2's playlist work is one measured test: curate a small number of playlists on the rollout channel and see whether they earn `playlist_starts` at all. The rest of this section waits until they do.
 - **Recommend-only first.** Proposals go to `playlist_proposals`, with the Jev fit check replacing `_llm_judge`.
 - **Frozen writers (§0.5 item 8) stay frozen** until Slice 2 ships the measured replacement.
 - **Re-embedding is a Phase B task,** not a Slice 2 pre-req.
@@ -560,10 +586,10 @@ As 2026-09-22 §5:
 | Stage | Contents | Exit gate |
 |---|---|---|
 | **Phase A: gates** | Pause Midas title autopilot. Probes (traffic source, Short link field, search terms). Freeze unmeasured writers. Haryanvi `default_language`. Honest strategy stamp. Live numbers. Fix silent job failures, deploy the health-scorer fix, close quota gaps. Mark old specs superseded. See Part 1. | Findings doc answers every probe question with raw evidence; go/no-go recorded per lever |
-| **Phase B: plumbing** | Traffic-source ingestion. `interventions` table. Holdout assignment. Human-edit ledger. Warm filter. Re-embed. `decision_log` for Jev shadow. `app/decide.py`. | One channel shows a week of traffic-source data and at least one detected human edit |
-| **Slice 1: backlinks + no change** | Tick routing (§6.1) **before** autopilot is re-enabled. Rules triage, pipeline step 3, code checks, canonical block, apply, weekly measurement with holdout. Jev triage/targets/checks in shadow. | First weekly verdicts written, treated vs holdout |
-| **Slice 2: playlists + Short links** | Recommend-only proposals and team queue. Jev goes live where shadow beat rules. | Proposals confirmed and measured; Short links flowing through the human ledger |
-| **Slice 3: agent challenger + titles** | Hand-rolled loop, tools, `decline`, writer bake-off, niche reference (§3.6). Title lever enabled. | §3.5 adoption decision per lever, including whether the niche reference is kept |
+| **Phase B: plumbing** | See **Part 3**. Traffic-source ingestion (P6). `interventions` table. Holdout assignment. Human-edit ledger. Warm filter. Re-embed. `decision_log` for Jev shadow. `app/decide.py`. Missing `default_language` (P7). | One channel shows a week of traffic-source data and at least one detected human edit |
+| **Slice 1: backlinks + no change** | Tick routing (§6.1) **before** autopilot is re-enabled. Rules triage, pipeline step 3, code checks, canonical block, apply, weekly measurement with holdout. Fleet candidates (P2). Jev triage/targets/checks in shadow. **Time-boxed (P1).** | First weekly verdicts written, treated vs holdout. **Stop rule (P1):** no lift over holdout after `BACKLINK_EXPERIMENT_WINDOWS` windows → the lever stops |
+| **Slice 2: playlists + Short links** | **One playlist test (P3).** Short links recommend-only to the team, permanently (P4). Jev goes live where shadow beat rules. | The playlist test answered (do curated playlists earn starts?); Short links flowing through the human ledger |
+| **Slice 3: agent challenger + titles** | Hand-rolled loop, tools, `decline`, writer bake-off, niche reference (§3.6). Title lever enabled, **aimed at browse/suggested CTR (P5)**. | §3.5 adoption decision per lever, including whether the niche reference is kept |
 | **Slice 4: playbook** | Weekly per-lever distillation; retire `reflection.py`. | Playbook changes triage or agent choices measurably vs no-playbook |
 | **Slice 5: fleet** | Per-channel quota shares via `JobBudget`; per-channel auto-apply flips; widen beyond the rollout channel. | Second channel live without regressions |
 
@@ -590,9 +616,14 @@ Every stage ships to one channel first, gets about a week of watching, then wide
   - `triage_json jsonb` (rules choice, Jev choice and probabilities)
   - `applied_at`, `detected_at` (human), `measurement_status`, `measurement_result jsonb`, `created_at`
   - `audits` stays intact. Title interventions reference it.
-- **`video_traffic_source_daily`**
-  - `video_id, channel_id, date, source_type, source_detail (nullable), views, est_minutes_watched`
-  - Columns are **provisional until Phase A1**, which defines the real report shape.
+- **`video_traffic_source_daily`** (P6; shape from Phase A1.1)
+  - `video_id, channel_id, date, source_type smallint, source_detail text not null default '', views, engaged_views, watch_time_minutes, report_id, ingested_at`
+  - Unique `(video_id, date, source_type, source_detail)`. Source: `channel_traffic_source_a3`, summed over `country_code`, `subscribed_status` and `live_or_on_demand` before storage.
+  - `source_type` stores YouTube's numeric code; names come from a code table in code (A1.1 has it).
+- **`playlist_traffic_daily`** (P6)
+  - `playlist_id, video_id, channel_id, date, source_type smallint, source_detail text not null default '', views, playlist_starts, watch_time_minutes, report_id, ingested_at`
+  - Unique `(playlist_id, video_id, date, source_type, source_detail)`. Source: `playlist_traffic_source_a2`, aggregated the same way.
+  - **Restatements:** YouTube re-issues some data dates. The newest report for a (job, data date) replaces that date's rows; it is never added to them.
 - **`decision_log`**
   - `id, decided_at, question_set_version, subject (video/pair/candidate), rules_answer, jev_answer, jev_probs jsonb, used text (rules|jev), intervention_id`
 - **`channels`**
@@ -612,6 +643,9 @@ Every stage ships to one channel first, gets about a week of watching, then wide
 | `HOLDOUT_PCT` | 0.20 | Per lever, stable hash |
 | `BACKLINK_MAX` | 3 | Start conservative (spam/ToS risk) |
 | `BACKLINK_MIN_CANDIDATES` | 2 | Below this, triage says `no_change` for backlinks |
+| `BACKLINK_EXPERIMENT_WINDOWS` | 3 | P1 stop rule: weekly windows before the lever stops if treated ≤ holdout |
+| `TRAFFIC_INGEST_CHANNELS` | the rollout channel | P6 / Part 3 B1: channels whose traffic-source reports are ingested |
+| `SIBLING_MIN_VIEWS` | 100 | P2: trailing-28-day suggested views between two of our channels, in either direction, for them to count as siblings |
 | `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` | 5 | §1.5 |
 | `AGENT_MAX_TURNS` | 12 | Slice 3; tune from traces |
 | `WRITER_MODEL` | = `AUDIT_MODEL` | Slice 3 bake-off replaces it |
@@ -644,9 +678,237 @@ As 2026-09-22 §7, adapted:
 
 ### 11. Open questions
 
-1. Phase A probe outcomes (A1–A3). Everything in §1.2 branches on them.
+1. ~~Phase A probe outcomes (A1–A3).~~ **Answered 2026-10-06:** (a) for all three levers; Short links not automatable; search terms available (§0.6).
 2. The Jev check false-positive rate acceptable before checks block (§2.4). Measure on a human-reviewed sample in Slice 1.
-3. Which channel is rollout #1. Candidates are the Haryanvi channel (after A5) or the Marathi probe channel. Pick the one with certified reach and the most warm videos, per the Phase A live numbers.
+3. ~~Which channel is rollout #1.~~ **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`** (owner, 2026-10-06). Haryanvi has no reach data.
 4. Whether human-run channels stay fully human during Slices 1–2 (recommended, so they serve as the benchmark) or get recommend-only suggestions.
-5. Is the house format itself right? Out of scope here. The title lever's verdicts in Slice 3 are the first evidence.
-6. Does the SEO team run the Midas channel during the pause (§6.1)? Optional; decide before Phase A starts.
+5. Is the house format itself right? **First evidence (A7): 64 wins vs 106 regressions under the old rewrites.** Treated as unproven (P5); Slice 3's verdicts decide.
+6. ~~Does the SEO team run the Midas channel during the pause?~~ Not needed: the owner had already turned title autopilot off around 2026-09-23, and no handover was arranged.
+
+---
+
+## Part 3 — Phase B: plumbing (ready to build)
+
+**Purpose.** Build the sensors and the record-keeping that Slice 1 needs, on one channel first, **without
+changing anything on YouTube.** Phase B adds no levers and no applies. Its only YouTube calls are reads,
+plus creating Reporting API jobs (a subscription, not a change to the channel).
+
+**Rollout channel:** Marathi `UCr5-YUqBiW7PUmeAtxUWuRg` (Part 1 conclusion). Everything new is enabled for
+it first. Widening to other channels is a config change, not new code.
+
+**Inputs.** Phase A findings (`docs/PHASE_A_FINDINGS.md`) and Part 2 as amended in §0.6. Where this Part
+and Part 2 disagree, this Part wins for Phase B, and Part 2 is corrected in the same change.
+
+**Schema discipline.** Phase B adds tables. Every migration follows the repo rules:
+- Apply the migration on the office machine.
+- Reload PostgREST's schema cache with `docker compose restart postgrest rest`, or app writes fail with PGRST204.
+- After verifying the migration, refresh the NAS snapshot (`CLAUDE.md`).
+
+All three steps are listed in B9.
+
+### Run order
+
+1. **B1: traffic-source ingestion first.** The exit gate needs a week of its data, so it should start
+   collecting as early as possible.
+2. **B2, B3:** interventions with holdout, then the human-edit ledger, which writes interventions.
+3. **B4, B5, B6:** the warm filter, `decide()` with `decision_log`, and the scoped re-embed. These are independent of each other.
+4. **B7, B8:** missing languages (P7) and the `refresh-stats` 401 fix.
+5. **B9:** deploy and verify. **B10:** docs. Then the exit gate.
+
+### B1 — Traffic-source ingestion (P6)
+
+**Problem.** The traffic-source reports exist (Phase A1.1), but nothing stores them. Slice 1's measurement,
+P2's sibling channels, and the human-edit ledger's measurements all read from them.
+
+**Change.**
+1. **Jobs.** For each channel in `TRAFFIC_INGEST_CHANNELS` (default: the rollout channel), ensure Reporting API
+   jobs exist for `channel_traffic_source_a3` and `playlist_traffic_source_a2`. Reuse the
+   `ensure_reach_job` pattern in `app/reporting_client.py`, generalised to a report type. Marathi's two jobs
+   already exist (created 2026-09-29) and must be found, not duplicated.
+2. **Ingest.** A daily job `traffic_poll` at 06:30 UTC (after `reporting_poll`, which it doesn't depend on)
+   that downloads every report not yet ingested and writes `video_traffic_source_daily` and
+   `playlist_traffic_daily` (Part 2 §7):
+   - Sum over `country_code`, `subscribed_status` and `live_or_on_demand` before writing.
+   - Store `source_type` as the numeric code. Keep a code→name table in code, copied from the A1.1 table,
+     with its source URL.
+   - **Restatements:** when a newer report arrives for a (job, data date) that's already ingested, replace
+     that date's rows for the channel. Never add to them. Record which report a row came from.
+   - Record each ingested report in the existing `reporting_reports_ingested` ledger.
+3. **Health.** Same failure semantics as `reporting_poll`: a channel crash fails the run; per-report errors
+   are judged by `job_status.item_error_verdict`.
+4. **Size.** Log rows written per channel per day. A1.1 saw about 52k raw rows a day for Marathi before
+   aggregation. Record the aggregated count in the findings doc after the first week, and decide retention
+   then. No retention policy in Phase B.
+
+**Tests.**
+- Aggregation sums across the dropped dimensions.
+- A restated date replaces rather than adds.
+- An already-ingested report is skipped.
+- Codes map to names.
+- An existing job is found, not recreated.
+- A malformed report fails only that report.
+
+**Acceptance.** Tests green. On the office machine, Marathi has `video_traffic_source_daily` rows for every
+data date from the backfill to the frontier minus 2 days, and `/health/jobs` shows `traffic_poll` `success`.
+
+### B2 — `interventions` table and holdout assignment
+
+**Change.**
+1. Migration for `interventions` exactly as Part 2 §7. New status values go into `app/status_vocab.py` and its
+   guard test: `declined`, `holdout`, `insufficient_data`, plus the intervention lifecycle statuses
+   (`planned`, `applied`, `measuring`, `judged`, `cancelled`).
+2. `app/interventions.py` with:
+   - `assign_arm(video_id, lever) -> 'treated' | 'holdout'`: a stable hash of (video_id, lever) against
+     `HOLDOUT_PCT`.
+   - `record(...)`.
+   - `active_for(video_id)`, which enforces §1.6: at most one active Midas intervention per video.
+3. Nothing in Phase B creates `midas` interventions. They start in Slice 1. B3 creates `human` ones.
+
+**Tests.**
+- The arm is stable across processes and calls.
+- The holdout share is about `HOLDOUT_PCT` over 10k ids.
+- Different levers give independent arms.
+- A second active intervention on a video is rejected.
+- The status vocab guard test covers every new value.
+
+**Acceptance.** Tests green; the migration is applied on the office machine.
+
+### B3 — Human-edit ledger (Part 2 §1.4)
+
+**Problem.** The SEO team edits other channels by hand, and that's our benchmark. Nothing records what they change.
+
+**Change.**
+1. **Description links.**
+   - When sync rewrites a video's description, diff the links to our videos before and after, using the
+     same extraction as Phase A1.3 but tightened to real 11-character IDs.
+   - For each link that wasn't there before, record an intervention: `origin='human'`, `lever='backlinks'`,
+     `arm='n/a'`, `detected_at = now`, with the source and target in `payload`.
+   - Skip any change Midas made itself. In Phase B that's every apply; from Slice 1, it's every
+     intervention with `origin='midas'`.
+2. **Playlist memberships.** When the playlist membership walk sees a video newly added to one of our playlists
+   that Midas didn't add, record `lever='playlist'` the same way.
+3. **Short links** can't be read (A2), so the ledger can't see them. The team logs them by hand, for example in
+   a sheet. That process is out of scope for code.
+4. **Detection timing.** Edits to old videos are seen only by a full sync, which runs every 3 days
+   (`FULL_SYNC_INTERVAL`). Record `detected_at`, not when the edit happened, and say so in the row.
+
+**Tests.**
+- An added link creates one intervention.
+- An unchanged description creates none.
+- A removed link is recorded in the payload but creates no intervention.
+- A Midas apply creates none.
+- A new playlist membership is recorded.
+- Detection is idempotent: a rerun doesn't duplicate.
+
+**Acceptance.** Tests green. After deploy, at least one human intervention exists on any channel. That's an
+exit-gate item: the SEO team edits continuously, so a week is enough.
+
+### B4 — Warm filter (Part 2 §2.1)
+
+**Change.**
+- A function and SQL pair that return a channel's eligible pool: public, not an episode, certified reach,
+  impressions ≥ `WARM_MIN_IMPRESSIONS` over the trailing `WARM_WINDOW_DAYS` ingested data days, and no active
+  intervention (B2). Ordered by impressions, with a `WARM_EXPLORE_PCT` random share from the rest of the pool.
+- Add it next to `next_audit_candidate`, with a parity test between SQL and Python, as the existing RPCs do.
+  **Don't wire it into the tick.** That's Slice 1's tick routing.
+
+**Tests.** It excludes dormant, episode, private and in-intervention videos; the explore share is about right;
+SQL and Python agree.
+
+**Acceptance.** Tests green. On the office machine, Marathi's pool size is recorded in the findings doc. It
+should be near A7's 566 warm videos.
+
+### B5 — `app/decide.py` and `decision_log`
+
+**Change.**
+- `decide(question_set, subject, context) -> Decision`: a typed answer plus probabilities.
+- Two backends behind `DECIDE_BACKEND`:
+  - `llm`, the default, via `openrouter.chat_json`.
+  - `jev`: a stub that raises `NotConfigured` until access exists.
+- Shadow mode: log both the rules answer and the backend's answer to `decision_log` (Part 2 §7), use only the
+  rules answer, and stamp the `question_set_version`. It feeds the A6 strategy stamp's
+  `DECISION_QUESTION_SET_VERSION`, replacing the placeholder.
+
+**Tests.** Both backends return the same typed shape; shadow decisions are logged and never used; the jev stub
+fails closed to the rules answer; the question-set version appears in both the log row and the strategy stamp.
+
+**Acceptance.** Tests green; the migration is applied.
+
+### B6 — Re-embed, scoped (Part 2 §4)
+
+**Change.**
+- Embed one consistent input (title + description + tags, the same recipe for every video) under a new
+  `model_version`, for the rollout channel and its P2 sibling channels. Siblings come from B1's data; until a
+  week exists, the rollout channel alone.
+- `video_embeddings` already has `model_version`, so no schema change is needed.
+- Recalibrate `PLAYLIST_JOIN_HIGH` / `PLAYLIST_JOIN_LOW` / `PLAYLIST_LEAVE` **per channel** on the new
+  distribution, and store the result, not in process-global settings.
+- Budget: estimate the OpenRouter cost before running, and record it. Run as a resumable one-off, not a
+  scheduled job.
+
+**Tests.** The input recipe is identical for every video; a rerun skips videos already embedded under the new
+`model_version`; calibration is per channel.
+
+**Acceptance.** Every warm Marathi video has a new-version embedding, and the calibration values are recorded.
+
+### B7 — Missing `default_language` (P7)
+
+**Change.**
+- Owner sets, via `PATCH /auth/channels/{id}` or SQL: Hindi `hi`, Bhojpuri `bho`, Malayalam `ml`, Tamil `ta`,
+  Rajasthani `raj`, Telugu `te`. Confirm each with the owner first, because Bhojpuri and Rajasthani audiences
+  might prefer `hi`.
+- In code: add `bho` and `raj` to `lang_display_name`, and to `_NON_ISO_639_1` in `app/youtube_metadata.py`
+  (→ `hi`), following the `bgc` precedent and its comment.
+
+**Tests.** Display names; the payload emits `hi` for `bho` and `raj`.
+
+**Acceptance.** All 13 channels have a `default_language`, recorded in the findings doc.
+
+### B8 — `refresh-stats` 401 fix
+
+**Problem.** A token failing *during* the stats call returns 500, because only `youtube_for_channel` is wrapped.
+This came up on the Hindi channel on 2026-10-06.
+
+**Change.** Map a token failure anywhere in the call to `HTTPException(401, "token_expired")`, and make the
+routine sync treat it as the expected skip.
+
+**Tests.** A token failure mid-call returns 401; the routine sync skips that channel and doesn't fail the run.
+
+### B9 — Deploy and verify
+
+**Steps (office machine).**
+1. Apply the migrations.
+2. Run `docker compose restart postgrest rest`.
+3. Restart the app.
+4. Check `/health/jobs` lists `traffic_poll`.
+5. After its first run, record rows per day for Marathi.
+6. Refresh the NAS snapshot once the migrations are verified.
+
+### B10 — Docs
+
+Update `STATE.md` for every task above. Record the findings-doc entries named in each acceptance line. Mark
+Part 3 done, and write the Slice 1 Part from what Phase B found.
+
+### Phase B exit gate
+
+- Marathi has at least **7 consecutive data days** in `video_traffic_source_daily`, ingested by `traffic_poll`
+  rather than by hand, and `/health/jobs` shows it `success`.
+- At least **one human intervention** detected by B3 on any channel, with its row checked by hand against the
+  video's description.
+- B1–B8 are merged, tests green, and deployed; the migrations are applied; PostgREST is reloaded; the NAS snapshot is refreshed.
+- `assign_arm` is stable, and `decide()` logs shadow decisions.
+- The warm pool and the B1 storage size are recorded in the findings doc.
+
+### Not doing in Phase B
+
+- No applies, no tick routing, and no re-enabling of title autopilot. Those are Slice 1.
+- No `midas` interventions.
+- No Jev calls; the jev backend stays a stub.
+- No retention policy for the traffic tables. Decide it from the first week's size.
+- No widening beyond `TRAFFIC_INGEST_CHANNELS`, except as a deliberate config change.
+- No reverting of the 106 regressions (P5: deferred).
+
+### Review protocol
+
+As Part 1: an independent clean-context review per task against this Part, and a phase review at the end listing
+what was spec'd but not built and what was built but not spec'd, with a check of `STATE.md` §1, §3 and §4.
