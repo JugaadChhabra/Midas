@@ -18,10 +18,12 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from app.db import supabase
 from app.embeddings import POOLED, embedded_video_ids, pooled_embeddings
 from app.openrouter import EMBED_MODEL, embed
+from app.playlists import _cosine_sim
 from app.rows import all_rows
 
 log = logging.getLogger("midas.reembed")
@@ -31,7 +33,9 @@ log = logging.getLogger("midas.reembed")
 RECIPE = "tdt-v1"
 MODEL_VERSION = f"{EMBED_MODEL}|{RECIPE}"
 
-#: Texts per embeddings call. A failed batch is counted and retried on rerun.
+#: Texts per embeddings call. A failed batch is retried one video at a time, so
+#: one bad text can't fail its neighbours; a video that still fails is counted
+#: and retried on rerun.
 BATCH_SIZE = 50
 
 #: Bytes per token for the estimate. UTF-8 bytes rather than characters, so
@@ -92,6 +96,20 @@ def estimate_channel(channel_id: str, usd_per_mtok: float) -> dict:
     }
 
 
+def _embed_batch(batch: list[dict]) -> None:
+    vectors = embed([recipe_text(v) for v in batch])
+    if len(vectors) != len(batch):
+        raise RuntimeError(f"{len(vectors)} vectors for {len(batch)} texts")
+    supabase().table("video_embeddings").upsert(
+        [
+            {"video_id": v["id"], "chunk_index": POOLED,
+             "embedding": vec, "model_version": MODEL_VERSION}
+            for v, vec in zip(batch, vectors)
+        ],
+        on_conflict="video_id,chunk_index,model_version",
+    ).execute()
+
+
 def reembed_channel(channel_id: str) -> dict:
     """Embed every video of the channel not yet under MODEL_VERSION. Resumable."""
     videos, todo = _todo(channel_id)
@@ -99,20 +117,26 @@ def reembed_channel(channel_id: str) -> dict:
     for i in range(0, len(todo), BATCH_SIZE):
         batch = todo[i:i + BATCH_SIZE]
         try:
-            vectors = embed([recipe_text(v) for v in batch])
-            supabase().table("video_embeddings").upsert(
-                [
-                    {"video_id": v["id"], "chunk_index": POOLED,
-                     "embedding": vec, "model_version": MODEL_VERSION}
-                    for v, vec in zip(batch, vectors)
-                ],
-                on_conflict="video_id,chunk_index,model_version",
-            ).execute()
+            _embed_batch(batch)
             embedded += len(batch)
+            continue
         except Exception as e:
-            failed += len(batch)
-            log.warning("reembed %s: batch of %d failed; rerun to retry: %s",
-                        channel_id, len(batch), e)
+            if len(batch) > 1:
+                log.warning("reembed %s: batch of %d failed; retrying one by one: %s",
+                            channel_id, len(batch), e)
+            else:
+                log.warning("reembed %s: video %s failed; rerun to retry: %s",
+                            channel_id, batch[0]["id"], e)
+                failed += 1
+                continue
+        for v in batch:
+            try:
+                _embed_batch([v])
+                embedded += 1
+            except Exception as e:
+                failed += 1
+                log.warning("reembed %s: video %s failed; rerun to retry: %s",
+                            channel_id, v["id"], e)
     log.info("reembed %s: %d embedded, %d failed, %d already done",
              channel_id, embedded, failed, len(videos) - len(todo))
     return {
@@ -143,39 +167,39 @@ def _members(channel_id: str) -> dict[str, list[str]]:
     return out
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    mag = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(x * x for x in b))
-    return dot / mag if mag else 0.0
+class MemberSims(NamedTuple):
+    """Each current member's cosine to its playlist's centroid, two ways.
 
-
-def member_similarities(channel_id: str) -> list[float]:
-    """Each member's cosine to the centroid of its playlist's OTHER members."""
-    return _scored(channel_id)[0]
-
-
-def _scored(channel_id: str) -> tuple[list[float], int]:
-    """(member similarities, playlists scored), for `member_similarities`.
-
-    Leave-one-out, as the engine never scores a video against a centroid that
-    includes itself. Only members with a MODEL_VERSION vector count, and a
-    playlist needs two others for a member to be scored.
+    `apart`: the centroid of the OTHER members, which is how a video outside the
+    playlist is scored (join_pass, reconcile's adds). `included`: the centroid
+    of all members, itself included, which is what reconcile compares with
+    PLAYLIST_LEAVE (`playlists._sims_matrix`, and the `playlist_video_sims` RPC).
     """
+    apart: list[float]
+    included: list[float]
+    playlists: int
+
+
+def member_similarities(channel_id: str) -> MemberSims:
+    """Similarities of every member with a MODEL_VERSION vector, in playlists
+    with at least 3 such members (so `apart` has two others to average)."""
     members = _members(channel_id)
     vectors = pooled_embeddings(
         sorted({v for vids in members.values() for v in vids}), model_version=MODEL_VERSION)
-    sims: list[float] = []
+    apart: list[float] = []
+    included: list[float] = []
     scored = 0
     for vids in members.values():
         vecs = [vectors[v] for v in vids if v in vectors]
         if len(vecs) < 3:
             continue
         scored += 1
+        # Cosine ignores scale, so a sum stands in for each mean.
         total = [sum(col) for col in zip(*vecs)]
         for v in vecs:
-            # The mean of the others points the same way as their sum.
-            sims.append(_cosine(v, [t - x for t, x in zip(total, v)]))
-    return sims, scored
+            apart.append(_cosine_sim(v, [t - x for t, x in zip(total, v)]))
+            included.append(_cosine_sim(v, total))
+    return MemberSims(apart, included, scored)
 
 
 def _percentile(sorted_values: list[float], pct: float) -> float:
@@ -188,34 +212,36 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
 def calibrate_channel(channel_id: str) -> dict:
     """Recompute the channel's playlist thresholds on MODEL_VERSION vectors.
 
-    From the leave-one-out similarity of current members to their playlists:
-    `join_high` is the median (a non-member at least as close as the typical
-    member is added directly), `leave` the 10th percentile (a member below it is
-    an outlier, sent to the judge for removal), `join_low` the 5th (below it the
-    judge isn't asked). The global defaults keep the same order, 0.55 < 0.60 <
-    0.72.
+    From current members' similarity to their playlists (`MemberSims`):
+    `join_high` is the median of `apart` (a non-member at least as close as the
+    typical member is added directly) and `join_low` its 5th percentile (below
+    it the judge isn't asked); `leave` is the 10th percentile of `included` (a
+    member below it is an outlier, sent to the judge for removal), measured as
+    reconcile measures it. Same order as the global defaults, 0.55 < 0.60 <
+    0.72, though `leave` comes from the other distribution.
 
     Stored on `channels.playlist_thresholds`; `settings` is never written.
     """
-    sims, scored = _scored(channel_id)
-    sims.sort()
-    if len(sims) < MIN_MEMBER_SIMS:
+    sims = member_similarities(channel_id)
+    apart, included = sorted(sims.apart), sorted(sims.included)
+    if len(apart) < MIN_MEMBER_SIMS:
         log.info("calibrate %s: %d member similarities, need %d; nothing stored",
-                 channel_id, len(sims), MIN_MEMBER_SIMS)
-        return {"skipped": True, "reason": "insufficient_data", "member_sims": len(sims)}
+                 channel_id, len(apart), MIN_MEMBER_SIMS)
+        return {"skipped": True, "reason": "insufficient_data", "member_sims": len(apart)}
 
     result = {
         "model_version": MODEL_VERSION,
-        "join_high": round(_percentile(sims, JOIN_HIGH_PCTL), 4),
-        "join_low": round(_percentile(sims, JOIN_LOW_PCTL), 4),
-        "leave": round(_percentile(sims, LEAVE_PCTL), 4),
-        "member_sims": len(sims),
-        "playlists": scored,
-        "method": f"member leave-one-out p{JOIN_HIGH_PCTL}/p{JOIN_LOW_PCTL}/p{LEAVE_PCTL}",
+        "join_high": round(_percentile(apart, JOIN_HIGH_PCTL), 4),
+        "join_low": round(_percentile(apart, JOIN_LOW_PCTL), 4),
+        "leave": round(_percentile(included, LEAVE_PCTL), 4),
+        "member_sims": len(apart),
+        "playlists": sims.playlists,
+        "method": (f"join_high p{JOIN_HIGH_PCTL}, join_low p{JOIN_LOW_PCTL} of member-apart; "
+                   f"leave p{LEAVE_PCTL} of member-included"),
         "computed_at": datetime.now(timezone.utc).isoformat(),
     }
     supabase().table("channels").update(
         {"playlist_thresholds": result}).eq("id", channel_id).execute()
     log.info("calibrate %s: join_high %.4f, join_low %.4f, leave %.4f (%d sims)",
-             channel_id, result["join_high"], result["join_low"], result["leave"], len(sims))
+             channel_id, result["join_high"], result["join_low"], result["leave"], len(apart))
     return result

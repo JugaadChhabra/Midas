@@ -126,6 +126,36 @@ def test_a_failed_batch_is_counted_and_the_rest_still_run(monkeypatch):
     assert len(sb.rows("video_embeddings")) == 1
 
 
+def test_a_failed_batch_is_retried_one_by_one(monkeypatch):
+    """One text the API rejects mustn't fail its batch-mates on every rerun."""
+    monkeypatch.setattr(reembed, "BATCH_SIZE", 3)
+    sb = FakeSupabase({"videos": [_video("v1"), _video("bad", title="BAD"), _video("v3")],
+                       "video_embeddings": []})
+
+    def rejects_bad(texts):
+        if any(t.startswith("BAD") for t in texts):
+            raise RuntimeError("OpenRouter embeddings 400: input too long")
+        return [[1.0, 0.0] for _ in texts]
+
+    with patch.object(reembed, "supabase", return_value=sb), \
+         patch("app.embeddings.supabase", return_value=sb), \
+         patch.object(reembed, "embed", rejects_bad):
+        out = reembed.reembed_channel(MR)
+    assert out["embedded"] == 2 and out["failed"] == 1
+    assert {r["video_id"] for r in sb.rows("video_embeddings")} == {"v1", "v3"}
+
+
+def test_too_few_vectors_back_is_a_failure_not_a_silent_drop(monkeypatch):
+    monkeypatch.setattr(reembed, "BATCH_SIZE", 2)
+    sb = FakeSupabase({"videos": [_video("v1"), _video("v2")], "video_embeddings": []})
+    with patch.object(reembed, "supabase", return_value=sb), \
+         patch("app.embeddings.supabase", return_value=sb), \
+         patch.object(reembed, "embed", lambda texts: [[1.0, 0.0]]):
+        out = reembed.reembed_channel(MR)
+    # Batch of 2 → 1 vector: fails, then each single succeeds.
+    assert out == {"channel_id": MR, "videos": 2, "skipped": 0, "embedded": 2, "failed": 0}
+
+
 def test_only_the_named_channel_is_embedded():
     sb = FakeSupabase({"videos": [_video("v1", MR), _video("p1", PA)],
                        "video_embeddings": []})
@@ -219,14 +249,15 @@ def test_calibration_is_per_channel_and_leaves_the_global_settings_alone(monkeyp
     # The tight channel gets a higher bar than the loose one.
     assert mr["join_high"] > pa["join_high"]
     for t in (mr, pa):
-        assert t["join_low"] <= t["leave"] <= t["join_high"]
+        assert t["join_low"] <= t["join_high"] and t["join_low"] <= t["leave"]
     # Only `channels` rows were written, one per channel, and nothing else.
     assert [(table, op) for table, op, _ in sb.writes] == [
         ("channels", "update"), ("channels", "update")]
 
 
-def test_calibration_uses_leave_one_out_member_similarity(monkeypatch):
-    monkeypatch.setattr(reembed, "MIN_MEMBER_SIMS", 1)
+def test_member_similarity_is_measured_apart_and_included():
+    """`apart` scores a member as a candidate is scored (centroid of the others);
+    `included` as reconcile scores it against PLAYLIST_LEAVE (centroid of all)."""
     sb = FakeSupabase({
         "channels": [{"id": MR}],
         "playlist_assignments": [_assign("PL", v, MR) for v in ("a", "b", "c")],
@@ -236,7 +267,22 @@ def test_calibration_uses_leave_one_out_member_similarity(monkeypatch):
          patch("app.embeddings.supabase", return_value=sb):
         sims = reembed.member_similarities(MR)
     # a vs mean(b, c) and b vs mean(a, c): cos 45°; c vs mean(a, b): orthogonal.
-    assert sorted(sims) == pytest.approx([0.0, 2 ** -0.5, 2 ** -0.5])
+    assert sorted(sims.apart) == pytest.approx([0.0, 2 ** -0.5, 2 ** -0.5])
+    # Each vs mean(a, b, c) = (2, 1) / 3.
+    assert sorted(sims.included) == pytest.approx([5 ** -0.5, 2 * 5 ** -0.5, 2 * 5 ** -0.5])
+    assert sims.playlists == 1
+
+
+def test_leave_is_calibrated_on_the_included_similarity(monkeypatch):
+    monkeypatch.setattr(reembed, "MIN_MEMBER_SIMS", 1)
+    monkeypatch.setattr(reembed, "member_similarities",
+                        lambda _cid: reembed.MemberSims([0.1, 0.2, 0.3], [0.7, 0.8, 0.9], 1))
+    sb = FakeSupabase({"channels": [{"id": MR}]})
+    with patch.object(reembed, "supabase", return_value=sb):
+        out = reembed.calibrate_channel(MR)
+    assert out["join_high"] == pytest.approx(0.2)
+    assert out["join_low"] == pytest.approx(0.11)
+    assert out["leave"] == pytest.approx(0.72)
 
 
 def test_calibration_with_too_little_data_stores_nothing(monkeypatch):
