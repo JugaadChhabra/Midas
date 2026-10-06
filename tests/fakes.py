@@ -219,6 +219,7 @@ class FakeQuery:
     def upsert(self, payload, **kw):
         self._write = ("upsert", payload)
         self._upsert_on = kw.get("on_conflict")
+        self._ignore_duplicates = kw.get("ignore_duplicates", False)
         return self
 
     def update(self, payload, **_kw):
@@ -279,14 +280,19 @@ class FakeQuery:
         items = payload if isinstance(payload, list) else [payload]
         if op == "upsert":
             keys = [k.strip() for k in (self._upsert_on or "id").split(",")]
+            written = []
             for item in items:
                 match = next(
                     (r for r in self._rows
                      if all(r.get(k) == item.get(k) for k in keys)), None)
+                if match is not None and self._ignore_duplicates:
+                    continue           # ON CONFLICT DO NOTHING: no row comes back
                 if match is not None:
                     match.update(item)
                 else:
                     self._rows.append(dict(item))
+                written.append(dict(item))
+            return Result(written)
         else:
             self._rows.extend(dict(i) for i in items)
         return Result([dict(i) for i in items])

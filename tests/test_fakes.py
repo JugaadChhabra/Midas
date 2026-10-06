@@ -221,6 +221,15 @@ def test_upsert_honours_a_composite_conflict_key():
     assert sb.rows("t") == [{"v": "x", "start": "d1", "n": 9}]
 
 
+def test_upsert_ignore_duplicates_keeps_the_stored_row_and_returns_nothing():
+    """ON CONFLICT DO NOTHING: PostgREST returns no row for the skipped one."""
+    sb = _sb(t=[{"k": "a", "n": 1}])
+    res = sb.table("t").upsert({"k": "a", "n": 2}, on_conflict="k",
+                               ignore_duplicates=True).execute()
+    assert res.data == []
+    assert sb.rows("t") == [{"k": "a", "n": 1}]
+
+
 def test_delete_removes_the_filtered_rows():
     sb = _sb(t=[{"id": 1}, {"id": 2}])
     sb.table("t").delete().eq("id", 1).execute()
