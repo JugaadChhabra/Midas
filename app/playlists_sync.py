@@ -311,6 +311,8 @@ def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
             # the baseline (walked_at None), or the first walk after deploy
             # would record every existing membership. Before the seed below,
             # so a failed seed is re-seen next walk and the ledger key dedupes.
+            # A ledger error doesn't stop the seed: those detections are lost,
+            # as B3a's are, rather than the walk's own record.
             if entry["walked_at"] is not None:
                 _record_human_memberships(channel_id, playlist_id, fresh)
 

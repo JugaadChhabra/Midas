@@ -97,6 +97,8 @@ def test_the_ledger_itself_is_idempotent_when_the_walk_rereads_a_membership():
 
 
 def test_a_re_add_after_removal_is_a_new_membership_to_the_ledger():
+    """The ledger's contract only: today's walk never hands it a re-add, since
+    it keeps any assignment row for the pair and doesn't see removals."""
     sb = _sb()
     with patch.object(he, "supabase", return_value=sb), \
          patch.object(iv, "supabase", return_value=sb):
@@ -143,11 +145,11 @@ def test_a_proposal_that_was_not_executed_does_not_make_it_midas():
 
 
 def test_a_midas_removal_does_not_make_a_later_add_midas():
+    """The ledger's contract only (see the re-add test above)."""
     removed = {**_sync_row("v2"), "action": "removed", "decision_source": "llm_confirmed"}
-    sb = _sb()
+    sb = _sb(assignments=[removed])
     with patch.object(he, "supabase", return_value=sb), \
          patch.object(iv, "supabase", return_value=sb):
-        sb._tables["playlist_assignments"].append(removed)
         assert he.record_playlist_additions(CH, PL, [("v2", "item-v2b")]) == 1
 
 

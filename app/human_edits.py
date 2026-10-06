@@ -253,6 +253,10 @@ def added_by_midas(playlist_id: str, video_ids: list[str]) -> set[str]:
     return {r["video_id"] for r in assigned} | {r["video_id"] for r in proposed}
 
 
+def _membership_key(playlist_id: str, video_id: str, playlist_item_id: str) -> str:
+    return f"{InterventionLever.PLAYLIST}:{playlist_id}:{video_id}:{playlist_item_id}"
+
+
 def record_playlist_additions(channel_id: str, playlist_id: str,
                               added: list[tuple[str, str]]) -> int:
     """Record the memberships the team added, for (video_id, playlist_item_id) pairs.
@@ -284,8 +288,7 @@ def record_playlist_additions(channel_id: str, playlist_id: str,
                     "timing": PLAYLIST_DETECTION_TIMING,
                 },
                 now=now,
-                ledger_key=(f"{InterventionLever.PLAYLIST}:{playlist_id}:"
-                            f"{video_id}:{playlist_item_id}"),
+                ledger_key=_membership_key(playlist_id, video_id, playlist_item_id),
             )
         except Exception as e:
             log.exception("human_edits %s: ledger failed for %s in %s: %s",
