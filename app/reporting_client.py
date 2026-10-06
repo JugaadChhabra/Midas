@@ -94,6 +94,32 @@ _TRAFFIC_CSV_COLUMNS = [
     "red_watch_time_minutes",
 ]
 
+# Phase B · B1b (#31): per playlist × video daily views and playlist starts by
+# traffic source. Marathi's job (381cf084…) was created by hand on 2026-09-29
+# under this name (A1.1).
+PLAYLIST_TRAFFIC_REPORT_TYPE_ID = "playlist_traffic_source_a2"
+PLAYLIST_TRAFFIC_JOB_NAME = "midas-playlist-traffic-source"
+
+# Exact 16-column header recorded in A1.1 (2026-10-01).
+_PLAYLIST_TRAFFIC_CSV_COLUMNS = [
+    "date",
+    "channel_id",
+    "playlist_id",
+    "video_id",
+    "live_or_on_demand",
+    "subscribed_status",
+    "country_code",
+    "traffic_source_type",
+    "traffic_source_detail",
+    "views",
+    "engaged_views",
+    "watch_time_minutes",
+    "average_view_duration_seconds",
+    "playlist_starts",
+    "playlist_saves_added",
+    "playlist_saves_removed",
+]
+
 # traffic_source_type code → name. The report carries numeric codes only.
 # Source: https://developers.google.com/youtube/reporting/v1/reports/dimensions
 # (fetched 2026-10-01, copied from docs/PHASE_A_FINDINGS.md A1.1).
@@ -263,6 +289,12 @@ def ensure_traffic_job(handle: ReportingHandle, channel_id: str) -> str | None:
     return ensure_job(handle, channel_id, TRAFFIC_REPORT_TYPE_ID, TRAFFIC_JOB_NAME)
 
 
+def ensure_playlist_traffic_job(handle: ReportingHandle, channel_id: str) -> str | None:
+    """`ensure_job` for the playlist traffic-source report type."""
+    return ensure_job(handle, channel_id, PLAYLIST_TRAFFIC_REPORT_TYPE_ID,
+                      PLAYLIST_TRAFFIC_JOB_NAME)
+
+
 # ── Reports ───────────────────────────────────────────────────────────────
 
 def list_reports(handle: ReportingHandle, channel_id: str, job_id: str) -> list[dict]:
@@ -421,4 +453,18 @@ def parse_traffic_csv(text: str) -> list[dict]:
     return _aggregate_traffic_csv(
         text, _TRAFFIC_CSV_COLUMNS, "traffic", ("video_id",),
         {"views": int, "engaged_views": int, "watch_time_minutes": float},
+    )
+
+
+def parse_playlist_traffic_csv(text: str) -> list[dict]:
+    """Parse a playlist_traffic_source_a2 CSV into per-day rows ready for upsert.
+
+    Aggregated like parse_traffic_csv, one row per (playlist_id, video_id, date,
+    source_type, source_detail), keeping views, playlist_starts and
+    watch_time_minutes (Part 2 §7). engaged_views, the average and the
+    playlist_saves_* columns are dropped.
+    """
+    return _aggregate_traffic_csv(
+        text, _PLAYLIST_TRAFFIC_CSV_COLUMNS, "playlist traffic", ("playlist_id", "video_id"),
+        {"views": int, "playlist_starts": int, "watch_time_minutes": float},
     )
