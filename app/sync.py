@@ -1,3 +1,4 @@
+import functools
 import logging
 import re
 import httpx
@@ -34,6 +35,39 @@ _SHORTS_PROBE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+
+class TokenExpired(HTTPException, TokenExpiredError):
+    """An expired or revoked token, raised out of a route function here.
+
+    Both things at once: an HTTP caller gets 401 `token_expired`, and an
+    in-process caller (`routine_sync` under `video_sync`, the autopilot resync)
+    still catches it as `TokenExpiredError` and skips or pauses. A plain
+    `HTTPException(401)` escaped those handlers and failed the run (B8).
+    """
+
+    def __init__(self, channel_id: str):
+        super().__init__(401, "token_expired")
+        self.channel_id = channel_id
+
+
+def _token_failure_is_401(route):
+    """Map a token failure anywhere in `route` to `TokenExpired`.
+
+    The token can fail at `youtube_for_channel` or mid-call, when google-auth
+    refreshes inside an API request and the yt_* helpers turn its invalid_grant
+    into `TokenExpiredError`. Wrapping the whole call catches both; wrapping
+    only `youtube_for_channel` let the mid-call one out as a 500.
+    """
+    @functools.wraps(route)
+    def wrapper(*args, **kwargs):
+        try:
+            return route(*args, **kwargs)
+        except TokenExpired:
+            raise
+        except TokenExpiredError as e:
+            raise TokenExpired(str(e)) from e
+    return wrapper
 
 
 def is_actually_short(video_id: str, duration_seconds: int | None) -> bool:
@@ -77,6 +111,7 @@ router = APIRouter(tags=["sync"])
 
 
 @router.post("/channels/{channel_id}/sync")
+@_token_failure_is_401
 def sync_channel(channel_id: str, full: bool = False):
     """Sync a channel's videos.
 
@@ -91,10 +126,7 @@ def sync_channel(channel_id: str, full: bool = False):
     ``refresh_stats`` (statistics+status), so a full sync is only needed
     occasionally.
     """
-    try:
-        yt = youtube_for_channel(channel_id)
-    except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
+    yt = youtube_for_channel(channel_id)
 
     # Read channel settings first so we know whether to include Shorts.
     # sync_shorts defaults to True (None = not set yet = include Shorts).
@@ -116,8 +148,6 @@ def sync_channel(channel_id: str, full: bool = False):
 
     try:
         channel_meta = yt_channels_list_uploads(yt, channel_id)
-    except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
     except HttpError as e:
         if e.status_code == 403 and "quotaExceeded" in str(e):
             raise HTTPException(429, "youtube_quota_exceeded")
@@ -143,8 +173,6 @@ def sync_channel(channel_id: str, full: bool = False):
             page_token = resp.get("nextPageToken")
             if not page_token:
                 break
-    except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
     except HttpError as e:
         if e.status_code == 403 and "quotaExceeded" in str(e):
             raise HTTPException(429, "youtube_quota_exceeded")
@@ -157,8 +185,6 @@ def sync_channel(channel_id: str, full: bool = False):
         batch = video_ids[i:i+50]
         try:
             items = yt_videos_list_full(yt, channel_id, batch)
-        except TokenExpiredError:
-            raise HTTPException(401, "token_expired")
         except HttpError as e:
             if e.status_code == 403 and "quotaExceeded" in str(e):
                 raise HTTPException(429, "youtube_quota_exceeded")
@@ -283,6 +309,7 @@ def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:
 
 
 @router.post("/channels/{channel_id}/refresh-stats")
+@_token_failure_is_401
 def refresh_stats(channel_id: str):
     """Refresh view/like/comment counts and privacy_status for every synced
     video on the channel. Cheap: 1 quota unit per 50 videos, and no playlist
@@ -294,14 +321,12 @@ def refresh_stats(channel_id: str):
     target_ids = [v["id"] for v in vids]
     if not target_ids:
         return {"refreshed": 0}
-    try:
-        yt = youtube_for_channel(channel_id)
-    except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
+    yt = youtube_for_channel(channel_id)
     return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
 @router.post("/channels/{channel_id}/refresh-applied-stats")
+@_token_failure_is_401
 def refresh_applied_stats(channel_id: str):
     """Refresh stats only for videos with applied audits. Cheap: 1 quota unit per 50 videos."""
     # Find video ids in this channel that have an applied audit
@@ -322,10 +347,7 @@ def refresh_applied_stats(channel_id: str):
     if not target_ids:
         return {"refreshed": 0}
 
-    try:
-        yt = youtube_for_channel(channel_id)
-    except TokenExpiredError:
-        raise HTTPException(401, "token_expired")
+    yt = youtube_for_channel(channel_id)
     return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
@@ -502,8 +524,8 @@ def needs_full_sync(channel: dict) -> bool:
 def routine_sync(channel: dict) -> str:
     """One routine pass for `channel` (a row with id, last_synced_at,
     last_full_synced_at). Returns "fresh" (nothing to do), "full" or
-    "incremental". Read-only against YouTube; raises TokenExpiredError like
-    `sync_channel`.
+    "incremental". Read-only against YouTube; a token failure raises
+    `TokenExpired`, a `TokenExpiredError`, like `sync_channel` and `refresh_stats`.
     """
     if not is_stale(channel):
         return "fresh"
