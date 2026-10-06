@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version) · **Commit:** on top of `13de8d3` · **Branch:** `phase-b/36-phase-b-b5-decide-decision-log-shadow-on`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version; B6 #37: `app/reembed.py`, `scripts/reembed.py`, `channels.playlist_thresholds`) · **Commit:** on top of `be63a1b` · **Branch:** `phase-b/37-phase-b-b6-scoped-re-embed-under-a-new-m`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -41,7 +41,8 @@ Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far i
 migration `20261006030000`) and B3b (#34: `app/human_edits.py` `record_playlist_additions`, called from the
 membership walk in `app/playlists_sync.py`; no migration) and B4 (#35: `app/warm.py`, the `warm_pool()` function in
 migration `20261006040000`; not called by anything yet) and B5 (#36: `app/decide.py`, `decision_log` in migration
-`20261006050000`; nothing calls `decide()` yet); none of it is deployed and the migrations are not applied.
+`20261006050000`; nothing calls `decide()` yet) and B6 (#37: `app/reembed.py`, run by `scripts/reembed.py`,
+`channels.playlist_thresholds` in migration `20261006060000`; not run yet); none of it is deployed and the migrations are not applied.
 
 **Data caveat for this generation.** The live database runs on the office machine, bound to
 `127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
@@ -57,7 +58,7 @@ Stages are the spec's build order (spec Part 2 §6).
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:24-31`, `app/youtube_metadata.py:58-60`. A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3 (both halves), B4, B5 and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:223-233`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:248-255`), `tests/test_decide.py` | Nothing calls `decide()` (no production caller; Slice 1's triage is the first), so `decision_log` gets no rows in Phase B; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing calls it (`tests/test_warm.py` guards that); no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3 (both halves), B4, B5, B6 and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:223-233`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:248-255`), `tests/test_decide.py`. B6: `app/reembed.py` (`recipe_text`, `MODEL_VERSION`, `estimate_channel`, `reembed_channel`, `calibrate_channel`), `scripts/reembed.py`, `supabase/migrations/20261006060000_channels_playlist_thresholds.sql`, `model_version` keyword on `app/embeddings.py` `pooled_embeddings`/`embedded_video_ids`, `tests/test_reembed.py` | Nothing calls `decide()` (no production caller; Slice 1's triage is the first), so `decision_log` gets no rows in Phase B; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing calls it (`tests/test_warm.py` guards that); the B6 recipe's vectors and `channels.playlist_thresholds` are written only by the one-off `scripts/reembed.py` (not yet run) and read by nothing in production; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
 | **Slice 1** | Backlinks + no change | **not started** | none | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it; the warm filter exists, B4, but nothing calls it), no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
@@ -103,7 +104,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 ## 2. Schema — as applied
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). The latest is `20261006050000` (B5, #36). It, `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
+`010_storage_shim.sql` run first). The latest is `20261006060000` (B6, #37). It, `20261006050000` (B5, #36), `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
 `20261006010000` (B1b, #31) and `20261006000000` (B1a, #30) are files only, not yet applied on the office machine.
 
 ```
@@ -153,13 +154,15 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261006030000_interventions_ledger_key.sql     interventions.ledger_key + unique index
 20261006040000_warm_pool_rpc.sql                warm_pool() function (B4)
 20261006050000_decision_log.sql                 decision_log (B5)
+20261006060000_channels_playlist_thresholds.sql  channels.playlist_thresholds (B6)
 ```
 
 These are the files. The live DB's migration ledger was not checked (unreachable).
 
 **Tables** (columns are the union across the migrations):
 
-- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false`.
+- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false, playlist_thresholds jsonb`.
+  `playlist_thresholds` (`20261006060000`, B6), verbatim: `alter table channels add column if not exists playlist_thresholds jsonb;`. NULL until `app/reembed.py` `calibrate_channel` writes `{model_version, join_high, join_low, leave, member_sims, playlists, method, computed_at}`; nothing reads it.
 - **`videos`**: `id text pk, channel_id → channels on delete cascade, title, description, tags text[], thumbnail_url, category_id, view_count, like_count, comment_count bigint, published_at, last_fetched_at, privacy_status text, thumbnail_optimized_at, playlists_optimized_at timestamptz, duration_seconds int, is_short bool, is_episode bool (nullable; NULL = not episode)`.
 - **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int default 0, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
   - Status vocab (`app/status_vocab.py:30-44`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:98-100`), and nothing writes `redo_of_audit_id`.
@@ -265,7 +268,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   ```
 - **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Nothing populates it (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`, `app/metrics_poll.py:85`).
 - **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed row `('2026.07-baseline-v1', 'code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)', 'anthropic/claude-haiku-4.5', 'champion', …)`; derived rows are upserted per audit (§6).
-- **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). `model_version` is always `EMBED_MODEL` (`app/embeddings.py:127`).
+- **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). Production writes use `model_version = EMBED_MODEL` (`app/embeddings.py:133`), from two input recipes (§6). B6's one-off re-embed writes a second value, `app/reembed.py` `MODEL_VERSION` = `"google/gemini-embedding-2-preview|tdt-v1"` (`EMBED_MODEL` + `"|"` + `RECIPE`, `app/reembed.py:31-32`), one recipe for every video (§6); every production reader and RPC still filters on `EMBED_MODEL`.
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()` (B4, below).
 
 - **`warm_pool()`** (`20261006040000`, B4), verbatim without its header comment. Its in-app twin is
@@ -344,7 +347,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   `used` vocab (`app/status_vocab.py:223-233`, `DecisionUsed`): `rules|jev`; always `rules` in shadow. `jev_answer`
   / `jev_probs` hold the configured backend's answer (`llm` by default), NULL when the backend failed.
 
-Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_daily`, `interventions` and `decision_log` exist (plus `channels.agent_enabled`); the rest, and the Slice tables and columns, are listed in §7.1.
+Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_daily`, `interventions` and `decision_log` exist (plus `channels.agent_enabled`, and B6's `channels.playlist_thresholds`, which the spec doesn't name); the rest, and the Slice tables and columns, are listed in §7.1.
 
 ---
 
@@ -365,7 +368,7 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `STRATEGY_LABEL` | `:262` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
 | `MIN_IMPRESSIONS` | `:185` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | no (a separate setting, same default) |
 | `MEASUREMENT_WINDOW_DAYS` | `:184` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
-| `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** |
+| `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** in use: B6 calibrates per channel into `channels.playlist_thresholds` (`app/reembed.py` `calibrate_channel`, never writing `settings`), but the engine still reads these globals |
 | `TRAFFIC_INGEST_CHANNELS` | `:226-230` `{c.strip() for c in (os.getenv("TRAFFIC_INGEST_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | the rollout channel (Part 2 §8) | no |
 | `HOLDOUT_PCT` | `:234` `float(os.getenv("HOLDOUT_PCT") or "0.20")` | 0.20, per lever, stable hash (Part 2 §8) | no. Read only by `app/interventions.py` `assign_arm` |
 | `WARM_MIN_IMPRESSIONS` | `:239` `int(os.getenv("WARM_MIN_IMPRESSIONS") or "500")` | 500 (Part 2 §8) | no. Read only by `app/warm.py` |
@@ -417,7 +420,8 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 (`app/playlists.py:28`); `metrics_poll.WINDOW_DAYS=7` (`app/metrics_poll.py:47`);
 `TIER2_TRAFFIC_SOURCE_SUPPORTED=False` (`app/metrics_poll.py:85`); `reach.ROLLOVER_SLOP_DAYS=1` (`app/reach.py:52`);
 `sync.SYNC_STALE_AFTER=timedelta(hours=6)`, `FULL_SYNC_INTERVAL=timedelta(days=3)` (`app/sync.py:515,520`);
-`decide.QUESTION_SET_VERSION="2026.10-b5-v1"` (`app/decide.py:36`); `quota.APPLY=(VIDEOS_LIST, VIDEOS_UPDATE)`
+`decide.QUESTION_SET_VERSION="2026.10-b5-v1"` (`app/decide.py:36`); `reembed.RECIPE="tdt-v1"`, `BATCH_SIZE=50`,
+`_BYTES_PER_TOKEN=3`, `JOIN_HIGH_PCTL=50`, `LEAVE_PCTL=10`, `JOIN_LOW_PCTL=5`, `MIN_MEMBER_SIMS=30` (`app/reembed.py:31-47`); `quota.APPLY=(VIDEOS_LIST, VIDEOS_UPDATE)`
 = 51u (`app/quota.py:50-67`); `openrouter.EMBED_MODEL="google/gemini-embedding-2-preview"` (`app/openrouter.py:7`).
 
 ---
@@ -520,6 +524,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). With `ledger_key` it upserts `on_conflict="ledger_key", ignore_duplicates=True` and returns None for a key already stored. Caller: `app/human_edits.py` |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` (`certify_covered` over a coverage set already read; `window_length` for SQL callers) |
 | `decide.py` | B5: `decide(question_set, subject, context, intervention_id=None) -> Decision` (`question_set`, `answer`, `probs`). Answers with the question set's rules (probability 1.0), asks the `DECIDE_BACKEND` backend in shadow (`llm` via `openrouter.chat_json`, validated against the allowed answers and probabilities in [0, 1]; `jev` raises `NotConfigured`), writes one `decision_log` row with `used = 'rules'` and `QUESTION_SET_VERSION`, and returns the rules answer. A backend failure is logged `"decide <set> <subject>: <backend> backend failed; rules answer stands: …"` and logged as a row with NULL `jev_answer`; a failed log write is logged and doesn't change the answer. One question set, `TRIAGE` (answers `no_change|backlinks|playlist|short_link|title`, Part 2 §2.2; the rules choose only `backlinks` or `no_change`). Every answer needs a probability; the rules answer is 1.0 on itself, 0.0 elsewhere. Not called by anything: Slice 1's triage calls it |
+| `reembed.py` | B6, one-off: `recipe_text` (title, description, tags as `f"{title}\n\n{description}\n\n{', '.join(tags)}"`, title and description stripped; no transcript, no branch), `MODEL_VERSION`, `estimate_channel` (video count, videos still to embed, tokens ≈ UTF-8 bytes / 3, cost at a price passed in; reads the DB, calls no API), `reembed_channel` (every video of the channel in `videos` without a `MODEL_VERSION` vector, in batches of 50 upserted on `video_id,chunk_index,model_version`; a failed batch is logged and counted, a rerun retries it), `calibrate_channel` (thresholds from the leave-one-out similarity of current playlist members, stored on `channels.playlist_thresholds`). Run only by `scripts/reembed.py` |
 | `warm.py` | B4 warm filter: `ranked_pool` (`{id, impressions}`, most impressions first, id tie-break; `warm_pool()` RPC paged through `all_rows` when `WARM_POOL_USE_RPC`, else in-app, and in-app if the RPC errors), `explore_order` (each pick is the best left or, with probability `WARM_EXPLORE_PCT`, a random one from the rest, flagged `explore`; injectable `random.Random`), `warm_pool` (both). Not called by anything: Slice 1's tick routing wires it in |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
@@ -540,7 +545,8 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
 | `static/*` | vanilla-JS dashboard |
 
-**Scripts:** `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`),
+**Scripts:** `scripts/reembed.py` (B6: `--channels` comma list, `--estimate` with `--usd-per-mtok`, `--skip-calibrate`;
+the real run re-embeds then calibrates each channel), `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`),
 `scripts/probe_reporting.py`, `scripts/probe_analytics.py`, `scripts/verify_reach_coverage.py`,
 `scripts/apply_migrations.py`, backfills, and the Phase A live probes in `scripts/probes/`
 (`probe_traffic_source_report.py` defaults to `channel_traffic_source_a3` since 2026-10-06,
@@ -703,7 +709,8 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
   | Playlist membership judge | `JUDGE_MODEL = "anthropic/claude-haiku-4.5"` | `reconcile_channel` (frozen) and dead `join_pass` | `app/playlists.py:206-213`, below |
   | Playlist title/description proposal | `JUDGE_MODEL` | `discover_playlists` (frozen) | `app/playlist_discovery.py:137-142`, below |
   | Decide shadow answer (B5) | `settings.AUDIT_MODEL` (the `chat_json` default) | `decide()` with `DECIDE_BACKEND=llm`; nothing calls `decide()` yet | `app/decide.py:111-129`, below |
-  | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | `embed_video` after apply; `bootstrap_embeddings` | input: title + `"\n\n"` + transcript[:6000] (`app/embeddings.py:112-114`); bootstrap passes `use_transcript=False`, so title only (`app/embeddings.py:176`) |
+  | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | `embed_video` after apply; `bootstrap_embeddings` | input: title + `"\n\n"` + transcript[:6000] (`app/embeddings.py:118-120`); bootstrap passes `use_transcript=False`, so title only (`app/embeddings.py:182`). Both under `model_version = EMBED_MODEL` |
+  | Embeddings, B6 recipe | `EMBED_MODEL`, stored as `model_version = "google/gemini-embedding-2-preview\|tdt-v1"` | `scripts/reembed.py` → `app/reembed.py` `reembed_channel`, one-off, not yet run | input: `app/reembed.py` `recipe_text`, title + `"\n\n"` + description + `"\n\n"` + tags joined by `", "`, the same shape for every video (empty fields stay empty blocks) |
 
   Verbatim short prompts:
   ```
@@ -784,9 +791,12 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 - **B5 `decide()` + `decision_log`: office acceptance.** Built (§2 `decision_log`, §3 `DECIDE_BACKEND`, §5
   `app/decide.py`, §6) and not deployed; the acceptance is applying `20261006050000` (after `20261006020000`, for the
   `interventions` FK). Nothing calls `decide()`, so no rows until Slice 1's triage.
-- **B6 scoped re-embed.** Not built. One `model_version` (= `EMBED_MODEL`) holds vectors from two input recipes
-  (title + transcript vs title only, §6), neither the spec's title + description + tags. Thresholds are still
-  process-global (`app/playlists.py:518`).
+- **B6 scoped re-embed: office acceptance.** Built (§2 `channels.playlist_thresholds`, §5 `app/reembed.py`,
+  `scripts/reembed.py`, §6) and not run. The acceptance (B9b) is applying `20261006060000`, running
+  `scripts/reembed.py --estimate` for Marathi and recording the cost, then the real run, after which every warm
+  Marathi video has a `MODEL_VERSION` vector and the calibration values are recorded. Siblings (P2) wait for a week
+  of B1 data. Nothing reads the new vectors or the stored thresholds: the playlist engine and its RPCs still use
+  `EMBED_MODEL` and the global thresholds (§7.3 items 4–5).
 - **B7 missing `default_language`.** Code half not built: no `bho`/`raj` in `_LANG_NAMES`
   (`app/transcripts.py:24-31`) or `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Data half: six channels
   NULL on 2026-10-06 (§1).
@@ -859,10 +869,21 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    window (`REASON_DORMANT`, `app/measurement.py:280`); the picker is newest-first (7.1 B4: the warm filter exists
    but the tick doesn't use it). A7 (2026-10-06):
    4,254 applies landed on dormant videos.
-4. **Embedding input (Part 3 B6).** Spec: one recipe (title + description + tags) for every video. Built: two
-   recipes under one `model_version` (§6), so `model_version` does not identify the input.
-5. **Playlist thresholds (Part 2 §4, B6).** Spec: per channel. Built: process-global, and `tune_thresholds`
-   overwrites the global from one channel (`app/playlists.py:518`), frozen.
+4. **Embedding input (Part 3 B6).** Spec: one recipe (title + description + tags) for every video. Built: B6's
+   recipe under its own `model_version` (`app/reembed.py`, §6), but production still writes and reads two recipes
+   under `EMBED_MODEL` (§6), so that value does not identify the input. B6 embeds **every** video of the named
+   channels (Shorts, private and episodes included), not only the warm ones the acceptance names: one recipe, and
+   the warm pool changes daily. The recipe has no length cap (title ≤100, description ≤5000, tags ≤500 chars,
+   `app/audit_suggestion.py`). The token estimate is UTF-8 bytes / 3, not a tokenizer, and the price is passed
+   in (`--usd-per-mtok`), not stored.
+5. **Playlist thresholds (Part 2 §4, B6).** Spec: per channel. Built: the engine still reads the process-global
+   values, and `tune_thresholds` overwrites the global from one channel (`app/playlists.py:518`), frozen. B6 stores
+   per-channel values on `channels.playlist_thresholds` that nothing reads. The spec gives no method; built
+   (`app/reembed.py` `calibrate_channel`): percentiles of each current member's cosine to the centroid of its
+   playlist's other members, on `MODEL_VERSION` vectors: `join_high` = p50, `leave` = p10, `join_low` = p5, needing
+   at least 30 similarities (else nothing is stored). Members are the latest `playlist_assignments` action per
+   (playlist, video) being `added`, as `playlists._current_members`; a playlist needs 3 embedded members. Stored as a
+   `channels` jsonb column rather than `threshold_history`, which `tune_thresholds` owns.
 6. **Discovery provenance.** Created playlists are stored as `origin='inherited'` (`app/playlist_discovery.py:200-205`),
    so a human-edit ledger (B3) could not tell Midas-created playlists from human ones by `origin`. B3b reads
    `playlist_assignments` (`decision_source='discovery'`) instead (`app/human_edits.py` `added_by_midas`).
@@ -1134,6 +1155,14 @@ from interventions where origin = 'human' and lever = 'backlinks' order by detec
 -- B3b: human playlist memberships detected, newest first (after 20261006030000 is applied)
 select channel_id, video_id, payload->>'playlist_id' playlist, payload->>'playlist_item_id' item, detected_at
 from interventions where origin = 'human' and lever = 'playlist' order by detected_at desc limit 50;
+
+-- B9b (B6; after scripts/reembed.py ran): warm Marathi videos without a B6-recipe vector (want 0), and the
+-- stored calibration
+select count(1) missing
+from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21) w
+where not exists (select 1 from video_embeddings e where e.video_id = w.id and e.chunk_index = 'pooled'
+                  and e.model_version = 'google/gemini-embedding-2-preview|tdt-v1');
+select id, playlist_thresholds from channels where playlist_thresholds is not null;
 
 -- applied audits in the last 90 days that landed on dormant videos
 select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total
