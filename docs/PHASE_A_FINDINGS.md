@@ -9,7 +9,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 
 ## Status: resume here
 
-*Last updated 2026-10-06.*
+*Last updated 2026-10-06. **Phase A evidence complete; conclusion below.***
 
 | Task | State |
 |---|---|
@@ -37,7 +37,7 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
    and Telugu `UCxK1-ftYdFvU4IuUW3POxRA` have 0 videos in `videos`. Minor bug: `refresh-stats`
    returns 500 rather than 401 when the token fails during the API call (it only catches
    `TokenExpiredError` around `youtube_for_channel`).
-3. ~~A7 live numbers.~~ **Done 2026-10-06.** Rollout #1 proposed as Marathi; **owner to confirm**.
+3. ~~A7 live numbers.~~ **Done 2026-10-06.** Rollout #1: **Marathi (confirmed)**.
    Judged title verdicts: 64 wins vs 106 regressions. Gujarati: 91% of applies hit dormant videos.
 4. ~~A1.2 and A3 on-demand.~~ **Done 2026-10-06:** by type, by day × type, and RELATED_VIDEO / YT_SEARCH
    detail all OK; PLAYLIST and SHORTS detail return 400. The Reporting API is the playlist sensor.
@@ -45,14 +45,82 @@ If a probe fails, paste the exact error and list the variants tried (spec Part 1
 5. **A5:** `default_language = 'bgc'` was **already set** on Haryanvi (A7 query 1). Only the optional
    i18n probe remains. Six channels have **no** `default_language` (Hindi, Bhojpuri, Malayalam,
    Tamil, Rajasthani, Telugu), so audits are blocked on them. Relevant only once the title lever returns.
-6. **Phase A conclusion:** the A1 outcome per lever, the rollout channel, and proposed Part 2
-   changes. Measured so far: our own playlists ≈0 views, YouTube Mixes 45%, ≥23% of suggested
+6. ~~Phase A conclusion.~~ **Written 2026-10-06** ("Phase A conclusion", below). **Waiting on the owner's
+   decisions on P1–P7.** Then: apply the accepted ones to spec Part 2, rewrite `STATE.md` §9, tick
+   the exit gate, delete the superseded specs, and write the Phase B Part. Earlier draft of this step: Measured so far: our own playlists ≈0 views, YouTube Mixes 45%, ≥23% of suggested
    views from our own channels. Then the exit gate, the `STATE.md` §9 rewrite, and Phase B.
 
 **PowerShell blocks for the office machine:** use `$PSItem`, never `$_`, and `count(1)`,
 never `count(*)`. The copy-paste path drops `_` and `*` in pairs, treating them as markdown
 emphasis. Write output to `logs\<name>.txt` and open it in Notepad (the window can't
 scroll long output).
+
+## Phase A conclusion (2026-10-06)
+
+*Evidence is in the sections below. This summary cites them, so it is no stronger than they are.*
+
+### 1. Can we measure each lever? (spec Part 2 §1.2)
+
+| Lever | Outcome | What it rests on | Traffic today (Marathi, 2026-09-29) |
+|---|---|---|---|
+| Description backlinks | **(a)** per link pair | A link A→B shows up as report rows with `video_id = B` and `traffic_source_detail = A`. Type 7 (Suggested) carries the referring video id (A1.1). We can't tell link clicks apart from YouTube's own suggestions of B next to A, but the §1.3 holdout handles that | **≈0**: 1,804 existing description links → 4 views/day attributable (A1.3) |
+| Playlist placement | **(a)** per playlist | Type 14/18 detail = playlist id; `playlist_traffic_source_a2` adds `playlist_starts` per playlist × video × day (A1.1). On-demand playlist detail returns 400, so the Reporting API is the sensor (A1.2) | **≈0**: our `PL…` playlists 50 views (0.02%). YouTube Mixes (`RD…`) get 117,929 (45%) |
+| Short → video link | **(a)** per Short, **but not automatable** | Type 32 detail = the referring Short's id (A1.1). The Data API can't read or set the link (A2), so humans set it in Studio and we measure it | **≈0**: 27 views (0.01%) from 12 Shorts |
+| Titles | measurable (CTR, built) | `video_reach_daily` | Judged history: **64 wins, 106 regressions, 652 neutral**; 4,254 applies landed on dormant videos (A7) |
+
+No lever is (c), so the exit-gate stop rule doesn't trigger.
+
+### 2. Rollout channel #1: **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`** (owner, 2026-10-06)
+
+Certified reach (frontier 10-04), 566 warm videos, `default_language = mr`, and every A1
+traffic-source job and finding. Haryanvi has no reach data. English (1,008 warm) is the
+alternative and the natural human-run benchmark. Details in A7.
+
+### 3. What the evidence says about the design
+
+1. **The spec's routing levers are measurable, but today they carry almost no traffic.**
+   Backlinks, our playlists and Short links together are under 0.05% of Marathi's views. That
+   could mean they don't work, or that they're barely used: few playlists, few Shorts with a
+   link set, links that may not be clicked. Phase A can't separate the two. Only a measured
+   test with a holdout can.
+2. **The traffic is algorithmic.** Mixes 45%, Shorts feed 19%, Suggested 19%, Browse 7%, Search
+   1.1% (A1.1). None of these is a lever Midas pulls directly. What we control is what
+   YouTube's algorithm sees: titles, thumbnails, and which videos sit next to which.
+3. **Our own channels already route traffic into each other.** At least 23% of Marathi's
+   suggested views come from our other channels: Hindi, English, Bhojpuri, Gujarati (A1.1).
+   On the warmest Marathi video, the top two referrers are Bhojpuri and English uploads (A1.2).
+   Part 2 treats every channel in isolation ("every link target is a public video on the same
+   channel", §2.4).
+4. **The title lever as it ran did net harm.** 106 regressions against 64 wins, and Gujarati
+   sent 91% of its applies to dormant videos (A7). The house format optimises for search,
+   which is 1.1% of views. People search Hindi phrasings ("dhobi aaya") of Marathi rhymes
+   ("dhobi ala") (A3).
+5. **The sensor has a known shape.** `channel_traffic_source_a3` (`_a2` is retired) plus
+   `playlist_traffic_source_a2`; numeric source codes; a 2-day steady lag; restated days (more
+   than one report per data date); about 52k rows per channel-day before aggregation (A1.1).
+6. **Sync is a sensor.** Pausing the title path silently stopped it. Fixed by `video_sync` (f07e65d).
+
+### 4. Proposed changes to Part 2 (**for owner decision; not applied yet**)
+
+| # | Proposal | Why (finding) |
+|---|---|---|
+| P1 | **Keep Slice 1 = backlinks, but run it as a time-boxed experiment** with a written stop rule. For example: if pair-level views on treated links aren't above holdout after 2–3 weekly windows, stop the lever and move on | §3.1. It's cheap to measure, but the prior is weak (4 views from 1,804 links) |
+| P2 | **Let backlink and related-video candidates come from the whole fleet,** not one channel. Relax §2.4 "same channel" to "one of our channels, in a language the audience watches" | §3.3: ≥23% of suggested views already cross channels |
+| P3 | **Shrink the playlist part of Slice 2** to one measured test: does curating a `PL…` playlist get any `playlist_starts` at all? Defer the rest | §3.1: our playlists get 0.02%. Mixes, which we don't control, get 45% |
+| P4 | **Keep Short→video links recommend-only, permanently** (no API exists), measured through type 32 | A2 |
+| P5 | **When the title lever returns (Slice 3), change its objective** from search keywords to browse/suggested click-through, and treat the house format (§11.5) as unproven. Consider reverting the 106 regressions now, as a separate, explicit decision | §3.4 |
+| P6 | **Phase B ingestion spec:** the a3 + playlist-a2 reports, the code→name table, newest-report-wins for restated days, 2-day lag, and aggregation that drops `country_code` before storage | §3.5 |
+| P7 | **Six channels have no `default_language`** (Hindi, Bhojpuri, Malayalam, Tamil, Rajasthani, Telugu). Set them before any of them gets a title lever, and before cross-channel candidates (P2) are language-matched | A7 query 1 |
+
+### 5. Phase A loose ends
+
+- **Exit gate:** every item holds except A11's last piece, the `STATE.md` §9 rewrite (below).
+  Once that lands, the stale CIL/PO/plan/09-22/08-26 specs and the TRACK2/TRACK4 drafts can be deleted.
+- A5's i18n probe is optional: the value `bgc` is already set.
+- Minor bug: `refresh-stats` returns 500 rather than 401 when a token fails mid-call.
+- Kannada and Telugu have no videos in `videos`.
+
+---
 
 ## Restart day: do these steps in order
 
@@ -562,9 +630,9 @@ type only · (c) nothing usable. These map onto Part 2 §1.2.
 
 | Lever | Outcome (a/b/c) | Source type and detail it rests on | Evidence (section) |
 |---|---|---|---|
-| Backlinks (description links) | **open:** (a) if description clicks are filed under type 7 (referrer ID, but mixed with the algorithm's own suggestions for that pair); (b)/(c) if they land in a type with no detail | type 7 Suggested videos → detail = referring video ID (confirmed). How description clicks are classified: A1.3 | A1.1, A1.3 |
-| Playlist | **(a), provisional** | type 14 / 18 → detail = playlist ID (`PL…` for channel playlists; `RD…` = YouTube Mixes, not ours); `playlist_traffic_source_a2` adds `playlist_starts` per playlist × video × day | A1.1 |
-| Short → video | **(a), provisional:** pending the check that the type-32 sources are Shorts | type 32 Related video → detail = referring video ID | A1.1 |
+| Backlinks (description links) | **(a)** per pair; the holdout separates link clicks from YouTube's own suggestions. Observed effect today ≈0 (4 views/day from 1,804 links) | type 7 Suggested videos → detail = referring video ID | A1.1, A1.3 |
+| Playlist | **(a)** | type 14 / 18 → detail = playlist ID (`PL…` for channel playlists; `RD…` = YouTube Mixes, not ours); `playlist_traffic_source_a2` adds `playlist_starts` per playlist × video × day | A1.1 |
+| Short → video | **(a)**, but humans set it in Studio (A2: no API); type-32 sources confirmed as the channel's own Shorts | type 32 Related video → detail = referring video ID | A1.1 |
 
 ---
 
@@ -681,7 +749,7 @@ app container: `docker compose exec midas python -c "from app.backup import snap
 | Channel | all |
 | Command / SQL | the `logs\a7-numbers.txt` block (STATE §8 SQL with `count(1)`, plus the two warm-pool queries) |
 | Raw evidence | below |
-| Outcome (rollout channel #1 and the reason) | **Proposed: Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`; awaiting owner confirmation.** See the table at the end of this section |
+| Outcome (rollout channel #1 and the reason) | **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`, confirmed by the owner 2026-10-06.** See the table at the end of this section |
 
 **Dormancy literal, confirmed.** A dormant verdict stores
 `measurement_result->>'reason_code' = 'dormant'`: the key is
@@ -799,7 +867,7 @@ Gujarati 3,902 of 4,277 (91%) · Marathi 352 of 1,201 (29%) · Punjabi 0 of 563 
 
 | Rollout channel #1 | Reason |
 |---|---|
-| **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg` (proposed, awaiting owner confirmation)** | Spec Part 2 §11.3: "certified reach and the most warm videos" between Haryanvi and Marathi. Haryanvi has **no reach data** (measurement off, no warm-up), so it can't be measured without weeks of warm-up. Marathi: reach current (frontier 2026-10-04, 221 days), 566 warm videos, `default_language = mr`, all A1 traffic-source jobs and evidence already on it; its 569 in-window audits all close by 2026-10-13. Alternative: English (1,008 warm, reach current), but its traffic-source jobs would need to be set up from scratch, and it could stay human-run as the benchmark (§11.4) |
+| **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg` (confirmed by the owner 2026-10-06)** | Spec Part 2 §11.3: "certified reach and the most warm videos" between Haryanvi and Marathi. Haryanvi has **no reach data** (measurement off, no warm-up), so it can't be measured without weeks of warm-up. Marathi: reach current (frontier 2026-10-04, 221 days), 566 warm videos, `default_language = mr`, all A1 traffic-source jobs and evidence already on it; its 569 in-window audits all close by 2026-10-13. Alternative: English (1,008 warm, reach current), but its traffic-source jobs would need to be set up from scratch, and it could stay human-run as the benchmark (§11.4) |
 
 ---
 
@@ -884,10 +952,10 @@ findstr "JOB FAILED" / "JOB DEGRADED" logs\midas.log  ->  no lines
 
 Phase B starts only when all of these hold (spec Part 1, "Phase A exit gate"):
 
-- [ ] `docs/PHASE_A_FINDINGS.md` answers A1–A3 with raw evidence and records an outcome — (a), (b), or (c) — per routing lever.
-- [ ] A0 is done and recorded: no Midas applies on the channel for 24 hours after the change.
-- [ ] A4–A6 and A8–A10 are merged, tests green, deployed to the office machine, and the frozen jobs are confirmed absent from the running scheduler's log.
-- [ ] A9 shows fresh health scores, and `GET /health/jobs` reports every job's status.
-- [ ] A11's doc changes are merged.
-- [ ] A7 numbers are in the findings doc, and rollout channel #1 is chosen with the reason recorded.
-- [ ] If A1 returns (c) for every routing lever, stop and revisit Part 2 before Phase B.
+- [x] `docs/PHASE_A_FINDINGS.md` answers A1–A3 with raw evidence and records an outcome — (a), (b), or (c) — per routing lever. *(2026-10-06: all three levers (a); A2 not automatable; A3 available)*
+- [x] A0 is done and recorded: no Midas applies on the channel for 24 hours after the change. *(last apply 2026-09-24 04:00 UTC)*
+- [x] A4–A6 and A8–A10 are merged, tests green, deployed to the office machine, and the frozen jobs are confirmed absent from the running scheduler's log. *(2026-09-29 startup log)*
+- [x] A9 shows fresh health scores, and `GET /health/jobs` reports every job's status. *(2026-10-01)*
+- [ ] A11's doc changes are merged. *(banners, superseded marker and diagram done; **`STATE.md` §9 rewrite pending**)*
+- [x] A7 numbers are in the findings doc, and rollout channel #1 is chosen with the reason recorded. *(Marathi, 2026-10-06)*
+- [x] If A1 returns (c) for every routing lever, stop and revisit Part 2 before Phase B. *(not triggered: no lever is (c). The conclusion still proposes Part 2 changes, P1–P7)*
