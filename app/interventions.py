@@ -78,12 +78,16 @@ def record(*, video_id: str, channel_id: str, lever: str, origin: str, arm: str,
            status: str, payload: dict | None = None, before_state: dict | None = None,
            audit_id: int | None = None, strategy_version: str | None = None,
            triage_json: dict | None = None, applied_at: str | None = None,
-           detected_at: str | None = None) -> dict:
+           detected_at: str | None = None, ledger_key: str | None = None) -> dict | None:
     """Insert one intervention and return the stored row.
 
     Raises ActiveInterventionExists when this would be a second open Midas
     intervention on the video. A row that isn't open (declined, judged, ...)
     neither needs nor gets the check.
+
+    With a `ledger_key` (the human-edit ledger, B3) the insert is idempotent:
+    a row with the same key already stored means this one is skipped and None
+    is returned (migration 20261006030000).
     """
     _require(lever, ALL_INTERVENTION_LEVERS, "lever")
     _require(origin, ALL_INTERVENTION_ORIGINS, "origin")
@@ -116,4 +120,12 @@ def record(*, video_id: str, channel_id: str, lever: str, origin: str, arm: str,
         "applied_at": applied_at,
         "detected_at": detected_at,
     }
+    if ledger_key is not None:
+        row["ledger_key"] = ledger_key
+        stored = (
+            supabase().table("interventions")
+            .upsert(row, on_conflict="ledger_key", ignore_duplicates=True)
+            .execute().data or []
+        )
+        return stored[0] if stored else None
     return supabase().table("interventions").insert(row).execute().data[0]

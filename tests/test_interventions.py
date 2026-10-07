@@ -221,3 +221,14 @@ def test_human_interventions_have_no_arm(arm):
         with pytest.raises(ValueError):
             iv.record(video_id="v1", channel_id="c1", lever="backlinks", origin="human",
                       arm=arm, status="applied")
+
+
+def test_record_with_a_ledger_key_skips_a_stored_key():
+    """B3's idempotency: the same key again is ON CONFLICT DO NOTHING."""
+    sb = _sb()
+    args = dict(video_id="v1", channel_id="c1", lever="backlinks", origin="human",
+                arm="n/a", status="applied", ledger_key="backlinks:v1:v2:abc")
+    with patch.object(iv, "supabase", return_value=sb):
+        assert iv.record(**args)["ledger_key"] == "backlinks:v1:v2:abc"
+        assert iv.record(**args) is None
+    assert len(sb.rows("interventions")) == 1
