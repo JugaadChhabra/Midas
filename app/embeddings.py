@@ -31,14 +31,15 @@ def parse_vector(raw) -> list[float]:
     return [float(x) for x in raw]
 
 
-def _pooled_query(video_ids: list[str], columns: str = "video_id,embedding"):
+def _pooled_query(video_ids: list[str], columns: str = "video_id,embedding",
+                  model_version: str = EMBED_MODEL):
     """Unexecuted query for the pooled rows of `video_ids`."""
     return (
         supabase().table("video_embeddings")
         .select(columns)
         .in_("video_id", video_ids)
         .eq("chunk_index", POOLED)
-        .eq("model_version", EMBED_MODEL)
+        .eq("model_version", model_version)
     )
 
 
@@ -56,9 +57,13 @@ def pooled_embedding(video_id: str) -> list[float] | None:
     return parse_vector(rows[0]["embedding"]) if rows else None
 
 
-def pooled_embeddings(video_ids) -> dict[str, list[float]]:
-    """{video_id: vector} for those that have one. Chunked and paged."""
-    rows = rows_for_ids(_pooled_query, video_ids)
+def pooled_embeddings(video_ids, *, model_version: str = EMBED_MODEL) -> dict[str, list[float]]:
+    """{video_id: vector} for those that have one. Chunked and paged.
+
+    `model_version` defaults to the production one; app/reembed.py reads its own.
+    """
+    rows = rows_for_ids(
+        lambda chunk: _pooled_query(chunk, model_version=model_version), video_ids)
     return {r["video_id"]: parse_vector(r["embedding"]) for r in rows}
 
 
@@ -76,9 +81,10 @@ def has_pooled_embedding(video_id: str) -> bool:
     return bool(rows)
 
 
-def embedded_video_ids(video_ids) -> set[str]:
+def embedded_video_ids(video_ids, *, model_version: str = EMBED_MODEL) -> set[str]:
     """Which of `video_ids` already have a pooled embedding (no vectors pulled)."""
-    rows = rows_for_ids(lambda chunk: _pooled_query(chunk, "video_id"), video_ids)
+    rows = rows_for_ids(
+        lambda chunk: _pooled_query(chunk, "video_id", model_version), video_ids)
     return {r["video_id"] for r in rows}
 
 

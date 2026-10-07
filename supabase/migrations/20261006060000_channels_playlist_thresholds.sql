@@ -1,0 +1,12 @@
+-- Phase B · B6 (#37) — per-channel playlist thresholds, calibrated on the re-embed.
+--
+-- app/reembed.py calibrate_channel writes one object per channel:
+--   {model_version, join_high, join_low, leave, member_sims, playlists, method, computed_at}
+-- computed on the vectors under `model_version` (the B6 recipe, not EMBED_MODEL).
+-- NULL until the channel is calibrated. Nothing reads it yet: the playlist
+-- engine still uses the process-global PLAYLIST_JOIN_HIGH / _LOW / PLAYLIST_LEAVE,
+-- and its writers are frozen (Phase A, A4).
+--
+-- A jsonb column rather than a table: one current value per channel, no
+-- history needed, and threshold_history belongs to playlists.tune_thresholds.
+alter table channels add column if not exists playlist_thresholds jsonb;

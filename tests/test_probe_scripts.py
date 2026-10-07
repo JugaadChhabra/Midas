@@ -16,6 +16,7 @@ PROBES = [
     "scripts.probes.probe_traffic_source_report",
     "scripts.probes.probe_traffic_source_analytics",
     "scripts.probes.probe_short_link",
+    "scripts.reembed",
 ]
 
 
