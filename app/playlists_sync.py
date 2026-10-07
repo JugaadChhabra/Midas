@@ -11,7 +11,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from app import quota
+from app import human_edits, quota
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -295,15 +295,28 @@ def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
                 # would never be read.
                 break
             resp = yt_playlist_items_page(yt, channel_id, playlist_id, page_token)
+            fresh: list[tuple[str, str]] = []
             for item in resp.get("items", []):
-                playlist_item_id = item["id"]
                 video_id = item["contentDetails"]["videoId"]
 
                 if video_id not in known_videos:
                     continue  # video not in our DB yet
                 if (video_id, playlist_id) in existing_pairs:
                     continue  # already tracked
+                existing_pairs.add((video_id, playlist_id))
+                fresh.append((video_id, item["id"]))
 
+            # B3b: a membership the walk has never seen, in a playlist it has
+            # walked before, is new since that walk. A playlist's first walk is
+            # the baseline (walked_at None), or the first walk after deploy
+            # would record every existing membership. Before the seed below,
+            # so a failed seed is re-seen next walk and the ledger key dedupes.
+            # A ledger error doesn't stop the seed: those detections are lost,
+            # as B3a's are, rather than the walk's own record.
+            if entry["walked_at"] is not None:
+                _record_human_memberships(channel_id, playlist_id, fresh)
+
+            for video_id, playlist_item_id in fresh:
                 supabase().table("playlist_assignments").insert({
                     "video_id": video_id,
                     "playlist_id": playlist_id,
@@ -312,7 +325,6 @@ def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
                     "decision_source": "sync",
                     "decided_at": now,
                 }).execute()
-                existing_pairs.add((video_id, playlist_id))
                 memberships_seeded += 1
 
             page_token = resp.get("nextPageToken")
@@ -344,3 +356,15 @@ def _sync_playlists(channel_id: str, budget: JobBudget | None) -> dict:
         "deferred_over_budget": truncated,
         "memberships_seeded": memberships_seeded,
     }
+
+
+def _record_human_memberships(channel_id: str, playlist_id: str,
+                              fresh: list[tuple[str, str]]) -> None:
+    """Hand new memberships to the human-edit ledger. Never fails the walk."""
+    if not fresh:
+        return
+    try:
+        human_edits.record_playlist_additions(channel_id, playlist_id, fresh)
+    except Exception as e:
+        log.exception("sync_playlists %s: human-edit ledger failed; walk continues: %s",
+                      channel_id, e)
