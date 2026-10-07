@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`) · **Commit:** on top of `112de0e` · **Branch:** `phase-b/39-phase-b-b8-video-sync-skips-expired-toke`
+**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`) · **Commit:** on top of `51e4c6d` · **Branch:** `phase-b/32-phase-b-b2-interventions-table-assign-ar`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -36,8 +36,9 @@ for Hindi `UCR9qQMyP86aSt-1VgaMg7UA` (`"HTTPException: 401: token_expired"`; re-
 `metrics_poll` **degraded** (A7 raw result 0). A manual sync of all channels ran 2026-10-06: Marathi has 5,804
 videos, synced 2026-10-06 07:48 UTC; Kannada and Telugu have 0 videos in `videos` ("Next session" item 2).
 Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far is B1, both halves (#30 video,
-#31 playlist: `app/traffic_poll.py`, migrations `20261006000000`, `20261006010000`), and B8 (#39: `app/sync.py`
-`TokenExpired`); none of it is deployed and the migrations are not applied.
+#31 playlist: `app/traffic_poll.py`, migrations `20261006000000`, `20261006010000`), B8 (#39: `app/sync.py`
+`TokenExpired`), and B2 (#32: `app/interventions.py`, migration `20261006020000`); none of it is deployed and
+the migrations are not applied.
 
 **Data caveat for this generation.** The live database runs on the office machine, bound to
 `127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
@@ -53,8 +54,8 @@ Stages are the spec's build order (spec Part 2 §6).
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:24-31`, `app/youtube_metadata.py:58-60`. A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:40-69` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py` | No `interventions` or `decision_log` table; no `app/interventions.py` or `app/decide.py`; no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
-| **Slice 1** | Backlinks + no change | **not started** | none | No tick routing, no `agent_enabled`, no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2 and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:40-69` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py` | No `decision_log` table; no `app/decide.py`; nothing writes `interventions` (B3 is the first writer); no warm filter; no new embedding recipe; `bho`/`raj` absent from `_LANG_NAMES` (`app/transcripts.py:24-31`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-60`). Partial footholds listed in §7.1. |
+| **Slice 1** | Backlinks + no change | **not started** | none | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it), no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
 | **Slice 4** | Playbook | **not started** | none | No `channels.playbook_json`. `app/reflection.py` (the thing Slice 4 retires) is frozen by `REFLECTION_ENABLED=false` (§4). |
@@ -91,16 +92,16 @@ Six channels have no `default_language`, so `eligibility.can_audit` gates them o
 (`app/eligibility.py:66-84`) and `audit_video` refuses them with 400 (`app/audits.py:390-402`).
 
 Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `reach_warmup`,
-`playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`, `sync_shorts`. `agent_enabled`
-does not exist (§7.1).
+`playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`, `sync_shorts`, and `agent_enabled`
+(`20261006020000`, B2; file only, not applied; nothing reads or sets it).
 
 ---
 
 ## 2. Schema — as applied
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). The latest is `20261006010000` (B1b, #31). It and `20261006000000` (B1a, #30) are
-files only, not yet applied on the office machine.
+`010_storage_shim.sql` run first). The latest is `20261006020000` (B2, #32). It, `20261006010000` (B1b, #31) and `20261006000000`
+(B1a, #30) are files only, not yet applied on the office machine.
 
 ```
 20260505092756_init.sql                          channels, videos, audit_configs, audits
@@ -145,17 +146,18 @@ files only, not yet applied on the office machine.
 20260904000100_next_audit_candidate_exclude_episodes.sql
 20261006000000_video_traffic_source_daily.sql   video_traffic_source_daily, reporting_reports_ingested.report_type
 20261006010000_playlist_traffic_daily.sql       playlist_traffic_daily
+20261006020000_interventions.sql                interventions, channels.agent_enabled
 ```
 
 These are the files. The live DB's migration ledger was not checked (unreachable).
 
 **Tables** (columns are the union across the migrations):
 
-- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false`.
+- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false`.
 - **`videos`**: `id text pk, channel_id → channels on delete cascade, title, description, tags text[], thumbnail_url, category_id, view_count, like_count, comment_count bigint, published_at, last_fetched_at, privacy_status text, thumbnail_optimized_at, playlists_optimized_at timestamptz, duration_seconds int, is_short bool, is_episode bool (nullable; NULL = not episode)`.
 - **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int default 0, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
-  - Status vocab (`app/status_vocab.py:28-42`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:96-98`), and nothing writes `redo_of_audit_id`.
-  - Measurement vocab (`app/status_vocab.py:61-71`): `not_applicable|awaiting_window|measuring|win|neutral|regression`. Reason codes (`app/measurement.py:168-171`): `no_timestamp`, `coverage_lost`, `dormant`, `video_gone`, under key `reason_code` (`app/verdicts.py:47`).
+  - Status vocab (`app/status_vocab.py:30-44`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:98-100`), and nothing writes `redo_of_audit_id`.
+  - Measurement vocab (`app/status_vocab.py:63-73`): `not_applicable|awaiting_window|measuring|win|neutral|regression`. Reason codes (`app/measurement.py:168-171`): `no_timestamp`, `coverage_lost`, `dormant`, `video_gone`, under key `reason_code` (`app/verdicts.py:47`).
   - Partial index `audits_measurement_inflight_idx` on `('awaiting_window','measuring')`; `audits_video_created_idx (video_id, created_at desc)`.
 - **`video_metrics`** (`20260610134419`):
   ```sql
@@ -187,6 +189,48 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   unique (playlist_id, video_id, date, source_type, source_detail)
   ```
   Index `(channel_id, date desc)`. Source: Reporting API `playlist_traffic_source_a2` (`app/reporting_client.py:100`), summed over the same three dimensions (`app/reporting_client.py:460` `parse_playlist_traffic_csv`); `engaged_views`, `average_view_duration_seconds` and `playlist_saves_*` are not stored.
+- **`interventions`** (`20261006020000`, B2):
+  ```sql
+  create table if not exists interventions (
+      id                  bigserial   primary key,
+      video_id            text        not null references videos(id) on delete cascade,
+      channel_id          text        not null references channels(id),
+      lever               text        not null,   -- backlinks|playlist|short_link|title
+      origin              text        not null,   -- midas|human
+      arm                 text        not null,   -- treated|holdout|n/a
+      status              text        not null,
+      payload             jsonb,
+      before_state        jsonb,
+      -- Title lever only.
+      audit_id            bigint      references audits(id),
+      strategy_version    text        references audit_strategies(version),
+      -- Rules choice, Jev choice and probabilities.
+      triage_json         jsonb,
+      applied_at          timestamptz,
+      -- Human interventions: when sync saw the edit, not when it was made.
+      detected_at         timestamptz,
+      measurement_status  text,
+      measurement_result  jsonb,
+      created_at          timestamptz default now()
+  );
+
+  -- Spec Part 2 §1.6: at most one active Midas intervention per video, of any
+  -- lever. app/interventions.record checks this first; the index makes it hold
+  -- under concurrent writers too. The status list mirrors
+  -- status_vocab.ACTIVE_INTERVENTION_STATUSES (tests/test_status_vocab.py).
+  -- Human interventions are outside it: they never block a Midas change.
+  create unique index if not exists interventions_one_active_midas_per_video
+      on interventions (video_id)
+      where origin = 'midas' and status in ('planned', 'applied', 'measuring', 'holdout');
+
+  -- Backs the on-delete-cascade from videos, and per-video reads of any origin.
+  create index if not exists interventions_video_idx on interventions (video_id);
+  ```
+  Vocab (`app/status_vocab.py:143-220`): lever
+  `backlinks|playlist|short_link|title`; origin `midas|human`; arm `treated|holdout|n/a`; status
+  `planned|applied|measuring|judged|cancelled|declined|holdout|insufficient_data`, of which
+  `ACTIVE_INTERVENTION_STATUSES` = `planned|applied|measuring|holdout`. The partial unique index is the SQL mirror
+  of that set (`tests/test_status_vocab.py`). Nothing writes the table yet; `measurement_status` has no vocab yet.
 - **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
   - Roles assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `playlist_discovery` inserts rows without `origin` or `created_by_optimizer_at` (`app/playlist_discovery.py:198-205`), so discovery-created playlists land as `origin='inherited'`. Nothing writes `playlists.strategy_version`.
 - **`playlist_metrics`**:
@@ -201,7 +245,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
 - **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). `model_version` is always `EMBED_MODEL` (`app/embeddings.py:127`).
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`.
 
-Of the spec's Phase B tables only `video_traffic_source_daily` and `playlist_traffic_daily` exist; the rest, and the Slice tables and columns, are listed in §7.1.
+Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_daily` and `interventions` exist (plus `channels.agent_enabled`); the rest, and the Slice tables and columns, are listed in §7.1.
 
 ---
 
@@ -219,13 +263,14 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `PLAYLIST_RECONCILE_WRITES_ENABLED` | `:116` same form, `"false"` | default false (A4) | no |
 | `PLAYLIST_TUNING_ENABLED` | `:117` same form, `"false"` | default false (A4) | no |
 | `REFLECTION_ENABLED` | `:34` same form, `"false"` | default false (A4) | no |
-| `STRATEGY_LABEL` | `:245` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
+| `STRATEGY_LABEL` | `:249` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
 | `MIN_IMPRESSIONS` | `:185` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | `WARM_MIN_IMPRESSIONS` absent |
 | `MEASUREMENT_WINDOW_DAYS` | `:184` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
 | `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** |
 | `TRAFFIC_INGEST_CHANNELS` | `:226-230` `{c.strip() for c in (os.getenv("TRAFFIC_INGEST_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | the rollout channel (Part 2 §8) | no |
+| `HOLDOUT_PCT` | `:234` `float(os.getenv("HOLDOUT_PCT") or "0.20")` | 0.20, per lever, stable hash (Part 2 §8) | no. Read only by `app/interventions.py` `assign_arm` |
 | `AUDIT_MODEL` | `:29` `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; dev `.env`: `google/gemini-3.7-flash` | reasoning model (Part 2 §3.1) | — |
-| `WARM_MIN_IMPRESSIONS` (500), `WARM_WINDOW_DAYS` (28), `WARM_EXPLORE_PCT` (0.10), `HOLDOUT_PCT` (0.20), `BACKLINK_MAX` (3), `BACKLINK_MIN_CANDIDATES` (2), `BACKLINK_EXPERIMENT_WINDOWS` (3), `SIBLING_MIN_VIEWS` (100), `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `AGENT_MAX_TURNS` (12), `WRITER_MODEL` (= `AUDIT_MODEL`), `DECIDE_BACKEND` (`llm`), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
+| `WARM_MIN_IMPRESSIONS` (500), `WARM_WINDOW_DAYS` (28), `WARM_EXPLORE_PCT` (0.10), `BACKLINK_MAX` (3), `BACKLINK_MIN_CANDIDATES` (2), `BACKLINK_EXPERIMENT_WINDOWS` (3), `SIBLING_MIN_VIEWS` (100), `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `AGENT_MAX_TURNS` (12), `WRITER_MODEL` (= `AUDIT_MODEL`), `DECIDE_BACKEND` (`llm`), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
 
 **Every other setting, verbatim defaults** (`app/config.py`; dev `.env` overrides noted):
 ```
@@ -366,6 +411,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
 | `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`, `ensure_playlist_traffic_job`), CSV parsing (reach; video and playlist traffic with aggregation, `_aggregate_traffic_csv`, and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`) |
 | `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
+| `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). No caller outside tests |
 | `reach.py` | data-day windows, coverage, frontier, staleness, `certify` |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
@@ -597,9 +643,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   `video_traffic_source_daily`, `playlist_traffic_daily`) and not deployed. The office acceptance (Marathi rows
   from the backfill to the frontier minus 2 days, `traffic_poll` `success`) is B9a. The aggregated rows-per-day
   figure for the findings doc and the retention decision wait for a week of data.
-- **B2 `interventions` + holdout.** Not built: no table, no `app/interventions.py` (`assign_arm`, `record`,
-  `active_for`), no `HOLDOUT_PCT`, no `declined|holdout|insufficient_data|planned|judged|cancelled` in
-  `app/status_vocab.py`.
+- **B2 `interventions` + holdout: office acceptance.** Built (§2, §3, §5) and not deployed; the acceptance is
+  applying `20261006020000` on the office machine (B9). No caller writes interventions yet.
 - **B3 human-edit ledger.** Not built: `sync_channel` overwrites descriptions without diffing links
   (`app/sync.py:114+`); the membership walk does not record human adds. *Constraint on the build:* the membership
   walk runs only inside `playlist_reconcile`, i.e. for the four allowlisted channels (`app/config.py:145-155`),
@@ -621,7 +666,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   in-memory (`app/job_status.py`).
 
 **Slice 1 (Part 2 §1–§2, §3.4, §6.1)**
-- Tick routing on `agent_enabled` (§6.1): not built; no `channels.agent_enabled`.
+- Tick routing on `agent_enabled` (§6.1): not built. The column exists (B2) and nothing reads it.
 - Rules triage, `no_change` as a `declined` intervention (§2.2): not built.
 - Backlink candidate pipeline, fleet siblings (P2, `SIBLING_MIN_VIEWS`), Jev next-watch scoring (§2.3): not built.
 - Code checks for links (§2.4): not built. Partially present: `DESCRIPTION_MAX = 5000`, the 15-hashtag cap and
@@ -705,12 +750,18 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    report, so `traffic_poll` fails Marathi daily (video rows still land).
 8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats (`app/audits.py:535-543`):
    the gates overestimate by 1u. Spec Part 1 A10 says note it only.
+9. **`interventions` DDL (Part 2 §7, Part 3 B2).** The spec lists columns only. Built with `not null` on
+   `video_id`, `channel_id`, `lever`, `origin`, `arm` and `status`, `video_id → videos on delete cascade` (as
+   `audits`), `created_at default now()`, and a partial unique index that makes §1.6 hold in the database as well
+   as in `record` (`supabase/migrations/20261006020000_interventions.sql`). Vocabularies are checked in Python
+   (`app/interventions.py` `_require`), not by SQL `check` constraints, as for `audits.status`.
 
 ### 7.4 Contradictions within the spec
 
-- **`agent_enabled` has no Phase B task.** Part 2 §7 is headed "Data model (Phase B)" and lists
-  `channels.agent_enabled`, and §2.1's eligibility requires it, but Part 3 has no task that adds it and B4's warm
-  filter omits it. Same heading also lists the Slice 3 `niche_reference_*` columns.
+- **`agent_enabled` and Part 2 §7.** Part 3 B2 adds `channels.agent_enabled` (built, `20261006020000`), but
+  Part 2 §7 says `bool default false` where B2 says `bool not null default false` (built as B2 says), and B4's
+  warm filter omits it while §2.1's eligibility requires it (B4 defers it to Slice 1's tick routing). Part 2 §7,
+  headed "Data model (Phase B)", also lists the Slice 3 `niche_reference_*` columns.
 - **Re-embed scope.** Part 2 §4: "Embed one consistent input for every video". Part 3 B6: the rollout channel and
   its siblings only. Part 3 says Part 2 "is corrected in the same change"; it wasn't.
 - **Sibling detection vs ingestion scope.** P2 / Part 2 §2.3 define a sibling by suggested traffic "to, or …
@@ -723,13 +774,23 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   against that query's 566.
 - **Intervention status vs measurement status.** Part 2 §7 gives `interventions` both `status` and
   `measurement_status`; B2's lifecycle statuses (`planned`, `applied`, `measuring`, `judged`, `cancelled`) put
-  measurement state into `status` too, reusing strings already in `AuditStatus` and `MeasurementStatus`.
+  measurement state into `status` too, reusing strings already in `AuditStatus` and `MeasurementStatus`. B2 also
+  lists `insufficient_data`, which §1.7 describes as a measurement outcome, and `holdout`, which is also an `arm`
+  value. As built, all eight are `InterventionStatus` values (`app/status_vocab.py:184-210`) and
+  `measurement_status` has no vocabulary; Slice 1's measurement decides how the two columns split.
 - **What counts as a Midas edit in B3.** B3 skips "every apply" in Phase B, yet Phase B allows no applies. The
   manual paths that still write to YouTube (`POST /audits/{id}/apply`, `/apply-pending`,
   `/playlists/proposals/decide`) are human-triggered through Midas: B3 doesn't say whether they are `human` or
   `midas`.
 - **"Active intervention" exclusion.** Part 2 §1.6 limits *Midas* interventions to one per video; §2.1 and B4
   exclude videos with "an active intervention" of any origin, which would let human edits block Midas picks.
+  Part 3 B2's test says "a second active intervention", no origin. As built (B2), §1.6's reading: `active_for`
+  and the partial unique index count `origin = 'midas'` only (`app/interventions.py`,
+  `20261006020000_interventions.sql`); B4 must decide whether its exclusion also counts human ones.
+- **Which statuses are "active".** Neither Part says. As built: `planned`, `applied`, `measuring` and
+  `holdout` (a held-out video is the control arm for its window); `declined` is not, so a `no_change` triage
+  doesn't hold a video for a window, and the picker could pick it again next tick (Slice 1's concern)
+  (`app/status_vocab.py:217-220`).
 - **`get_search_terms`.** A3 answered yes (Part 2 §11.1), but §6's Slice 3 row doesn't list the tool and §7 has
   no storage for terms.
 - **`WARM_MIN_IMPRESSIONS`** says "Revisit after Phase A live numbers" (§8); Phase A is done and it wasn't revisited.
@@ -851,6 +912,9 @@ cross join lateral generate_series(
 where d::date not in (select data_date from reporting_reports_ingested
                       where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
 order by 1, 2;
+
+-- interventions by origin, lever, arm and status (B2; after the 20261006020000 migration is applied)
+select origin, lever, arm, status, count(1) from interventions group by 1,2,3,4 order by 1,2,3,4;
 
 -- applied audits in the last 90 days that landed on dormant videos
 select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total

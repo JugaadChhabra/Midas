@@ -6,7 +6,9 @@ mirrors live outside Python and cannot import the constants, so they are parsed
 and compared here instead:
 
   * the next_audit_candidate() SQL function re-types the picker's skip lists,
-  * app/static/status.js maps audit statuses to pills.
+  * app/static/status.js maps audit statuses to pills,
+  * the interventions migration's partial unique index re-types the active
+    intervention statuses (spec Part 2 §1.6).
 
 The live parity tests (test_autopilot_picker_parity_live.py,
 test_autopilot_measurement_exclusion_parity_live.py) exist because those copies
@@ -28,6 +30,7 @@ from app.apply_outcome import ApplyOutcome
 REPO = Path(__file__).resolve().parents[1]
 PICKER_SQL = REPO / "supabase/migrations/20260730010000_next_audit_candidate_exclude_measurement.sql"
 STATUS_JS = REPO / "app/static/status.js"
+INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql"
 
 
 def _sql_not_in_lists(sql: str) -> list[set[str]]:
@@ -67,6 +70,31 @@ def test_not_applicable_is_not_a_measured_verdict():
     assert sv.MeasurementStatus.NOT_APPLICABLE not in sv.MEASURED_STATUSES
 
 
+def test_intervention_values_are_the_persisted_strings():
+    assert sv.ALL_INTERVENTION_LEVERS == {"backlinks", "playlist", "short_link", "title"}
+    assert sv.ALL_INTERVENTION_ORIGINS == {"midas", "human"}
+    assert sv.ALL_INTERVENTION_ARMS == {"treated", "holdout", "n/a"}
+    assert sv.InterventionStatus.PLANNED == "planned"
+    assert sv.InterventionStatus.APPLIED == "applied"
+    assert sv.InterventionStatus.MEASURING == "measuring"
+    assert sv.InterventionStatus.JUDGED == "judged"
+    assert sv.InterventionStatus.CANCELLED == "cancelled"
+    assert sv.InterventionStatus.DECLINED == "declined"
+    assert sv.InterventionStatus.HOLDOUT == "holdout"
+    assert sv.InterventionStatus.INSUFFICIENT_DATA == "insufficient_data"
+    assert sv.ALL_INTERVENTION_STATUSES == {
+        "planned", "applied", "measuring", "judged", "cancelled",
+        "declined", "holdout", "insufficient_data",
+    }
+
+
+def test_active_intervention_statuses_are_the_open_ones():
+    """Spec Part 2 §1.6. A held-out video is in the experiment; a declined,
+    judged, cancelled or insufficient_data one is not."""
+    assert sv.ACTIVE_INTERVENTION_STATUSES == {"planned", "applied", "measuring", "holdout"}
+    assert sv.ACTIVE_INTERVENTION_STATUSES <= sv.ALL_INTERVENTION_STATUSES
+
+
 # ── apply_outcome overlaps this vocabulary and must agree ────────────────
 
 def test_apply_outcome_agrees_with_the_vocabulary():
@@ -91,6 +119,21 @@ def test_sql_picker_measurement_exclusion_matches_python():
         "next_audit_candidate()'s measurement exclusion has drifted from "
         "ACTIVE_MEASUREMENT_STATUSES"
     )
+
+
+# ── mirror 3: the one-active-Midas-intervention index ─────────────────────
+
+def test_sql_active_intervention_index_matches_python():
+    sql = INTERVENTIONS_SQL.read_text()
+    m = re.search(r"interventions_one_active_midas_per_video.*?where\s+(.*?);", sql, re.S | re.I)
+    assert m, "interventions_one_active_midas_per_video not found"
+    where = m.group(1)
+    assert re.search(r"origin\s*=\s*'midas'", where)
+    statuses = re.search(r"status\s+in\s*\(([^)]*)\)", where, re.I)
+    assert {v.strip().strip("'") for v in statuses.group(1).split(",")} == \
+        set(sv.ACTIVE_INTERVENTION_STATUSES), (
+        "the partial unique index's status list has drifted from "
+        "ACTIVE_INTERVENTION_STATUSES")
 
 
 # ── mirror 2: the dashboard pills ────────────────────────────────────────

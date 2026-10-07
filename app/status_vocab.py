@@ -14,13 +14,15 @@ Values are plain `str` class attributes rather than `Enum` members so they can
 be passed straight to postgrest filters and compared to raw DB values without
 `.value` at every call site.
 
-Two mirrors live outside Python and cannot import this module:
+Three mirrors live outside Python and cannot import this module:
 
   * `supabase/migrations/20260730010000_next_audit_candidate_exclude_measurement.sql`
     re-types the picker's skip lists in SQL.
   * `app/static/status.js` maps audit statuses to pills.
+  * `supabase/migrations/20261006020000_interventions.sql` re-types
+    ACTIVE_INTERVENTION_STATUSES in its one-active-Midas-intervention index.
 
-`tests/test_status_vocab.py` parses both and fails if either drifts.
+`tests/test_status_vocab.py` parses all three and fails if any drifts.
 """
 from __future__ import annotations
 
@@ -136,3 +138,83 @@ class ReflectionMode:
 
 #: Modes that promote a new candidate immediately.
 PROMOTING_REFLECTION_MODES = (ReflectionMode.LIVE, ReflectionMode.AUTO)
+
+
+class InterventionLever:
+    """`interventions.lever` — which routing or title lever a row records."""
+
+    BACKLINKS = "backlinks"
+    PLAYLIST = "playlist"
+    SHORT_LINK = "short_link"
+    TITLE = "title"
+
+
+ALL_INTERVENTION_LEVERS = frozenset({
+    InterventionLever.BACKLINKS, InterventionLever.PLAYLIST,
+    InterventionLever.SHORT_LINK, InterventionLever.TITLE,
+})
+
+
+class InterventionOrigin:
+    """`interventions.origin` — who made the change."""
+
+    MIDAS = "midas"
+    #: An SEO-team edit Midas detected on sync (B3). Never has a holdout arm.
+    HUMAN = "human"
+
+
+ALL_INTERVENTION_ORIGINS = frozenset({InterventionOrigin.MIDAS, InterventionOrigin.HUMAN})
+
+
+class InterventionArm:
+    """`interventions.arm` — the control-group split (spec Part 2 §1.3)."""
+
+    TREATED = "treated"
+    #: Chosen for the lever by triage, recorded, and deliberately NOT applied.
+    HOLDOUT = "holdout"
+    #: Human edits and declined triages: not part of a treated/holdout split.
+    NOT_APPLICABLE = "n/a"
+
+
+ALL_INTERVENTION_ARMS = frozenset({
+    InterventionArm.TREATED, InterventionArm.HOLDOUT, InterventionArm.NOT_APPLICABLE,
+})
+
+
+class InterventionStatus:
+    """`interventions.status` — the lifecycle of one intervention row.
+
+    Shares `applied` and `measuring` with AuditStatus / MeasurementStatus by
+    spelling only; this is a different column on a different table.
+    """
+
+    PLANNED = "planned"
+    APPLIED = "applied"
+    MEASURING = "measuring"
+    JUDGED = "judged"
+    CANCELLED = "cancelled"
+    #: Triage said `no_change` (spec Part 2 §2.2). Nothing was changed.
+    DECLINED = "declined"
+    #: The holdout arm's in-window state: recorded, not applied, measured.
+    HOLDOUT = "holdout"
+    #: The window was extended once and the indicator floor still wasn't
+    #: reached (spec Part 2 §1.7). Excluded from the week's learning.
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
+ALL_INTERVENTION_STATUSES = frozenset({
+    InterventionStatus.PLANNED, InterventionStatus.APPLIED,
+    InterventionStatus.MEASURING, InterventionStatus.JUDGED,
+    InterventionStatus.CANCELLED, InterventionStatus.DECLINED,
+    InterventionStatus.HOLDOUT, InterventionStatus.INSUFFICIENT_DATA,
+})
+
+#: An intervention in one of these is open: the video is inside a measurement
+#: window (or about to be), so a second Midas change would confound it (spec
+#: Part 2 §1.6). Holdout counts — changing a held-out video contaminates the
+#: control arm. `declined` doesn't: nothing was changed. Mirrored in SQL by the
+#: partial unique index interventions_one_active_midas_per_video.
+ACTIVE_INTERVENTION_STATUSES = frozenset({
+    InterventionStatus.PLANNED, InterventionStatus.APPLIED,
+    InterventionStatus.MEASURING, InterventionStatus.HOLDOUT,
+})
