@@ -10,6 +10,14 @@ on:
     branches:
       - main
 
+# Back-to-back merges start parallel builds, and whichever finishes last owns
+# :latest (2026-10-07: #43's build finished after #45's, so :latest lacked #44
+# and #45). One build per ref at a time, newest wins: a newer push cancels the
+# older build still running.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
