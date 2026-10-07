@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app import audits
+from app import audits, decide
 from app.config import settings
 from tests.fakes import FakeSupabase
 
@@ -38,7 +38,7 @@ def test_version_is_label_plus_short_hash():
     assert len(digest) == 12 and int(digest, 16) >= 0
     assert inputs["label"] == "2026.07-baseline"
     assert inputs["audit_model"] == settings.AUDIT_MODEL
-    assert inputs["decision_question_set_version"] == audits.DECISION_QUESTION_SET_VERSION
+    assert inputs["decision_question_set_version"] == decide.QUESTION_SET_VERSION
     assert inputs["prompt_version_id"] is None
     assert inputs["prompt_source"] == audits.PROMPT_SOURCE_DEFAULT
     assert len(inputs["prompt_sha256"]) == 64
@@ -118,6 +118,15 @@ def test_different_default_prompt_gives_different_version():
     before, _ = audits.strategy_version(*DEFAULT)
     after, _ = audits.strategy_version(audits.DEFAULT_PROMPT + " ", audits.PROMPT_SOURCE_DEFAULT)
     assert before != after
+
+
+def test_different_question_set_version_gives_different_version():
+    """B5: the stamp names the decide() question set that produced the audit."""
+    before, _ = audits.strategy_version(*DEFAULT)
+    with patch.object(decide, "QUESTION_SET_VERSION", "2099.01-test"):
+        after, inputs = audits.strategy_version(*DEFAULT)
+    assert before != after
+    assert inputs["decision_question_set_version"] == "2099.01-test"
 
 
 def test_writer_model_is_hashed_only_when_it_exists():
