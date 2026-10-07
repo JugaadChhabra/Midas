@@ -411,7 +411,7 @@ The 2026-09-22 spec compared each video only with its own past, which a weekly w
 #### 1.4 The SEO team's edits (new)
 
 - On sync, detect changes Midas didn't make: new links in descriptions, new playlist memberships, and Short links if readable (Phase A2). Record each as an intervention with `origin = 'human'`.
-- Measure them with the same indicators. There's no holdout for human edits, so compare against the same channel's unchanged videos in the same week.
+- Measure them with the same indicators. There's no holdout for human edits, so compare against the same channel's unchanged videos in the same week. **(Slice 1, 2026-10-07)** For backlinks, Slice 1 reports human edits' pair views on their own, with no comparison group: an unchanged video has no pair to measure (Part 4 S1.6).
 - Turn on `reach_warmup` for human-run channels so their reach and traffic data are ingested.
 - **Purposes:**
   - Test the one-week-impact hypothesis (§0.1).
@@ -464,7 +464,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 
 | Lever | Slice 1–2 (pipeline) | Slice 3+ (agent challenger, §3) |
 |---|---|---|
-| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by tag/title overlap (embeddings after re-embed, §4). A sibling is one of our channels that already sends suggested traffic to the source channel, measured over the trailing 28 days of the source channel's own `video_traffic_source_daily` rows (at least `SIBLING_MIN_VIEWS`). **(Slice 1, 2026-10-07)** A sibling counts only if it is itself in `TRAFFIC_INGEST_CHANNELS`: a link A→B is measured from B's channel's report, so a target on an un-ingested channel can't be measured. `TRAFFIC_INGEST_CHANNELS` is widened to Marathi's siblings before Slice 1 launches, so their pre-windows exist (Part 4 D1). Jev answers "would a viewer of A plausibly watch B next?" per pair. Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
+| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by similarity on the re-embed's vectors (§4). **(Slice 1, 2026-10-07)** Embeddings only, with no tag/title-overlap fallback (Part 4 S1.1). A sibling is one of our channels that already sends suggested traffic to the source channel, measured over the trailing 28 days of the source channel's own `video_traffic_source_daily` rows (at least `SIBLING_MIN_VIEWS`). **(Slice 1, 2026-10-07)** A sibling counts only if it is itself in `TRAFFIC_INGEST_CHANNELS`: a link A→B is measured from B's channel's report, so a target on an un-ingested channel can't be measured. `TRAFFIC_INGEST_CHANNELS` is widened to Marathi's siblings before Slice 1 launches, so their pre-windows exist (Part 4 D1). The decide() backend answers "would a viewer of A plausibly watch B next?" per pair, in shadow until it beats the rules (Part 4 S1.5). Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
 | Playlist | Candidates from playlist inventory. Jev fit judgment replaces `playlists._llm_judge`. Written to `playlist_proposals`. | Agent |
 | Short link | Jev picks the best long video for each Short. Queued for the team. | Agent |
 | Title | Existing `audit_video` path, only when triage says `title` | Agent with writer model (§3.3) |
@@ -472,7 +472,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 #### 2.4 Step 4: checks (code first, then Jev)
 
 - **Code (hard rules):**
-  - Every link target is a public video on the source's channel or one of its sibling channels (P2, §2.3), and not the video itself.
+  - Every link target is a public video on the source's channel or one of its sibling channels (P2, §2.3), and not the video itself. **(Slice 1, 2026-10-07)** It is also warm on its own channel, not a Short, and not already linked from the source (Part 4 S1.1).
   - At most `BACKLINK_MAX` links.
   - Description ≤ 5,000 chars.
   - 15-hashtag cap still holds.
@@ -597,7 +597,7 @@ As 2026-09-22 §5:
 |---|---|---|
 | **Phase A: gates** | Pause Midas title autopilot. Probes (traffic source, Short link field, search terms). Freeze unmeasured writers. Haryanvi `default_language`. Honest strategy stamp. Live numbers. Fix silent job failures, deploy the health-scorer fix, close quota gaps. Mark old specs superseded. See Part 1. | Findings doc answers every probe question with raw evidence; go/no-go recorded per lever |
 | **Phase B: plumbing** | See **Part 3**. Traffic-source ingestion (P6). `interventions` table. Holdout assignment. Human-edit ledger. Warm filter. Re-embed. `decision_log` for Jev shadow. `app/decide.py`. Missing `default_language` (P7). | One channel shows a week of traffic-source data and at least one detected human edit |
-| **Slice 1: backlinks + no change** | Tick routing (§6.1) **before** autopilot is re-enabled. Rules triage, pipeline step 3, code checks, canonical block, apply, weekly measurement with holdout. Fleet candidates (P2). Jev triage/targets/checks in shadow. **Time-boxed (P1).** | First weekly verdicts written, treated vs holdout. **Stop rule (P1):** no lift over holdout after `BACKLINK_EXPERIMENT_WINDOWS` windows → the lever stops |
+| **Slice 1: backlinks + no change** | Tick routing (§6.1) **before** autopilot is re-enabled. Rules triage, pipeline step 3, code checks, canonical block, apply, weekly measurement with holdout. Fleet candidates (P2). Triage and next-watch in shadow; no Jev checks (Part 4 D7). **Time-boxed (P1).** | First weekly verdicts written, treated vs holdout. **Stop rule (P1):** no lift over holdout after `BACKLINK_EXPERIMENT_WINDOWS` windows → the lever stops |
 | **Slice 2: playlists + Short links** | **One playlist test (P3).** Short links recommend-only to the team, permanently (P4). Jev goes live where shadow beat rules. | The playlist test answered (do curated playlists earn starts?); Short links flowing through the human ledger |
 | **Slice 3: agent challenger + titles** | Hand-rolled loop, tools, `decline`, writer bake-off, niche reference (§3.6). Title lever enabled, **aimed at browse/suggested CTR (P5)**. | §3.5 adoption decision per lever, including whether the niche reference is kept |
 | **Slice 4: playbook** | Weekly per-lever distillation; retire `reflection.py`. | Playbook changes triage or agent choices measurably vs no-playbook |
@@ -655,7 +655,7 @@ Every stage ships to one channel first, gets about a week of watching, then wide
 | `BACKLINK_MIN_CANDIDATES` | 2 | Below this, triage says `no_change` for backlinks |
 | `BACKLINK_EXPERIMENT_WINDOWS` | 3 | P1 stop rule: weekly windows before the lever stops if treated ≤ holdout |
 | `TRAFFIC_INGEST_CHANNELS` | the rollout channel | P6 / Part 3 B1: channels whose traffic-source reports are ingested |
-| `SIBLING_MIN_VIEWS` | 100 | P2: trailing-28-day suggested views between two of our channels, in either direction, for them to count as siblings |
+| `SIBLING_MIN_VIEWS` | 100 | P2: trailing-28-day suggested views from one of our channels into the source channel (inbound only, §2.3; Slice 1, 2026-10-07) |
 | `BACKLINK_MIN_LIFT` | 1.0 | Slice 1, 2026-10-07: attributable views per treated video per week that cumulative lift must reach to beat holdout (Part 4 D6) |
 | `BACKLINK_APPLY_ENABLED` | false | Slice 1, 2026-10-07: kill switch for backlink writes to YouTube |
 | `TRIAGE_COOLDOWN_DAYS` | 7 | Slice 1, 2026-10-07: §2.1 pick exclusion after any Midas intervention |
@@ -693,7 +693,7 @@ As 2026-09-22 §7, adapted:
 ### 11. Open questions
 
 1. ~~Phase A probe outcomes (A1–A3).~~ **Answered 2026-10-06:** (a) for all three levers; Short links not automatable; search terms available (§0.6).
-2. The Jev check false-positive rate acceptable before checks block (§2.4). Measure on a human-reviewed sample in Slice 1.
+2. The Jev check false-positive rate acceptable before checks block (§2.4). Measure on a human-reviewed sample once Jev checks run; they aren't in Slice 1 (Part 4 D7).
 3. ~~Which channel is rollout #1.~~ **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`** (owner, 2026-10-06). Haryanvi has no reach data.
 4. Whether human-run channels stay fully human during Slices 1–2 (recommended, so they serve as the benchmark) or get recommend-only suggestions.
 5. Is the house format itself right? **First evidence (A7): 64 wins vs 106 regressions under the old rewrites.** Treated as unproven (P5); Slice 3's verdicts decide.
@@ -1136,9 +1136,9 @@ is this question.
 - **Weekly verdict.** A new table, `lever_verdicts`:
 
   ```
-  channel_id, lever, week_start, n_treated, n_holdout,
+  channel_id, lever, arm_scope (treated_vs_holdout | human), week_start, n_treated, n_holdout,
   treated_mean_delta, holdout_mean_delta, lift, cumulative_lift, windows_judged,
-  verdict, computed_at
+  verdict, stop_rule_triggered, computed_at
   ```
 
   - `lift` = treated mean delta − holdout mean delta, over the rows judged that week.
@@ -1149,7 +1149,7 @@ is this question.
   applied stay in place **(D8)**.
 - **Human benchmark (§1.4).** `human` backlinks interventions on channels in `TRAFFIC_INGEST_CHANNELS` get the same
   pair measurement, with `detected_at` as d₀. They are reported in their own row, `lever = 'backlinks'`,
-  `arm = 'n/a'`, and never mixed into the treated/holdout lift.
+  `arm_scope = 'human'`, and never mixed into the treated/holdout lift.
 - **Job.** `lever_measurement`, weekly on Monday at 09:00 UTC (after `traffic_poll`), with `traffic_poll`'s failure
   semantics. Two read endpoints:
   - `GET /channels/{id}/interventions?lever=&status=` (paged);
