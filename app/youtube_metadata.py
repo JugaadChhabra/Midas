@@ -57,6 +57,10 @@ SNIPPET_STATUS_PARTS = "snippet,status"
 #: silently and permanently.
 _NON_ISO_639_1 = {
     "bgc": "hi",     # Haryanvi -> Hindi
+    # Unused for now: the owner chose plain `hi` for Bhojpuri and Rajasthani
+    # (2026-10-06). These let the channels switch later without a code change.
+    "bho": "hi",     # Bhojpuri -> Hindi
+    "raj": "hi",     # Rajasthani -> Hindi
 }
 
 

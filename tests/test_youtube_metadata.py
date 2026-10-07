@@ -4,6 +4,8 @@ apply and revert used to hand-copy this shape — category, language adaptation,
 made-for-kids, and the parts they imply. They share build_update_payload now, so
 the contract has one owner and the two paths cannot drift.
 """
+import pytest
+
 from app.youtube_metadata import (
     CATEGORY_ID_EDUCATION,
     SELF_DECLARED_MADE_FOR_KIDS,
@@ -26,6 +28,14 @@ def test_payload_carries_the_full_contract():
 def test_language_is_adapted_at_the_boundary():
     """A content dialect (ISO 639-3) is mapped to the code YouTube documents."""
     p = build_update_payload("v", title="T", description="D", tags=[], lang="bgc")
+    assert p["snippet"]["defaultLanguage"] == "hi"
+    assert p["snippet"]["defaultAudioLanguage"] == "hi"
+
+
+@pytest.mark.parametrize("lang", ["bho", "raj"])
+def test_bhojpuri_and_rajasthani_are_sent_as_hindi(lang):
+    """B7: `bho` and `raj` have no ISO 639-1 code, so YouTube gets `hi`."""
+    p = build_update_payload("v", title="T", description="D", tags=[], lang=lang)
     assert p["snippet"]["defaultLanguage"] == "hi"
     assert p["snippet"]["defaultAudioLanguage"] == "hi"
 
