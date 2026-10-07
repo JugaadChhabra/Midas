@@ -1,7 +1,7 @@
 # Midas — implementation spec: the discoverability agent
 
 Date: 2026-09-23
-Status: Part 1 done (exit gate passed 2026-10-06) · **Part 3 (Phase B) ready to build** · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
+Status: Part 1 done (exit gate passed 2026-10-06) · **Part 3 (Phase B) ready to build** (code merged or in PR; deploy and exit gate pending) · Part 4 (Slice 1) drafted 2026-10-07, owner decisions D1–D8 accepted 2026-10-07; ready to build once Phase B's exit gate passes · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
 Supersedes:
 - `2026-09-22-discoverability-agent-spec.md`
 - The separate 2026-09-23 discoverability and Phase A specs (merged here)
@@ -18,11 +18,12 @@ Ground truth used: `STATE.md` @ `bddd373`.
 
 ## How to use this document (read first)
 
-This file has two parts, and they are used differently.
+This file has four parts, and they are used differently.
 
 - **Part 1 is Phase A, now done.** It is kept as the record of what Phase A did; evidence is in `docs/PHASE_A_FINDINGS.md`.
 - **Part 2 is the design.** It describes the whole target system and the order its stages arrive, amended by Phase A's findings (§0.6). **Do not implement anything from Part 2 directly.** That holds even where Part 2 describes code in detail.
 - **Part 3 is the build task: Phase B.** It is the only part to implement now, in its run order.
+- **Part 4 is Slice 1, drafted.** Its owner decisions (D1–D8) were accepted on 2026-10-07. It becomes "ready to build" when Phase B's exit gate passes.
 
 **After Phase A's exit gate**, the Phase B build section is written into this file as a new Part, using Phase A's findings. Each later slice follows the same pattern. Part 2 is updated if a finding changes the design. At any time, exactly one Part is marked "ready to build."
 
@@ -410,7 +411,7 @@ The 2026-09-22 spec compared each video only with its own past, which a weekly w
 #### 1.4 The SEO team's edits (new)
 
 - On sync, detect changes Midas didn't make: new links in descriptions, new playlist memberships, and Short links if readable (Phase A2). Record each as an intervention with `origin = 'human'`.
-- Measure them with the same indicators. There's no holdout for human edits, so compare against the same channel's unchanged videos in the same week.
+- Measure them with the same indicators. There's no holdout for human edits, so compare against the same channel's unchanged videos in the same week. **(Slice 1, 2026-10-07)** For backlinks, Slice 1 reports human edits' pair views on their own, with no comparison group: an unchanged video has no pair to measure (Part 4 S1.6).
 - Turn on `reach_warmup` for human-run channels so their reach and traffic data are ingested.
 - **Purposes:**
   - Test the one-week-impact hypothesis (§0.1).
@@ -432,6 +433,8 @@ The 2026-09-22 spec compared each video only with its own past, which a weekly w
 
 The warm filter (§2.1) keeps most of them out. If a warm video still doesn't reach its indicator floor within the window, extend that video's window once, to 14 days. If it still doesn't, mark it `insufficient_data` and exclude it from the week's learning. Never silently drop it.
 
+**(Slice 1, 2026-10-07)** For backlinks the floor is on the **source** video, not on the pair: `LEVER_MIN_SOURCE_VIEWS` total views in the post window. Nobody can click a link on a video nobody watched, and pair views near zero are the expected result, not a reason to discard a row (Part 4 S1.6).
+
 ---
 
 ### 2. Pipeline (diagram steps 1–5)
@@ -442,6 +445,9 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 
 - **Eligible:** public, not an episode (`is_episode`), on a channel with `agent_enabled`, certified reach (`reach.certify`), and **impressions ≥ `WARM_MIN_IMPRESSIONS` over the trailing `WARM_WINDOW_DAYS` of ingested data-days**.
 - **Excluded:** videos with an active intervention (§1.6). This replaces the current awaiting/measuring exclusion.
+- **Also excluded (Slice 1, 2026-10-07),** in the SQL and its in-app parity fallback (Part 4 S1.4):
+  - videos with any Midas intervention created within `TRIAGE_COOLDOWN_DAYS`. A `declined` (`no_change`) row isn't active, so without the cooldown the same top video would be offered again on the next tick;
+  - for an experiment's duration, videos that already have an intervention for that lever, of either arm. Each video is in the experiment once.
 - **Order:** most impressions first. This is exploitation. A small random share (`WARM_EXPLORE_PCT`) of picks comes from the rest of the warm pool, so the long tail isn't starved.
 - The "CTR below channel band" condition applies **only to the title lever**, inside triage. Any warm video can benefit from routing.
 
@@ -458,7 +464,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 
 | Lever | Slice 1–2 (pipeline) | Slice 3+ (agent challenger, §3) |
 |---|---|---|
-| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by tag/title overlap (embeddings after re-embed, §4). A sibling is one of our channels that already sends suggested traffic to the source channel, measured over the trailing 28 days of the source channel's own `video_traffic_source_daily` rows (at least `SIBLING_MIN_VIEWS`). Traffic in the other direction counts only once the sibling is itself in `TRAFFIC_INGEST_CHANNELS`, because a channel's report shows only its own inbound traffic. Jev answers "would a viewer of A plausibly watch B next?" per pair. Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
+| Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by similarity on the re-embed's vectors (§4). **(Slice 1, 2026-10-07)** Embeddings only, with no tag/title-overlap fallback (Part 4 S1.1). A sibling is one of our channels that already sends suggested traffic to the source channel, measured over the trailing 28 days of the source channel's own `video_traffic_source_daily` rows (at least `SIBLING_MIN_VIEWS`). **(Slice 1, 2026-10-07)** A sibling counts only if it is itself in `TRAFFIC_INGEST_CHANNELS`: a link A→B is measured from B's channel's report, so a target on an un-ingested channel can't be measured. `TRAFFIC_INGEST_CHANNELS` is widened to Marathi's siblings before Slice 1 launches, so their pre-windows exist (Part 4 D1). The decide() backend answers "would a viewer of A plausibly watch B next?" per pair, in shadow until it beats the rules (Part 4 S1.5). Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
 | Playlist | Candidates from playlist inventory. Jev fit judgment replaces `playlists._llm_judge`. Written to `playlist_proposals`. | Agent |
 | Short link | Jev picks the best long video for each Short. Queued for the team. | Agent |
 | Title | Existing `audit_video` path, only when triage says `title` | Agent with writer model (§3.3) |
@@ -466,7 +472,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 #### 2.4 Step 4: checks (code first, then Jev)
 
 - **Code (hard rules):**
-  - Every link target is a public video on the source's channel or one of its sibling channels (P2, §2.3), and not the video itself.
+  - Every link target is a public video on the source's channel or one of its sibling channels (P2, §2.3), and not the video itself. **(Slice 1, 2026-10-07)** It is also warm on its own channel, not a Short, and not already linked from the source (Part 4 S1.1).
   - At most `BACKLINK_MAX` links.
   - Description ≤ 5,000 chars.
   - 15-hashtag cap still holds.
@@ -478,11 +484,11 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
   - Are the links relevant to this video?
   - For titles: is it faithful to the transcript?
 - **On failure:** one retry of step 3 with the failure reasons, then quarantine.
-- **Rollout.** Jev checks run in shadow alongside the code checks in Slice 1. They start *blocking* once their false-positive rate on human-reviewed samples is acceptable (§9).
+- **Rollout.** **(Slice 1, 2026-10-07)** Jev checks are not in Slice 1 (Part 4 D7): the backlink block is rendered by code from our own titles, so language and appropriateness are fixed, and relevance is the shadow next-watch question (Part 4 S1.5). Where Jev checks do run, they start in shadow alongside the code checks, and start *blocking* once their false-positive rate on human-reviewed samples is acceptable (§9).
 
 #### 2.5 Step 5: apply
 
-- **Backlinks.** `videos.update` changing only the description: the current description plus the canonical block (§3.4). The payload builder (`youtube_metadata.py`) must send the current title and category unchanged. Charged through the existing quota gate (50u).
+- **Backlinks.** **(Slice 1, 2026-10-07)** Not `build_update_payload`, which always sends category, language and `status` fields and takes title and tags from the caller. The write fetches the live snippet with `videos.list` (1u), renders the canonical block (§3.4) onto the live description, and sends `videos.update` with `part=snippet` only, sending the fetched snippet back with only `description` replaced. Charged through the existing ledger gate (`quota.APPLY`, 51u) (Part 4 S1.3).
 - **Playlist.** Recommend-only (Slice 2). Confirmed proposals apply via `yt_playlist_items_insert` (50u).
 - **Short link.** Recommend-only to the team, **permanently (P4)**: Phase A2 found no readable or writable API field. The team sets it in Studio. It enters the §1.4 human ledger when the team applies it, and it's measured through type 32.
 - **Title.** The existing apply path, unchanged.
@@ -591,7 +597,7 @@ As 2026-09-22 §5:
 |---|---|---|
 | **Phase A: gates** | Pause Midas title autopilot. Probes (traffic source, Short link field, search terms). Freeze unmeasured writers. Haryanvi `default_language`. Honest strategy stamp. Live numbers. Fix silent job failures, deploy the health-scorer fix, close quota gaps. Mark old specs superseded. See Part 1. | Findings doc answers every probe question with raw evidence; go/no-go recorded per lever |
 | **Phase B: plumbing** | See **Part 3**. Traffic-source ingestion (P6). `interventions` table. Holdout assignment. Human-edit ledger. Warm filter. Re-embed. `decision_log` for Jev shadow. `app/decide.py`. Missing `default_language` (P7). | One channel shows a week of traffic-source data and at least one detected human edit |
-| **Slice 1: backlinks + no change** | Tick routing (§6.1) **before** autopilot is re-enabled. Rules triage, pipeline step 3, code checks, canonical block, apply, weekly measurement with holdout. Fleet candidates (P2). Jev triage/targets/checks in shadow. **Time-boxed (P1).** | First weekly verdicts written, treated vs holdout. **Stop rule (P1):** no lift over holdout after `BACKLINK_EXPERIMENT_WINDOWS` windows → the lever stops |
+| **Slice 1: backlinks + no change** | Tick routing (§6.1) **before** autopilot is re-enabled. Rules triage, pipeline step 3, code checks, canonical block, apply, weekly measurement with holdout. Fleet candidates (P2). Triage and next-watch in shadow; no Jev checks (Part 4 D7). **Time-boxed (P1).** | First weekly verdicts written, treated vs holdout. **Stop rule (P1):** no lift over holdout after `BACKLINK_EXPERIMENT_WINDOWS` windows → the lever stops |
 | **Slice 2: playlists + Short links** | **One playlist test (P3).** Short links recommend-only to the team, permanently (P4). Jev goes live where shadow beat rules. | The playlist test answered (do curated playlists earn starts?); Short links flowing through the human ledger |
 | **Slice 3: agent challenger + titles** | Hand-rolled loop, tools, `decline`, writer bake-off, niche reference (§3.6). Title lever enabled, **aimed at browse/suggested CTR (P5)**. | §3.5 adoption decision per lever, including whether the niche reference is kept |
 | **Slice 4: playbook** | Weekly per-lever distillation; retire `reflection.py`. | Playbook changes triage or agent choices measurably vs no-playbook |
@@ -649,7 +655,11 @@ Every stage ships to one channel first, gets about a week of watching, then wide
 | `BACKLINK_MIN_CANDIDATES` | 2 | Below this, triage says `no_change` for backlinks |
 | `BACKLINK_EXPERIMENT_WINDOWS` | 3 | P1 stop rule: weekly windows before the lever stops if treated ≤ holdout |
 | `TRAFFIC_INGEST_CHANNELS` | the rollout channel | P6 / Part 3 B1: channels whose traffic-source reports are ingested |
-| `SIBLING_MIN_VIEWS` | 100 | P2: trailing-28-day suggested views between two of our channels, in either direction, for them to count as siblings |
+| `SIBLING_MIN_VIEWS` | 100 | P2: trailing-28-day suggested views from one of our channels into the source channel (inbound only, §2.3; Slice 1, 2026-10-07) |
+| `BACKLINK_MIN_LIFT` | 1.0 | Slice 1, 2026-10-07: attributable views per treated video per week that cumulative lift must reach to beat holdout (Part 4 D6) |
+| `BACKLINK_APPLY_ENABLED` | false | Slice 1, 2026-10-07: kill switch for backlink writes to YouTube |
+| `TRIAGE_COOLDOWN_DAYS` | 7 | Slice 1, 2026-10-07: §2.1 pick exclusion after any Midas intervention |
+| `LEVER_MIN_SOURCE_VIEWS` | 100 | Slice 1, 2026-10-07: §1.7 floor, on the source's post-window views |
 | `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` | 5 | §1.5 |
 | `AGENT_MAX_TURNS` | 12 | Slice 3; tune from traces |
 | `WRITER_MODEL` | = `AUDIT_MODEL` | Slice 3 bake-off replaces it |
@@ -683,7 +693,7 @@ As 2026-09-22 §7, adapted:
 ### 11. Open questions
 
 1. ~~Phase A probe outcomes (A1–A3).~~ **Answered 2026-10-06:** (a) for all three levers; Short links not automatable; search terms available (§0.6).
-2. The Jev check false-positive rate acceptable before checks block (§2.4). Measure on a human-reviewed sample in Slice 1.
+2. The Jev check false-positive rate acceptable before checks block (§2.4). Measure on a human-reviewed sample once Jev checks run; they aren't in Slice 1 (Part 4 D7).
 3. ~~Which channel is rollout #1.~~ **Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`** (owner, 2026-10-06). Haryanvi has no reach data.
 4. Whether human-run channels stay fully human during Slices 1–2 (recommended, so they serve as the benchmark) or get recommend-only suggestions.
 5. Is the house format itself right? **First evidence (A7): 64 wins vs 106 regressions under the old rewrites.** Treated as unproven (P5); Slice 3's verdicts decide.
@@ -934,3 +944,306 @@ Part 3 done, and write the Slice 1 Part from what Phase B found.
 
 As Part 1: an independent clean-context review per task against this Part, and a phase review at the end listing
 what was spec'd but not built and what was built but not spec'd, with a check of `STATE.md` §1, §3 and §4.
+
+---
+
+## Part 4 — Slice 1: backlinks + no change (drafted 2026-10-07; ready to build once Phase B's exit gate passes)
+
+**Purpose.** Midas changes YouTube again, on one channel, with one lever, as a measured experiment. Each tick
+picks a warm video and decides, by rules, whether it gets a code-rendered block of links to related videos
+("backlinks") or nothing. A stable fifth of the videos chosen for the lever are held out unchanged. A weekly job
+compares the two arms' attributable views. **P1 time box:** if the treated arm doesn't beat holdout after
+`BACKLINK_EXPERIMENT_WINDOWS` weekly windows, the lever stops and the result is written up as a finding.
+
+**Rollout channel:** Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`, the only channel with `agent_enabled = true` in Slice 1.
+
+**Inputs.** Phase B as built: `video_traffic_source_daily` (B1), `interventions` and `assign_arm` (B2), the
+human-edit ledger (B3), `app/warm.py` (B4), `decide()` and `decision_log` (B5), the new-recipe embeddings and
+`channels.playlist_thresholds` (B6). The Phase B findings (warm pool, B1 rows/day, the first human interventions)
+are filled in at B10. Where this Part and Part 2 disagree, this Part wins, and Part 2 is corrected in the same
+change. The corrections are listed under "Changes to Part 2" and were applied on 2026-10-07.
+
+**Owner decisions.** Items marked **(D#)** point to the "Owner decisions" table at the end. The owner accepted
+every recommendation on 2026-10-07.
+
+### What Phase B found that shapes this Part
+
+1. **A pair's views are only visible in the target's channel's report.** A link A→B shows up as rows with
+   `video_id = B, source_type = 7, source_detail = A`. Those rows come from B's channel's
+   `channel_traffic_source_a3`. A Hindi target linked from a Marathi video is therefore measurable only if Hindi
+   is in `TRAFFIC_INGEST_CHANNELS`. P2's cross-channel candidates mean nothing until the sibling channels are
+   ingested, and their pre-window needs a week of data before launch. **(D1)**
+2. **A declined video isn't held.** `no_change` is recorded as a `declined` intervention, which is not an active
+   status (`status_vocab.ACTIVE_INTERVENTION_STATUSES`). The B4 warm pool would offer the same top video again on
+   the next tick. The pick needs a cooldown (S1.4).
+3. **`build_update_payload` isn't description-only.** It always sends `categoryId` (Education), the language
+   fields and `status.selfDeclaredMadeForKids`, and takes title and tags from the caller (`app/youtube_metadata.py`).
+   A `videos.update` replaces the whole `snippet`, so anything omitted is deleted. Backlinks need their own write
+   path (S1.3).
+4. **`made_by_midas` knows only audits.** B3a's ledger would record Midas's own block as a human edit unless the
+   check learns about `midas` backlink interventions (`app/human_edits.py`, which says so in its docstring).
+
+### Run order
+
+1. **S1.1, S1.2, S1.3** in parallel: candidates, the renderer, and the description-only write path.
+2. **S1.4:** tick routing, triage and holdout, wiring the three together behind `BACKLINK_APPLY_ENABLED`.
+3. **S1.5, S1.6:** the shadow next-watch question, and weekly measurement with the stop rule.
+4. **S1.7:** deploy, preview, then enable writes (owner). **S1.8:** docs.
+
+### S1.1 — Siblings and backlink candidates (Part 2 §2.3, P2)
+
+**Change.** A new module, `app/backlinks.py`, with:
+- `siblings(channel_id)`: our other channels whose videos sent the channel's videos at least `SIBLING_MIN_VIEWS`
+  suggested (type 7) views over its trailing 28 ingested data days, read from the channel's own
+  `video_traffic_source_daily` rows. A channel counts only if it is itself in `TRAFFIC_INGEST_CHANNELS`
+  (finding 1). Ordered by views.
+- `candidates(video)`: link targets for a source video, ranked. A target must be:
+  - on the source's channel or a sibling;
+  - public, not a Short, not the source itself, and not already linked from the source's description
+    (`human_edits.video_links`);
+  - warm on its own channel (≥ `WARM_MIN_IMPRESSIONS` over `WARM_WINDOW_DAYS` ingested data days, B4's measure);
+  - similar to the source: cosine similarity on the B6 `model_version` ≥ the source channel's calibrated `join_low`
+    (`channels.playlist_thresholds`). A target or source without a new-version embedding is skipped and counted.
+  
+  Rank by similarity, ties broken by impressions. Return at most `2 × BACKLINK_MAX` rows, each with
+  `{video_id, channel_id, title, similarity, impressions}`. The caller keeps the top `BACKLINK_MAX`.
+- Until a sibling channel has new-version embeddings (S1.7 step 2), its videos simply don't appear. No fallback to
+  title overlap: two recipes in one comparison is the B6 mistake again.
+
+**Tests.** Sibling threshold and the ingested-channels rule; each exclusion above; ranking; the skip count for
+missing embeddings; reads paged through `app/rows.py`.
+
+### S1.2 — Canonical backlink block (Part 2 §3.4)
+
+**Change.** Pure functions in `app/backlinks.py`, with no I/O:
+- `render(description, targets, language) -> str`. The block is a heading line followed by one line per target,
+  `<target title> https://youtu.be/<id>`. The heading comes from a per-language table in code. Marathi's text is
+  supplied by the SEO team **(D3)**, and a language missing from the table makes `render` refuse rather than fall
+  back to English.
+- **Placement (D2):** directly after the description's first line, so the links are above "Show more".
+- `find(description)` and `strip(description)`: locate and remove the block by its exact heading line and the
+  `youtu.be` lines under it.
+- **Idempotent:** rendering onto a description that already has a block replaces it and never duplicates it.
+- **Safe:** at most `BACKLINK_MAX` targets. If the result would exceed 5,000 characters, `render` refuses. The
+  result passes `cap_description_hashtags` unchanged (the block adds no hashtags).
+
+**Tests.** Idempotence; placement; the cap; the language table (including a missing language refusing); 5,000
+characters; `strip(render(d)) == d`; a block that survives a re-render with different targets.
+
+### S1.3 — Description-only apply, revert, and the ledger (Part 2 §2.5)
+
+**Change.**
+- `apply_backlinks(intervention)`:
+  1. Fetch the live snippet with `videos.list` (1u). Use it, not the stored description: the team may have
+     edited since the last sync.
+  2. Render the block onto the live description.
+  3. Send `videos.update` with `part=snippet` only, sending the fetched snippet back with only `description`
+     replaced. Title, tags, category, language and `status` stay as YouTube had them.
+  4. Store the live description in `before_state`, and the rendered description and targets in `payload`.
+  5. Write the new description to `videos.description` so the next sync sees no diff.
+  
+  The write is charged through the existing ledger gate (`quota.APPLY`, 51u). Typed outcomes follow
+  `app/apply_outcome.py`, and `DRY_RUN` is honoured.
+- **Revert:** `POST /interventions/{id}/revert` removes the block with `strip` from the live description, using
+  the same quota gate (409 when unaffordable) as `POST /audits/{id}/revert`. Status becomes `cancelled`, with the
+  revert recorded in `payload`.
+- **Ledger:** `human_edits.made_by_midas` also returns true when the description's links to our videos are exactly
+  a `midas` backlinks intervention's targets (finding 4).
+
+**Tests.**
+- A fake YouTube client records the update body: only `description` differs from the fetched snippet, `parts` is
+  `snippet`, and no `status` is sent.
+- Live description vs stale stored description.
+- Quota-gate refusal.
+- A revert restores the original text.
+- A sync after an apply records no human intervention.
+- A human link added next to a Midas block still records one.
+
+### S1.4 — Tick routing, triage and holdout (Part 2 §2.1, §2.2, §1.3, §6.1)
+
+**Change.**
+- **Routing.** In `autopilot.tick`, a channel with `agent_enabled` takes the agent path. That path calls
+  `audit_video` **never**: the title lever is disabled until Slice 3. With `agent_enabled = false` the tick is
+  byte-for-byte today's behaviour. A new predicate, `eligibility.can_run_agent(ch)`, is true when:
+  - `can_audit(ch)` holds (enabled, not paused, language set);
+  - `agent_enabled` is set;
+  - the channel's reach is certified.
+- **Pick.** The B4 warm pool, minus two further exclusions. Both go into the SQL and the Python twin, with the
+  parity test extended:
+  - any Midas intervention on the video created within `TRIAGE_COOLDOWN_DAYS` (finding 2);
+  - for the experiment's duration, any video that already has a `backlinks` intervention of either arm. Each video
+    is in the experiment once.
+- **Triage.** `decide(TRIAGE, …)` with the context below. The rules answer is used, and the backend's answer is
+  logged in shadow:
+  - `has_related_block`: the description already links to one of our videos **(D5)**;
+  - `backlink_candidates`: the count from S1.1;
+  - the 28-day traffic mix by source type;
+  - impressions and CTR;
+  - the video's recent interventions.
+  
+  `decide()` returns the decision's log id, so the intervention's `triage_json` and `decision_log` link both ways.
+  The stop rule (S1.6) makes triage answer `no_change` for backlinks once the lever has stopped.
+- **Record.**
+  - `no_change` → a `declined` intervention with the rationale.
+  - `backlinks` → `assign_arm(video, 'backlinks')`.
+    - **Holdout:** a `holdout` intervention whose `payload` carries the targets it *would* have got. That makes
+      it measurable on the same pairs.
+    - **Treated:** a `planned` intervention, then S1.3's apply. Success makes it `measuring` with `applied_at`;
+      failure makes it `cancelled`, with the error in `payload`.
+- **Cap.** The daily cap counts applied Midas interventions as well as applied audits (`_applies_today`).
+  Holdout and declined rows don't count. Marathi's cap for the experiment is 40/day **(D4)**.
+- **Kill switch.** `BACKLINK_APPLY_ENABLED` (default false). While false, treated rows stop at `planned` →
+  `cancelled` with reason `apply_disabled`, and nothing is written to YouTube.
+- **Preview.** `scripts/preview_backlinks.py --channel <id> --n 20` runs pick → triage → candidates → render
+  read-only. It records nothing and prints each before/after description with its arm. The owner reads its output
+  before writes are enabled (S1.7).
+
+**Tests.**
+- With `agent_enabled` on, a tick never calls `audit_video`; with it off, the tick is unchanged (Part 2 §9).
+- The cooldown and the once-per-experiment rule, in SQL and Python, with the parity test.
+- A holdout row records targets and never calls YouTube.
+- Declined rows don't count toward the cap.
+- A second active Midas intervention is impossible (B2's index).
+- The kill switch writes nothing to YouTube.
+- Triage is deterministic for a given context.
+
+### S1.5 — Next-watch in shadow (Part 2 §2.3)
+
+**Change.** A second question set in `app/decide.py`, `NEXT_WATCH`: "Would a viewer of A plausibly watch B
+next?", answered yes/no. It's asked for each pair S1.1 returns. The rules answer is "yes, if similarity ≥ the
+channel's `join_low`", the backend answers in shadow, and the result is stored on the intervention. Bump
+`QUESTION_SET_VERSION`.
+
+Part 2 §2.4's shadow **checks** (language, kid-appropriate, links relevant) are dropped from Slice 1 **(D7)**. The
+block is rendered by code from our own titles, so language and appropriateness are already fixed, and relevance
+is this question.
+
+**Tests.** One log row per pair; the rules answer is used; the version bump reaches the strategy stamp.
+
+### S1.6 — Weekly measurement and the stop rule (Part 2 §1.2, §1.3, §1.7, P1)
+
+**Change.**
+- **Pair views.** For an intervention with source A and targets B₁…Bₙ, its indicator over a window is the sum of
+  `views` in `video_traffic_source_daily` where `video_id ∈ {Bᵢ}`, `source_type = 7` and `source_detail = A`.
+- **Windows.** The as-of date d₀ is the `applied_at` date (treated) or the `created_at` date (holdout).
+  - Pre window: d₀−7 … d₀−1. Post window: d₀+1 … d₀+7.
+  - A window is complete when every target's channel has ingested data through d₀+7.
+  - If the **source** had fewer than `LEVER_MIN_SOURCE_VIEWS` total views in the post window, extend the window
+    once to 14 days. If it still falls short, mark the row `insufficient_data`. The floor is on the source
+    because nobody can click a link on a video nobody watched; pair views near zero are the expected result,
+    not a reason to discard a row.
+  - Otherwise the row becomes `judged`, with `{pre, post, delta, source_views, window}` in `measurement_result`.
+- **Weekly verdict.** A new table, `lever_verdicts`:
+
+  ```
+  channel_id, lever, arm_scope (treated_vs_holdout | human), week_start, n_treated, n_holdout,
+  treated_mean_delta, holdout_mean_delta, lift, cumulative_lift, windows_judged,
+  verdict, stop_rule_triggered, computed_at
+  ```
+
+  - `lift` = treated mean delta − holdout mean delta, over the rows judged that week.
+  - `verdict` is directional (`helped|no_change|worse`, §1.5) against `BACKLINK_MIN_LIFT` **(D6)**.
+  - A week with no judged holdout row writes no verdict.
+- **Stop rule.** Once `windows_judged ≥ BACKLINK_EXPERIMENT_WINDOWS` and `cumulative_lift < BACKLINK_MIN_LIFT`,
+  the lever is stopped for the channel (`stop_rule_triggered` on the row). Triage reads it (S1.4). Blocks already
+  applied stay in place **(D8)**.
+- **Human benchmark (§1.4).** `human` backlinks interventions on channels in `TRAFFIC_INGEST_CHANNELS` get the same
+  pair measurement, with `detected_at` as d₀. They are reported in their own row, `lever = 'backlinks'`,
+  `arm_scope = 'human'`, and never mixed into the treated/holdout lift.
+- **Job.** `lever_measurement`, weekly on Monday at 09:00 UTC (after `traffic_poll`), with `traffic_poll`'s failure
+  semantics. Two read endpoints:
+  - `GET /channels/{id}/interventions?lever=&status=` (paged);
+  - `GET /channels/{id}/lever-verdicts`.
+
+**Tests.**
+- Pair views select the right source type and detail.
+- Pre and post windows are as above.
+- The completeness rule waits for a lagging target channel.
+- The 14-day extension happens once, and then `insufficient_data`.
+- The verdict arithmetic.
+- The stop rule triggers exactly at the window count, and stopped triage returns `no_change`.
+- Human rows never enter the lift.
+- Restated traffic days are reread on the next run, because a judged row is recomputed while its window is within
+  the restatement horizon.
+
+### S1.7 — Deploy, preview, go live (owner, office machine)
+
+1. **Before launch, during Phase B's exit-gate week:** widen `TRAFFIC_INGEST_CHANNELS` to Marathi's
+   siblings **(D1)**, so their pre-windows exist by launch.
+2. After deploying S1.1–S1.6, apply the migrations, run `docker compose restart postgrest rest`, and restart the
+   app.
+3. Run `scripts/reembed.py --estimate` for the sibling channels, record the cost, then do the real run.
+4. Set `agent_enabled = true` and `autopilot_enabled = true` on Marathi, leaving `BACKLINK_APPLY_ENABLED` unset
+   (false). Run `scripts/preview_backlinks.py` for 20 videos. **The owner and the SEO team read the rendered
+   descriptions.**
+5. Set `BACKLINK_APPLY_ENABLED=true` in the office `.env` and restart. Watch the first 10 applies by hand in
+   Studio: the block, the title, the tags and the category are all unchanged apart from the block.
+6. Refresh the NAS snapshot after each migration step is verified.
+
+### S1.8 — Docs
+
+- `STATE.md` updated for every task.
+- The findings doc records:
+  - the preview review;
+  - the first weekly verdict;
+  - at window `BACKLINK_EXPERIMENT_WINDOWS`, the stop-rule outcome, with the numbers, as a finding either way.
+- Mark Part 4 done and write the Slice 2 Part.
+
+### Config (new)
+
+| Setting | Start | Notes |
+|---|---|---|
+| `BACKLINK_MAX` | 3 | Part 2 §8 |
+| `BACKLINK_MIN_CANDIDATES` | 2 | Exists (B5) |
+| `BACKLINK_EXPERIMENT_WINDOWS` | 3 | P1 |
+| `BACKLINK_MIN_LIFT` | 1.0 | Attributable views per treated video per week. **(D6)** |
+| `BACKLINK_APPLY_ENABLED` | false | Kill switch for YouTube writes |
+| `SIBLING_MIN_VIEWS` | 100 | Part 2 §8, inbound only (finding 1) |
+| `TRIAGE_COOLDOWN_DAYS` | 7 | Finding 2 |
+| `LEVER_MIN_SOURCE_VIEWS` | 100 | §1.7 floor, on the source's post-window views |
+
+### Exit gate
+
+- The first weekly verdict is written for Marathi, treated vs holdout, with both arms non-empty.
+- Every applied block was checked by hand on the first 10. No title, tag, category or language field changed.
+- No human intervention was recorded for a Midas edit.
+- `/health/jobs` shows `lever_measurement` `success`.
+- At window `BACKLINK_EXPERIMENT_WINDOWS`, the stop rule's outcome is recorded in the findings doc, and Slice 2 is
+  written either way.
+
+### Not doing in Slice 1
+
+- No titles, no playlists and no Short links. `audit_video` never runs on an agent channel.
+- No channel other than Marathi gets `agent_enabled`.
+- No Jev calls. The shadow backend is `llm` until access exists.
+- No model-written text in the block.
+- No automatic revert of applied blocks when the lever stops **(D8)**.
+- No playbook. The weekly verdict table is its future input.
+
+### Changes to Part 2 (applied 2026-10-07)
+
+- **§2.1.** The pick also excludes recently triaged videos and, during an experiment, videos already in it.
+- **§2.3.** A sibling counts only if its own traffic is ingested.
+- **§2.4.** Jev checks are not in Slice 1 (D7).
+- **§8.** `BACKLINK_MIN_LIFT`, `BACKLINK_APPLY_ENABLED`, `TRIAGE_COOLDOWN_DAYS` and `LEVER_MIN_SOURCE_VIEWS` added.
+- **§1.7.** The window-extension floor is on the source's views.
+- **§2.5.** The backlink write is a fresh `videos.list` plus a snippet-only `videos.update`, not
+  `build_update_payload`.
+
+### Owner decisions (decided 2026-10-07: all recommendations accepted)
+
+| # | Question | Decision and why |
+|---|---|---|
+| D1 | Widen `TRAFFIC_INGEST_CHANNELS` to Marathi's siblings (A1.1: Hindi, English, Bhojpuri, Gujarati) before launch? | **Yes, during Phase B's exit-gate week.** Without it, cross-channel links are unmeasurable (finding 1) and there's no pre-window at launch. English also becomes the human benchmark (§1.4). Cost: storage, sized against B1's measured rows/day |
+| D2 | Where the block goes | **After the first line, above "Show more".** A link nobody sees tests nothing. The alternative was the end of the description, where the team's existing links may already be |
+| D3 | The heading text in Marathi | **The SEO team writes it.** Not guessed by code or a model |
+| D4 | Marathi's daily cap during the experiment | **40/day** (≈2,040u at 51u, against ≤1.4k/day current burn and a 10k ceiling). At the default 10/day, the warm pool would take over three weeks, and the first windows would be thin |
+| D5 | Videos that already link to our videos | **Skip them** (`no_change`). The team already pulled this lever there, and adding to it muddies the pair measure |
+| D6 | What "beats holdout" means | **Cumulative lift ≥ 1 attributable view per treated video per week.** Any positive lift would pass on noise at today's ≈0 pair traffic. Below 1 view/video/week, a few hundred linked videos earn fewer views a week than Marathi gets in minutes, which isn't worth the spam risk |
+| D7 | Drop Jev shadow checks from Slice 1 | **Yes.** The block is code-rendered from our own titles; relevance is covered by S1.5 |
+| D8 | When the lever stops, revert the blocks? | **No, leave them.** They're harmless links, and reverting costs 51u each. The revert endpoint exists for any one that needs to go |
+
+### Review protocol
+
+As Parts 1 and 3: an independent clean-context review per task against this Part, and a slice review at the end
+listing spec'd-but-not-built and built-but-not-spec'd, with a check of `STATE.md` §1–§4 and §7.
