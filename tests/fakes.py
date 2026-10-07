@@ -352,6 +352,10 @@ class FakeSupabase:
                 f"call to unstubbed rpc {name!r}; rpcs described: {sorted(self._rpc)}")
         result = self._rpc[name]
         data = result(params) if callable(result) else result
+        if isinstance(data, list):
+            # A set-returning function: PostgREST caps and pages it like a
+            # table, so order()/range() work on it (all_rows over an rpc).
+            return FakeQuery(name, [dict(r) for r in data], self.writes)
         return _Executed(data)
 
     def rows(self, table: str) -> list[dict]:
@@ -360,7 +364,7 @@ class FakeSupabase:
 
 
 class _Executed:
-    """rpc() returns something already executable; .execute() just unwraps it."""
+    """A scalar rpc() result is already executable; .execute() just unwraps it."""
 
     def __init__(self, data):
         self._data = data
