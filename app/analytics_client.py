@@ -27,15 +27,11 @@ Return shape: a dict keyed by metric name, or `None` if the report has no row
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request as GoogleRequest
-from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 
-from app.config import settings
 from app.db import supabase
-from app.youtube_client import TokenExpiredError, _client_secrets
+from app.youtube_client import TokenExpiredError, channel_credentials
 
 
 class AnalyticsNotAuthorizedError(Exception):
@@ -71,44 +67,20 @@ _PLAYLIST_METRICS = ",".join([
 def analytics_creds_for_channel(channel_id: str) -> Credentials:
     """Load + refresh a channel's creds, gated on the analytics scope grant.
 
-    Mirrors `youtube_client.youtube_for_channel` exactly — same row read, same
-    refresh dance, same TokenExpiredError contract. Refuses to hand out creds
+    The refresh is `youtube_client.channel_credentials`, shared with the Data
+    API, so the TokenExpiredError contract is the same. Refuses to hand out creds
     if the channel hasn't re-consented to the analytics scope; callers should
     treat that as "skip silently" (CIL §0.1 graceful-degradation rule).
 
     Shared by the Analytics client below AND reporting_client (both APIs are
-    authorized by the same yt-analytics.readonly scope) so the token-refresh
-    logic lives exactly once.
+    authorized by the same yt-analytics.readonly scope).
     """
     row = supabase().table("channels").select("*").eq("id", channel_id).single().execute().data
     if not row:
         raise ValueError(f"Channel {channel_id} not found")
     if not row.get("analytics_authorized"):
         raise AnalyticsNotAuthorizedError(channel_id)
-
-    secrets = _client_secrets()
-    creds = Credentials(
-        token=row.get("access_token"),
-        refresh_token=row["refresh_token"],
-        token_uri=secrets["token_uri"],
-        client_id=secrets["client_id"],
-        client_secret=secrets["client_secret"],
-        scopes=settings.SCOPES,
-    )
-
-    if not creds.valid:
-        try:
-            creds.refresh(GoogleRequest())
-        except RefreshError as e:
-            if "invalid_grant" in str(e):
-                raise TokenExpiredError(channel_id) from e
-            raise
-        supabase().table("channels").update({
-            "access_token": creds.token,
-            "token_expiry": creds.expiry.replace(tzinfo=timezone.utc).isoformat() if creds.expiry else None,
-        }).eq("id", channel_id).execute()
-
-    return creds
+    return channel_credentials(channel_id, row)
 
 
 def analytics_for_channel(channel_id: str):
