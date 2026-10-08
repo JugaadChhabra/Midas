@@ -334,11 +334,11 @@ def download_report_csv(handle: ReportingHandle, channel_id: str, download_url: 
 
     Discovery-service calls auto-refresh through google-auth, but this raw
     download uses the bearer token directly — on a long backfill run the
-    ~1h access token can lapse between list and download. A `creds.valid`
-    pre-check is NOT sufficient: we construct Credentials without an expiry
-    timestamp, so google-auth considers them valid forever. The reliable
-    signal is the 401 itself — refresh and retry once (observed live on the
-    2026-07-02 first backfill run: 10/49 downloads 401'd mid-run).
+    ~1h access token can lapse between list and download (observed live on
+    the 2026-07-02 first backfill run: 10/49 downloads 401'd mid-run). The
+    creds carry their expiry now (`youtube_client.channel_credentials`), but
+    the 401 is still the signal for a token that lapsed mid-run: refresh and
+    retry once.
     """
     success = False
     try:

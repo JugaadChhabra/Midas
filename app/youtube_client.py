@@ -19,11 +19,30 @@ def _client_secrets() -> dict:
         return json.load(f)["web"]
 
 
-def youtube_for_channel(channel_id: str):
-    row = supabase().table("channels").select("*").eq("id", channel_id).single().execute().data
-    if not row:
-        raise ValueError(f"Channel {channel_id} not found")
+def _stored_expiry(row: dict) -> datetime:
+    """`channels.token_expiry` as google-auth wants it: naive UTC.
 
+    Without an expiry google-auth treats a stored token as valid forever, so a
+    dead token went out on every call and only the 401-retry inside the API
+    client refreshed it, in memory, never saved. On 2026-10-08 that retry
+    started failing (6 channels' video_sync). A missing expiry counts as
+    expired, so the token is refreshed before the first call.
+    """
+    raw = row.get("token_expiry")
+    if not raw:
+        return datetime(1970, 1, 1)
+    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if dt.tzinfo:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def channel_credentials(channel_id: str, row: dict) -> Credentials:
+    """A channel's stored creds, refreshed and saved if the token has expired.
+
+    Shared by the Data API (`youtube_for_channel`) and the Analytics/Reporting
+    APIs (`analytics_client.analytics_creds_for_channel`).
+    """
     secrets = _client_secrets()
     creds = Credentials(
         token=row.get("access_token"),
@@ -32,6 +51,7 @@ def youtube_for_channel(channel_id: str):
         client_id=secrets["client_id"],
         client_secret=secrets["client_secret"],
         scopes=settings.SCOPES,
+        expiry=_stored_expiry(row),
     )
 
     if not creds.valid:
@@ -46,7 +66,15 @@ def youtube_for_channel(channel_id: str):
             "token_expiry": creds.expiry.replace(tzinfo=timezone.utc).isoformat() if creds.expiry else None,
         }).eq("id", channel_id).execute()
 
-    return build("youtube", "v3", credentials=creds, cache_discovery=False)
+    return creds
+
+
+def youtube_for_channel(channel_id: str):
+    row = supabase().table("channels").select("*").eq("id", channel_id).single().execute().data
+    if not row:
+        raise ValueError(f"Channel {channel_id} not found")
+    return build("youtube", "v3", credentials=channel_credentials(channel_id, row),
+                 cache_discovery=False)
 
 
 # ── Quota-logged YouTube call helpers ────────────────────────────────────
