@@ -1,7 +1,7 @@
 # Midas — implementation spec: the discoverability agent
 
 Date: 2026-09-23
-Status: Part 1 done (exit gate passed 2026-10-06) · **Part 3 (Phase B) ready to build** (code merged or in PR; deploy and exit gate pending) · Part 4 (Slice 1) drafted 2026-10-07, owner decisions D1–D8 accepted 2026-10-07; ready to build once Phase B's exit gate passes · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
+Status: Part 1 done (exit gate passed 2026-10-06) · Part 3 (Phase B) done (exit gate passed 2026-10-13) · **Part 4 (Slice 1) ready to build** (owner decisions D1–D8 accepted 2026-10-07) · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
 Supersedes:
 - `2026-09-22-discoverability-agent-spec.md`
 - The separate 2026-09-23 discoverability and Phase A specs (merged here)
@@ -22,8 +22,8 @@ This file has four parts, and they are used differently.
 
 - **Part 1 is Phase A, now done.** It is kept as the record of what Phase A did; evidence is in `docs/PHASE_A_FINDINGS.md`.
 - **Part 2 is the design.** It describes the whole target system and the order its stages arrive, amended by Phase A's findings (§0.6). **Do not implement anything from Part 2 directly.** That holds even where Part 2 describes code in detail.
-- **Part 3 is the build task: Phase B.** It is the only part to implement now, in its run order.
-- **Part 4 is Slice 1, drafted.** Its owner decisions (D1–D8) were accepted on 2026-10-07. It becomes "ready to build" when Phase B's exit gate passes.
+- **Part 3 is Phase B, now done.** It is kept as the record of what Phase B did; evidence is in `docs/PHASE_B_FINDINGS.md`.
+- **Part 4 is the build task: Slice 1.** It is the only part to implement now, in its run order. Its owner decisions (D1–D8) were accepted on 2026-10-07.
 
 **After Phase A's exit gate**, the Phase B build section is written into this file as a new Part, using Phase A's findings. Each later slice follows the same pattern. Part 2 is updated if a finding changes the design. At any time, exactly one Part is marked "ready to build."
 
@@ -373,7 +373,7 @@ amendments; the sections they touch are edited in place and marked **(P#)**.
 | P4 | **Short → video links are recommend-only, permanently.** The Data API can't read or set them (A2) | §2.5, §6 |
 | P5 | When the title lever returns (Slice 3), its **objective is browse/suggested click-through, not search keywords**, and the house format is unproven. **Reverting the 106 regressions was considered and deferred** (owner, 2026-10-06) | §3.3, §11.5 |
 | P6 | **Traffic-source ingestion is specified:** `channel_traffic_source_a3` + `playlist_traffic_source_a2`, numeric codes, newest report wins for restated days, 2-day lag, aggregate out `country_code` / `subscribed_status` / `live_or_on_demand` before storage | §7, Part 3 |
-| P7 | **Set `default_language` on the six channels without one** (Hindi, Bhojpuri, Malayalam, Tamil, Rajasthani, Telugu), with API-code mappings for the codes YouTube doesn't take | Part 3 |
+| P7 | **Set `default_language` on the six channels without one** (Hindi, Bhojpuri, Malayalam, Tamil, Rajasthani, Telugu), with API-code mappings for the codes YouTube doesn't take. Owner chose plain `hi` for Bhojpuri and Rajasthani (2026-10-06); the `bho`/`raj` mappings exist for a later switch | Part 3 |
 
 ### 1. Measurement and learning loop
 
@@ -570,7 +570,8 @@ As 2026-09-22 §4, with these changes:
 - **Recommend-only first.** Proposals go to `playlist_proposals`, with the Jev fit check replacing `_llm_judge`.
 - **Frozen writers (§0.5 item 8) stay frozen** until Slice 2 ships the measured replacement.
 - **Re-embedding is a Phase B task,** not a Slice 2 pre-req.
-  - Embed one consistent input for every video under a new `model_version`.
+  - Embed one consistent input for every video under a new `model_version`, starting with the rollout channel and
+    its sibling channels (Part 3 B6); other channels when a slice needs them.
   - Recalibrate `PLAYLIST_JOIN_HIGH` / `PLAYLIST_JOIN_LOW` / `PLAYLIST_LEAVE` on the new distribution, per channel rather than process-global.
   - Until done, embeddings are not used for any candidate generation.
 - Auto-apply of adds is flipped per channel only after sustained trustworthy verdicts. New-playlist creation and deletes stay human-confirmed.
@@ -701,7 +702,11 @@ As 2026-09-22 §7, adapted:
 
 ---
 
-## Part 3 — Phase B: plumbing (ready to build)
+## Part 3 — Phase B: plumbing (done 2026-10-13)
+
+> **Done.** Exit gate passed 2026-10-13. Deploy record, B1 storage and the retention decision, the warm pool,
+> the B6 cost and calibration, and the first human interventions are in `docs/PHASE_B_FINDINGS.md`. Part 3 is
+> kept as the record of what was asked.
 
 **Purpose.** Build the sensors and the record-keeping that Slice 1 needs, on one channel first, **without
 changing anything on YouTube.** Phase B adds no levers and no applies. Its only YouTube calls are reads,
@@ -916,6 +921,9 @@ YouTube client that raises the token error, the routine sync skips that channel 
 5. After its first run, record rows per day for Marathi.
 6. Refresh the NAS snapshot once the migrations are verified.
 
+As run, B9 was split in two so B1's data clock started early: **B9a** (#40, 2026-10-07) deployed B1 and B8 alone;
+**B9b** (#41, 2026-10-07/08) applied the other five migrations, set the languages and ran the re-embed.
+
 ### B10 — Docs
 
 Update `STATE.md` for every task above. Record the findings-doc entries named in each acceptance line. Mark
@@ -947,7 +955,7 @@ what was spec'd but not built and what was built but not spec'd, with a check of
 
 ---
 
-## Part 4 — Slice 1: backlinks + no change (drafted 2026-10-07; ready to build once Phase B's exit gate passes)
+## Part 4 — Slice 1: backlinks + no change (ready to build since 2026-10-13)
 
 **Purpose.** Midas changes YouTube again, on one channel, with one lever, as a measured experiment. Each tick
 picks a warm video and decides, by rules, whether it gets a code-rendered block of links to related videos

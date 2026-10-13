@@ -14,12 +14,13 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version; B6 #37: `app/reembed.py`, `scripts/reembed.py`, `channels.playlist_thresholds`; B7 #38, 2026-10-07: `bho`/`raj` in `_LANG_NAMES` and `_NON_ISO_639_1`) · **Commit:** on top of `339c01a` · **Branch:** `phase-b/38-phase-b-b7-code-half-bho-raj-display-nam`
+**Generated:** 2026-10-13 (B10: Phase B deployed 2026-10-07/08 and its exit gate passed 2026-10-13, `docs/PHASE_B_FINDINGS.md`; #56, 2026-10-08: `youtube_client.channel_credentials`). Earlier: 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version; B6 #37: `app/reembed.py`, `scripts/reembed.py`, `channels.playlist_thresholds`; B7 #38, 2026-10-07: `bho`/`raj` in `_LANG_NAMES` and `_NON_ISO_639_1`) · **Commit:** on top of `fdafa79` · **Branch:** `docs/b10-phase-b-close`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Its
-status line: Part 1 (Phase A) done, exit gate passed 2026-10-06; **Part 3 (Phase B) "ready to build"**; Part 2
+status line: Part 1 (Phase A) done, exit gate passed 2026-10-06; Part 3 (Phase B) done, exit gate passed 2026-10-13;
+**Part 4 (Slice 1) "ready to build"**; Part 2
 the approved design, amended 2026-10-06 by P1–P7 (spec Part 2 §0.6).
 
 **Office deployment (from `docs/PHASE_A_FINDINGS.md`).** The office machine has run the Phase A image since
@@ -43,11 +44,13 @@ membership walk in `app/playlists_sync.py`; no migration) and B4 (#35: `app/warm
 migration `20261006040000`; not called by anything yet) and B5 (#36: `app/decide.py`, `decision_log` in migration
 `20261006050000`; nothing calls `decide()` yet) and B6 (#37: `app/reembed.py`, run by `scripts/reembed.py`,
 `channels.playlist_thresholds` in migration `20261006060000`; not run yet) and B7's code half (#38: `bho`/`raj` →
-`hi`, `app/transcripts.py`, `app/youtube_metadata.py`; no channel uses them yet); none of it is deployed and the migrations are not applied.
+`hi`, `app/transcripts.py`, `app/youtube_metadata.py`; no channel uses them yet). **All of it is deployed** (B9a #40
+2026-10-07: B1 + B8; B9b #41 2026-10-07/08: the other five migrations, the languages, the Marathi re-embed), and #56
+(stored token expiry) since 2026-10-08. Live figures from the deploy are in `docs/PHASE_B_FINDINGS.md`.
 
 **Data caveat for this generation.** The live database runs on the office machine, bound to
 `127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
-this file. Live figures below are quoted from `docs/PHASE_A_FINDINGS.md`, each labelled with its date and
+this file. Live figures below are quoted from `docs/PHASE_A_FINDINGS.md` and `docs/PHASE_B_FINDINGS.md`, each labelled with its date and
 section; anything not recorded there is blank. §8 ends with the SQL to refresh them.
 
 ---
@@ -59,8 +62,8 @@ Stages are the spec's build order (spec Part 2 §6).
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:25-31`, `app/youtube_metadata.py:58-59` (the `bgc` entries). A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **in progress** (B1 built, both halves, B2, B3 (both halves), B4, B5, B6, B7 (code half) and B8; not deployed) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:223-233`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:248-255`), `tests/test_decide.py`. B6: `app/reembed.py` (`recipe_text`, `MODEL_VERSION`, `estimate_channel`, `reembed_channel`, `calibrate_channel`), `scripts/reembed.py`, `supabase/migrations/20261006060000_channels_playlist_thresholds.sql`, `model_version` keyword on `app/embeddings.py` `pooled_embeddings`/`embedded_video_ids`, `tests/test_reembed.py`. B7 (code half): `bho`/`raj` in `_LANG_NAMES` (`app/transcripts.py:25-36`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-64`), `tests/test_language_codes.py`, `tests/test_youtube_metadata.py` | Nothing calls `decide()` (no production caller; Slice 1's triage is the first), so `decision_log` gets no rows in Phase B; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing calls it (`tests/test_warm.py` guards that); the B6 recipe's vectors and `channels.playlist_thresholds` are written only by the one-off `scripts/reembed.py` (not yet run) and read by nothing in production; the `bho`/`raj` entries are unused, since the owner chose plain `hi` for Bhojpuri and Rajasthani (2026-10-06, `app/youtube_metadata.py:60-61`) and they exist so those channels can switch later without a code change. Partial footholds listed in §7.1. |
-| **Slice 1** | Backlinks + no change | **not started** | none | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it; the warm filter exists, B4, but nothing calls it), no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **done** (exit gate passed 2026-10-13; deployed 2026-10-07/08; `docs/PHASE_B_FINDINGS.md`) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:223-233`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:248-255`), `tests/test_decide.py`. B6: `app/reembed.py` (`recipe_text`, `MODEL_VERSION`, `estimate_channel`, `reembed_channel`, `calibrate_channel`), `scripts/reembed.py`, `supabase/migrations/20261006060000_channels_playlist_thresholds.sql`, `model_version` keyword on `app/embeddings.py` `pooled_embeddings`/`embedded_video_ids`, `tests/test_reembed.py`. B7 (code half): `bho`/`raj` in `_LANG_NAMES` (`app/transcripts.py:25-36`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-64`), `tests/test_language_codes.py`, `tests/test_youtube_metadata.py` | Nothing calls `decide()` (no production caller; Slice 1's triage is the first), so `decision_log` gets no rows in Phase B; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing calls it (`tests/test_warm.py` guards that); the B6 recipe's vectors and `channels.playlist_thresholds` are written only by the one-off `scripts/reembed.py` (run for Marathi 2026-10-07/08) and read by nothing in production; the `bho`/`raj` entries are unused, since the owner chose plain `hi` for Bhojpuri and Rajasthani (2026-10-06, `app/youtube_metadata.py:60-61`) and they exist so those channels can switch later without a code change. Partial footholds listed in §7.1. |
+| **Slice 1** | Backlinks + no change | **ready to build** (spec Part 4, since 2026-10-13); not started | none | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it; the warm filter exists, B4, but nothing calls it), no backlink renderer. Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
 | **Slice 4** | Playbook | **not started** | none | No `channels.playbook_json`. `app/reflection.py` (the thing Slice 4 retires) is frozen by `REFLECTION_ENABLED=false` (§4). |
@@ -83,22 +86,23 @@ machinery (spec Part 2 §0.5 "Kept").
 | Punjabi | `UC8KjoL0Z9mTHKqB6gFutkJw` | `pa` | t | **t** (only one) | t | 342 | 2026-10-04 (213) |
 | Gujarati | `UCOVKJdzghm2gOnuaGeJTonA` | `gu` | t | f | t | 603 | 2026-10-04 (147) |
 | English | `UCMpj6iUMCMhB0k4L5EcxJwQ` | `en` | t | f | t | 1,008 | 2026-10-04 (148) |
-| Hindi | `UCR9qQMyP86aSt-1VgaMg7UA` | NULL | t | f | t | 1,120 | 2026-09-26 (213; token expired, last synced 2026-09-24) |
-| Bhojpuri | `UC8oC7Yiz0WkH3PKb3GW42XA` | NULL | t | f | t | 471 | 2026-10-04 (183) |
-| Tamil | `UCWb0eKKkX1NE1r_Tu6oKhdQ` | NULL | t | f | t | 290 | 2026-10-04 (143) |
-| Malayalam | `UCX8BttGE4UAFdm1RRIULOPQ` | NULL | t | f | t | 70 | 2026-10-04 (143) |
+| Hindi | `UCR9qQMyP86aSt-1VgaMg7UA` | `hi` (set 2026-10-07) | t | f | t | 1,120 | 2026-09-26 (213; token expired, last synced 2026-09-24) |
+| Bhojpuri | `UC8oC7Yiz0WkH3PKb3GW42XA` | `hi` (set 2026-10-07) | t | f | t | 471 | 2026-10-04 (183) |
+| Tamil | `UCWb0eKKkX1NE1r_Tu6oKhdQ` | `ta` (set 2026-10-07) | t | f | t | 290 | 2026-10-04 (143) |
+| Malayalam | `UCX8BttGE4UAFdm1RRIULOPQ` | `ml` (set 2026-10-07) | t | f | t | 70 | 2026-10-04 (143) |
 | Haryanvi | `UCc4Tv_DEGDEKrKAt-vyVNmw` | `bgc` | f | f | t | no reach data | none |
-| Rajasthani | `UCFO6AQ_KBQDEaQiTi-dBEWQ` | NULL | f | f | t | no reach data | none |
+| Rajasthani | `UCFO6AQ_KBQDEaQiTi-dBEWQ` | `hi` (set 2026-10-07) | f | f | t | no reach data | none |
 | 3D Animated Series | `UCqtU4xCSjsSvE53Iy6NUKSg` | `hi` | f | f | t | no reach data | none |
 | Kannada | `UCo4_mZK5aAF7ugv4cTfZlEg` | `kn` | f | f | f | no reach data | none (0 videos) |
-| Telugu | `UCxK1-ftYdFvU4IuUW3POxRA` | NULL | f | f | f | no reach data | none (0 videos) |
+| Telugu | `UCxK1-ftYdFvU4IuUW3POxRA` | `te` (set 2026-10-07) | f | f | f | no reach data | none (0 videos) |
 
-Six channels have no `default_language`, so `eligibility.can_audit` gates them out of title audits
-(`app/eligibility.py:66-84`) and `audit_video` refuses them with 400 (`app/audits.py:390-402`).
+Every channel has a `default_language` since B9b step 7 (2026-10-07; `docs/PHASE_B_FINDINGS.md`), so
+`eligibility.can_audit` (`app/eligibility.py:66-84`) no longer gates any channel out on language. Harmless while
+`autopilot_enabled = f` everywhere.
 
 Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `reach_warmup`,
 `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`, `sync_shorts`, and `agent_enabled`
-(`20261006020000`, B2; file only, not applied; nothing reads or sets it).
+(`20261006020000`, B2; applied 2026-10-07; nothing reads or sets it).
 
 ---
 
@@ -106,7 +110,8 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
 `010_storage_shim.sql` run first). The latest is `20261006060000` (B6, #37). It, `20261006050000` (B5, #36), `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
-`20261006010000` (B1b, #31) and `20261006000000` (B1a, #30) are files only, not yet applied on the office machine.
+`20261006010000` (B1b, #31) and `20261006000000` (B1a, #30) are applied on the office machine: the B1 pair on
+2026-10-07 (B9a), the other five on 2026-10-07 (B9b) (`docs/PHASE_B_FINDINGS.md`).
 
 ```
 20260505092756_init.sql                          channels, videos, audit_configs, audits
@@ -516,9 +521,9 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, `rejection()`, `house_format_spec()` |
 | `apply_outcome.py` | typed `ApplyError`/`ApplyOutcome` |
 | `youtube_metadata.py` | `videos.update` payload; `_NON_ISO_639_1 = {"bgc": "hi", "bho": "hi", "raj": "hi"}` (`:58-64`; `bho`/`raj` unused for now, B7) |
-| `youtube_client.py` | Data API wrappers + quota charging |
+| `youtube_client.py` | Data API wrappers + quota charging; `channel_credentials` (#56): a channel's stored creds with `expiry` from `channels.token_expiry` (NULL = expired), refreshed and saved when expired, shared with `analytics_client` |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
-| `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics) |
+| `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics); `analytics_creds_for_channel` = the `analytics_authorized` gate + `youtube_client.channel_credentials` (also used by the Reporting API) |
 | `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`, `ensure_playlist_traffic_job`), CSV parsing (reach; video and playlist traffic with aggregation, `_aggregate_traffic_csv`, and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`) |
 | `human_edits.py` | B3a human-edit ledger, description links: `video_links` (11-character ids from `watch?v=`, `youtu.be/`, `shorts/`, `embed/`, `live/`, `v/` URLs), `made_by_midas` (the description equals an applied audit's `suggested_description` or a reverted one's `description_before`, whitespace collapsed; the seam for Slice 1's `origin='midas'` interventions), `record_description_edits` (diff, keep targets in `videos` on any channel, write `human` backlinks rows with a `ledger_key`, stamp removals on the earlier row). Called only from `sync_channel` on a full sync. B3b, playlist memberships: `added_by_midas` (a `playlist_assignments` `added` row whose `decision_source` isn't `sync`, i.e. `embedding`, `llm_confirmed` or `discovery`, or an `approved` `add` `playlist_proposals` row; never `playlists.origin`), `record_playlist_additions` (write `human` playlist rows with a `ledger_key`). Called only from the membership walk (`app/playlists_sync.py`). Both write through `_record_human` |
 | `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily` |
@@ -711,7 +716,7 @@ the real run re-embeds then calibrates each channel), `scripts/create_reporting_
   | Playlist title/description proposal | `JUDGE_MODEL` | `discover_playlists` (frozen) | `app/playlist_discovery.py:137-142`, below |
   | Decide shadow answer (B5) | `settings.AUDIT_MODEL` (the `chat_json` default) | `decide()` with `DECIDE_BACKEND=llm`; nothing calls `decide()` yet | `app/decide.py:111-129`, below |
   | Embeddings | `EMBED_MODEL = "google/gemini-embedding-2-preview"` | `embed_video` after apply; `bootstrap_embeddings` | input: title + `"\n\n"` + transcript[:6000] (`app/embeddings.py:118-120`); bootstrap passes `use_transcript=False`, so title only (`app/embeddings.py:182`). Both under `model_version = EMBED_MODEL` |
-  | Embeddings, B6 recipe | `EMBED_MODEL`, stored as `model_version = "google/gemini-embedding-2-preview\|tdt-v1"` | `scripts/reembed.py` → `app/reembed.py` `reembed_channel`, one-off, not yet run | input: `app/reembed.py` `recipe_text`, title + `"\n\n"` + description + `"\n\n"` + tags joined by `", "`, the same shape for every video (empty fields stay empty blocks) |
+  | Embeddings, B6 recipe | `EMBED_MODEL`, stored as `model_version = "google/gemini-embedding-2-preview\|tdt-v1"` | `scripts/reembed.py` → `app/reembed.py` `reembed_channel`, one-off, run for Marathi 2026-10-07/08 | input: `app/reembed.py` `recipe_text`, title + `"\n\n"` + description + `"\n\n"` + tags joined by `", "`, the same shape for every video (empty fields stay empty blocks) |
 
   Verbatim short prompts:
   ```
@@ -766,43 +771,24 @@ the real run re-embeds then calibrates each channel), `scripts/create_reporting_
 ## 7. Delta vs the specs
 
 Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2" is the design as amended by
-§0.6 (P1–P7); "Part 3" is Phase B, the Part marked ready to build.
+§0.6 (P1–P7); "Part 3" is Phase B (done 2026-10-13); "Part 4" is Slice 1, the Part marked ready to build.
 
 ### 7.1 Spec'd but not built
 
-**Phase B (Part 3)**
-- **B1 traffic-source ingestion: office acceptance.** Both halves are built (§2, §4: `traffic_poll`,
-  `video_traffic_source_daily`, `playlist_traffic_daily`) and not deployed. The office acceptance (Marathi rows
-  from the backfill to the frontier minus 2 days, `traffic_poll` `success`) is B9a. The aggregated rows-per-day
-  figure for the findings doc and the retention decision wait for a week of data.
-- **B2 `interventions` + holdout: office acceptance.** Built (§2, §3, §5) and not deployed; the acceptance is
-  applying `20261006020000` on the office machine (B9). Its only writer is the B3 human ledger.
-- **B3 human-edit ledger: office acceptance.** Both halves built (§2, §4, §5: `app/human_edits.py`; B3a description
-  links, B3b playlist memberships) and not deployed; the office acceptance is applying `20261006030000` (after
-  `20261006020000`) and, after a week, at least one `human` intervention (B9, exit gate). B3b adds no migration.
-  *Scope of B3b:* the walk runs only inside `playlist_reconcile`, i.e. for the four allowlisted channels
-  (`app/config.py:145-155`; Marathi is in the default). Membership detection for any other channel needs it added
-  to `PLAYLIST_RECONCILE_CHANNELS`. B3a sees an old video's edit only on a full sync, every 3 days
-  (`app/sync.py:520`).
-- **B4 warm filter: office acceptance.** Built (§2 `warm_pool()`, §3, §5 `app/warm.py`) and not deployed; the
-  acceptance is applying `20261006040000` and recording Marathi's pool size in the findings doc (B9b, SQL in §8).
-  Not wired into the tick (Slice 1): the picker is still newest-first with no impressions filter
+**Phase B (Part 3)**: done; the acceptances are recorded in `docs/PHASE_B_FINDINGS.md`. What remains:
+- **B1 retention.** Decided 2026-10-13 (owner): collapse `source_detail` for traffic nothing reads (findings doc,
+  "Retention decision"). Not built: `video_traffic_source_daily` was 4,766 MB / ≈15.0M rows on 2026-10-13.
+- **B3 scope.** The membership walk runs only inside `playlist_reconcile`, i.e. for the allowlisted channels
+  (`app/config.py:145-155`; Marathi is in the default). B3a sees an old video's edit only on a full sync, every
+  3 days (`app/sync.py:520`). As of 2026-10-13 every `human` row is a playlist membership (110); none is a backlink.
+- **B4** is not wired into the tick (Slice 1): the picker is still newest-first with no impressions filter
   (`supabase/migrations/20260904000100_next_audit_candidate_exclude_episodes.sql:37`
   `order by v.published_at desc, v.id`) and excludes in-window audits rather than active interventions (`:35-36`).
-- **B5 `decide()` + `decision_log`: office acceptance.** Built (§2 `decision_log`, §3 `DECIDE_BACKEND`, §5
-  `app/decide.py`, §6) and not deployed; the acceptance is applying `20261006050000` (after `20261006020000`, for the
-  `interventions` FK). Nothing calls `decide()`, so no rows until Slice 1's triage.
-- **B6 scoped re-embed: office acceptance.** Built (§2 `channels.playlist_thresholds`, §5 `app/reembed.py`,
-  `scripts/reembed.py`, §6) and not run. The acceptance (B9b) is applying `20261006060000`, running
-  `scripts/reembed.py --estimate` for Marathi and recording the cost, then the real run, after which every warm
-  Marathi video has a `MODEL_VERSION` vector and the calibration values are recorded. Siblings (P2) wait for a week
-  of B1 data. Nothing reads the new vectors or the stored thresholds: the playlist engine and its RPCs still use
+- **B5:** nothing calls `decide()`, so `decision_log` is empty until Slice 1's triage.
+- **B6:** run for Marathi only; the siblings wait for #55 (nginx body limit; every batch got 413 on Marathi).
+  Nothing reads the new vectors or the stored thresholds: the playlist engine and its RPCs still use
   `EMBED_MODEL` and the global thresholds (§7.3 items 4–5).
-- **B7 missing `default_language`: data half.** The code half is built (§1, §5: `bho`/`raj` display names and
-  → `hi`, `app/transcripts.py:25-36`, `app/youtube_metadata.py:58-64`). The data half is not done: six channels
-  NULL on 2026-10-06 (§1). Owner decision 2026-10-06 (`app/youtube_metadata.py:60-61`): Bhojpuri and Rajasthani get plain `hi`, not
-  `bho`/`raj`, so the new entries stay unused until a channel switches.
-- **B9/B10.** Nothing to deploy; this file is B10's only output so far.
+- **B7:** done; `bho`/`raj` stay unused while Bhojpuri and Rajasthani use plain `hi` (owner, 2026-10-06).
 - **B2's persistence of the A8 registry** ("Persisting it is Phase B work", Part 1 A8): not built; registry is
   in-memory (`app/job_status.py`).
 
@@ -990,8 +976,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   Part 2 §7 says `bool default false` where B2 says `bool not null default false` (built as B2 says), and B4's
   warm filter omits it while §2.1's eligibility requires it (B4 defers it to Slice 1's tick routing). Part 2 §7,
   headed "Data model (Phase B)", also lists the Slice 3 `niche_reference_*` columns.
-- **Re-embed scope.** Part 2 §4: "Embed one consistent input for every video". Part 3 B6: the rollout channel and
-  its siblings only. Part 3 says Part 2 "is corrected in the same change"; it wasn't.
+- **Re-embed scope.** Resolved 2026-10-13: Part 2 §4 now says the rollout channel and its siblings first (B10).
 - **Sibling detection vs ingestion scope.** P2 / Part 2 §2.3 define a sibling by suggested traffic "to, or …
   from" the source channel over 28 days of `video_traffic_source_daily`. B1 ingests only
   `TRAFFIC_INGEST_CHANNELS` (default: Marathi), so traffic from Marathi into other channels is never ingested, and
@@ -1039,7 +1024,17 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 
 ## 8. Operational reality
 
-The live DB is unreachable from here. Every figure is from `docs/PHASE_A_FINDINGS.md`, labelled.
+The live DB is unreachable from here. Every figure is from `docs/PHASE_A_FINDINGS.md` or
+`docs/PHASE_B_FINDINGS.md`, labelled.
+
+- **Phase B, 2026-10-13** (`docs/PHASE_B_FINDINGS.md`): every registered job `success`. Warm pool (B4, Marathi)
+  531, floor 500, top 7,303,586. `video_traffic_source_daily` 4,766 MB / ≈14,969,306 rows; `playlist_traffic_daily`
+  12 MB / ≈30,460 rows. Traffic frontiers: Marathi 2026-10-11 (43 data-days both feeds, no gaps from 08-30);
+  Hindi, Bhojpuri, English, Gujarati 2026-10-10/11 (35–36). `human` interventions 110, all `playlist`.
+  Marathi thresholds (B6, 2026-10-08): `join_high 0.9014`, `join_low 0.8454`, `leave 0.8703` (5,176 sims, 82
+  playlists). Office disk: C 94.3 GB free, D 59.2 GB free.
+- **2026-10-08 auth incident** (findings doc, "Fix #56"): stored `token_expiry` was July on 12 of 13 channels;
+  `video_sync` failed for 6 channels with `HttpError 401 Invalid Credentials` until #56.
 
 - **Outcome volume** (A7 query 2, 2026-10-06; applied/reverted audits): `awaiting_window` 575 · `neutral` 652 ·
   `not_applicable/dormant` 4,254 · `not_applicable/other` 2,461 · `regression` 106 · `win` 64. Judged (822):
