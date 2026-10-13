@@ -37,9 +37,11 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import time
 from datetime import date, datetime
 from typing import NamedTuple
 
+import google.auth.exceptions
 import httpx
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
@@ -329,27 +331,65 @@ def list_reports(handle: ReportingHandle, channel_id: str, job_id: str) -> list[
     return reports
 
 
+# Connection-level failures worth another try: the same kinds app/db.py retries
+# for PostgREST, plus google-auth's wrapper for a refresh that hit one
+# (`('Connection aborted.', RemoteDisconnected(...))`, 2026-10-08). An HTTP
+# answer (403, 404, 500) is not one of these and fails at once.
+_DOWNLOAD_TRANSIENT = (
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    google.auth.exceptions.TransportError,
+)
+DOWNLOAD_ATTEMPTS = 3
+#: Pause before retry n (1-based): 1 s, then 2 s.
+DOWNLOAD_BACKOFF_SECONDS = (1.0, 2.0)
+
+
 def download_report_csv(handle: ReportingHandle, channel_id: str, download_url: str) -> str:
     """Fetch a report's CSV body (raw httpx + bearer token, per probe).
 
-    Discovery-service calls auto-refresh through google-auth, but this raw
-    download uses the bearer token directly — on a long backfill run the
-    ~1h access token can lapse between list and download (observed live on
-    the 2026-07-02 first backfill run: 10/49 downloads 401'd mid-run). The
-    creds carry their expiry now (`youtube_client.channel_credentials`), but
-    the 401 is still the signal for a token that lapsed mid-run: refresh and
-    retry once.
+    Two separate recoveries, counted apart so neither uses up the other:
+
+    * **A dropped connection** (`_DOWNLOAD_TRANSIENT`, on the download or on the
+      token refresh) is retried up to DOWNLOAD_ATTEMPTS times in all, with a
+      short pause. Seen every few days on the office machine ("Server
+      disconnected without sending a response."); without a retry the data-day
+      waited a day and the run was `degraded` (#57).
+    * **A 401** refreshes the token once and tries again: the ~1h access token
+      can lapse between list and download (observed live on the 2026-07-02 first
+      backfill run: 10/49 downloads 401'd mid-run). The creds carry their expiry
+      (`youtube_client.channel_credentials`), but the 401 is still the signal for
+      a token that lapsed mid-run. A second 401 fails.
+
+    One quota row per call, whatever the attempts.
     """
     success = False
+    refreshed = False
+    transient_left = DOWNLOAD_ATTEMPTS - 1
     try:
-        for attempt in (1, 2):
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.get(
-                    download_url,
-                    headers={"Authorization": f"Bearer {handle.creds.token}"},
-                )
-            if resp.status_code == 401 and attempt == 1:
-                handle.creds.refresh(GoogleRequest())
+        while True:
+            try:
+                with httpx.Client(timeout=60.0) as client:
+                    resp = client.get(
+                        download_url,
+                        headers={"Authorization": f"Bearer {handle.creds.token}"},
+                    )
+                if resp.status_code == 401 and not refreshed:
+                    # Marked only once it worked: a refresh that hit a dropped
+                    # connection is retried as a blip, and may refresh again.
+                    handle.creds.refresh(GoogleRequest())
+                    refreshed = True
+                    continue
+            except _DOWNLOAD_TRANSIENT as e:
+                if transient_left == 0:
+                    raise
+                attempt = DOWNLOAD_ATTEMPTS - transient_left
+                log.warning("report download for %s failed (%s: %s), attempt %d/%d; retrying",
+                            channel_id, type(e).__name__, e, attempt, DOWNLOAD_ATTEMPTS)
+                _sleep(DOWNLOAD_BACKOFF_SECONDS[min(attempt, len(DOWNLOAD_BACKOFF_SECONDS)) - 1])
+                transient_left -= 1
                 continue
             break
         resp.raise_for_status()
@@ -357,6 +397,11 @@ def download_report_csv(handle: ReportingHandle, channel_id: str, download_url: 
         return resp.text
     finally:
         _log_quota(channel_id, "youtubeReporting.media.download", success)
+
+
+def _sleep(seconds: float) -> None:
+    """The retry pause; patched out in tests."""
+    time.sleep(seconds)
 
 
 def report_data_date(report: dict) -> date:
