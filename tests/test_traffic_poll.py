@@ -38,6 +38,22 @@ def _csv(*rows):
     return HEADER + "".join(rows)
 
 
+_REAL_OUR_VIDEO_IDS = tp._our_video_ids
+
+
+class _EveryVideo:
+    """`our_videos` that counts every id as ours, so the retention rule keeps
+    every detail: the tests that predate it check aggregation, not retention."""
+    def __contains__(self, _id):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _every_video_is_ours():
+    with patch.object(tp, "_our_video_ids", return_value=_EveryVideo()) as m:
+        yield m
+
+
 def _report(rid, day="2026-09-29", created="2026-10-01T10:00:00Z"):
     return {"id": rid, "startTime": f"{day}T07:00:00Z", "createTime": created,
             "downloadUrl": f"https://x/{rid}"}
@@ -243,7 +259,7 @@ def test_dry_run_with_no_job_skips_the_channel():
 # ── the run: health semantics ─────────────────────────────────────────────
 
 def _run(channel_counts):
-    def poll(cid):
+    def poll(cid, _ours=None):
         c = channel_counts[cid]
         if isinstance(c, Exception):
             raise c
@@ -272,7 +288,7 @@ def test_every_report_failing_fails_the_channel_and_the_run():
 def test_a_channel_crash_fails_the_run_after_polling_the_rest():
     ran = []
 
-    def poll(cid):
+    def poll(cid, _ours=None):
         ran.append(cid)
         if cid == "bad":
             raise RuntimeError("reports.list 500")
@@ -617,3 +633,85 @@ def test_the_newest_restatement_wins_even_when_create_times_differ_in_precision(
 def test_the_playlist_header_error_names_the_report_type_to_reprobe():
     with pytest.raises(ValueError, match="--report-type playlist_traffic_source_a2"):
         rc.parse_playlist_traffic_csv("date\n")
+
+
+# ── retention: collapse the detail nothing reads (owner, 2026-10-13) ──────
+
+OURS = {"ourA", "ourB", "q2kEmaYSaGY"}
+
+
+@pytest.mark.parametrize("stype, detail, kept", [
+    (7, "ourA", True),            # suggested from one of our videos: the backlink signal
+    (7, "theirs", False),         # suggested from someone else's video
+    (14, "PLdOc4aI4TeAo", True),  # one of our channel playlists
+    (14, "RDq2kEmaYSaGY", True),  # a Mix seeded from our video q2kEmaYSaGY
+    (14, "RDtheirs", False),      # a Mix seeded from someone else's video
+    (14, "RDAMVMHY7LepEngtg", False),
+    (3, "anything", True),        # every other type keeps its detail
+    (5, "search term", True),
+    (32, "theirs", True),
+    (7, "", True),
+])
+def test_keeps_detail(stype, detail, kept):
+    assert tp.keeps_detail(stype, detail, OURS) is kept
+
+
+def test_collapse_folds_unread_detail_into_one_blank_row_and_keeps_totals():
+    rows = [
+        {"video_id": "v1", "date": "2026-10-10", "source_type": 7, "source_detail": "ourA",
+         "views": 5, "engaged_views": 4, "watch_time_minutes": 2.0},
+        {"video_id": "v1", "date": "2026-10-10", "source_type": 7, "source_detail": "x1",
+         "views": 3, "engaged_views": 2, "watch_time_minutes": 1.5},
+        {"video_id": "v1", "date": "2026-10-10", "source_type": 7, "source_detail": "x2",
+         "views": 2, "engaged_views": 1, "watch_time_minutes": 0.5},
+        # a blank-detail row of the same type already in the report joins the bucket
+        {"video_id": "v1", "date": "2026-10-10", "source_type": 7, "source_detail": "",
+         "views": 1, "engaged_views": 1, "watch_time_minutes": 0.25},
+        {"video_id": "v1", "date": "2026-10-10", "source_type": 14, "source_detail": "RDx1",
+         "views": 7, "engaged_views": 6, "watch_time_minutes": 3.0},
+    ]
+    out = {(r["source_type"], r["source_detail"]): r for r in tp.collapse_unread_detail(rows, OURS)}
+    assert set(out) == {(7, "ourA"), (7, ""), (14, "")}
+    assert (out[(7, "")]["views"], out[(7, "")]["engaged_views"], out[(7, "")]["watch_time_minutes"]) == (6, 4, 2.25)
+    assert out[(14, "")]["views"] == 7
+    for m in ("views", "engaged_views", "watch_time_minutes"):
+        assert sum(r[m] for r in out.values()) == sum(r[m] for r in rows)
+
+
+def test_the_video_feed_lands_collapsed_rows(_every_video_is_ours):
+    _every_video_is_ours.return_value = OURS
+    sb = _sb()
+    counts = _poll(sb, [_report("r1")], {"r1": _csv(
+        _row("v1", 7, "ourA", 2, 1, 1.0),
+        _row("v1", 7, "theirs1", 3, 1, 1.0),
+        _row("v1", 7, "theirs2", 4, 2, 2.0, country="US"),
+    )})["video"]
+    assert counts["rows_ingested"] == 2
+    got = {(r["source_detail"], r["views"]) for r in sb.rows("video_traffic_source_daily")}
+    assert got == {("ourA", 2), ("", 7)}
+    (ledger,) = sb.rows("reporting_reports_ingested")
+    assert ledger["row_count"] == 2
+
+
+def test_the_playlist_feed_is_not_collapsed(_every_video_is_ours):
+    _every_video_is_ours.return_value = set()
+    sb = _sb()
+    _poll(sb, [], {"p1": _pl_csv(_pl_row("PL1", "v1", 7, "theirs", 2, 1.0, 1))},
+          playlist_reports=[_report("p1", day="2026-09-28")])
+    (row,) = sb.rows("playlist_traffic_daily")
+    assert row["source_detail"] == "theirs"
+
+
+def test_poll_traffic_reads_our_videos_once_per_run(_every_video_is_ours):
+    seen = []
+    with patch.object(tp.eligibility, "channels_for", return_value=[{"id": "a"}, {"id": "b"}]), \
+         patch.object(tp, "_poll_channel", side_effect=lambda cid, ours: seen.append(ours) or {}):
+        tp.poll_traffic()
+    assert _every_video_is_ours.call_count == 1
+    assert len(seen) == 2 and seen[0] is seen[1]
+
+
+def test_our_videos_are_every_video_id_on_every_channel():
+    sb = FakeSupabase({"videos": [{"id": "a", "channel_id": "c1"}, {"id": "b", "channel_id": "c2"}]})
+    with patch.object(tp, "supabase", return_value=sb):
+        assert _REAL_OUR_VIDEO_IDS() == {"a", "b"}
