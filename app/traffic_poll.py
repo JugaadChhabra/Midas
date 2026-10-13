@@ -33,6 +33,12 @@ channel has been polled; per-report errors are judged by
 job_status.item_error_verdict, per feed; TokenExpiredError skips the channel.
 The feeds are isolated from each other: one feed's crash (its job or listing
 failing) is recorded and fails the channel, but the other feed still runs.
+
+Retention (owner, 2026-10-13; docs/PHASE_B_FINDINGS.md): the video feed keeps
+`source_detail` only where something reads it, and folds the rest into the
+(video, day, type) row with a blank detail, so per-type totals stay exact. See
+`keeps_detail`. scripts/collapse_traffic_detail.sql applies the same rule to
+rows ingested before it.
 """
 
 from __future__ import annotations
@@ -42,6 +48,8 @@ from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
 from app import eligibility, job_status
+from app.db import supabase
+from app.rows import all_rows
 from app.analytics_client import AnalyticsNotAuthorizedError
 from app.reporting_client import (
     PLAYLIST_TRAFFIC_REPORT_TYPE_ID,
@@ -69,15 +77,60 @@ class _Feed(NamedTuple):
     parse: Callable[[str], list[dict]]
     table: str
     on_conflict: str
+    collapse: bool = False
 
 
 _FEEDS = (
     _Feed("video", TRAFFIC_REPORT_TYPE_ID, ensure_traffic_job, parse_traffic_csv,
-          "video_traffic_source_daily", "video_id,date,source_type,source_detail"),
+          "video_traffic_source_daily", "video_id,date,source_type,source_detail", collapse=True),
     _Feed("playlist", PLAYLIST_TRAFFIC_REPORT_TYPE_ID, ensure_playlist_traffic_job,
           parse_playlist_traffic_csv, "playlist_traffic_daily",
           "playlist_id,video_id,date,source_type,source_detail"),
 )
+
+
+_SUGGESTED = 7
+_PLAYLISTS = 14
+_METRICS = ("views", "engaged_views", "watch_time_minutes")
+
+
+def keeps_detail(source_type: int, detail: str, our_videos) -> bool:
+    """Whether a row's `source_detail` is kept rather than folded into the blank bucket.
+
+    Suggested (7): only when the referring video is ours, on any channel. That is
+    the backlink and sibling signal (Slice 1); the rest is other people's videos,
+    ≈90% of a day's rows. Playlists (14): our channel playlists (`PL…`) and the
+    Mixes seeded from one of our videos (`RD<videoId>`, A1.1); other Mixes are
+    YouTube's. Every other type keeps its detail: those rows are few.
+    """
+    if not detail:
+        return True
+    if source_type == _SUGGESTED:
+        return detail in our_videos
+    if source_type == _PLAYLISTS:
+        return detail.startswith("PL") or (detail.startswith("RD") and detail[2:] in our_videos)
+    return True
+
+
+def collapse_unread_detail(rows: list[dict], our_videos) -> list[dict]:
+    """Fold the detail `keeps_detail` drops into one blank-detail row per
+    (video, day, type), summing the metrics, so per-type totals are unchanged."""
+    out: dict[tuple, dict] = {}
+    for r in rows:
+        detail = r["source_detail"] if keeps_detail(r["source_type"], r["source_detail"], our_videos) else ""
+        key = (r["video_id"], r["date"], r["source_type"], detail)
+        acc = out.get(key)
+        if acc is None:
+            out[key] = {**r, "source_detail": detail}
+        else:
+            for m in _METRICS:
+                acc[m] += r[m]
+    return list(out.values())
+
+
+def _our_video_ids() -> set[str]:
+    """Every video id in `videos`, all channels: what counts as "ours"."""
+    return {r["id"] for r in all_rows(supabase().table("videos").select("id"))}
 
 
 def _created(report: dict) -> datetime:
@@ -96,10 +149,13 @@ def _newest_per_day(reports: list[dict]) -> list[dict]:
     return [newest[d] for d in sorted(newest)]
 
 
-def _ingest_report(handle, channel_id: str, feed: _Feed, job_id: str, report: dict) -> int:
+def _ingest_report(handle, channel_id: str, feed: _Feed, job_id: str, report: dict,
+                   our_videos) -> int:
     """Download, aggregate and land one report. Returns rows written."""
     data_date = report_data_date(report).isoformat()
     rows = feed.parse(download_report_csv(handle, channel_id, report["downloadUrl"]))
+    if feed.collapse:
+        rows = collapse_unread_detail(rows, our_videos)
     now_iso = datetime.now(timezone.utc).isoformat()
     payload = [
         {
@@ -120,7 +176,7 @@ def _ingest_report(handle, channel_id: str, feed: _Feed, job_id: str, report: di
     return len(payload)
 
 
-def _poll_feed(handle, channel_id: str, feed: _Feed, seen: set[str]) -> dict:
+def _poll_feed(handle, channel_id: str, feed: _Feed, seen: set[str], our_videos) -> dict:
     job_id = feed.ensure_job(handle, channel_id)
     if job_id is None:
         # DRY_RUN with no existing job — nothing to ingest yet.
@@ -133,7 +189,7 @@ def _poll_feed(handle, channel_id: str, feed: _Feed, seen: set[str]) -> dict:
     reports_err = 0
     for report in new:
         try:
-            rows_ingested += _ingest_report(handle, channel_id, feed, job_id, report)
+            rows_ingested += _ingest_report(handle, channel_id, feed, job_id, report, our_videos)
         except TokenExpiredError:
             raise
         except Exception as e:
@@ -152,15 +208,17 @@ def _poll_feed(handle, channel_id: str, feed: _Feed, seen: set[str]) -> dict:
     }
 
 
-def _poll_channel(channel_id: str) -> dict:
+def _poll_channel(channel_id: str, our_videos=None) -> dict:
     """Both feeds for one channel: {feed key: counts, or {"error": ...} if it crashed}."""
+    if our_videos is None:
+        our_videos = _our_video_ids()
     handle = reporting_for_channel(channel_id)
     # Report ids are unique across report types, so one ledger read serves both.
     seen = ingested_report_ids(channel_id)
     out: dict[str, dict] = {}
     for feed in _FEEDS:
         try:
-            out[feed.key] = _poll_feed(handle, channel_id, feed, seen)
+            out[feed.key] = _poll_feed(handle, channel_id, feed, seen, our_videos)
         except TokenExpiredError:
             raise
         except Exception as e:
@@ -179,10 +237,12 @@ def poll_traffic() -> dict | None:
 
     crashed: dict[str, str] = {}
     partial_errors: dict[str, str] = {}
+    # Read once per run, not per channel: ~70k ids across the fleet.
+    our_videos = _our_video_ids()
     for ch in channels:
         cid = ch["id"]
         try:
-            c = _poll_channel(cid) or {}
+            c = _poll_channel(cid, our_videos) or {}
             log.info("traffic_poll %s: %s", cid, c)
             failures = [f"{key}: {f['error']}" for key, f in c.items() if "error" in f]
             failure, partial = job_status.item_error_verdict({
