@@ -253,6 +253,10 @@ class Settings:
     # Spec Part 2 §2.2, §8: below this many backlink candidates, the triage
     # rules say `no_change` (app/decide.py TRIAGE).
     BACKLINK_MIN_CANDIDATES = int(os.getenv("BACKLINK_MIN_CANDIDATES") or "2")
+    # Slice 1 · S1.2 (spec Part 4 Config, Part 2 §8): the most targets one
+    # canonical backlink block links to (app/backlinks.py render refuses more).
+    # Start conservative: spam/ToS risk.
+    BACKLINK_MAX = int(os.getenv("BACKLINK_MAX") or "3")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).
