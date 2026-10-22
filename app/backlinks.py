@@ -304,8 +304,7 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> C
         if vector is None:
             skipped += 1
             continue
-        # To the stored thresholds' precision (reembed.calibrate_channel).
-        similarity = round(_cosine_sim(source_vector, vector), 4)
+        similarity = _cosine_sim(source_vector, vector)
         if similarity >= thresholds["join_low"]:
             rows.append({"video_id": v["id"], "channel_id": v["channel_id"],
                          "title": v.get("title"), "similarity": similarity,

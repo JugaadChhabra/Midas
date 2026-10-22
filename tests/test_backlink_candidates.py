@@ -7,10 +7,13 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from app import backlinks
 from app.openrouter import EMBED_MODEL
 from app.reembed import MODEL_VERSION
-from tests.fakes import FakeSupabase
+from app.rows import PAGE_SIZE
+from tests.fakes import FakeQuery, FakeSupabase
 
 FRONTIER = date(2026, 10, 20)
 SRC_CH, SIB, OTHER = "c1", "c2", "c3"
@@ -93,6 +96,22 @@ def wired(sb, ingest=(SRC_CH, SIB, OTHER), **settings):
         yield
 
 
+@contextmanager
+def postgrest_cap():
+    """Truncate every read at PAGE_SIZE rows, as PostgREST does: the double
+    doesn't, so without this a >1000-row test passes on an unpaged read."""
+    execute = FakeQuery.execute
+
+    def capped(self):
+        result = execute(self)
+        if self._write is None and isinstance(result.data, list):
+            result.data = result.data[:PAGE_SIZE]
+        return result
+
+    with patch.object(FakeQuery, "execute", capped):
+        yield
+
+
 # ── siblings ──────────────────────────────────────────────────────────────
 
 TRAFFIC_28 = ledger(SRC_CH, TRAFFIC, [day(n) for n in range(28)])
@@ -160,7 +179,8 @@ def test_no_ingested_traffic_days_means_no_siblings():
 def test_siblings_reads_past_the_1000_row_cap():
     sb = fake(traffic_ledger=TRAFFIC_28, videos=OUR_VIDEOS, traffic=[
         suggested(f"t{i:04d}", "s1", 1, d=day(i % 28)) for i in range(1500)])
-    assert siblings(sb, SIBLING_MIN_VIEWS=1500) == [{"channel_id": SIB, "views": 1500}]
+    with postgrest_cap():
+        assert siblings(sb, SIBLING_MIN_VIEWS=1500) == [{"channel_id": SIB, "views": 1500}]
 
 
 # ── candidates ────────────────────────────────────────────────────────────
@@ -208,7 +228,7 @@ def ids(result):
 def test_a_qualifying_target_comes_back_with_its_row():
     result = candidates(scene(target("a", 0.95, imp=700, title="Song A")))
     assert result.rows == [{"video_id": "a", "channel_id": SRC_CH, "title": "Song A",
-                            "similarity": 0.95, "impressions": 700}]
+                            "similarity": pytest.approx(0.95), "impressions": 700}]
     assert result.reason is None
     assert result.skipped_unembedded == 0
 
@@ -268,8 +288,8 @@ def test_a_target_on_a_channel_with_uncertified_reach_is_not_warm():
 
 
 def test_a_target_below_the_source_channels_join_low_is_excluded():
-    sb = scene(target("at", 0.8), target("below", 0.79))
-    assert ids(candidates(sb)) == ["at"]
+    sb = scene(target("above", 0.8001), target("below", 0.79999))   # join_low 0.8
+    assert ids(candidates(sb)) == ["above"]
 
 
 def test_a_target_in_an_intervention_or_an_episode_is_still_a_target():
@@ -334,4 +354,6 @@ def test_the_source_channels_join_low_applies_to_sibling_targets():
 def test_candidates_read_past_the_1000_row_cap():
     # 1,200 warm, embedded targets; the only similar one sorts last by id.
     many = [target(f"v{i:04d}", 0.5) for i in range(1199)] + [target("v9999", 0.99)]
-    assert ids(candidates(scene(*many))) == ["v9999"]
+    sb = scene(*many)
+    with postgrest_cap():
+        assert ids(candidates(sb)) == ["v9999"]
