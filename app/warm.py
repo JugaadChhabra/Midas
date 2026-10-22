@@ -59,10 +59,18 @@ def _ranked_pool_rpc(channel_id: str) -> list[dict]:
     )
 
 
-def _ranked_pool_inapp(channel_id: str) -> list[dict]:
+def warm_impressions(channel_id: str) -> dict[str, int]:
+    """{video_id: impressions} for the channel's videos at or over
+    WARM_MIN_IMPRESSIONS across its latest WARM_WINDOW_DAYS ingested reach
+    data-days; {} when its reach isn't certified.
+
+    The warmth measure alone, with none of the pool's other filters: S1.1's
+    backlink targets (app/backlinks.py) need a video to be warm, not free of
+    an intervention. A video in `video_reach_daily` but not in `videos` is here.
+    """
     covered = reach.coverage(channel_id)
     if not reach.certify_covered(covered)["certified"]:
-        return []
+        return {}
     window = set(sorted(covered, reverse=True)[:settings.WARM_WINDOW_DAYS])
 
     impressions: dict[str, int] = defaultdict(int)
@@ -75,7 +83,12 @@ def _ranked_pool_inapp(channel_id: str) -> list[dict]:
     ):
         if r["date"] in window:
             impressions[r["video_id"]] += r["impressions"]
-    warm = {vid for vid, n in impressions.items() if n >= settings.WARM_MIN_IMPRESSIONS}
+    return {vid: n for vid, n in impressions.items() if n >= settings.WARM_MIN_IMPRESSIONS}
+
+
+def _ranked_pool_inapp(channel_id: str) -> list[dict]:
+    impressions = warm_impressions(channel_id)
+    warm = set(impressions)
 
     videos = rows_for_ids(
         lambda c: (
