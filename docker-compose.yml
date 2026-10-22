@@ -1,11 +1,4 @@
 services:
-  # ── Postgres (self-hosted; replaces the Supabase-hosted project) ─────────
-  # Egress to a hosted DB was the binding constraint: reading a channel's whole
-  # video table on every dashboard load is correct but unaffordable over the
-  # wire. On localhost it is free, so the app can read what it actually needs.
-  #
-  # pgvector image, not stock postgres: 20260518000000_playlists.sql does
-  # `create extension vector` and video_embeddings is a vector(3072).
   db:
     image: pgvector/pgvector:pg16
     container_name: midas-db
@@ -15,9 +8,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-midas}
     volumes:
       - ./pgdata:/var/lib/postgresql/data
-    # Loopback only, on 55432: reachable from host tooling
-    # (scripts/apply_migrations.py, pg_dump) but not from the network. 5432 is
-    # left alone because this machine already runs a local Postgres on it.
+
     ports:
       - "127.0.0.1:55432:5432"
     restart: unless-stopped
@@ -75,19 +66,9 @@ services:
       PGRST_DB_URI: postgresql://${POSTGRES_USER:-midas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-midas}
       PGRST_DB_SCHEMAS: public
       PGRST_DB_ANON_ROLE: anon
-      # The app's SUPABASE_SERVICE_KEY must be a JWT signed with this secret
-      # carrying {"role":"service_role"} — see scripts/make_service_key.py.
       PGRST_JWT_SECRET: ${PGRST_JWT_SECRET:?set PGRST_JWT_SECRET in .env}
-      # Hosted Supabase caps every response at 1000 rows; that cap is the single
-      # most-repeated bug in this codebase. Self-hosted we could raise it, but
-      # it stays put deliberately: app/rows.py pages correctly either way, and
-      # keeping the cap means local and any future hosted deployment behave the
-      # same. Raising it here would let unpaged code work locally and truncate
-      # in production — the exact failure mode we just spent a day removing.
       PGRST_DB_MAX_ROWS: 1000
       PGRST_DB_POOL: 12
-    # Loopback only. Needed when running the app on the host (outside compose);
-    # in-compose the midas service reaches it as http://postgrest:3000.
     ports:
       - "127.0.0.1:3000:3000"
     restart: unless-stopped
