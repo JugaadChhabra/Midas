@@ -155,6 +155,12 @@ def test_strip_stops_at_the_first_line_that_is_not_a_block_link():
     assert backlinks.strip(d) == "First\nRhyme 2 https://youtu.be/vid00000002?t=30\nRest"
 
 
+def test_a_line_in_block_shape_added_under_the_block_reads_as_the_blocks():
+    """Known limit: only a caller holding the rendered targets can tell them apart."""
+    d = "First\nWatch next:\nRhyme 1 https://youtu.be/vid00000001\nMy pick https://youtu.be/abcdefghijk\n\nRest"
+    assert backlinks.find(d).video_ids == ("vid00000001", "abcdefghijk")
+
+
 def test_a_heading_with_no_links_under_it_is_not_a_block():
     d = "First\nWatch next:\nRest"
     assert backlinks.find(d) is None
@@ -203,10 +209,8 @@ def test_a_malformed_target_is_refused(bad):
 def test_marathi_has_no_heading_yet_and_refuses():
     """D3: the SEO team writes Marathi's heading (owner, 2026-10-23). Adding
     `"mr": "<their text>"` to backlinks.HEADINGS flips this test."""
-    assert "mr" not in backlinks.HEADINGS
-    with patch.dict(backlinks.HEADINGS, {}, clear=True):
-        with pytest.raises(backlinks.RenderRefused, match="'mr'"):
-            backlinks.render("First", TARGETS, "mr")
+    with pytest.raises(backlinks.RenderRefused, match="'mr'"):
+        backlinks.render("First", TARGETS, "mr")
 
 
 @pytest.mark.parametrize("lang", [None, "", "en", "zz"])

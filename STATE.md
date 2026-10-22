@@ -981,7 +981,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    that a human's own link line in that shape, sitting under the first line before the render, isn't absorbed into the
    block by `strip`; more than `BACKLINK_MAX` targets is refused, not trimmed (S1.1's caller keeps the top
    `BACKLINK_MAX`); `#` is removed from target titles, so the block never adds a hashtag; an empty description
-   becomes the block alone. The 5,000 limit is checked in characters (`len`, as `rejection()`), not UTF-8 bytes.
+   becomes the block alone. A line in the block's shape that a human adds directly under the block is read as part
+   of it (`tests/test_backlinks.py`); S1.3 can tell by comparing `find`'s ids with the intervention's targets. The 5,000 limit is checked in characters (`len`, as `rejection()`, `app/audit_suggestion.py`), not UTF-8 bytes.
 
 ### 7.4 Contradictions within the spec
 

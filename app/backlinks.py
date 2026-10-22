@@ -18,8 +18,10 @@ its exact heading line and the `youtu.be` lines under it, nothing looser. A
 blank line separates the block from the text after it, so a human's link line
 that used to sit under the first line isn't read as one of the block's.
 
-These are pure functions: no database, no YouTube. The block holds no
-model-written text.
+The block functions are pure: no database, no YouTube. The block holds no
+model-written text. `find` can't tell a human's line in the block's shape added
+directly under the block from one of its own; a caller that knows the targets
+it rendered (the intervention's payload) compares them with `find`'s.
 """
 from __future__ import annotations
 
@@ -35,9 +37,10 @@ from app.config import settings
 # missing here makes `render` refuse; there is no English fallback.
 HEADINGS: dict[str, str] = {}
 
-_VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
+_VIDEO_ID = r"[A-Za-z0-9_-]{11}"
+_VIDEO_ID_RE = re.compile(_VIDEO_ID)
 # One block line: a non-empty title, one space, a youtu.be link, nothing after.
-_LINK_LINE_RE = re.compile(r"\S(?:.*\S)? https://youtu\.be/([A-Za-z0-9_-]{11})")
+_LINK_LINE_RE = re.compile(rf"\S(?:.*\S)? https://youtu\.be/({_VIDEO_ID})")
 
 
 class RenderRefused(ValueError):
