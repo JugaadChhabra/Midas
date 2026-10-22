@@ -1,4 +1,5 @@
-"""Phase B · B4 — warm_pool() (SQL) and app/warm.py (in-app) agree (#35).
+"""Phase B · B4 — warm_pool() (SQL) and app/warm.py (in-app) agree (#35);
+Slice 1 · S1.4a adds the cooldown and once-per-experiment exclusions (#63).
 
 The existing RPCs prove parity only live (test_autopilot_picker_parity_live.py),
 which skips without credentials. This one runs the migration's function on a
@@ -7,7 +8,8 @@ the in-app twin on FakeSupabase, over the same rows, and compares. It touches
 no real database. Skips if no Postgres server binaries are on PATH.
 
 The tables are the subset of columns warm_pool() reads, typed as in the
-migrations that create them.
+migrations that create them. Both warm_pool() migrations run in order, so the
+replacement's drop of the four-argument function is exercised too.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ import random
 import shutil
 import subprocess
 import tempfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,7 +32,8 @@ psycopg = pytest.importorskip("psycopg")
 pytestmark = pytest.mark.needs_socket
 
 REPO = Path(__file__).resolve().parents[1]
-MIGRATION = REPO / "supabase/migrations/20261006040000_warm_pool_rpc.sql"
+MIGRATIONS = [REPO / "supabase/migrations/20261006040000_warm_pool_rpc.sql",
+              REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"]
 
 SCHEMA = """
 create role service_role;
@@ -49,7 +52,8 @@ create table video_reach_daily (
 );
 create table interventions (
     id bigserial primary key, video_id text not null references videos(id),
-    channel_id text not null, origin text not null, status text not null
+    channel_id text not null, lever text not null, origin text not null,
+    arm text not null, status text not null, created_at timestamptz default now()
 );
 """
 
@@ -58,6 +62,18 @@ FRONTIER = date(2026, 10, 4)
 
 def day(n: int) -> str:
     return (FRONTIER - timedelta(days=n)).isoformat()
+
+
+def ago(days: float) -> str:
+    """A created_at `days` before now: SQL's now() and the app's clock agree to
+    well under the gaps the ages below leave around TRIAGE_COOLDOWN_DAYS (7)."""
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def intervention(video_id, *, lever="title", origin="midas", arm="treated",
+                 status="judged", age_days=365, channel="c1"):
+    return {"video_id": video_id, "channel_id": channel, "lever": lever, "origin": origin,
+            "arm": arm, "status": status, "created_at": ago(age_days)}
 
 
 @pytest.fixture(scope="module")
@@ -81,7 +97,8 @@ def pg():
         with psycopg.connect(host=str(root), user="postgres", dbname="postgres",
                              autocommit=True) as conn:
             conn.execute(SCHEMA)
-            conn.execute(MIGRATION.read_text())
+            for migration in MIGRATIONS:
+                conn.execute(migration.read_text())
             yield conn
     finally:
         subprocess.run([pg_ctl, "-D", str(data), "-m", "immediate", "stop"],
@@ -106,9 +123,9 @@ def _load(conn, tables: dict[str, list[dict]]) -> None:
 
 def _sql_pool(conn, channel_id: str) -> list[dict]:
     p = warm._rpc_params(channel_id)
-    cur = conn.execute("select id, impressions from warm_pool(%s, %s, %s, %s)",
+    cur = conn.execute("select id, impressions from warm_pool(%s, %s, %s, %s, %s)",
                        [p["p_channel_id"], p["p_min_impressions"], p["p_window_days"],
-                        p["p_measurement_window_days"]])
+                        p["p_measurement_window_days"], p["p_cooldown_days"]])
     return [{"id": i, "impressions": n} for i, n in cur.fetchall()]
 
 
@@ -158,14 +175,19 @@ def _random_world(seed: int) -> dict[str, list[dict]]:
                                                   "private", "unlisted"]),
                     "is_episode": rng.choice([None, None, False, True]),
                 })
-                if rng.random() < 0.25:
-                    tables["interventions"].append({
-                        "video_id": vid, "channel_id": ch,
-                        "origin": rng.choice(["midas", "human"]),
-                        "status": rng.choice(["planned", "applied", "measuring", "holdout",
-                                              "judged", "cancelled", "declined",
-                                              "insufficient_data"]),
-                    })
+                # Interventions of every lever, origin, arm, status and age, up
+                # to three per video; ages stay clear of the 7-day cooldown edge.
+                for _ in range(rng.choice([0, 0, 0, 1, 1, 2, 3])):
+                    tables["interventions"].append(intervention(
+                        vid, channel=ch,
+                        lever=rng.choice(["backlinks", "playlist", "short_link", "title"]),
+                        origin=rng.choice(["midas", "human"]),
+                        arm=rng.choice(["treated", "holdout", "n/a"]),
+                        status=rng.choice(["planned", "applied", "measuring", "holdout",
+                                           "judged", "cancelled", "declined",
+                                           "insufficient_data"]),
+                        age_days=rng.choice([0.1, 1, 3, 6.5, 7.5, 8, 30, 400]),
+                    ))
             for n in rng.sample(range(60), rng.randrange(0, 12)):
                 if n in covered:                          # rows only land with a report
                     tables["video_reach_daily"].append({
@@ -182,9 +204,18 @@ def _random_world(seed: int) -> dict[str, list[dict]]:
 
 @pytest.mark.parametrize("seed", range(8))
 def test_sql_and_python_agree_on_random_worlds(pg, seed):
-    pools = _assert_parity(pg, _random_world(seed))
+    tables = _random_world(seed)
+    pools = _assert_parity(pg, tables)
     assert pools["c1"], "a certified channel with no warm video proves little"
     assert bool(pools["c2"]) is (seed % 2 == 0)
+    # Every world has closed Midas rows that only S1.4a's rules count: recent
+    # ones, and backlinks rows of either arm, old ones included.
+    closed = [i for i in tables["interventions"] if i["origin"] == "midas"
+              and i["status"] not in ("planned", "applied", "measuring", "holdout")]
+    recent = datetime.now(timezone.utc) - timedelta(days=7)
+    assert any(datetime.fromisoformat(i["created_at"]) > recent for i in closed)
+    assert any(i["lever"] == "backlinks" and i["arm"] != "n/a"
+               and datetime.fromisoformat(i["created_at"]) < recent for i in closed)
 
 
 def test_sql_and_python_agree_on_an_ingested_window_with_a_hole(pg):
@@ -218,3 +249,52 @@ def test_sql_and_python_agree_that_an_uncertified_channel_is_empty(pg):
         "interventions": [],
     }
     assert _assert_parity(pg, tables, channels=("c1",)) == {"c1": []}
+
+
+def _cooldown_and_experiment_world() -> dict[str, list[dict]]:
+    ids = ["declined_recent", "holdout_recent", "planned_recent", "declined_old",
+           "backlinks_treated_old", "backlinks_holdout_old", "backlinks_human",
+           "playlist_old", "free"]
+    return {
+        "videos": [{"id": v, "channel_id": "c1", "privacy_status": "public", "is_episode": None}
+                   for v in ids],
+        "reporting_reports_ingested": [
+            {"report_id": f"r{n}", "channel_id": "c1", "data_date": day(n),
+             "report_type": "channel_reach_basic_a1"} for n in range(28)],
+        "video_reach_daily": [
+            {"id": i, "video_id": v, "channel_id": "c1", "date": day(0),
+             "impressions": 1000 + i, "ctr": 0.05} for i, v in enumerate(ids, 1)],
+        "interventions": [
+            {"id": i, **row} for i, row in enumerate([
+                intervention("declined_recent", status="declined", age_days=1),
+                intervention("holdout_recent", lever="title", arm="holdout", status="holdout",
+                             age_days=1),
+                intervention("planned_recent", status="planned", age_days=1),
+                intervention("declined_old", status="declined", age_days=8),
+                intervention("backlinks_treated_old", lever="backlinks", status="judged",
+                             age_days=400),
+                intervention("backlinks_holdout_old", lever="backlinks", arm="holdout",
+                             status="judged", age_days=400),
+                intervention("backlinks_human", lever="backlinks", origin="human", arm="n/a",
+                             status="applied", age_days=1),
+                intervention("playlist_old", lever="playlist", status="judged", age_days=400),
+            ], 1)
+        ],
+    }
+
+
+def test_sql_and_python_agree_on_the_cooldown_and_once_per_experiment(pg):
+    """Part 4 S1.4 "Pick": recent Midas rows of any status and Midas backlinks
+    rows of either arm, at any age, exclude; human rows and old ones don't."""
+    pools = _assert_parity(pg, _cooldown_and_experiment_world(), channels=("c1",))
+    assert sorted(r["id"] for r in pools["c1"]) == [
+        "backlinks_human", "declined_old", "free", "playlist_old"]
+
+
+def test_the_old_four_argument_function_is_gone(pg):
+    """Replaced, not overloaded: PostgREST can't pick between overloads."""
+    cur = pg.execute("select pg_get_function_identity_arguments(oid) from pg_proc "
+                     "where proname = 'warm_pool'")
+    assert [r[0] for r in cur.fetchall()] == [
+        "p_channel_id text, p_min_impressions bigint, p_window_days integer, "
+        "p_measurement_window_days integer, p_cooldown_days integer"]

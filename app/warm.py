@@ -8,7 +8,14 @@ A channel's eligible ("warm") pool for Slice 1's pick:
 
 Warm means: public, not an episode, on a channel whose reach is certified
 (`reach.certify`), with >= WARM_MIN_IMPRESSIONS over the channel's latest
-WARM_WINDOW_DAYS *ingested* reach data-days, and no active Midas intervention.
+WARM_WINDOW_DAYS *ingested* reach data-days, and not held by a Midas intervention.
+
+Held (S1.4a, spec Part 4 S1.4 "Pick", finding 2), by any Midas row that is:
+  - active (status_vocab.ACTIVE_INTERVENTION_STATUSES), as B4;
+  - created within TRIAGE_COOLDOWN_DAYS, whatever its lever or status: a
+    `no_change` is `declined`, not active, and would be offered again next tick;
+  - a `backlinks` row of either arm (treated or holdout), at any age: each video
+    is in the backlinks experiment once.
 
 Ingested, not calendar: the window is the latest WARM_WINDOW_DAYS days the
 reach ledger has a report for (`reach.coverage`), so a gap in ingestion
@@ -19,7 +26,7 @@ A `human` row records an edit and never closes, so counting it would bar every
 video the team has ever touched.
 
 The ranking runs in-app or in Postgres (`warm_pool()`, migration
-20261006040000) behind WARM_POOL_USE_RPC, as next_audit_candidate does; the
+20261023000000) behind WARM_POOL_USE_RPC, as next_audit_candidate does; the
 two are held together by tests/test_warm_pool_parity.py. The explore share is
 drawn here, over either, with an injectable `random.Random`.
 
@@ -31,12 +38,18 @@ from __future__ import annotations
 import logging
 import random
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from app import reach
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
-from app.status_vocab import ACTIVE_INTERVENTION_STATUSES, InterventionOrigin
+from app.status_vocab import (
+    ACTIVE_INTERVENTION_STATUSES,
+    InterventionArm,
+    InterventionLever,
+    InterventionOrigin,
+)
 
 log = logging.getLogger("midas.warm")
 
@@ -48,7 +61,23 @@ def _rpc_params(channel_id: str) -> dict:
         "p_window_days": settings.WARM_WINDOW_DAYS,
         # certify's window, for the SQL twin of reach.certify_covered.
         "p_measurement_window_days": reach.window_length(),
+        "p_cooldown_days": settings.TRIAGE_COOLDOWN_DAYS,
     }
+
+
+#: The backlinks experiment's arms; a Midas row in either puts a video in it for good.
+_EXPERIMENT_ARMS = frozenset({InterventionArm.TREATED, InterventionArm.HOLDOUT})
+
+
+def _holds(row: dict, cooldown_start: datetime) -> bool:
+    """Whether a Midas intervention row keeps its video out of the pool."""
+    if row["status"] in ACTIVE_INTERVENTION_STATUSES:
+        return True
+    if row["lever"] == InterventionLever.BACKLINKS and row["arm"] in _EXPERIMENT_ARMS:
+        return True
+    created = row.get("created_at")
+    return created is not None and (
+        datetime.fromisoformat(created.replace("Z", "+00:00")) > cooldown_start)
 
 
 def _ranked_pool_rpc(channel_id: str) -> list[dict]:
@@ -99,17 +128,18 @@ def _ranked_pool_inapp(channel_id: str) -> list[dict]:
         ),
         warm,
     )
+    cooldown_start = datetime.now(timezone.utc) - timedelta(days=settings.TRIAGE_COOLDOWN_DAYS)
     held = {
         r["video_id"] for r in rows_for_ids(
             lambda c: (
                 supabase().table("interventions")
-                .select("video_id")
+                .select("video_id,lever,arm,status,created_at")
                 .eq("origin", InterventionOrigin.MIDAS)
-                .in_("status", sorted(ACTIVE_INTERVENTION_STATUSES))
                 .in_("video_id", c)
             ),
             warm,
         )
+        if _holds(r, cooldown_start)
     }
     pool = [
         {"id": v["id"], "impressions": impressions[v["id"]]}
