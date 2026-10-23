@@ -30,8 +30,8 @@ The ranking runs in-app or in Postgres (`warm_pool()`, migration
 two are held together by tests/test_warm_pool_parity.py. The explore share is
 drawn here, over either, with an injectable `random.Random`.
 
-Not called from the tick in Phase B: Slice 1's tick routing wires it in, and
-checks `channels.agent_enabled` itself.
+The agent tick (app/agent_tick.py, S1.4b) picks from `warm_pool`; the tick
+checks `channels.agent_enabled` itself (`eligibility.can_run_agent`).
 """
 from __future__ import annotations
 

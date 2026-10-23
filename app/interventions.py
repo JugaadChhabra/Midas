@@ -17,7 +17,7 @@ did, whatever Midas is doing. The database enforces the same rule with a
 partial unique index (migration 20261006020000), so two writers can't race
 past the check here.
 
-Nothing in Phase B creates `midas` interventions; they start in Slice 1.
+`midas` interventions are written by Slice 1's agent tick (app/agent_tick.py).
 """
 from __future__ import annotations
 

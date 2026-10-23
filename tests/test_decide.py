@@ -58,6 +58,7 @@ def test_triage_rules():
     assert rules({"has_related_block": True, "backlink_candidates": 9}) == "no_change"
     assert rules({"has_related_block": False, "backlink_candidates": None}) == "no_change"
     assert rules({}) == "no_change"
+    assert rules({**WARM, "backlinks_stopped": True}) == "no_change"     # S1.4: lever stopped
     with patch.object(settings, "BACKLINK_MIN_CANDIDATES", 4):
         assert rules(WARM) == "no_change"
 

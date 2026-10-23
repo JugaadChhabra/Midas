@@ -17,7 +17,8 @@ question, its answers or its rules change. It is hashed into the A6 strategy
 stamp (app/audits.py strategy_version), so a stamp names the questions that
 produced it.
 
-Nothing in Phase B calls decide(); Slice 1's triage does.
+The caller is Slice 1's triage (app/agent_tick.py), which stores the returned
+`log_id` on its intervention and points the log row back with `link`.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ from app.status_vocab import DecisionUsed
 
 log = logging.getLogger(__name__)
 
-QUESTION_SET_VERSION = "2026.10-b5-v1"
+QUESTION_SET_VERSION = "2026.10-s1-v1"
 
 
 @dataclass(frozen=True)
@@ -67,8 +68,11 @@ class NotConfigured(Exception):
 
 def _triage_rules(context: dict) -> str:
     """Spec Part 2 §2.2: backlinks if the description has no related block and
-    at least BACKLINK_MIN_CANDIDATES candidates exist; otherwise no_change."""
-    if (not context.get("has_related_block")
+    at least BACKLINK_MIN_CANDIDATES candidates exist; otherwise no_change.
+    Never backlinks once the lever has stopped for the channel (Part 4 S1.4,
+    the S1.6 stop rule: `backlinks_stopped`)."""
+    if (not context.get("backlinks_stopped")
+            and not context.get("has_related_block")
             and (context.get("backlink_candidates") or 0) >= settings.BACKLINK_MIN_CANDIDATES):
         return "backlinks"
     return "no_change"
