@@ -11,7 +11,9 @@ Slice 3.
 
 Pick: the first of the warm pool (`warm.warm_pool`, with its explore share and
 S1.4a's cooldown and once-per-experiment exclusions). Triage: `decide(TRIAGE,
-…)`, the rules answer used and the backend's logged in shadow. Record, through
+…)`, the rules answer used and the backend's logged in shadow. A video triaged
+to `backlinks` (either arm) also gets `decide(NEXT_WATCH, …)` per candidate
+pair, in shadow (S1.5), stored as `triage_json.next_watch`. Record, through
 `interventions.record` (one active Midas intervention per video):
 
   - `no_change` -> `declined`, arm `n/a`, with the rationale;
@@ -22,8 +24,9 @@ S1.4a's cooldown and once-per-experiment exclusions). Triage: `decide(TRIAGE,
     ApplyOutcome (`apply_disabled` while BACKLINK_APPLY_ENABLED is false), and
     the ApplyError goes on to the tick, which reacts as for an audit apply.
 
-The decision and the intervention point at each other: `triage_json` holds the
-`decision_log_id`, and `decide.link` sets `decision_log.intervention_id`.
+The decisions and the intervention point at each other: `triage_json` holds the
+`decision_log_id` (and each pair's, under `next_watch`), and `decide.link` sets
+`decision_log.intervention_id` on every one.
 """
 from __future__ import annotations
 
@@ -171,6 +174,23 @@ def _targets(found: backlinks.Candidates) -> list[dict]:
     return found.rows[:settings.BACKLINK_MAX]
 
 
+def _next_watch(video: dict, found: backlinks.Candidates) -> list[dict]:
+    """S1.5: `decide(NEXT_WATCH, …)` for every pair `candidates` returned
+    (not only the targets kept), the rules answer used and the backend's
+    logged in shadow. One decision_log row per pair; the per-pair results go
+    on the intervention's `triage_json.next_watch`."""
+    out = []
+    for c in found.rows:
+        context = {"source_video_id": video["id"], "source_title": video.get("title"),
+                   "target_video_id": c["video_id"], "target_channel_id": c["channel_id"],
+                   "target_title": c.get("title"), "similarity": c["similarity"],
+                   "join_low": found.join_low}
+        d = decide.decide(decide.NEXT_WATCH, f"{video['id']}->{c['video_id']}", context)
+        out.append({"target_video_id": c["video_id"], "similarity": c["similarity"],
+                    "decision_log_id": d.log_id, "answer": d.answer, "probs": d.probs})
+    return out
+
+
 def _cancel(row: dict, reason: str, detail: str | None, **payload) -> None:
     supabase().table("interventions").update({
         "status": InterventionStatus.CANCELLED,
@@ -217,6 +237,7 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
                 status=InterventionStatus.DECLINED,
                 payload={"rationale": _rationale(context)})
         else:
+            triage["next_watch"] = _next_watch(video, found)
             arm = interventions.assign_arm(video["id"], InterventionLever.BACKLINKS)
             row = interventions.record(
                 **common, arm=arm,
@@ -226,7 +247,8 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
     except interventions.ActiveInterventionExists as e:
         log.info("agent %s: %s", channel_id, e)
         return ACTIVE_INTERVENTION
-    decide.link(decision.log_id, row["id"])
+    for log_id in [decision.log_id, *(p["decision_log_id"] for p in triage.get("next_watch", ()))]:
+        decide.link(log_id, row["id"])
     log.info("agent %s: %s %s (intervention %s, arm %s)", channel_id, video["id"],
              row["status"], row["id"], row["arm"])
     if row["status"] != InterventionStatus.PLANNED:

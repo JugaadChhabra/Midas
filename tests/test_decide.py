@@ -231,3 +231,72 @@ def test_link_points_the_decision_at_its_intervention():
         decide.link(5, 42)
         decide.link(None, 43)                       # no log row: nothing to link
     assert [r["intervention_id"] for r in sb.rows("decision_log")] == [42, None]
+
+
+# ── NEXT_WATCH: the per-pair question, in shadow (Slice 1 S1.5, #66) ─────
+
+PAIR = {"source_video_id": "vidA", "source_title": "Rhyme A",
+        "target_video_id": "vidB", "target_channel_id": "UCx", "target_title": "Rhyme B",
+        "similarity": 0.85, "join_low": 0.8}
+
+
+def test_next_watch_rules_say_yes_at_or_above_join_low():
+    rules = decide.NEXT_WATCH.rules
+    assert decide.NEXT_WATCH.answers == ("yes", "no")
+    assert rules(PAIR) == "yes"
+    assert rules({**PAIR, "similarity": 0.8}) == "yes"                 # ≥, not >
+    assert rules({**PAIR, "similarity": 0.79}) == "no"
+    assert rules({**PAIR, "join_low": None}) == "no"
+    assert rules({**PAIR, "similarity": None}) == "no"
+    assert rules({}) == "no"
+
+
+def test_next_watch_rules_answer_is_used_and_the_backend_logged_in_shadow(sb):
+    with patch.object(settings, "DECIDE_BACKEND", "llm"), \
+         patch("app.decide.openrouter.chat_json", _llm_says("no", {"yes": 0.1, "no": 0.9})):
+        d = decide.decide(decide.NEXT_WATCH, "vidA->vidB", PAIR)
+    assert d == decide.Decision("next_watch", "yes", {"yes": 1.0, "no": 0.0})
+    (row,) = sb.rows("decision_log")
+    assert (row["subject"], row["rules_answer"], row["used"]) == ("vidA->vidB", "yes", "rules")
+    assert row["jev_answer"] == "no" and row["jev_probs"] == {"yes": 0.1, "no": 0.9}
+    assert row["question_set_version"] == decide.QUESTION_SET_VERSION
+
+
+def test_next_watch_backend_failure_still_logs_the_row_without_its_answer(sb):
+    def down(*a, **kw):
+        raise RuntimeError("OpenRouter 503")
+
+    for chat in (down, _llm_says("backlinks", P(backlinks=1.0))):     # error; a TRIAGE answer
+        with patch.object(settings, "DECIDE_BACKEND", "llm"), \
+             patch("app.decide.openrouter.chat_json", chat):
+            assert decide.decide(decide.NEXT_WATCH, "vidA->vidB", PAIR).answer == "yes"
+    rows = sb.rows("decision_log")
+    assert len(rows) == 2
+    assert all(r["jev_answer"] is None and r["jev_probs"] is None for r in rows)
+    assert {r["rules_answer"] for r in rows} == {"yes"}
+
+
+def test_llm_backend_asks_next_watch_with_its_question_and_label():
+    seen = {}
+
+    def fake_chat_json(prompt, model=None, system=None, image_urls=None, label=None):
+        seen.update(prompt=prompt, label=label)
+        return {"answer": "yes", "probs": {"yes": 0.7, "no": 0.3}}
+
+    with patch("app.decide.openrouter.chat_json", fake_chat_json):
+        decide._BACKENDS["llm"](decide.NEXT_WATCH, "vidA->vidB", PAIR)
+    assert decide.NEXT_WATCH.question in seen["prompt"]
+    assert "ALLOWED ANSWERS: yes, no" in seen["prompt"]
+    assert '"target_title": "Rhyme B"' in seen["prompt"]
+    assert seen["label"] == "decide.next_watch"
+
+
+def test_the_s1_5_bump_reaches_the_strategy_stamp():
+    """S1.5 added a question set, so the version moved past S1.4b's, and the
+    audit stamp hashes the new one."""
+    assert decide.QUESTION_SET_VERSION not in ("2026.10-b5-v1", "2026.10-s1-v1")
+    current, inputs = audits.strategy_version(audits.DEFAULT_PROMPT, audits.PROMPT_SOURCE_DEFAULT)
+    assert inputs["decision_question_set_version"] == decide.QUESTION_SET_VERSION
+    with patch.object(decide, "QUESTION_SET_VERSION", "2026.10-s1-v1"):
+        previous, _ = audits.strategy_version(audits.DEFAULT_PROMPT, audits.PROMPT_SOURCE_DEFAULT)
+    assert current != previous
