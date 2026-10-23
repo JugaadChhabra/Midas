@@ -22,6 +22,8 @@ Which rows: `backlinks` interventions on the channel (the source's channel),
     d0 = the `detected_at` date, which is when sync saw the edit, not when it
     was made (B3).
 
+d0 is a data-day: the Pacific date of that timestamp (YouTube's day, as reach's).
+
 Windows: pre = d0−7 … d0−1, post = d0+1 … d0+7. A window is complete once
 every target's channel, and the source's (whose report holds the source's
 own views), has ingested `channel_traffic_source_a3` through the post window's
@@ -43,6 +45,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from app import reach
 from app.config import settings
@@ -70,6 +73,10 @@ EXTENDED_DAYS = 14
 RESTATEMENT_HORIZON_DAYS = 28
 
 _SUGGESTED = 7
+#: Traffic data-days are YouTube's, which roll over on Pacific time (as reach's,
+#: app/reach.py), so d0 is the Pacific date of the timestamp: the apply's own
+#: data-day, never in either window, whatever the UTC hour.
+_DATA_DAY_TZ = ZoneInfo("America/Los_Angeles")
 
 _DECIDED = (InterventionStatus.JUDGED, InterventionStatus.INSUFFICIENT_DATA)
 _COLUMNS = ("id,video_id,channel_id,origin,arm,status,payload,applied_at,created_at,"
@@ -79,13 +86,13 @@ Window = tuple[str, str]
 
 
 def _day(value) -> date | None:
-    """The UTC date of a timestamptz (as PostgREST returns it), or None."""
+    """The data-day (Pacific date) of a timestamptz as PostgREST returns it, or None."""
     if not value:
         return None
     ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if ts.tzinfo is not None:
-        ts = ts.astimezone(timezone.utc)
-    return ts.date()
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(_DATA_DAY_TZ).date()
 
 
 def as_of(row: dict) -> date | None:
@@ -150,14 +157,18 @@ def source_views(source: str, window: Window) -> int:
 
 
 def _result(source: str, target_ids: list[str], d0: date, post_days: int,
-            views_of_source: int) -> dict:
+            views_of_source: int, missing: Callable[[Window, Window], list[str]]) -> dict:
     """`measurement_result` for a decided row. `delta` is in views per week:
     an extended post window is scaled to 7 days before the pre is subtracted,
-    so it compares with the 7-day pre and with unextended rows."""
+    so it compares with the 7-day pre and with unextended rows.
+
+    `missing_days`: data-days in either window that some channel the row reads
+    has no ingested report for (a gap, or ingestion that began inside the pre
+    window). They count as zero views; the row says so instead of hiding it.
+    """
     pre, post = windows(d0, post_days)
-    rows = _pair_rows(source, target_ids, (pre[0], post[1]))
-    pre_views = sum(r["views"] for r in rows if _in(pre, r["date"]))
-    post_views = sum(r["views"] for r in rows if _in(post, r["date"]))
+    pre_views = pair_views(source, target_ids, pre)
+    post_views = pair_views(source, target_ids, post)
     delta = (post_views - pre_views if post_days == WEEK
              else post_views * WEEK / post_days - pre_views)
     return {
@@ -165,16 +176,20 @@ def _result(source: str, target_ids: list[str], d0: date, post_days: int,
         "post": post_views,
         "delta": delta,
         "source_views": views_of_source,
+        "missing_days": missing(pre, post),
         "window": {"d0": d0.isoformat(), "pre": list(pre), "post": list(post),
                    "post_days": post_days, "extended": post_days != WEEK},
     }
 
 
-def evaluate(row: dict, complete_through: Callable[[str], bool]) -> tuple[str, str | None, dict | None]:
+def evaluate(row: dict, complete_through: Callable[[str], bool],
+             missing: Callable[[Window, Window], list[str]] = lambda *_: []
+             ) -> tuple[str, str | None, dict | None]:
     """(measurement_status, outcome status or None, measurement_result or None).
 
     `complete_through(day)` says whether every channel the row reads has
-    ingested traffic data through `day`.
+    ingested traffic data through `day`; `missing(pre, post)` lists the
+    windows' data-days one of them lacks.
     """
     d0 = as_of(row)
     if d0 is None:
@@ -191,10 +206,10 @@ def evaluate(row: dict, complete_through: Callable[[str], bool]) -> tuple[str, s
         seen = source_views(source, post)
         if seen >= settings.LEVER_MIN_SOURCE_VIEWS:
             return (InterventionMeasurement.DONE, InterventionStatus.JUDGED,
-                    _result(source, target_ids, d0, post_days, seen))
+                    _result(source, target_ids, d0, post_days, seen, missing))
     # Extended once and still under the floor (Part 2 §1.7).
     return (InterventionMeasurement.DONE, InterventionStatus.INSUFFICIENT_DATA,
-            _result(source, target_ids, d0, EXTENDED_DAYS, seen))
+            _result(source, target_ids, d0, EXTENDED_DAYS, seen, missing))
 
 
 def _measured(row: dict, channel_id: str) -> bool:
@@ -263,12 +278,12 @@ def measure_channel(channel_id: str, *, today: date | None = None) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     rows = _rows(channel_id, today)
     channel_of = _target_channels(rows)
-    frontiers: dict[str, str | None] = {}
+    covered: dict[str, set[str]] = {}
 
-    def frontier(cid: str) -> str | None:
-        if cid not in frontiers:
-            frontiers[cid] = reach.frontier(reach.coverage(cid, report_type=TRAFFIC_REPORT_TYPE_ID))
-        return frontiers[cid]
+    def coverage(cid: str) -> set[str]:
+        if cid not in covered:
+            covered[cid] = reach.coverage(cid, report_type=TRAFFIC_REPORT_TYPE_ID)
+        return covered[cid]
 
     counts = dict.fromkeys(("attempted", "errored", "judged", "insufficient_data",
                             "awaiting_window", "extended", "changed"), 0)
@@ -281,9 +296,12 @@ def measure_channel(channel_id: str, *, today: date | None = None) -> dict:
             channels = {channel_of[t] for t in targets(row)} | {row["channel_id"]}
 
             def complete_through(day: str) -> bool:
-                return all((frontier(c) or "") >= day for c in channels)
+                return all((reach.frontier(coverage(c)) or "") >= day for c in channels)
 
-            progress, outcome, result = evaluate(row, complete_through)
+            def missing(*windows_: Window) -> list[str]:
+                return sorted({d for c in channels for d in reach.missing_days(coverage(c), *windows_)})
+
+            progress, outcome, result = evaluate(row, complete_through, missing)
             update = _update(row, progress, outcome, result, now)
         except Exception as e:
             counts["errored"] += 1
@@ -304,8 +322,8 @@ def _update(row: dict, progress: str, outcome: str | None, result: dict | None,
 
     A decided row that can't be decided again yet (a restatement took the source
     under the floor, and the extended window isn't complete) keeps its verdict.
-    `judged_at` is when the row was first decided, and stays; `computed_at` is
-    the last time its numbers changed.
+    `judged_at` is when the row got its current outcome, kept across recomputes
+    that don't change it; `computed_at` is the last time its numbers changed.
     """
     previous = row.get("measurement_result") or {}
     if outcome is None:
@@ -319,6 +337,8 @@ def _update(row: dict, progress: str, outcome: str | None, result: dict | None,
     return {
         "status": outcome,
         "measurement_status": progress,
-        "measurement_result": {**result, "judged_at": previous.get("judged_at") or now,
+        "measurement_result": {**result,
+                               "judged_at": (previous.get("judged_at") if row["status"] == outcome
+                                             else None) or now,
                                "computed_at": now},
     }

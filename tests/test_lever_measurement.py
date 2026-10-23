@@ -60,8 +60,8 @@ def holdout(id_=2, **kw) -> dict:
 def human(id_=3, target=T1, channel=CH, **kw) -> dict:
     return {**treated(id_), "origin": "human", "arm": "n/a", "status": "applied",
             "channel_id": channel, "applied_at": None,
-            "created_at": f"{D0.isoformat()}T04:00:00+00:00",
-            "detected_at": f"{D0.isoformat()}T04:00:00+00:00",
+            "created_at": f"{D0.isoformat()}T16:00:00+00:00",
+            "detected_at": f"{D0.isoformat()}T16:00:00+00:00",
             "payload": {"source_video_id": SRC, "target_video_id": target}, **kw}
 
 
@@ -107,8 +107,8 @@ def test_pre_and_post_windows_exclude_d0():
 
 
 @pytest.mark.parametrize("row", [
-    treated(applied_at="2026-10-01T23:00:00-05:00"),       # 2026-10-02 in UTC
-    holdout(created_at="2026-10-02T00:30:00+00:00"),
+    treated(applied_at="2026-10-02T20:00:00+00:00"),
+    holdout(created_at="2026-10-02T18:30:00+00:00"),
     human(detected_at="2026-10-02T12:00:00Z"),
 ], ids=["treated: applied_at", "holdout: created_at", "human: detected_at"])
 def test_d0_per_kind_and_the_windows_measured_around_it(row):
@@ -133,6 +133,17 @@ def test_d0_per_kind_and_the_windows_measured_around_it(row):
     assert (result["pre"], result["post"], result["delta"]) == (3, 7, 4)
 
 
+@pytest.mark.parametrize("stamp, d0", [
+    ("2026-10-03T05:00:00+00:00", date(2026, 10, 2)),   # 22:00 Pacific, the 2nd
+    ("2026-10-03T07:30:00+00:00", date(2026, 10, 3)),   # 00:30 Pacific, the 3rd
+    ("2026-10-02T23:00:00-05:00", date(2026, 10, 2)),
+])
+def test_d0_is_the_pacific_data_day_not_the_utc_date(stamp, d0):
+    """Traffic data-days are YouTube's (Pacific): a block applied in the small
+    UTC hours went live on the previous data-day, which mustn't be in the pre."""
+    assert lm.as_of(treated(applied_at=stamp)) == d0
+
+
 def test_a_judged_row_carries_pre_post_delta_source_views_and_window():
     rows = source_daily(20, range(1, 8)) + [traffic(T1, -3, 2), traffic(T1, 3, 6),
                                             traffic(T2, 4, 1)]
@@ -144,6 +155,7 @@ def test_a_judged_row_carries_pre_post_delta_source_views_and_window():
     r = got["measurement_result"]
     assert (r["pre"], r["post"], r["delta"], r["source_views"]) == (2, 7, 5, 140)
     assert r["judged_at"] == r["computed_at"]
+    assert r["missing_days"] == []
     assert counts["judged"] == 1 and counts["attempted"] == 1 and counts["errored"] == 0
 
 
@@ -182,6 +194,19 @@ def test_a_human_targets_channel_is_read_from_videos():
         sb._tables["reporting_reports_ingested"].extend(ledger(SIB, 7, start=7))
         lm.measure_channel(CH, today=TODAY)
     assert stored(sb, 3)["status"] == "judged"
+
+
+def test_days_a_channel_never_ingested_inside_the_windows_are_flagged_on_the_row():
+    """Frontier-complete with a gap, and a sibling whose ingestion began inside
+    the pre window: judged, and the missing days are listed, not hidden."""
+    row = treated(targets=((T1, CH), (T3, SIB)))
+    ingested = ([r for r in ledger(CH, 8) if r["data_date"] != day(3)]
+                + ledger(SIB, 8, start=-4))
+    with db([row], source_daily(50), ingested) as sb:
+        lm.measure_channel(CH, today=TODAY)
+    assert stored(sb)["status"] == "judged"
+    assert stored(sb)["measurement_result"]["missing_days"] == [
+        day(-7), day(-6), day(-5), day(3)]
 
 
 # ── the floor and the one extension ──────────────────────────────────────
@@ -257,6 +282,18 @@ def test_a_restatement_that_reopens_the_extension_keeps_the_verdict_until_it_can
     assert stored(sb)["status"] == "judged"
     assert stored(sb)["measurement_status"] == "done"
     assert len(sb.writes) == writes
+
+
+def test_a_restatement_that_flips_the_outcome_restamps_judged_at():
+    with db([treated()], source_daily(15, range(1, 8)), ledger(CH, 14)) as sb:
+        lm.measure_channel(CH, today=TODAY)
+        sb._tables["interventions"][0]["measurement_result"]["judged_at"] = "2026-10-09T00:00:00+00:00"
+        table = sb._tables["video_traffic_source_daily"]
+        table[:] = [r for r in table if r["date"] != day(1)]       # 105 -> 90, 14 days in
+        lm.measure_channel(CH, today=TODAY)
+    got = stored(sb)
+    assert got["status"] == "insufficient_data"
+    assert got["measurement_result"]["judged_at"] not in ("2026-10-09T00:00:00+00:00", None)
 
 
 def test_a_judged_row_past_the_restatement_horizon_is_left_alone():
