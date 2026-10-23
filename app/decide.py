@@ -17,8 +17,10 @@ question, its answers or its rules change. It is hashed into the A6 strategy
 stamp (app/audits.py strategy_version), so a stamp names the questions that
 produced it.
 
-The caller is Slice 1's triage (app/agent_tick.py), which stores the returned
-`log_id` on its intervention and points the log row back with `link`.
+Two question sets: TRIAGE (which lever, per video) and NEXT_WATCH (would a
+viewer of A watch B next, per backlink candidate pair; Slice 1 S1.5). The
+caller is Slice 1's agent tick (app/agent_tick.py), which stores the returned
+`log_id`s on its intervention and points the log rows back with `link`.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ from app.status_vocab import DecisionUsed
 
 log = logging.getLogger(__name__)
 
-QUESTION_SET_VERSION = "2026.10-s1-v1"
+QUESTION_SET_VERSION = "2026.10-s1-v2"
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,26 @@ TRIAGE = QuestionSet(
     # (Slice 1); the backend may choose any.
     answers=("no_change", "backlinks", "playlist", "short_link", "title"),
     rules=_triage_rules,
+)
+
+
+def _next_watch_rules(context: dict) -> str:
+    """Spec Part 4 S1.5: yes if the pair's similarity is at least the source
+    channel's `join_low` (B6, on MODEL_VERSION vectors); otherwise no."""
+    similarity, join_low = context.get("similarity"), context.get("join_low")
+    if similarity is not None and join_low is not None and similarity >= join_low:
+        return "yes"
+    return "no"
+
+
+NEXT_WATCH = QuestionSet(
+    name="next_watch",
+    question=(
+        "Would a viewer who just watched video A (the source) plausibly watch "
+        "video B (the target) next? `yes` or `no`."
+    ),
+    answers=("yes", "no"),
+    rules=_next_watch_rules,
 )
 
 

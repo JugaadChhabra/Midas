@@ -101,6 +101,10 @@ _DB_MODULES = ("autopilot", "eligibility", "reach", "warm", "backlinks", "embedd
 
 
 def _shadow_says_no_change(prompt, model=None, system=None, image_urls=None, label=None):
+    """The shadow backend disagrees with the rules: no_change to triage, no to
+    every next-watch pair."""
+    if label == "decide.next_watch":
+        return {"answer": "no", "probs": {"yes": 0.2, "no": 0.8}}
     return {"answer": "no_change",
             "probs": {a: (1.0 if a == "no_change" else 0.0) for a in decide.TRIAGE.answers}}
 
@@ -381,11 +385,78 @@ def test_triage_json_and_decision_log_intervention_id_link_both_ways():
     with wired(sb):
         ap.tick()
     [row] = midas_rows(sb)
-    [logged] = sb.rows("decision_log")
+    [logged] = [r for r in sb.rows("decision_log") if r["subject"] == SRC]
     assert row["triage_json"]["decision_log_id"] == logged["id"]
     assert logged["intervention_id"] == row["id"]
     assert logged["subject"] == SRC and logged["rules_answer"] == row["triage_json"]["answer"]
     assert row["triage_json"]["question_set_version"] == decide.QUESTION_SET_VERSION
+
+
+# ── next-watch in shadow, per candidate pair (S1.5, #66) ──────────────────
+
+def _pair_rows(sb):
+    return [r for r in sb.rows("decision_log") if r["subject"] != SRC]
+
+
+@pytest.mark.parametrize("holdout_pct, status", [(0.0, "measuring"), (1.0, "holdout")])
+def test_next_watch_is_asked_once_per_candidate_pair_and_stored_on_the_intervention(
+        holdout_pct, status):
+    sb = world()
+    with wired(sb, holdout_pct=holdout_pct):
+        ap.tick()
+    [row] = midas_rows(sb)
+    assert row["status"] == status
+    pairs = _pair_rows(sb)
+    assert [r["subject"] for r in pairs] == [f"{SRC}->{t}" for t in (T1, T2, T3)]
+    assert all(r["question_set_version"] == decide.QUESTION_SET_VERSION for r in pairs)
+    # The rules answer is used (every candidate is ≥ join_low); the backend's "no" is only logged.
+    assert {(r["rules_answer"], r["jev_answer"], r["used"]) for r in pairs} == {("yes", "no", "rules")}
+    assert {r["intervention_id"] for r in pairs} == {row["id"]}
+
+    stored = row["triage_json"]["next_watch"]
+    assert [s["target_video_id"] for s in stored] == [T1, T2, T3]
+    assert [s["decision_log_id"] for s in stored] == [r["id"] for r in pairs]
+    assert {s["answer"] for s in stored} == {"yes"}
+    assert stored[0]["probs"] == {"yes": 1.0, "no": 0.0}
+    assert stored[0]["similarity"] == pytest.approx(1 / (1.01 ** 0.5))
+
+
+def test_next_watch_asks_every_pair_candidates_returns_not_only_the_targets():
+    sb = world()
+    with wired(sb) as p:
+        ap.settings.BACKLINK_MAX = 2
+        ap.tick()
+    [row] = midas_rows(sb)
+    assert [t["video_id"] for t in row["payload"]["targets"]] == [T1, T2]
+    assert [s["target_video_id"] for s in row["triage_json"]["next_watch"]] == [T1, T2, T3]
+    assert len(_pair_rows(sb)) == 3
+    assert p["yt"].updates
+
+
+def test_next_watch_is_not_asked_for_a_declined_video():
+    sb = world(description=f"{SRC_DESCRIPTION}\nhttps://youtu.be/{OTHER_CH_VIDEO}")
+    with wired(sb):
+        ap.tick()
+    [row] = midas_rows(sb)
+    assert row["status"] == "declined"
+    assert "next_watch" not in row["triage_json"]
+    assert _pair_rows(sb) == []
+
+
+def test_next_watch_backend_failure_still_logs_every_pair_and_the_tick_goes_on():
+    def triage_only(prompt, model=None, system=None, image_urls=None, label=None):
+        if label == "decide.next_watch":
+            raise RuntimeError("OpenRouter 503")
+        return _shadow_says_no_change(prompt, label=label)
+
+    sb = world()
+    with wired(sb) as p, patch("app.decide.openrouter.chat_json", triage_only):
+        ap.tick()
+    assert outcome(p) == "measuring"
+    pairs = _pair_rows(sb)
+    assert len(pairs) == 3
+    assert all(r["jev_answer"] is None and r["rules_answer"] == "yes" for r in pairs)
+    assert {s["answer"] for s in midas_rows(sb)[0]["triage_json"]["next_watch"]} == {"yes"}
 
 
 # ── the preview writes nothing ────────────────────────────────────────────

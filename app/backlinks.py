@@ -190,12 +190,14 @@ class Candidates(NamedTuple):
     `rows` are `{video_id, channel_id, title, similarity, impressions}`, best
     first, at most 2 × BACKLINK_MAX. `skipped_unembedded` counts the source or
     otherwise eligible targets with no B6 vector. `reason` is set when the
-    source got none without targets being considered.
+    source got none without targets being considered. `join_low` is the
+    threshold the rows passed (the source channel's), once it was read.
     """
 
     rows: list[dict]
     skipped_unembedded: int = 0
     reason: str | None = None
+    join_low: float | None = None
 
 
 def siblings(channel_id: str) -> list[dict]:
@@ -272,7 +274,8 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> C
         return Candidates([], reason=THRESHOLDS_OTHER_MODEL)
     source_vector = pooled_embeddings([source_id], model_version=MODEL_VERSION).get(source_id)
     if source_vector is None:
-        return Candidates([], skipped_unembedded=1, reason=SOURCE_NOT_EMBEDDED)
+        return Candidates([], skipped_unembedded=1, reason=SOURCE_NOT_EMBEDDED,
+                          join_low=thresholds["join_low"])
 
     if sibling_ids is None:
         sibling_ids = [s["channel_id"] for s in siblings(channel_id)]
@@ -310,4 +313,5 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> C
                          "title": v.get("title"), "similarity": similarity,
                          "impressions": impressions[v["id"]]})
     rows.sort(key=lambda r: (-r["similarity"], -r["impressions"], r["video_id"]))
-    return Candidates(rows[:2 * settings.BACKLINK_MAX], skipped_unembedded=skipped)
+    return Candidates(rows[:2 * settings.BACKLINK_MAX], skipped_unembedded=skipped,
+                      join_low=thresholds["join_low"])
