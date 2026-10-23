@@ -13,7 +13,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app import agent_tick, autopilot as ap, backlinks, decide, eligibility
+from app import agent_tick, autopilot as ap, backlinks, backlinks_apply, decide, eligibility
+from app.apply_outcome import ApplyError
 from app import interventions as iv
 from app.reembed import MODEL_VERSION
 from scripts import preview_backlinks
@@ -150,6 +151,23 @@ def midas_rows(sb):
 
 # ── routing ───────────────────────────────────────────────────────────────
 
+def test_turning_the_agent_off_never_starts_title_rewrites_by_default():
+    """Slice 1 review (2026-10-23): with agent_enabled off and autopilot_enabled
+    on, the tick used to fall back to the title path. TITLE_AUTOPILOT_ENABLED
+    (default false) keeps it shut until Slice 3."""
+    sb = world(channel=_channel(agent_enabled=False))
+    with wired(sb) as p, \
+         patch("app.autopilot.agent_tick.run") as agent_run, \
+         patch("app.autopilot._next_video_for_channel", return_value={"id": SRC}) as pick:
+        assert ap.settings.TITLE_AUTOPILOT_ENABLED is False
+        ap.tick()
+    assert outcome(p) == "title_autopilot_disabled"
+    agent_run.assert_not_called()
+    pick.assert_not_called()
+    p["audit"].assert_not_called()
+    p["youtube_for_channel"].assert_not_called()
+
+
 def test_an_agent_tick_applies_backlinks_and_never_calls_audit_video():
     sb = world()
     with wired(sb) as p:
@@ -170,6 +188,7 @@ def test_with_agent_enabled_off_the_tick_takes_the_audit_path_unchanged():
                     {k: v for k, v in _channel().items() if k != "agent_enabled"}):
         sb = world(channel=channel)
         with wired(sb) as p, \
+             patch.object(ap.settings, "TITLE_AUTOPILOT_ENABLED", True), \
              patch("app.autopilot.agent_tick.run") as agent_run, \
              patch("app.autopilot._next_video_for_channel", return_value={"id": SRC}), \
              patch("app.autopilot.validate_audit", return_value=(True, "")), \
@@ -253,6 +272,16 @@ def test_applied_midas_interventions_count_toward_the_cap_and_holdout_declined_d
     with wired(sb):
         assert ap._applies_today(CH) == 2                           # the audit + T1
 
+    # Treated attempts today that never reached YouTube count too (review,
+    # 2026-10-23), so a systematic failure is bounded by the cap.
+    sb = world(interventions=[
+        _iv(T1, "cancelled", "treated"),                            # counts
+        _iv(T2, "cancelled", "treated", created_at=yesterday),      # not today
+        _iv(T3, "holdout", "holdout"),                              # no
+    ])
+    with wired(sb):
+        assert ap._applies_today(CH) == 1
+
     sb = world(channel=_channel(autopilot_daily_cap=2), interventions=[
         _iv(T1, "measuring", "treated", applied_at=today),
         _iv(T2, "measuring", "treated", applied_at=today)])
@@ -282,19 +311,44 @@ def test_a_second_active_midas_intervention_is_impossible():
 
 # ── the kill switch, DRY_RUN, failures ────────────────────────────────────
 
-def test_the_kill_switch_writes_nothing_to_youtube_and_cancels_with_apply_disabled():
+def test_the_kill_switch_makes_the_agent_do_nothing_at_all():
+    """Slice 1 review (2026-10-23): with writes off a tick used to pick, triage
+    and record rows that never reached YouTube, using up the experiment's pool.
+    Now it does nothing: no pick, no LLM call, no row, no YouTube call."""
     sb = world()
-    with wired(sb, enabled=False) as p:
+    with wired(sb, enabled=False) as p, \
+         patch("app.agent_tick.run") as run:
         ap.tick()
     assert outcome(p) == "apply_disabled"
-    [row] = midas_rows(sb)
-    assert row["status"] == "cancelled" and row["applied_at"] is None
-    assert row["payload"]["error"]["reason"] == "apply_disabled"
-    assert [t["video_id"] for t in row["payload"]["targets"]] == [T1, T2, T3]
+    run.assert_not_called()
+    assert midas_rows(sb) == [] and sb.rows("decision_log") == []
     p["youtube_for_channel"].assert_not_called()
     assert p["yt"].lists == [] and p["yt"].updates == []
-    assert sb.rows("videos")[0]["description"] == SRC_DESCRIPTION
     assert ap._failure_counts.get(CH, 0) == 0
+
+
+def test_with_no_heading_for_the_language_the_agent_does_nothing():
+    """S1.2/D3: Marathi's heading isn't in the table yet. Every pick would end in a
+    refused render, so the agent waits instead of burning videos and LLM calls."""
+    sb = world()
+    with wired(sb, heading=False) as p, patch("app.agent_tick.run") as run:
+        ap.tick()
+    assert outcome(p) == "no_heading"
+    run.assert_not_called()
+    assert midas_rows(sb) == []
+    p["youtube_for_channel"].assert_not_called()
+
+
+def test_the_backlinks_apply_still_refuses_while_writes_are_off():
+    """Belt and braces under the tick's gate: apply_backlinks itself refuses."""
+    sb = world()
+    with wired(sb, enabled=False):
+        row = iv.record(video_id=SRC, channel_id=CH, lever="backlinks", origin="midas",
+                        arm="treated", status="planned",
+                        payload={"targets": [{"video_id": T1, "channel_id": CH, "title": "t"}]})
+        with pytest.raises(ApplyError) as e:
+            backlinks_apply.apply_backlinks(row)
+    assert e.value.outcome.value == "apply_disabled"
 
 
 def test_dry_run_sends_nothing_and_cancels_the_rehearsal():

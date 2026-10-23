@@ -146,7 +146,8 @@ def render(description: str | None, targets: Iterable[Mapping], language: str | 
     link order. Raises RenderRefused for a language with no heading, no targets,
     more than BACKLINK_MAX (the caller keeps the top BACKLINK_MAX; nothing is
     trimmed here), a duplicate or malformed target, or a result over
-    DESCRIPTION_MAX characters. The block adds no hashtag, so a description
+    DESCRIPTION_MAX characters or UTF-8 bytes (YouTube counts bytes: a Marathi
+    character is 3, so the byte limit binds first). The block adds no hashtag, so a description
     `cap_description_hashtags` leaves alone it still leaves alone.
     """
     heading = HEADINGS.get(language)
@@ -168,6 +169,9 @@ def render(description: str | None, targets: Iterable[Mapping], language: str | 
     out = "\n".join(head + [heading, *links] + ([""] + rest if rest else []))
     if len(out) > DESCRIPTION_MAX:
         raise RenderRefused(f"description would be {len(out)} characters, over {DESCRIPTION_MAX}")
+    if len(out.encode("utf-8")) > DESCRIPTION_MAX:
+        raise RenderRefused(
+            f"description would be {len(out.encode('utf-8'))} bytes, over {DESCRIPTION_MAX}")
     return out
 
 

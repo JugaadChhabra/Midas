@@ -168,12 +168,13 @@ def test_sql_warm_pool_intervention_exclusion_matches_python():
         set(sv.ACTIVE_INTERVENTION_STATUSES), (
         "warm_pool()'s intervention exclusion has drifted from "
         "ACTIVE_INTERVENTION_STATUSES")
-    # S1.4a's once-per-experiment rule: a midas backlinks row of either arm.
+    # S1.4a's once-per-experiment rule: a midas backlinks holdout row, or a
+    # treated one that reached YouTube (review fix, 2026-10-23).
     lever = re.search(r"lever\s*=\s*'([^']+)'", where)
     assert lever and lever.group(1) == sv.InterventionLever.BACKLINKS
-    arms = re.search(r"arm\s+in\s*\(([^)]*)\)", where, re.I)
-    assert {v.strip().strip("'") for v in arms.group(1).split(",")} == {
-        sv.InterventionArm.TREATED, sv.InterventionArm.HOLDOUT}
+    arms = set(re.findall(r"arm\s*=\s*'([^']+)'", where))
+    assert arms == {sv.InterventionArm.TREATED, sv.InterventionArm.HOLDOUT}
+    assert re.search(r"arm\s*=\s*'treated'\s+and\s+i\.applied_at\s+is\s+not\s+null", where)
 
 
 # ── mirror 2: the dashboard pills ────────────────────────────────────────

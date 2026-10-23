@@ -65,15 +65,18 @@ def _rpc_params(channel_id: str) -> dict:
     }
 
 
-#: The backlinks experiment's arms; a Midas row in either puts a video in it for good.
-_EXPERIMENT_ARMS = frozenset({InterventionArm.TREATED, InterventionArm.HOLDOUT})
 
 
 def _holds(row: dict, cooldown_start: datetime) -> bool:
     """Whether a Midas intervention row keeps its video out of the pool."""
     if row["status"] in ACTIVE_INTERVENTION_STATUSES:
         return True
-    if row["lever"] == InterventionLever.BACKLINKS and row["arm"] in _EXPERIMENT_ARMS:
+    # Once per experiment: a holdout row, or a treated row whose write reached
+    # YouTube. A treated row cancelled before its write never gave the video a
+    # block, so it doesn't use up the video (as warm_pool() in SQL).
+    if row["lever"] == InterventionLever.BACKLINKS and (
+            row["arm"] == InterventionArm.HOLDOUT
+            or (row["arm"] == InterventionArm.TREATED and row.get("applied_at"))):
         return True
     created = row.get("created_at")
     return created is not None and (
@@ -133,7 +136,7 @@ def _ranked_pool_inapp(channel_id: str) -> list[dict]:
         r["video_id"] for r in rows_for_ids(
             lambda c: (
                 supabase().table("interventions")
-                .select("video_id,lever,arm,status,created_at")
+                .select("video_id,lever,arm,status,created_at,applied_at")
                 .eq("origin", InterventionOrigin.MIDAS)
                 .in_("video_id", c)
             ),

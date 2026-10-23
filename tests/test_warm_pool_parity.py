@@ -54,7 +54,8 @@ create table video_reach_daily (
 create table interventions (
     id bigserial primary key, video_id text not null references videos(id),
     channel_id text not null, lever text not null, origin text not null,
-    arm text not null, status text not null, created_at timestamptz default now()
+    arm text not null, status text not null, created_at timestamptz default now(),
+    applied_at timestamptz
 );
 """
 
@@ -72,9 +73,10 @@ def ago(days: float) -> str:
 
 
 def intervention(video_id, *, lever="title", origin="midas", arm="treated",
-                 status="judged", age_days=365, channel="c1"):
+                 status="judged", age_days=365, channel="c1", applied=False):
     return {"video_id": video_id, "channel_id": channel, "lever": lever, "origin": origin,
-            "arm": arm, "status": status, "created_at": ago(age_days)}
+            "arm": arm, "status": status, "created_at": ago(age_days),
+            "applied_at": ago(age_days) if applied else None}
 
 
 @pytest.fixture(scope="module")
@@ -188,6 +190,7 @@ def _random_world(seed: int) -> dict[str, list[dict]]:
                                            "judged", "cancelled", "declined",
                                            "insufficient_data"]),
                         age_days=rng.choice([0.1, 1, 3, 6.5, 7.5, 8, 30, 400]),
+                        applied=rng.random() < 0.5,
                     ))
             for n in rng.sample(range(60), rng.randrange(0, 12)):
                 if n in covered:                          # rows only land with a report
@@ -255,7 +258,7 @@ def test_sql_and_python_agree_that_an_uncertified_channel_is_empty(pg):
 def _cooldown_and_experiment_world() -> dict[str, list[dict]]:
     ids = ["declined_recent", "holdout_recent", "planned_recent", "declined_old",
            "backlinks_treated_old", "backlinks_holdout_old", "backlinks_human",
-           "playlist_old", "free"]
+           "playlist_old", "backlinks_never_sent_old", "free"]
     return {
         "videos": [{"id": v, "channel_id": "c1", "privacy_status": "public", "is_episode": None}
                    for v in ids],
@@ -273,6 +276,8 @@ def _cooldown_and_experiment_world() -> dict[str, list[dict]]:
                 intervention("planned_recent", status="planned", age_days=1),
                 intervention("declined_old", status="declined", age_days=8),
                 intervention("backlinks_treated_old", lever="backlinks", status="judged",
+                             age_days=400, applied=True),
+                intervention("backlinks_never_sent_old", lever="backlinks", status="cancelled",
                              age_days=400),
                 intervention("backlinks_holdout_old", lever="backlinks", arm="holdout",
                              status="judged", age_days=400),
@@ -285,11 +290,12 @@ def _cooldown_and_experiment_world() -> dict[str, list[dict]]:
 
 
 def test_sql_and_python_agree_on_the_cooldown_and_once_per_experiment(pg):
-    """Part 4 S1.4 "Pick": recent Midas rows of any status and Midas backlinks
-    rows of either arm, at any age, exclude; human rows and old ones don't."""
+    """Part 4 S1.4 "Pick": recent Midas rows of any status, and Midas backlinks
+    holdout rows or treated rows that reached YouTube, at any age, exclude; human
+    rows, old ones, and an old treated row that was never sent don't."""
     pools = _assert_parity(pg, _cooldown_and_experiment_world(), channels=("c1",))
     assert sorted(r["id"] for r in pools["c1"]) == [
-        "backlinks_human", "declined_old", "free", "playlist_old"]
+        "backlinks_human", "backlinks_never_sent_old", "declined_old", "free", "playlist_old"]
 
 
 def test_the_old_four_argument_function_is_gone(pg):

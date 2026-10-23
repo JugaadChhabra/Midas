@@ -256,8 +256,10 @@ def channel_interventions(
 ):
     """The channel's interventions, newest first, one page at a time.
 
-    `next_offset` is the next page's `offset`, or None on the last page. One
-    page is at most PAGE_SIZE rows, PostgREST's own cap (app/rows.py).
+    `next_offset` is the next page's `offset` whenever this page came back
+    full, else None. A last page that is exactly full therefore points at one
+    more, empty page (fetching limit + 1 rows would hit PostgREST's own cap at
+    limit = PAGE_SIZE). One page is at most PAGE_SIZE rows (app/rows.py).
     """
     if lever is not None and lever not in ALL_INTERVENTION_LEVERS:
         raise HTTPException(400, f"unknown lever {lever!r}")

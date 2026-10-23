@@ -1,5 +1,15 @@
+import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
+
+
+@pytest.fixture(autouse=True)
+def _title_autopilot_on():
+    """These tests drive the title path, which TITLE_AUTOPILOT_ENABLED (default
+    false since the Slice 1 review) otherwise shuts."""
+    import app.autopilot as _ap
+    with patch.object(_ap.settings, "TITLE_AUTOPILOT_ENABLED", True):
+        yield
 
 
 def _run_tick_with_channel(channel_row):
