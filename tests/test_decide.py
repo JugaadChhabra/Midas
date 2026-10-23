@@ -201,3 +201,32 @@ def test_changing_the_question_set_version_changes_both(sb):
     assert after != before
     assert inputs["decision_question_set_version"] == "2099.01-test"
     assert sb.rows("decision_log")[0]["question_set_version"] == "2099.01-test"
+
+
+# ── the log id links a decision to its intervention (Slice 1 S1.4, #65) ──
+
+def test_decide_returns_its_decision_log_id():
+    sb = FakeSupabase({"decision_log": [{"id": 4}]}, serial=("decision_log",))
+    with patch("app.decide.supabase", return_value=sb):
+        d = _decide("llm")
+    assert d.log_id == 5
+    assert d == RULES_BACKLINKS                     # the id isn't part of the answer
+    assert sb.rows("decision_log")[-1]["id"] == 5
+
+
+def test_a_failed_log_write_leaves_no_log_id():
+    class Down:
+        def table(self, name):
+            raise RuntimeError("db down")
+
+    with patch("app.decide.supabase", return_value=Down()):
+        assert _decide("llm").log_id is None
+
+
+def test_link_points_the_decision_at_its_intervention():
+    sb = FakeSupabase({"decision_log": [{"id": 5, "intervention_id": None},
+                                        {"id": 6, "intervention_id": None}]})
+    with patch("app.decide.supabase", return_value=sb):
+        decide.link(5, 42)
+        decide.link(None, 43)                       # no log row: nothing to link
+    assert [r["intervention_id"] for r in sb.rows("decision_log")] == [42, None]

@@ -317,7 +317,7 @@ def test_a_link_to_a_video_uploaded_in_the_same_sync_counts():
 
 def test_a_ledger_error_never_fails_the_sync(caplog):
     sb = _sync_sb("Lyrics")
-    with patch.object(he, "_our_videos", side_effect=RuntimeError("db down")):
+    with patch.object(he, "our_videos", side_effect=RuntimeError("db down")):
         result = _sync(sb, f"Lyrics\n{_url(OURS_A)}")
     assert result == {"synced": 2}
     stored = {v["id"]: v["description"] for v in sb.rows("videos")}
