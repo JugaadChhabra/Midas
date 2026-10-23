@@ -1244,7 +1244,7 @@ is this question.
 |---|---|---|
 | D1 | Widen `TRAFFIC_INGEST_CHANNELS` to Marathi's siblings (A1.1: Hindi, English, Bhojpuri, Gujarati) before launch? | **Yes, during Phase B's exit-gate week.** Without it, cross-channel links are unmeasurable (finding 1) and there's no pre-window at launch. English also becomes the human benchmark (§1.4). Cost: storage, sized against B1's measured rows/day |
 | D2 | Where the block goes | **After the first line, above "Show more".** A link nobody sees tests nothing. The alternative was the end of the description, where the team's existing links may already be |
-| D3 | The heading text in Marathi | **The SEO team writes it.** Not guessed by code or a model |
+| D3 | The heading text in Marathi | **The SEO team writes it.** Not guessed by code or a model. *2026-10-23: the SEO team had no preference; the owner chose `आणखी गाणी पहा:` ("watch more songs").* |
 | D4 | Marathi's daily cap during the experiment | **40/day** (≈2,040u at 51u, against ≤1.4k/day current burn and a 10k ceiling). At the default 10/day, the warm pool would take over three weeks, and the first windows would be thin |
 | D5 | Videos that already link to our videos | **Skip them** (`no_change`). The team already pulled this lever there, and adding to it muddies the pair measure |
 | D6 | What "beats holdout" means | **Cumulative lift ≥ 1 attributable view per treated video per week.** Any positive lift would pass on noise at today's ≈0 pair traffic. Below 1 view/video/week, a few hundred linked videos earn fewer views a week than Marathi gets in minutes, which isn't worth the spam risk |

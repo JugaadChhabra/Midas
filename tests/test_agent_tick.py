@@ -128,7 +128,8 @@ def wired(sb, *, yt=None, enabled=True, dry_run=False, holdout_pct=0.0, heading=
             WARM_MIN_IMPRESSIONS=500, BACKLINK_MAX=3, BACKLINK_MIN_CANDIDATES=2,
             TRAFFIC_INGEST_CHANNELS={CH}, DECIDE_BACKEND="llm"))
         stack.enter_context(patch("app.decide.openrouter.chat_json", _shadow_says_no_change))
-        stack.enter_context(patch.dict(backlinks.HEADINGS, {"mr": HEADING} if heading else {}))
+        stack.enter_context(patch.dict(backlinks.HEADINGS, {"mr": HEADING} if heading else {},
+                                       clear=True))
         audit = stack.enter_context(patch("app.autopilot.audit_video"))
         span = stack.enter_context(patch("app.autopilot.tracing.span"))
         rec = MagicMock()
