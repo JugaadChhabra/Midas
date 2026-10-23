@@ -22,6 +22,10 @@ class ApplyOutcome(str, Enum):
     QUOTA_EXCEEDED = "youtube_quota_exceeded"
     TOKEN_EXPIRED = "token_expired"
     FAILED = "failed"
+    # Refusals before anything is sent (the backlinks write, app/backlinks_apply.py):
+    # the quota ledger can't afford it, or BACKLINK_APPLY_ENABLED is false.
+    QUOTA_INSUFFICIENT = "quota_insufficient"
+    APPLY_DISABLED = "apply_disabled"
 
 
 # The HTTP status each outcome maps to — the whole YouTube-error taxonomy, in one
@@ -31,6 +35,8 @@ _APPLY_STATUS: dict[ApplyOutcome, int] = {
     ApplyOutcome.QUOTA_EXCEEDED: 429,
     ApplyOutcome.TOKEN_EXPIRED: 401,
     ApplyOutcome.FAILED: 500,
+    ApplyOutcome.QUOTA_INSUFFICIENT: 409,
+    ApplyOutcome.APPLY_DISABLED: 409,
 }
 
 
