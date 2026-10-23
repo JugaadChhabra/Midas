@@ -206,11 +206,12 @@ def test_a_malformed_target_is_refused(bad):
 # ── the language table (D3) ───────────────────────────────────────────────
 
 
-def test_marathi_has_no_heading_yet_and_refuses():
-    """D3: the SEO team writes Marathi's heading (owner, 2026-10-23). Adding
-    `"mr": "<their text>"` to backlinks.HEADINGS flips this test."""
-    with pytest.raises(backlinks.RenderRefused, match="'mr'"):
-        backlinks.render("First", TARGETS, "mr")
+def test_marathi_renders_with_its_heading():
+    """D3, decided by the owner on 2026-10-23 (the SEO team had no preference)."""
+    assert backlinks.HEADINGS["mr"] == "आणखी गाणी पहा:"
+    out = backlinks.render("First", TARGETS, "mr")
+    assert out.splitlines()[1] == "आणखी गाणी पहा:"
+    assert backlinks.strip(out) == "First"
 
 
 @pytest.mark.parametrize("lang", [None, "", "en", "zz"])
