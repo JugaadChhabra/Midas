@@ -257,6 +257,11 @@ class Settings:
     # canonical backlink block links to (app/backlinks.py render refuses more).
     # Start conservative: spam/ToS risk.
     BACKLINK_MAX = int(os.getenv("BACKLINK_MAX") or "3")
+    # Slice 1 · S1.1 (spec Part 4 Config, Part 2 §2.3, §8): a sibling channel
+    # sent the channel's videos at least this many suggested (type 7) views over
+    # its trailing 28 ingested traffic data-days (app/backlinks.py siblings).
+    # Inbound only, read from the channel's own report (Part 4 finding 1).
+    SIBLING_MIN_VIEWS = int(os.getenv("SIBLING_MIN_VIEWS") or "100")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

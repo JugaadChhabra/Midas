@@ -18,6 +18,16 @@ its exact heading line and the `youtu.be` lines under it, nothing looser. A
 blank line separates the block from the text after it, so a human's link line
 that used to sit under the first line isn't read as one of the block's.
 
+Which videos to link to is S1.1 (Part 2 §2.3, P2), and reads the database:
+
+    siblings(channel_id)   -- our channels that already send it suggested views
+    candidates(video)      -- ranked link targets, on its channel or a sibling
+
+Similarity is on B6's vectors only (`reembed.MODEL_VERSION`), against the
+source channel's calibrated `join_low`: no fallback to the production
+EMBED_MODEL vectors or to title overlap, since two recipes in one comparison
+is the B6 mistake again. A sibling's videos appear once it is re-embedded.
+
 The block functions are pure: no database, no YouTube. The block holds no
 model-written text. `find` can't tell a human's line in the block's shape added
 directly under the block from one of its own; a caller that knows the targets
@@ -26,11 +36,20 @@ it rendered (the intervention's payload) compares them with `find`'s.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, NamedTuple
 
+from app import reach, warm
 from app.audit_suggestion import DESCRIPTION_MAX
 from app.config import settings
+from app.db import supabase
+from app.embeddings import pooled_embeddings
+from app.human_edits import video_links
+from app.playlists import _cosine_sim
+from app.reembed import MODEL_VERSION
+from app.reporting_client import TRAFFIC_REPORT_TYPE_ID
+from app.rows import all_rows, rows_for_ids
 
 # The heading line per channel `default_language`. D3: the SEO team writes
 # Marathi's (owner, 2026-10-23), added before rollout (S1.7). A language
@@ -150,3 +169,145 @@ def render(description: str | None, targets: Iterable[Mapping], language: str | 
     if len(out) > DESCRIPTION_MAX:
         raise RenderRefused(f"description would be {len(out)} characters, over {DESCRIPTION_MAX}")
     return out
+
+
+# ── S1.1: siblings and candidates ─────────────────────────────────────────
+
+#: The sibling window: the channel's latest this-many ingested traffic
+#: data-days (Part 2 §2.3), counted as B4 counts reach days.
+SIBLING_WINDOW_DAYS = 28
+_SUGGESTED = 7
+
+#: Why `candidates` returned none before looking at targets, for the caller's log.
+NO_THRESHOLDS = "no_thresholds"
+THRESHOLDS_OTHER_MODEL = "thresholds_other_model_version"
+SOURCE_NOT_EMBEDDED = "source_not_embedded"
+
+
+class Candidates(NamedTuple):
+    """`candidates`' answer.
+
+    `rows` are `{video_id, channel_id, title, similarity, impressions}`, best
+    first, at most 2 × BACKLINK_MAX. `skipped_unembedded` counts the source or
+    otherwise eligible targets with no B6 vector. `reason` is set when the
+    source got none without targets being considered.
+    """
+
+    rows: list[dict]
+    skipped_unembedded: int = 0
+    reason: str | None = None
+
+
+def siblings(channel_id: str) -> list[dict]:
+    """Our other channels whose videos sent this channel's videos at least
+    SIBLING_MIN_VIEWS suggested views over its latest SIBLING_WINDOW_DAYS
+    ingested traffic data-days, as `{channel_id, views}`, most views first.
+
+    Read from the channel's own `video_traffic_source_daily`: a type-7 row
+    keeps its detail only when the referring video is ours (traffic_poll
+    `keeps_detail`). A channel counts only if it is itself in
+    TRAFFIC_INGEST_CHANNELS: a link to it is measured from its own report
+    (Part 4 finding 1).
+    """
+    covered = reach.coverage(channel_id, report_type=TRAFFIC_REPORT_TYPE_ID)
+    if not covered:
+        return []
+    window = set(sorted(covered, reverse=True)[:SIBLING_WINDOW_DAYS])
+
+    by_referrer: dict[str, int] = defaultdict(int)
+    for r in all_rows(
+        supabase().table("video_traffic_source_daily")
+        .select("source_detail,date,views")
+        .eq("channel_id", channel_id)
+        .eq("source_type", _SUGGESTED)
+        .neq("source_detail", "")
+        .gte("date", min(window))
+        .lte("date", max(window))
+    ):
+        if r["date"] in window:
+            by_referrer[r["source_detail"]] += r["views"]
+
+    channel_of = {
+        v["id"]: v["channel_id"] for v in rows_for_ids(
+            lambda c: supabase().table("videos").select("id,channel_id").in_("id", c),
+            by_referrer,
+        )
+    }
+    by_channel: dict[str, int] = defaultdict(int)
+    for vid, views in by_referrer.items():
+        ch = channel_of.get(vid)
+        if ch and ch != channel_id and ch in settings.TRAFFIC_INGEST_CHANNELS:
+            by_channel[ch] += views
+    out = [{"channel_id": ch, "views": n} for ch, n in by_channel.items()
+           if n >= settings.SIBLING_MIN_VIEWS]
+    out.sort(key=lambda r: r["channel_id"])
+    out.sort(key=lambda r: r["views"], reverse=True)
+    return out
+
+
+def _thresholds(channel_id: str) -> dict:
+    rows = (
+        supabase().table("channels").select("playlist_thresholds")
+        .eq("id", channel_id).limit(1).execute()
+    ).data or []
+    return (rows[0].get("playlist_thresholds") if rows else None) or {}
+
+
+def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> Candidates:
+    """Link targets for the source `video` (a `videos` row with `id`,
+    `channel_id`, `description`), ranked by similarity, ties by impressions.
+
+    A target is on the source's channel or a sibling (`siblings`, unless the
+    caller passes `sibling_ids`); public, not a Short, not the source, and not
+    already linked from its description; warm on its own channel (B4's
+    measure, `warm.warm_impressions`); and at least the source channel's
+    `join_low` similar to it on B6 vectors. A NULL privacy or `is_short` is
+    not yet known, and eligible (as warm_pool()).
+    """
+    source_id, channel_id = video["id"], video["channel_id"]
+    thresholds = _thresholds(channel_id)
+    if thresholds.get("join_low") is None:
+        return Candidates([], reason=NO_THRESHOLDS)
+    if thresholds.get("model_version") != MODEL_VERSION:
+        return Candidates([], reason=THRESHOLDS_OTHER_MODEL)
+    source_vector = pooled_embeddings([source_id], model_version=MODEL_VERSION).get(source_id)
+    if source_vector is None:
+        return Candidates([], skipped_unembedded=1, reason=SOURCE_NOT_EMBEDDED)
+
+    if sibling_ids is None:
+        sibling_ids = [s["channel_id"] for s in siblings(channel_id)]
+    # Keyed by video, so only these channels' videos are looked at.
+    impressions: dict[str, int] = {}
+    for ch in dict.fromkeys([channel_id, *sibling_ids]):
+        impressions.update(warm.warm_impressions(ch))
+
+    linked = video_links(video.get("description"))
+    eligible = [
+        v for v in rows_for_ids(
+            lambda c: (
+                supabase().table("videos")
+                .select("id,channel_id,title,privacy_status,is_short")
+                .in_("id", c)
+            ),
+            impressions,
+        )
+        if v["id"] != source_id
+        and v["id"] not in linked
+        and v.get("privacy_status") in (None, "public")
+        and v.get("is_short") is not True
+    ]
+
+    vectors = pooled_embeddings([v["id"] for v in eligible], model_version=MODEL_VERSION)
+    rows, skipped = [], 0
+    for v in eligible:
+        vector = vectors.get(v["id"])
+        if vector is None:
+            skipped += 1
+            continue
+        similarity = _cosine_sim(source_vector, vector)
+        if similarity >= thresholds["join_low"]:
+            rows.append({"video_id": v["id"], "channel_id": v["channel_id"],
+                         "title": v.get("title"), "similarity": similarity,
+                         "impressions": impressions[v["id"]]})
+    rows.sort(key=lambda r: (-r["similarity"], -r["impressions"], r["video_id"]))
+    return Candidates(rows[:2 * settings.BACKLINK_MAX], skipped_unembedded=skipped)

@@ -270,7 +270,9 @@ def test_the_warm_filter_is_not_called_from_the_tick():
         "Phase B must not wire the warm filter into the tick")
 
 
-def test_nothing_in_the_app_uses_the_warm_filter_yet():
+def test_only_s1_1_candidates_use_warm_and_only_its_warmth_measure():
+    """Until the tick routing (S1.4): S1.1's candidates read `warm_impressions`
+    for their targets' warmth, and nothing picks from the pool yet."""
     users = [
         p.relative_to(REPO).as_posix()
         for p in (REPO / "app").rglob("*.py")
@@ -278,7 +280,9 @@ def test_nothing_in_the_app_uses_the_warm_filter_yet():
         and re.search(r"\bapp\.warm\b|from app import[^\n]*\bwarm\b|[\"']warm_pool[\"']",
                       p.read_text())
     ]
-    assert users == [], f"wired before Slice 1: {users}"
+    assert users == ["app/backlinks.py"], f"wired before Slice 1's tick: {users}"
+    backlinks = (REPO / "app/backlinks.py").read_text()
+    assert not re.search(r"warm\.(ranked_pool|warm_pool|explore_order)\b", backlinks)
 
 
 def test_the_sql_counts_the_same_report_type_as_reach_coverage():

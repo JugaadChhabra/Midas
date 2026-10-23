@@ -121,12 +121,15 @@ def days(window: Window) -> list[str]:
 
 # ── Coverage ──────────────────────────────────────────────────────────────
 
-def coverage(channel_id: str) -> set[str]:
+def coverage(channel_id: str, *, report_type: str = REACH_REPORT_TYPE_ID) -> set[str]:
     """The set of data-days this channel has an ingested reach report for.
 
     "Covered" means a report was ingested for that data-day. It says nothing
     about whether impressions were non-trivial — the MIN_IMPRESSIONS floor is
     applied later, per video, by `measurement`.
+
+    `report_type` asks the same of another report in the ledger: the sibling
+    window (app/backlinks.py) counts traffic-source data-days the same way.
     """
     rows = all_rows(
         supabase().table("reporting_reports_ingested")
@@ -134,7 +137,7 @@ def coverage(channel_id: str) -> set[str]:
         .eq("channel_id", channel_id)
         # The ledger also holds traffic-source reports (B1); only a reach
         # report makes a day covered.
-        .eq("report_type", REACH_REPORT_TYPE_ID),
+        .eq("report_type", report_type),
         # The one paged table without an `id` primary key.
         order_by="report_id",
     )
