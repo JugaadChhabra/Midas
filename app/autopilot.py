@@ -10,7 +10,7 @@ from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
 from app.channel_audits import audits_for_channel
-from app import eligibility, quota, tracing
+from app import agent_tick, eligibility, quota, tracing
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
@@ -22,6 +22,8 @@ from app.status_vocab import (
     AUDIT_PICKER_SKIP_STATUSES,
     AUTO_EXPIRE_PAUSE_REASONS,
     AuditStatus,
+    InterventionOrigin,
+    InterventionStatus,
     PausedReason,
 )
 from app.shorts.runner import active_job_count
@@ -86,7 +88,18 @@ def _applies_today(channel_id: str) -> int:
         .gte("applied_at", _today_start_iso())
         .execute()
     )
-    return len(res.data or [])
+    # Plus Midas interventions applied today (Slice 1, spec Part 4 S1.4 "Cap"):
+    # applied_at is set only by a write that reached YouTube, so holdout and
+    # declined rows never count. A day's cap is far under the 1000-row page.
+    applied = (
+        supabase().table("interventions")
+        .select("id")
+        .eq("channel_id", channel_id)
+        .eq("origin", InterventionOrigin.MIDAS)
+        .gte("applied_at", _today_start_iso())
+        .execute()
+    )
+    return len(res.data or []) + len(applied.data or [])
 
 
 def _next_video_for_channel(channel_id: str) -> dict | None:
@@ -452,23 +465,31 @@ def _apply_audit_and_handle(audit_row: dict, video: dict, channel_id: str) -> st
     except ApplyError as e:
         if e.outcome is ApplyOutcome.TEST_AND_COMPARE:
             log.info("Skipping video %s: active Test & Compare experiment on YouTube", video["id"])
-        elif e.outcome is ApplyOutcome.QUOTA_EXCEEDED:
-            _yt_quota_exhausted_until = _next_yt_quota_reset()
-            log.warning(
-                "YouTube quotaExceeded: the Data API quota is project-wide, so "
-                "autopilot is dormant fleet-wide (every channel, not just %s) until %s",
-                channel_id, _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
-            )
-        elif e.outcome is ApplyOutcome.TOKEN_EXPIRED:
-            log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
-            _pause(channel_id, PausedReason.TOKEN_EXPIRED)
-        else:  # ApplyOutcome.FAILED
-            _record_failure(channel_id)
-        return e.outcome.value
+        return _react_to_apply_error(e, channel_id)
     except Exception as e:
         log.exception("Apply failed for %s: %s", audit_row["id"], e)
         _record_failure(channel_id)
         return APPLY_UNCLASSIFIED
+
+
+def _react_to_apply_error(e: ApplyError, channel_id: str) -> str:
+    """Idle on quota exhaustion, pause on token expiry, record a failure on a
+    YouTube failure; a refusal before anything was sent (Test & Compare, the
+    ledger's quota_insufficient, apply_disabled) is a skip. Returns the outcome."""
+    global _yt_quota_exhausted_until
+    if e.outcome is ApplyOutcome.QUOTA_EXCEEDED:
+        _yt_quota_exhausted_until = _next_yt_quota_reset()
+        log.warning(
+            "YouTube quotaExceeded: the Data API quota is project-wide, so "
+            "autopilot is dormant fleet-wide (every channel, not just %s) until %s",
+            channel_id, _yt_quota_exhausted_until.strftime("%Y-%m-%d %H:%M UTC"),
+        )
+    elif e.outcome is ApplyOutcome.TOKEN_EXPIRED:
+        log.warning("OAuth token expired or revoked for %s; pausing autopilot", channel_id)
+        _pause(channel_id, PausedReason.TOKEN_EXPIRED)
+    elif e.outcome is ApplyOutcome.FAILED:
+        _record_failure(channel_id)
+    return e.outcome.value
 
 
 #: tick.outcome, and the token in the log line, when the ledger says the apply
@@ -491,6 +512,51 @@ def _can_afford_apply(channel_id: str) -> bool:
         QUOTA_INSUFFICIENT, channel_id, cost, quota.units_remaining(),
     )
     return False
+
+
+#: tick.outcome for an agent channel whose agent path is closed (paused, title
+#: autopilot flag off, no language, or reach not certified).
+AGENT_INELIGIBLE = "agent_ineligible"
+#: tick.outcome when the agent path raised something unclassified.
+AGENT_FAILED = "agent_failed"
+
+
+def _agent_tick(ch: dict) -> str:
+    """The agent path (Slice 1, spec Part 4 S1.4): gate → resync → cap → quota
+    → `agent_tick.run` (pick, triage, record, apply). Never calls audit_video.
+    Returns the tick outcome."""
+    channel_id = ch["id"]
+    if not eligibility.can_run_agent(ch):
+        _touch_tick(channel_id)
+        return AGENT_INELIGIBLE
+    if not _resync_if_stale(ch):
+        return "stale_sync"
+
+    cap = ch.get("autopilot_daily_cap") or 10
+    applies = _applies_today(channel_id)
+    if applies >= cap:
+        log.info("Channel %s at daily cap (%d/%d)", channel_id, applies, cap)
+        _touch_tick(channel_id)
+        return "daily_cap"
+
+    # Before triage, as before the audit: a tick that can't afford the write
+    # shouldn't record a treated row only to cancel it.
+    if not _can_afford_apply(channel_id):
+        _touch_tick(channel_id)
+        return QUOTA_INSUFFICIENT
+
+    try:
+        outcome = agent_tick.run(ch)
+        if outcome == InterventionStatus.MEASURING:
+            _failure_counts[channel_id] = 0
+    except ApplyError as e:
+        outcome = _react_to_apply_error(e, channel_id)
+    except Exception as e:
+        log.exception("Agent tick failed for %s: %s", channel_id, e)
+        _record_failure(channel_id)
+        outcome = AGENT_FAILED
+    _touch_tick(channel_id)
+    return outcome
 
 
 def tick():
@@ -524,6 +590,12 @@ def tick():
                     _run_shorts_action(ch)
                 except Exception as e:
                     log.exception("Shorts autopilot failed for %s: %s", channel_id, e)
+
+            # Slice 1: an agent channel takes the agent path, which never runs
+            # audit_video. Every other channel goes on below exactly as before.
+            if ch.get("agent_enabled"):
+                rec.set(**{"tick.outcome": _agent_tick(ch)})
+                return
 
             # The metadata-audit path runs only for channels whose audit path is open.
             # (A channel can be picked purely for shorts while audit-paused, so this

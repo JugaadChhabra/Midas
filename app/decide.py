@@ -17,13 +17,14 @@ question, its answers or its rules change. It is hashed into the A6 strategy
 stamp (app/audits.py strategy_version), so a stamp names the questions that
 produced it.
 
-Nothing in Phase B calls decide(); Slice 1's triage does.
+The caller is Slice 1's triage (app/agent_tick.py), which stores the returned
+`log_id` on its intervention and points the log row back with `link`.
 """
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from app import openrouter
@@ -33,7 +34,7 @@ from app.status_vocab import DecisionUsed
 
 log = logging.getLogger(__name__)
 
-QUESTION_SET_VERSION = "2026.10-b5-v1"
+QUESTION_SET_VERSION = "2026.10-s1-v1"
 
 
 @dataclass(frozen=True)
@@ -41,12 +42,15 @@ class Decision:
     """One answer to a question set: the answer and a probability per allowed answer.
 
     The rules answer carries 1.0 on itself and 0.0 on the rest; a backend's
-    carries what it reports.
+    carries what it reports. `log_id` is the decision_log row decide() wrote
+    (None if the write failed); it isn't part of the answer, so equality
+    ignores it.
     """
 
     question_set: str
     answer: str
     probs: dict[str, float]
+    log_id: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -64,8 +68,11 @@ class NotConfigured(Exception):
 
 def _triage_rules(context: dict) -> str:
     """Spec Part 2 §2.2: backlinks if the description has no related block and
-    at least BACKLINK_MIN_CANDIDATES candidates exist; otherwise no_change."""
-    if (not context.get("has_related_block")
+    at least BACKLINK_MIN_CANDIDATES candidates exist; otherwise no_change.
+    Never backlinks once the lever has stopped for the channel (Part 4 S1.4,
+    the S1.6 stop rule: `backlinks_stopped`)."""
+    if (not context.get("backlinks_stopped")
+            and not context.get("has_related_block")
             and (context.get("backlink_candidates") or 0) >= settings.BACKLINK_MIN_CANDIDATES):
         return "backlinks"
     return "no_change"
@@ -160,7 +167,8 @@ def decide(question_set: QuestionSet, subject: str, context: dict,
     """The rules answer to `question_set` for `subject`, with the backend's in shadow.
 
     Logs one decision_log row (rules answer, backend answer and probabilities,
-    used = rules). A failed log write is logged and doesn't change the answer.
+    used = rules) and returns its id as `log_id`. A failed log write is logged
+    and doesn't change the answer; `log_id` is then None.
     """
     answer = question_set.rules(context)
     rules = _validated(question_set, answer,
@@ -176,7 +184,26 @@ def decide(question_set: QuestionSet, subject: str, context: dict,
         "intervention_id": intervention_id,
     }
     try:
-        supabase().table("decision_log").insert(row).execute()
+        stored = supabase().table("decision_log").insert(row).execute().data or []
+        log_id = stored[0].get("id") if stored else None
     except Exception as e:
         log.warning("decide %s %s: decision_log write failed: %s", question_set.name, subject, e)
-    return rules
+        log_id = None
+    return replace(rules, log_id=log_id)
+
+
+def link(log_id: int | None, intervention_id: int) -> None:
+    """Point a decision_log row at the intervention recorded from it.
+
+    The decision comes first (triage decides, then the row is recorded), so
+    the link is written after. No-op without a log id; a failed write is
+    logged, never raised, as decide()'s own.
+    """
+    if log_id is None:
+        return
+    try:
+        supabase().table("decision_log").update(
+            {"intervention_id": intervention_id}).eq("id", log_id).execute()
+    except Exception as e:
+        log.warning("decide: linking decision_log %s to intervention %s failed: %s",
+                    log_id, intervention_id, e)

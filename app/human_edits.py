@@ -53,7 +53,7 @@ log = logging.getLogger("midas.human_edits")
 # Phase A1.3's extraction found every YouTube link in a description and kept
 # junk such as `ExampleURL3`. Tightened here to the URL forms that carry a video
 # id, and to exactly 11 id characters: the lookahead refuses a longer token.
-# Junk that happens to be 11 characters is dropped later, by _our_videos.
+# Junk that happens to be 11 characters is dropped later, by our_videos.
 _VIDEO_LINK = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:[^\s#]*?&)?v=|shorts/|embed/|live/|v/)|youtu\.be/)"
     r"([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])",
@@ -138,12 +138,12 @@ def _midas_block(video_id: str, description: str | None) -> bool:
                 or r.get("status") == InterventionStatus.CANCELLED):
             continue
         targets = {t.get("video_id") for t in (r.get("payload") or {}).get("targets") or []}
-        if targets and targets <= links and not _our_videos(links - targets):
+        if targets and targets <= links and not our_videos(links - targets):
             return True
     return False
 
 
-def _our_videos(ids: set[str]) -> set[str]:
+def our_videos(ids: set[str]) -> set[str]:
     """The subset of `ids` that are videos in `videos`, on any of our channels."""
     rows = rows_for_ids(
         lambda c: supabase().table("videos").select("id").in_("id", c), sorted(ids))
@@ -240,7 +240,7 @@ def record_description_edits(channel_id: str,
         return 0
 
     linked = {t for _, added, removed in diffs.values() for t in added | removed}
-    ours = (linked & set(also_ours)) | _our_videos(linked - set(also_ours))
+    ours = (linked & set(also_ours)) | our_videos(linked - set(also_ours))
     now = datetime.now(timezone.utc).isoformat()
     recorded = 0
     for video_id, (after, added, removed) in diffs.items():

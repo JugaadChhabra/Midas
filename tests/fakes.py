@@ -299,8 +299,9 @@ class FakeQuery:
 
 
 class FakeTable:
-    def __init__(self, name, rows, writes):
+    def __init__(self, name, rows, writes, serial=False):
         self._name, self._rows, self._writes = name, rows, writes
+        self._serial = serial
 
     def select(self, columns="*", count=None, **_kw):
         q = FakeQuery(self._name, self._rows, self._writes, columns)
@@ -308,6 +309,17 @@ class FakeTable:
         return q
 
     def insert(self, payload, **kw):
+        if self._serial:
+            # bigserial: the next id after the largest stored, as Postgres
+            # would hand out; `writes` records the row with its id.
+            items = payload if isinstance(payload, list) else [payload]
+            next_id = max((r.get("id") or 0 for r in self._rows), default=0) + 1
+            numbered = []
+            for item in items:
+                if item.get("id") is None:
+                    item, next_id = {**item, "id": next_id}, next_id + 1
+                numbered.append(item)
+            payload = numbered if isinstance(payload, list) else numbered[0]
         return FakeQuery(self._name, self._rows, self._writes).insert(payload, **kw)
 
     def upsert(self, payload, **kw):
@@ -328,10 +340,12 @@ class FakeSupabase:
     """
 
     def __init__(self, tables: dict[str, list[dict]] | None = None,
-                 rpc: dict[str, object] | None = None):
+                 rpc: dict[str, object] | None = None, serial: tuple[str, ...] = ()):
         self._tables = {name: [dict(r) for r in rows]
                         for name, rows in (tables or {}).items()}
         self._rpc = rpc or {}
+        #: Tables whose inserts get an `id` (bigserial) when they carry none.
+        self._serial = set(serial)
         #: (table, op, payload) per write, in order.
         self.writes: list[tuple[str, str, object]] = []
         #: (name, params) per rpc call, in order.
@@ -343,7 +357,8 @@ class FakeSupabase:
                 f"query against unstubbed table {name!r}; tables described: "
                 f"{sorted(self._tables)}. Add it to FakeSupabase(...) — an "
                 f"empty answer here is how a test passes while reading nothing.")
-        return FakeTable(name, self._tables[name], self.writes)
+        return FakeTable(name, self._tables[name], self.writes,
+                         serial=name in self._serial)
 
     def rpc(self, name: str, params=None):
         self.rpc_calls.append((name, params))

@@ -320,28 +320,32 @@ def test_flag_off_never_touches_the_rpc():
     assert sb.rpc_calls == []
 
 
-# ── not wired into the tick (Slice 1 does that) ───────────────────────────
+# ── wired only through the agent tick (S1.4b) ─────────────────────────────
 
-def test_the_warm_filter_is_not_called_from_the_tick():
+def test_the_audit_tick_never_picks_from_the_warm_pool():
     autopilot = (REPO / "app/autopilot.py").read_text()
-    # Not a bare "warm": autopilot may well mention channels.reach_warmup.
+    # Not a bare "warm": autopilot may well mention channels.reach_warmup. The
+    # agent path picks through app/agent_tick.py, never the audit path.
     assert not re.search(r"\bwarm\b|warm_pool|ranked_pool|explore_order", autopilot), (
-        "Phase B must not wire the warm filter into the tick")
+        "the audit path must not pick from the warm filter")
 
 
-def test_only_s1_1_candidates_use_warm_and_only_its_warmth_measure():
-    """Until the tick routing (S1.4): S1.1's candidates read `warm_impressions`
-    for their targets' warmth, and nothing picks from the pool yet."""
-    users = [
+def test_only_the_agent_tick_picks_and_s1_1_candidates_use_only_the_warmth_measure():
+    """S1.4b's agent tick picks from the pool (`warm_pool`, with its explore
+    share); S1.1's candidates read only `warm_impressions` for their targets."""
+    users = sorted(
         p.relative_to(REPO).as_posix()
         for p in (REPO / "app").rglob("*.py")
         if p.name != "warm.py"
         and re.search(r"\bapp\.warm\b|from app import[^\n]*\bwarm\b|[\"']warm_pool[\"']",
                       p.read_text())
-    ]
-    assert users == ["app/backlinks.py"], f"wired before Slice 1's tick: {users}"
+    )
+    assert users == ["app/agent_tick.py", "app/backlinks.py"], users
     backlinks = (REPO / "app/backlinks.py").read_text()
     assert not re.search(r"warm\.(ranked_pool|warm_pool|explore_order)\b", backlinks)
+    agent = (REPO / "app/agent_tick.py").read_text()
+    assert re.search(r"warm\.warm_pool\(", agent)
+    assert not re.search(r"warm\.(ranked_pool|explore_order)\b", agent)
 
 
 def test_the_sql_counts_the_same_report_type_as_reach_coverage():

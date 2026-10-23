@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 
+from app import reach
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
@@ -81,6 +82,22 @@ def can_audit(channel: dict) -> bool:
         channel.get("autopilot_enabled")
         and not channel.get("autopilot_paused_reason")
         and channel.get("default_language")
+    )
+
+
+def can_run_agent(channel: dict) -> bool:
+    """Agent path open? (Slice 1, spec Part 4 S1.4, Part 2 §6.1.)
+
+    The audit path's own gate (`can_audit`: enabled, not paused, language
+    set), plus `agent_enabled`, plus certified reach: the warm pool is empty
+    on an uncertified channel, and a lever measured against uncovered days
+    measures nothing. Certification reads the reach ledger, so it is asked
+    last.
+    """
+    return bool(
+        can_audit(channel)
+        and channel.get("agent_enabled")
+        and reach.certify(channel["id"])["certified"]
     )
 
 
