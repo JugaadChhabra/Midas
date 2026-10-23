@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-10-23 (Slice 1 S1.1 #62: `app/backlinks.py` `siblings`/`candidates`, `SIBLING_MIN_VIEWS`, `warm.warm_impressions`, `reach.coverage(report_type=)`). Earlier: 2026-10-23 (Slice 1 S1.2 #61: `app/backlinks.py`, `BACKLINK_MAX`). Earlier: 2026-10-13 (B10: Phase B deployed 2026-10-07/08 and its exit gate passed 2026-10-13, `docs/PHASE_B_FINDINGS.md`; #56, 2026-10-08: `youtube_client.channel_credentials`). Earlier: 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version; B6 #37: `app/reembed.py`, `scripts/reembed.py`, `channels.playlist_thresholds`; B7 #38, 2026-10-07: `bho`/`raj` in `_LANG_NAMES` and `_NON_ISO_639_1`) · **Commit:** on top of `96203c2` · **Branch:** `slice-1/62-slice-1-s1-1-siblings-and-backlink-candi`
+**Generated:** 2026-10-23 (Slice 1 S1.4a #63: `warm_pool()` replaced by `20261023000000`, cooldown and once-per-experiment exclusions in it and `app/warm.py`, `TRIAGE_COOLDOWN_DAYS`). Earlier: 2026-10-23 (Slice 1 S1.1 #62: `app/backlinks.py` `siblings`/`candidates`, `SIBLING_MIN_VIEWS`, `warm.warm_impressions`, `reach.coverage(report_type=)`). Earlier: 2026-10-23 (Slice 1 S1.2 #61: `app/backlinks.py`, `BACKLINK_MAX`). Earlier: 2026-10-13 (B10: Phase B deployed 2026-10-07/08 and its exit gate passed 2026-10-13, `docs/PHASE_B_FINDINGS.md`; #56, 2026-10-08: `youtube_client.channel_credentials`). Earlier: 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version; B6 #37: `app/reembed.py`, `scripts/reembed.py`, `channels.playlist_thresholds`; B7 #38, 2026-10-07: `bho`/`raj` in `_LANG_NAMES` and `_NON_ISO_639_1`) · **Commit:** on top of `6d3f0f6` · **Branch:** `slice-1/63-slice-1-s1-4a-warm-pool-exclusions-for-t`
 (Older design docs are deleted in the same change and live only in git history; nothing below cites them.
 `scripts/overnight_tickets.sh` is dev tooling, never deployed.)
 
@@ -63,7 +63,7 @@ Stages are the spec's build order (spec Part 2 §6).
 |---|---|---|---|---|
 | **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:115-117,34`, `app/main.py:323-364`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:25-31`, `app/youtube_metadata.py:58-59` (the `bgc` entries). A6: `app/audits.py:199-286`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:77-103,562-565`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:477-493,559,627`, `app/audits.py:830-837`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
 | **Phase B** | Plumbing (spec Part 3, B1–B10) | **done** (exit gate passed 2026-10-13; deployed 2026-10-07/08; `docs/PHASE_B_FINDINGS.md`) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:234`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:235-247`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:223-233`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:248-255`), `tests/test_decide.py`. B6: `app/reembed.py` (`recipe_text`, `MODEL_VERSION`, `estimate_channel`, `reembed_channel`, `calibrate_channel`), `scripts/reembed.py`, `supabase/migrations/20261006060000_channels_playlist_thresholds.sql`, `model_version` keyword on `app/embeddings.py` `pooled_embeddings`/`embedded_video_ids`, `tests/test_reembed.py`. B7 (code half): `bho`/`raj` in `_LANG_NAMES` (`app/transcripts.py:25-36`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-64`), `tests/test_language_codes.py`, `tests/test_youtube_metadata.py` | Nothing calls `decide()` (no production caller; Slice 1's triage is the first), so `decision_log` gets no rows in Phase B; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is built but nothing picks from it (`tests/test_warm.py` guards that; S1.1's candidates use its `warm_impressions`); the B6 recipe's vectors and `channels.playlist_thresholds` are written only by the one-off `scripts/reembed.py` (run for Marathi 2026-10-07/08) and read in production only by S1.1's `backlinks.candidates`, itself not called yet; the `bho`/`raj` entries are unused, since the owner chose plain `hi` for Bhojpuri and Rajasthani (2026-10-06, `app/youtube_metadata.py:60-61`) and they exist so those channels can switch later without a code change. Partial footholds listed in §7.1. |
-| **Slice 1** | Backlinks + no change | **in progress** (spec Part 4, ready to build since 2026-10-13) | S1.1: `app/backlinks.py` (`siblings`, `candidates`, `Candidates`), `SIBLING_MIN_VIEWS` (`app/config.py:264`), `app/warm.py` `warm_impressions`, `tests/test_backlink_candidates.py`. S1.2: `app/backlinks.py` (`render`, `find`, `strip`, `HEADINGS`), `BACKLINK_MAX` (`app/config.py:259`), `tests/test_backlinks.py` | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it; the warm pool exists, B4, but nothing picks from it). The candidate finder exists (S1.1) but nothing calls it, and it finds only Marathi targets until the siblings are re-embedded (S1.7). The canonical block renderer exists (S1.2) but nothing calls it, and its heading table is empty, so it refuses every language until the SEO team's Marathi heading is added (D3, S1.7). Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
+| **Slice 1** | Backlinks + no change | **in progress** (spec Part 4, ready to build since 2026-10-13) | S1.1: `app/backlinks.py` (`siblings`, `candidates`, `Candidates`), `SIBLING_MIN_VIEWS` (`app/config.py:264`), `app/warm.py` `warm_impressions`, `tests/test_backlink_candidates.py`. S1.2: `app/backlinks.py` (`render`, `find`, `strip`, `HEADINGS`), `BACKLINK_MAX` (`app/config.py:259`), `tests/test_backlinks.py`. S1.4a: `supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql` (`warm_pool()`), `app/warm.py` `_holds`, `TRIAGE_COOLDOWN_DAYS` (`app/config.py:269`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py` | No tick routing (the `channels.agent_enabled` column exists, B2, but nothing reads or sets it; the warm pool exists, B4, with S1.4a's cooldown and once-per-experiment exclusions, but nothing picks from it, and `20261023000000` is not applied). The candidate finder exists (S1.1) but nothing calls it, and it finds only Marathi targets until the siblings are re-embedded (S1.7). The canonical block renderer exists (S1.2) but nothing calls it, and its heading table is empty, so it refuses every language until the SEO team's Marathi heading is added (D3, S1.7). Title autopilot is off on every channel (header), which is the spec's precondition (spec Part 2 §6.1). |
 | **Slice 2** | Playlists + Short links | **not started** (as spec'd) | pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
 | **Slice 3** | Agent challenger + titles | **not started** | none | No `app/agent/`, no `openrouter.chat_tools`, no `WRITER_MODEL`, no `app/niche_reference.py`. The old title path (`audit_video`) is intact but unreachable from autopilot while `autopilot_enabled = f` (`app/eligibility.py:66-84`). |
 | **Slice 4** | Playbook | **not started** | none | No `channels.playbook_json`. `app/reflection.py` (the thing Slice 4 retires) is frozen by `REFLECTION_ENABLED=false` (§4). |
@@ -109,7 +109,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 ## 2. Schema — as applied
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). The latest is `20261006060000` (B6, #37). It, `20261006050000` (B5, #36), `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
+`010_storage_shim.sql` run first). The latest is `20261023000000` (S1.4a, #63), not applied. `20261006060000` (B6, #37), `20261006050000` (B5, #36), `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
 `20261006010000` (B1b, #31) and `20261006000000` (B1a, #30) are applied on the office machine: the B1 pair on
 2026-10-07 (B9a), the other five on 2026-10-07 (B9b) (`docs/PHASE_B_FINDINGS.md`).
 
@@ -161,6 +161,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261006040000_warm_pool_rpc.sql                warm_pool() function (B4)
 20261006050000_decision_log.sql                 decision_log (B5)
 20261006060000_channels_playlist_thresholds.sql  channels.playlist_thresholds (B6)
+20261023000000_warm_pool_agent_exclusions.sql   warm_pool() replaced: + p_cooldown_days, cooldown, once per experiment (S1.4a)
 ```
 
 These are the files. The live DB's migration ledger was not checked (unreachable).
@@ -276,16 +277,22 @@ These are the files. The live DB's migration ledger was not checked (unreachable
 - **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Nothing populates it (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`, `app/metrics_poll.py:85`).
 - **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed row `('2026.07-baseline-v1', 'code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)', 'anthropic/claude-haiku-4.5', 'champion', …)`; derived rows are upserted per audit (§6).
 - **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). Production writes use `model_version = EMBED_MODEL` (`app/embeddings.py:133`), from two input recipes (§6). B6's one-off re-embed writes a second value, `app/reembed.py` `MODEL_VERSION` = `"google/gemini-embedding-2-preview|tdt-v1"` (`EMBED_MODEL` + `"|"` + `RECIPE`, `app/reembed.py:33-34`), one recipe for every video (§6); every production reader filters on `EMBED_MODEL`, and every caller of the `p_model_version` RPCs passes it, except `app/backlinks.py` `candidates` (S1.1), which reads only `MODEL_VERSION` and is not called yet.
-- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()` (B4, below).
+- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()` (B4, replaced by S1.4a, below).
 
-- **`warm_pool()`** (`20261006040000`, B4), verbatim without its header comment. Its in-app twin is
-  `app/warm.py` `_ranked_pool_inapp`; nothing calls either yet (§5):
+- **`warm_pool()`** (`20261023000000`, S1.4a #63, replacing B4's `20261006040000`), verbatim without its header
+  comment. Its in-app twin is `app/warm.py` `_ranked_pool_inapp`; nothing calls either yet (§5). On top of B4's
+  active-Midas exclusion it skips a video with any `midas` row created within `p_cooldown_days`
+  (`TRIAGE_COOLDOWN_DAYS`), whatever its lever or status, or any `midas` `backlinks` row of arm `treated` or
+  `holdout`, at any age. The four-argument B4 function is dropped, not overloaded:
   ```sql
+  drop function if exists warm_pool(text, bigint, int, int);
+
   create or replace function warm_pool(
       p_channel_id               text,
       p_min_impressions          bigint,
       p_window_days              int,
-      p_measurement_window_days  int
+      p_measurement_window_days  int,
+      p_cooldown_days            int
   )
   returns table(id text, impressions bigint)
   language sql
@@ -327,13 +334,17 @@ These are the files. The live DB's migration ledger was not checked (unreachable
         select 1 from interventions i
         where i.video_id = v.id
           and i.origin = 'midas'
-          and i.status in ('planned', 'applied', 'measuring', 'holdout')
+          and (
+            i.status in ('planned', 'applied', 'measuring', 'holdout')
+            or i.created_at > now() - make_interval(days => p_cooldown_days)
+            or (i.lever = 'backlinks' and i.arm in ('treated', 'holdout'))
+          )
       )
     order by rc.impressions desc, v.id;
   $$;
 
-  revoke execute on function warm_pool(text, bigint, int, int) from public;
-  grant  execute on function warm_pool(text, bigint, int, int) to service_role;
+  revoke execute on function warm_pool(text, bigint, int, int, int) from public;
+  grant  execute on function warm_pool(text, bigint, int, int, int) to service_role;
   ```
 
 - **`decision_log`** (`20261006050000`, B5), verbatim without its header comment. Written only by
@@ -372,7 +383,7 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `PLAYLIST_RECONCILE_WRITES_ENABLED` | `:116` same form, `"false"` | default false (A4) | no |
 | `PLAYLIST_TUNING_ENABLED` | `:117` same form, `"false"` | default false (A4) | no |
 | `REFLECTION_ENABLED` | `:34` same form, `"false"` | default false (A4) | no |
-| `STRATEGY_LABEL` | `:274` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
+| `STRATEGY_LABEL` | `:284` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
 | `MIN_IMPRESSIONS` | `:185` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | no (a separate setting, same default) |
 | `MEASUREMENT_WINDOW_DAYS` | `:184` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
 | `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** in use: B6 calibrates per channel into `channels.playlist_thresholds` (`app/reembed.py` `calibrate_channel`, never writing `settings`), but the engine still reads these globals |
@@ -386,6 +397,7 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `BACKLINK_MAX` | `:259` `int(os.getenv("BACKLINK_MAX") or "3")` | 3 (Part 4 Config, Part 2 §8) | no. Read only by `app/backlinks.py` `render`, at call time, which refuses more targets rather than trimming |
 | `AUDIT_MODEL` | `:29` `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; dev `.env`: `google/gemini-3.7-flash` | reasoning model (Part 2 §3.1) | — |
 | `SIBLING_MIN_VIEWS` | `:264` `int(os.getenv("SIBLING_MIN_VIEWS") or "100")` | 100, inbound only (Part 4 Config, Part 2 §8) | no. Read only by `app/backlinks.py` `siblings`, over the source channel's latest 28 ingested traffic data-days (`SIBLING_WINDOW_DAYS`, a module constant) |
+| `TRIAGE_COOLDOWN_DAYS` | `:269` `int(os.getenv("TRIAGE_COOLDOWN_DAYS") or "7")` | 7 (Part 4 Config, finding 2; Part 2 §2.1, §8) | no. Read only by `app/warm.py` (in-app cooldown, and `p_cooldown_days` of the `warm_pool()` RPC) |
 | `BACKLINK_EXPERIMENT_WINDOWS` (3), `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `AGENT_MAX_TURNS` (12), `WRITER_MODEL` (= `AUDIT_MODEL`), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
 
 **Every other setting, verbatim defaults** (`app/config.py`; dev `.env` overrides noted):
@@ -535,7 +547,7 @@ measurement and playbook rebuild (Part 2 §1.1, §5).
 | `decide.py` | B5: `decide(question_set, subject, context, intervention_id=None) -> Decision` (`question_set`, `answer`, `probs`). Answers with the question set's rules (probability 1.0), asks the `DECIDE_BACKEND` backend in shadow (`llm` via `openrouter.chat_json`, validated against the allowed answers and probabilities in [0, 1]; `jev` raises `NotConfigured`), writes one `decision_log` row with `used = 'rules'` and `QUESTION_SET_VERSION`, and returns the rules answer. A backend failure is logged `"decide <set> <subject>: <backend> backend failed; rules answer stands: …"` and logged as a row with NULL `jev_answer`; a failed log write is logged and doesn't change the answer. One question set, `TRIAGE` (answers `no_change|backlinks|playlist|short_link|title`, Part 2 §2.2; the rules choose only `backlinks` or `no_change`). Every answer needs a probability; the rules answer is 1.0 on itself, 0.0 elsewhere. Not called by anything: Slice 1's triage calls it |
 | `reembed.py` | B6, one-off: `recipe_text` (title, description, tags as `f"{title}\n\n{description}\n\n{', '.join(tags)}"`, title and description stripped; no transcript, no branch), `MODEL_VERSION`, `estimate_channel` (video count, videos still to embed, tokens ≈ UTF-8 bytes / 3, cost at a price passed in; reads the DB, calls no API), `reembed_channel` (every video of the channel in `videos` without a `MODEL_VERSION` vector, in batches of 50 upserted on `video_id,chunk_index,model_version`; a failed batch, or one answered with the wrong number of vectors, is retried one video at a time; a video that still fails is logged and counted, and a rerun retries it), `member_similarities` (`MemberSims`), `calibrate_channel` (thresholds from current playlist members' similarity, stored on `channels.playlist_thresholds`). Run only by `scripts/reembed.py` |
 | `backlinks.py` | Slice 1 S1.2, pure (no I/O): the canonical backlink block. `render(description, targets, language)` puts `HEADINGS[language]` then one `<title> https://youtu.be/<id>` line per target (dicts with `video_id`, `title`) directly after the description's first line (D2), then a blank line if text follows; any block already there is stripped first, so a re-render replaces it. Raises `RenderRefused` (a `ValueError`) for a language not in `HEADINGS` (no English fallback), no targets, more than `BACKLINK_MAX`, a duplicate or malformed target id, an empty title, a heading with `#`, or a result over `DESCRIPTION_MAX` characters. `#` is dropped from titles and whitespace collapsed, so the block adds no hashtag. `find` → `Block(language, video_ids, start, end)`: an exact heading line followed by at least one line matching `<title> https://youtu.be/<11-char id>` and nothing else; `strip` removes every such block and the blank line after it. `HEADINGS` is empty: Marathi's heading comes from the SEO team (D3). **S1.1, reads the DB:** `siblings(channel_id)` → `[{channel_id, views}]`, most views first: the channels whose videos sent this channel's videos ≥ `SIBLING_MIN_VIEWS` type-7 views over its latest `SIBLING_WINDOW_DAYS` (28) ingested `channel_traffic_source_a3` data-days (`reach.coverage(report_type=)`), read from its own `video_traffic_source_daily`, mapped to channels through `videos`, excluding itself and any channel not in `TRAFFIC_INGEST_CHANNELS`. `candidates(video, *, sibling_ids=None)` → `Candidates(rows, skipped_unembedded, reason)`: targets on the source's channel or a sibling, warm on their own channel (`warm.warm_impressions`), public (or NULL), not a Short (`is_short` true), not the source, not in `human_edits.video_links(source description)`, with a `reembed.MODEL_VERSION` vector, and cosine ≥ the source channel's `playlist_thresholds.join_low`; ranked by similarity, then impressions, then id; at most `2 × BACKLINK_MAX` rows `{video_id, channel_id, title, similarity, impressions}`. Reasons: `no_thresholds`, `thresholds_other_model_version`, `source_not_embedded`. Nothing calls any of it yet (S1.3/S1.4) |
-| `warm.py` | B4 warm filter: `ranked_pool` (`{id, impressions}`, most impressions first, id tie-break; `warm_pool()` RPC paged through `all_rows` when `WARM_POOL_USE_RPC`, else in-app, and in-app if the RPC errors), `explore_order` (each pick is the best left or, with probability `WARM_EXPLORE_PCT`, a random one from the rest, flagged `explore`; injectable `random.Random`), `warm_pool` (both); `warm_impressions` (the warmth measure alone, `{video_id: impressions}` ≥ `WARM_MIN_IMPRESSIONS`, `{}` if reach isn't certified; the in-app pool is built on it). Only `app/backlinks.py` `candidates` calls into it (`warm_impressions`, S1.1), and nothing calls that yet: Slice 1's tick routing wires the pool in |
+| `warm.py` | B4 warm filter: `ranked_pool` (`{id, impressions}`, most impressions first, id tie-break; `warm_pool()` RPC paged through `all_rows` when `WARM_POOL_USE_RPC`, else in-app, and in-app if the RPC errors), `explore_order` (each pick is the best left or, with probability `WARM_EXPLORE_PCT`, a random one from the rest, flagged `explore`; injectable `random.Random`), `warm_pool` (both); `_holds` (S1.4a: a `midas` row holds its video if active, created within `TRIAGE_COOLDOWN_DAYS` whatever its status, or a `backlinks` row of arm `treated`/`holdout` at any age; the in-app pool reads every `midas` row of its warm videos through `rows_for_ids`); `warm_impressions` (the warmth measure alone, `{video_id: impressions}` ≥ `WARM_MIN_IMPRESSIONS`, `{}` if reach isn't certified; the in-app pool is built on it). Only `app/backlinks.py` `candidates` calls into it (`warm_impressions`, S1.1), and nothing calls that yet: Slice 1's tick routing wires the pool in |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
 | `performance.py` | per-channel performance table/CSV |
@@ -799,6 +811,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 
 **Slice 1 (Part 2 §1–§2, §3.4, §6.1)**
 - Tick routing on `agent_enabled` (§6.1): not built. The column exists (B2) and nothing reads it.
+- The pick's cooldown and once-per-experiment exclusions (§2.1, Part 4 S1.4 "Pick"): built (S1.4a, `warm_pool()` in
+  `20261023000000`, `app/warm.py`), not applied and not called.
 - Rules triage, `no_change` as a `declined` intervention (§2.2): not built.
 - Backlink candidates and fleet siblings (P2, Part 4 S1.1): built (`app/backlinks.py` `siblings`, `candidates`),
   not called. Sibling targets appear only once the sibling channels have `MODEL_VERSION` vectors (S1.7 step 2;
@@ -964,6 +978,13 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    uniformly from all but the best remaining video. Settings are function parameters (SQL can't read `settings`).
    The `WARM_POOL_USE_RPC` switch (default false) isn't in the spec; it follows `AUTOPILOT_PICKER_USE_RPC`.
    Parity is tested offline on a throwaway local Postgres (`tests/test_warm_pool_parity.py`), not only live.
+   **S1.4a (#63).** The two Slice 1 exclusions are in the same function, replaced by `20261023000000`, and its twin;
+   only `midas` rows count. "Created within `TRIAGE_COOLDOWN_DAYS`" = `created_at > now() - p_cooldown_days days`
+   (Python: `> now(UTC) - TRIAGE_COOLDOWN_DAYS`); a NULL `created_at` is outside it. "For the experiment's duration"
+   is built as *forever*: no experiment id or end exists yet, so a video with any `midas` `backlinks` row of arm
+   `treated` or `holdout` never re-enters the pool; a later experiment would need a boundary column. The cooldown
+   applies to every lever, not only backlinks. The signature gained `p_cooldown_days`, so the four-argument function
+   is dropped (PostgREST can't pick between overloads); its only caller, `app/warm.py` `_rpc_params`, passes it.
 13. **`decide()` and `decision_log` (Part 3 B5).** The spec gives `decide(question_set, subject, context)` and no
    question sets. Built: a `QuestionSet` (name, question, allowed answers, rules function) and one set, `TRIAGE`
    (Part 2 §2.2's rules: `backlinks` with no related block and at least `BACKLINK_MIN_CANDIDATES` candidates, else
@@ -1155,10 +1176,11 @@ from (select channel_id, video_id, sum(impressions) imp
       from video_reach_daily where date > current_date - 30 group by 1,2) t
 where imp >= 500 group by 1 order by 2 desc;
 
--- B9b: Marathi's warm pool (B4; after 20261006040000 is applied). Arguments: WARM_MIN_IMPRESSIONS,
--- WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS. 0 rows also when reach isn't certified.
+-- B9b: Marathi's warm pool (B4; S1.4a's five-argument form, which needs 20261023000000 applied; before it, drop
+-- the last argument). Arguments: WARM_MIN_IMPRESSIONS, WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS,
+-- TRIAGE_COOLDOWN_DAYS. 0 rows also when reach isn't certified.
 select count(1) warm_videos, min(impressions) floor_, max(impressions) top
-from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21);
+from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7);
 
 -- traffic-source rows per data-day (B1; after the 20261006000000 migration is applied)
 select channel_id, date, count(1) rows_, sum(views) views, max(report_id) report
@@ -1198,7 +1220,7 @@ from interventions where origin = 'human' and lever = 'playlist' order by detect
 -- B9b (B6; after scripts/reembed.py ran): warm Marathi videos without a B6-recipe vector (want 0), and the
 -- stored calibration
 select count(1) missing
-from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21) w
+from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7) w
 where not exists (select 1 from video_embeddings e where e.video_id = w.id and e.chunk_index = 'pooled'
                   and e.model_version = 'google/gemini-embedding-2-preview|tdt-v1');
 select id, playlist_thresholds from channels where playlist_thresholds is not null;

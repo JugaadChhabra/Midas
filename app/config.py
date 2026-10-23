@@ -262,6 +262,11 @@ class Settings:
     # its trailing 28 ingested traffic data-days (app/backlinks.py siblings).
     # Inbound only, read from the channel's own report (Part 4 finding 1).
     SIBLING_MIN_VIEWS = int(os.getenv("SIBLING_MIN_VIEWS") or "100")
+    # Slice 1 · S1.4a (spec Part 4 Config, finding 2; Part 2 §2.1, §8): the warm
+    # pool skips a video with any Midas intervention created this many days ago
+    # or fewer, whatever its status, so a `no_change` (declined, not active)
+    # isn't offered again on the next tick (app/warm.py, warm_pool()).
+    TRIAGE_COOLDOWN_DAYS = int(os.getenv("TRIAGE_COOLDOWN_DAYS") or "7")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

@@ -5,7 +5,7 @@ against it on a real Postgres in test_warm_pool_parity.py.
 """
 import random
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,10 +39,17 @@ def video(video_id, privacy="public", is_episode=None, channel=CH):
             "is_episode": is_episode}
 
 
-def intervention(video_id, origin="midas", status="applied"):
-    return {"video_id": video_id, "channel_id": CH, "lever": "backlinks",
-            "origin": origin, "arm": "treated" if origin == "midas" else "n/a",
-            "status": status}
+def ago(days: float) -> str:
+    """A created_at `days` before now, as PostgREST returns a timestamptz."""
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def intervention(video_id, origin="midas", status="applied", *, lever="title", arm=None,
+                 age_days=365):
+    """Old and off the backlinks experiment by default, so only `status` matters."""
+    return {"video_id": video_id, "channel_id": CH, "lever": lever,
+            "origin": origin, "arm": arm or ("treated" if origin == "midas" else "n/a"),
+            "status": status, "created_at": ago(age_days)}
 
 
 #: 28 contiguous covered days: certified (21-day window behind the frontier).
@@ -87,8 +94,9 @@ def test_dormant_episode_private_and_in_intervention_videos_are_excluded():
 
 
 def test_closed_midas_and_any_human_intervention_do_not_exclude():
-    """Only an open Midas intervention holds a video (§1.6, as active_for). A
-    human row never closes, so counting it would bar every video the team edited."""
+    """Past the cooldown and off the backlinks experiment, only an open Midas
+    intervention holds a video (§1.6, as active_for). A human row never closes,
+    so counting it would bar every video the team edited."""
     sb = sb_for(
         reach_rows=[reach("judged", 1000), reach("declined", 1000), reach("human", 1000)],
         videos=[video("judged"), video("declined"), video("human")],
@@ -97,6 +105,56 @@ def test_closed_midas_and_any_human_intervention_do_not_exclude():
                        intervention("human", origin="human", status="applied")],
     )
     assert sorted(pool_ids(sb)) == ["declined", "human", "judged"]
+
+
+# ── S1.4a: the agent's exclusions (Part 4 S1.4 "Pick", finding 2) ────────
+
+def test_the_cooldown_excludes_any_recent_midas_row_and_keeps_an_older_one():
+    """A `no_change` is a declined row, not active: without the cooldown the
+    same top video is offered again on the next tick."""
+    cooldown = warm.settings.TRIAGE_COOLDOWN_DAYS
+    recent = {"declined": "declined", "holdout": "holdout", "planned": "planned",
+              "cancelled": "cancelled", "judged": "judged"}
+    sb = sb_for(
+        reach_rows=[reach(v, 1000) for v in [*recent, "declined_long_ago", "fresh"]],
+        videos=[video(v) for v in [*recent, "declined_long_ago", "fresh"]],
+        interventions=[
+            *(intervention(v, status=s, lever="title", age_days=1) for v, s in recent.items()),
+            # The video's last Midas row is older than the cooldown.
+            intervention("declined_long_ago", status="declined", age_days=cooldown + 1),
+            intervention("declined_long_ago", status="judged", age_days=cooldown + 30),
+        ],
+    )
+    assert pool_ids(sb) == ["declined_long_ago", "fresh"]
+
+
+def test_the_cooldown_is_triage_cooldown_days():
+    sb = sb_for(reach_rows=[reach("v", 1000)], videos=[video("v")],
+                interventions=[intervention("v", status="declined", age_days=3)])
+    with patch.object(warm.settings, "TRIAGE_COOLDOWN_DAYS", 2):
+        assert pool_ids(sb) == ["v"]
+    with patch.object(warm.settings, "TRIAGE_COOLDOWN_DAYS", 4):
+        assert pool_ids(sb) == []
+
+
+def test_a_midas_backlinks_row_of_either_arm_excludes_for_good():
+    """Each video is in the backlinks experiment once, at any age; a human
+    backlinks row (the B3a ledger) and other levers' old rows don't count."""
+    sb = sb_for(
+        reach_rows=[reach(v, 1000) for v in ("treated", "held_out", "human", "old_playlist")],
+        videos=[video(v) for v in ("treated", "held_out", "human", "old_playlist")],
+        interventions=[
+            intervention("treated", status="judged", lever="backlinks", arm="treated",
+                         age_days=400),
+            intervention("held_out", status="judged", lever="backlinks", arm="holdout",
+                         age_days=400),
+            intervention("human", origin="human", status="applied", lever="backlinks",
+                         age_days=1),
+            intervention("old_playlist", status="judged", lever="playlist", arm="treated",
+                         age_days=400),
+        ],
+    )
+    assert pool_ids(sb) == ["human", "old_playlist"]
 
 
 def test_unclassified_privacy_and_episode_count_as_eligible():
@@ -243,6 +301,7 @@ def test_rpc_path_pages_the_function_and_passes_the_settings():
         "p_min_impressions": warm.settings.WARM_MIN_IMPRESSIONS,
         "p_window_days": warm.settings.WARM_WINDOW_DAYS,
         "p_measurement_window_days": warm.reach.window_length(),
+        "p_cooldown_days": warm.settings.TRIAGE_COOLDOWN_DAYS,
     }
 
 
@@ -287,5 +346,5 @@ def test_only_s1_1_candidates_use_warm_and_only_its_warmth_measure():
 
 def test_the_sql_counts_the_same_report_type_as_reach_coverage():
     from app.reporting_client import REACH_REPORT_TYPE_ID
-    sql = (REPO / "supabase/migrations/20261006040000_warm_pool_rpc.sql").read_text()
+    sql = (REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql").read_text()
     assert re.findall(r"report_type = '([^']+)'", sql) == [REACH_REPORT_TYPE_ID]

@@ -9,7 +9,8 @@ and compared here instead:
   * app/static/status.js maps audit statuses to pills,
   * the interventions migration's partial unique index re-types the active
     intervention statuses (spec Part 2 §1.6), and so does the warm_pool()
-    SQL function (B4).
+    SQL function (B4; replaced by S1.4a, which also re-types the backlinks
+    lever and its experiment arms).
 
 The live parity tests (test_autopilot_picker_parity_live.py,
 test_autopilot_measurement_exclusion_parity_live.py) exist because those copies
@@ -32,7 +33,7 @@ REPO = Path(__file__).resolve().parents[1]
 PICKER_SQL = REPO / "supabase/migrations/20260730010000_next_audit_candidate_exclude_measurement.sql"
 STATUS_JS = REPO / "app/static/status.js"
 INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql"
-WARM_POOL_SQL = REPO / "supabase/migrations/20261006040000_warm_pool_rpc.sql"
+WARM_POOL_SQL = REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"
 
 
 def _sql_not_in_lists(sql: str) -> list[set[str]]:
@@ -156,6 +157,12 @@ def test_sql_warm_pool_intervention_exclusion_matches_python():
         set(sv.ACTIVE_INTERVENTION_STATUSES), (
         "warm_pool()'s intervention exclusion has drifted from "
         "ACTIVE_INTERVENTION_STATUSES")
+    # S1.4a's once-per-experiment rule: a midas backlinks row of either arm.
+    lever = re.search(r"lever\s*=\s*'([^']+)'", where)
+    assert lever and lever.group(1) == sv.InterventionLever.BACKLINKS
+    arms = re.search(r"arm\s+in\s*\(([^)]*)\)", where, re.I)
+    assert {v.strip().strip("'") for v in arms.group(1).split(",")} == {
+        sv.InterventionArm.TREATED, sv.InterventionArm.HOLDOUT}
 
 
 # ── mirror 2: the dashboard pills ────────────────────────────────────────
