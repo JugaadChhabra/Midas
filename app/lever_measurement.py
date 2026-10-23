@@ -11,8 +11,8 @@ window is the sum of those views over its targets:
     windows(d0, post_days)                -- (pre, post) around the as-of date
     measure_channel(channel_id)           -- judge every row of the channel whose window is complete
 
-The weekly `lever_measurement` job (S1.6b, #68) calls `measure_channel` per
-channel; nothing here is scheduled.
+The weekly `lever_measurement` job (S1.6b, app/lever_verdicts.py `run_weekly`)
+calls `measure_channel` per channel, then writes the week's verdicts.
 
 Which rows: `backlinks` interventions on the channel (the source's channel),
 

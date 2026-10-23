@@ -36,6 +36,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from app import backlinks, backlinks_apply, decide, human_edits, interventions, reach, warm
+from app import lever_verdicts
 from app.apply_outcome import ApplyError
 from app.config import settings
 from app.db import supabase
@@ -70,8 +71,8 @@ _VIDEO_COLUMNS = "id,channel_id,title,description"
 
 def backlinks_stopped(channel_id: str) -> bool:
     """Whether the backlinks lever has stopped for the channel (the P1 stop
-    rule, spec Part 4 S1.6). Not built yet (#68): never stopped."""
-    return False
+    rule, spec Part 4 S1.6): `lever_verdicts.stopped`. Once stopped, it stays so."""
+    return lever_verdicts.stopped(channel_id)
 
 
 def _video(video_id: str) -> dict | None:
