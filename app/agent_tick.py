@@ -35,8 +35,8 @@ import random
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from app import (backlinks, backlinks_apply, decide, human_edits, interventions,
-                 lever_verdicts, reach, warm)
+from app import backlinks, backlinks_apply, decide, human_edits, interventions, reach, warm
+from app import lever_verdicts
 from app.apply_outcome import ApplyError
 from app.config import settings
 from app.db import supabase
