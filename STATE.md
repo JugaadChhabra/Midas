@@ -1007,7 +1007,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    is dropped (PostgREST can't pick between overloads); its only caller, `app/warm.py` `_rpc_params`, passes it.
 13. **`decide()` and `decision_log` (Part 3 B5).** The spec gives `decide(question_set, subject, context)` and no
    question sets. Built: a `QuestionSet` (name, question, allowed answers, rules function) and one set, `TRIAGE`
-   (S1.5 adds a second, `NEXT_WATCH`, item 18) (Part 2 §2.2's rules: `backlinks` with no related block and at least `BACKLINK_MIN_CANDIDATES` candidates, else
+   (Part 2 §2.2's rules: `backlinks` with no related block and at least `BACKLINK_MIN_CANDIDATES` candidates, else
    `no_change`; context keys `has_related_block`, `backlink_candidates`), so `BACKLINK_MIN_CANDIDATES` is added in
    Phase B rather than Slice 1. One `QUESTION_SET_VERSION` covers every set in `app/decide.py` and replaces the A6
    placeholder (`DECISION_QUESTION_SET_VERSION` is gone from `app/audits.py`), so after deploy every audit source stamps a new
@@ -1088,7 +1088,9 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    question set is new, so `QUESTION_SET_VERSION` goes to `2026.10-s1-v2` and, as with B5 and S1.4b, every audit's
    `strategy_version` changes after deploy though no audit prompt did (`tests/test_decide.py`
    `test_the_s1_5_bump_reaches_the_strategy_stamp`). The preview (`scripts/preview_backlinks.py`) doesn't ask it.
-   Part 2 §2.4's shadow checks are not built (D7).
+   Part 2 §2.4's shadow checks are not built (D7). Cost: each pair is one sequential backend call inside the tick,
+   so a video triaged to `backlinks` makes up to `2 × BACKLINK_MAX` (6) `decide.next_watch` calls besides triage's.
+   Item 13's single `TRIAGE` set now has this second set beside it.
 
 ### 7.4 Contradictions within the spec
 

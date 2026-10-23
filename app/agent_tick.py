@@ -247,7 +247,8 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
     except interventions.ActiveInterventionExists as e:
         log.info("agent %s: %s", channel_id, e)
         return ACTIVE_INTERVENTION
-    for log_id in [decision.log_id, *(p["decision_log_id"] for p in triage.get("next_watch", ()))]:
+    pair_log_ids = [p["decision_log_id"] for p in triage.get("next_watch", ())]
+    for log_id in (decision.log_id, *pair_log_ids):
         decide.link(log_id, row["id"])
     log.info("agent %s: %s %s (intervention %s, arm %s)", channel_id, video["id"],
              row["status"], row["id"], row["arm"])
