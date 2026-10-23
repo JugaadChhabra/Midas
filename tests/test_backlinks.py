@@ -278,3 +278,13 @@ def test_a_heading_with_a_hashtag_is_refused():
 def test_title_whitespace_is_collapsed_to_one_line():
     out = backlinks.render("First", [t(1, "  Two\nline   title ")], LANG)
     assert out.split("\n")[2] == "Two line title https://youtu.be/vid00000001"
+
+
+def test_a_devanagari_description_over_5000_bytes_is_refused_though_under_5000_characters():
+    """YouTube's description limit is 5,000 bytes (Slice 1 review, 2026-10-23).
+    A Devanagari character is 3 bytes in UTF-8."""
+    base = "पहिली ओळ\n" + "म" * 1700                    # ~1,709 characters, ~5,100 bytes
+    assert len(base) < DESCRIPTION_MAX < len(base.encode("utf-8"))
+    with patch.dict(backlinks.HEADINGS, {"mr": "पहा:"}), \
+         pytest.raises(backlinks.RenderRefused, match="bytes"):
+        backlinks.render(base, [{"video_id": "aaaaaaaaaaa", "title": "t"}], "mr")

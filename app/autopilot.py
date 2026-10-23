@@ -10,7 +10,7 @@ from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
 from app.channel_audits import audits_for_channel
-from app import agent_tick, eligibility, quota, tracing
+from app import agent_tick, backlinks, eligibility, quota, tracing
 from app.audits import audit_video, validate_audit, apply_audit_internal
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
@@ -22,6 +22,7 @@ from app.status_vocab import (
     AUDIT_PICKER_SKIP_STATUSES,
     AUTO_EXPIRE_PAUSE_REASONS,
     AuditStatus,
+    InterventionArm,
     InterventionOrigin,
     InterventionStatus,
     PausedReason,
@@ -99,7 +100,21 @@ def _applies_today(channel_id: str) -> int:
         .gte("applied_at", _today_start_iso())
         .execute()
     )
-    return len(res.data or []) + len(applied.data or [])
+    # Plus today's treated attempts that never reached YouTube (DRY_RUN, a
+    # refused render, a YouTube error): each cost a pick and LLM calls, so a
+    # systematic failure is bounded by the cap too, not just by the tick rate
+    # (Slice 1 review, 2026-10-23).
+    unsent = (
+        supabase().table("interventions")
+        .select("id")
+        .eq("channel_id", channel_id)
+        .eq("origin", InterventionOrigin.MIDAS)
+        .eq("arm", InterventionArm.TREATED)
+        .is_("applied_at", "null")
+        .gte("created_at", _today_start_iso())
+        .execute()
+    )
+    return len(res.data or []) + len(applied.data or []) + len(unsent.data or [])
 
 
 def _next_video_for_channel(channel_id: str) -> dict | None:
@@ -519,6 +534,12 @@ def _can_afford_apply(channel_id: str) -> bool:
 AGENT_INELIGIBLE = "agent_ineligible"
 #: tick.outcome when the agent path raised something unclassified.
 AGENT_FAILED = "agent_failed"
+#: tick.outcome when BACKLINK_APPLY_ENABLED is off: the agent does nothing at all.
+AGENT_APPLY_DISABLED = ApplyOutcome.APPLY_DISABLED.value
+#: tick.outcome when the channel's language has no backlink heading yet (S1.2, D3).
+AGENT_NO_HEADING = "no_heading"
+#: tick.outcome when a channel reaches the title path while TITLE_AUTOPILOT_ENABLED is off.
+TITLE_AUTOPILOT_DISABLED = "title_autopilot_disabled"
 
 
 def _agent_tick(ch: dict) -> str:
@@ -529,6 +550,16 @@ def _agent_tick(ch: dict) -> str:
     if not eligibility.can_run_agent(ch):
         _touch_tick(channel_id)
         return AGENT_INELIGIBLE
+    # With writes off, or no heading to render, a tick could only record rows
+    # that never reach YouTube: picks, LLM calls and holdout rows with no treated
+    # counterpart (Slice 1 review, 2026-10-23). So the agent does nothing until
+    # it can write; scripts/preview_backlinks.py is how to look before that.
+    if not settings.BACKLINK_APPLY_ENABLED:
+        _touch_tick(channel_id)
+        return AGENT_APPLY_DISABLED
+    if ch.get("default_language") not in backlinks.HEADINGS:
+        _touch_tick(channel_id)
+        return AGENT_NO_HEADING
     if not _resync_if_stale(ch):
         return "stale_sync"
 
@@ -602,6 +633,13 @@ def tick():
             # is re-checked here, not just at pick — same predicate, one owner.)
             if not eligibility.can_audit(ch):
                 rec.set(**{"tick.outcome": "audit_paused"})
+                _touch_tick(channel_id)
+                return
+
+            # The title path is off fleet-wide until Slice 3 (TITLE_AUTOPILOT_ENABLED),
+            # whatever a channel's flags say.
+            if not settings.TITLE_AUTOPILOT_ENABLED:
+                rec.set(**{"tick.outcome": TITLE_AUTOPILOT_DISABLED})
                 _touch_tick(channel_id)
                 return
 

@@ -271,6 +271,12 @@ class Settings:
     # YouTube. While false, app/backlinks_apply.py's apply and revert refuse
     # (`apply_disabled`) and send nothing. DRY_RUN is honoured on top of it.
     BACKLINK_APPLY_ENABLED = os.getenv("BACKLINK_APPLY_ENABLED", "false").lower() == "true"
+    # The autopilot's title path (audit_video → apply: title, tags, description)
+    # is off until Slice 3 (spec Part 2 §6). Without this switch, a channel with
+    # autopilot_enabled and agent_enabled = false would fall back to it, e.g.
+    # turning the agent off on Marathi would start title rewrites at its daily cap
+    # (Slice 1 review, 2026-10-23). Manual audit routes are not affected.
+    TITLE_AUTOPILOT_ENABLED = os.getenv("TITLE_AUTOPILOT_ENABLED", "false").lower() == "true"
     # Slice 1 · S1.6 (spec Part 4 Config, Part 2 §1.7): the floor on the SOURCE
     # video's total views in a backlinks intervention's post window. Under it
     # the window is extended once to 14 days, then `insufficient_data`

@@ -8,8 +8,12 @@
 --     cancelled and judged included), created within p_cooldown_days
 --     (TRIAGE_COOLDOWN_DAYS). A `no_change` is a `declined` row, which isn't
 --     active, so without this the same top video is offered on the next tick;
---   * once per experiment: any Midas `backlinks` intervention of either arm
---     (treated or holdout), at any age. Each video is in the experiment once.
+--   * once per experiment: any Midas `backlinks` holdout row, or treated row that
+--     reached YouTube (`applied_at` set), at any age. Each video is in the
+--     experiment once. A treated row cancelled before its write (kill switch,
+--     DRY_RUN, a refused render, a YouTube error) doesn't count: the video never
+--     got a block, so it stays in the pool (after the cooldown) instead of being
+--     lost to the experiment (Slice 1 review, 2026-10-23).
 --
 -- The signature gains p_cooldown_days, so the four-argument function is dropped
 -- rather than left as an overload (PostgREST can't choose between overloads by
@@ -70,7 +74,8 @@ as $$
         and (
           i.status in ('planned', 'applied', 'measuring', 'holdout')
           or i.created_at > now() - make_interval(days => p_cooldown_days)
-          or (i.lever = 'backlinks' and i.arm in ('treated', 'holdout'))
+          or (i.lever = 'backlinks'
+              and (i.arm = 'holdout' or (i.arm = 'treated' and i.applied_at is not null)))
         )
     )
   order by rc.impressions desc, v.id;

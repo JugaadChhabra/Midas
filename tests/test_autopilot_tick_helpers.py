@@ -16,6 +16,15 @@ import app.autopilot as ap
 from app.apply_outcome import ApplyError, ApplyOutcome
 
 
+
+@pytest.fixture(autouse=True)
+def _title_autopilot_on():
+    """These tests drive the title path, which TITLE_AUTOPILOT_ENABLED (default
+    false since the Slice 1 review) otherwise shuts."""
+    import app.autopilot as _ap
+    with patch.object(_ap.settings, "TITLE_AUTOPILOT_ENABLED", True):
+        yield
+
 def test_record_failure_pauses_only_at_threshold():
     with patch("app.autopilot._pause") as pause:
         ap._failure_counts.clear()

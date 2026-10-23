@@ -45,11 +45,12 @@ def ago(days: float) -> str:
 
 
 def intervention(video_id, origin="midas", status="applied", *, lever="title", arm=None,
-                 age_days=365):
+                 age_days=365, applied=None):
     """Old and off the backlinks experiment by default, so only `status` matters."""
     return {"video_id": video_id, "channel_id": CH, "lever": lever,
             "origin": origin, "arm": arm or ("treated" if origin == "midas" else "n/a"),
-            "status": status, "created_at": ago(age_days)}
+            "status": status, "created_at": ago(age_days),
+            "applied_at": ago(age_days) if applied else None}
 
 
 #: 28 contiguous covered days: certified (21-day window behind the frontier).
@@ -145,7 +146,7 @@ def test_a_midas_backlinks_row_of_either_arm_excludes_for_good():
         videos=[video(v) for v in ("treated", "held_out", "human", "old_playlist")],
         interventions=[
             intervention("treated", status="judged", lever="backlinks", arm="treated",
-                         age_days=400),
+                         age_days=400, applied=True),
             intervention("held_out", status="judged", lever="backlinks", arm="holdout",
                          age_days=400),
             intervention("human", origin="human", status="applied", lever="backlinks",
@@ -352,3 +353,23 @@ def test_the_sql_counts_the_same_report_type_as_reach_coverage():
     from app.reporting_client import REACH_REPORT_TYPE_ID
     sql = (REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql").read_text()
     assert re.findall(r"report_type = '([^']+)'", sql) == [REACH_REPORT_TYPE_ID]
+
+
+def test_a_treated_backlinks_row_that_never_reached_youtube_doesnt_use_up_the_video():
+    """Slice 1 review (2026-10-23): a treated row cancelled before its write
+    (kill switch, DRY_RUN, a refused render, a YouTube error) has no applied_at.
+    The video never got a block, so past the cooldown it is back in the pool;
+    otherwise every failed tick would burn a video for good."""
+    sb = sb_for(
+        reach_rows=[reach(v, 1000) for v in ("never_sent", "sent", "recent_fail")],
+        videos=[video(v) for v in ("never_sent", "sent", "recent_fail")],
+        interventions=[
+            intervention("never_sent", status="cancelled", lever="backlinks", arm="treated",
+                         age_days=30),
+            intervention("sent", status="cancelled", lever="backlinks", arm="treated",
+                         age_days=30, applied=True),     # applied, then reverted
+            intervention("recent_fail", status="cancelled", lever="backlinks", arm="treated",
+                         age_days=1),                    # still in the cooldown
+        ],
+    )
+    assert pool_ids(sb) == ["never_sent"]
