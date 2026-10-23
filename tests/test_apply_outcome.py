@@ -27,3 +27,11 @@ def test_enum_values_match_the_persisted_strings():
     # These strings are stored as autopilot_paused_reason and read by the UI/auth.
     assert ApplyOutcome.TOKEN_EXPIRED.value == "token_expired"
     assert ApplyOutcome.TEST_AND_COMPARE.value == "blocked_test_and_compare"
+
+
+def test_refusals_before_anything_is_sent_are_409():
+    # The backlinks write (app/backlinks_apply.py): kill switch and ledger gate.
+    assert ApplyError(ApplyOutcome.APPLY_DISABLED).status_code == 409
+    assert ApplyError(ApplyOutcome.QUOTA_INSUFFICIENT).status_code == 409
+    assert ApplyOutcome.APPLY_DISABLED.value == "apply_disabled"
+    assert ApplyOutcome.QUOTA_INSUFFICIENT.value == "quota_insufficient"

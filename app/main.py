@@ -32,6 +32,7 @@ from app.metrics_poll import poll_metrics
 from app.reporting_poll import poll_reporting
 from app.traffic_poll import poll_traffic
 from app.measurement import router as measurement_router
+from app.backlinks_apply import router as backlinks_apply_router
 from app.playlist_health import score_channel as playlist_health_score_channel
 
 def _configure_logging() -> None:
@@ -539,6 +540,7 @@ app.include_router(shorts_router)
 app.include_router(shorts_video_router)
 app.include_router(autoshorts_router)
 app.include_router(measurement_router)
+app.include_router(backlinks_apply_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

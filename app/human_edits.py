@@ -94,9 +94,14 @@ def made_by_midas(video_id: str, description: str | None) -> bool:
     reverted one's description_before (the revert wrote it back). Compared with
     whitespace collapsed, since YouTube may hand back different line endings.
 
-    Slice 1 adds every `origin='midas'` intervention here (its payload / applied
-    description). This function is the only check, so that is the one change.
+    Slice 1 (S1.3, Part 4 finding 4): also an applied Midas backlinks block.
+    The description's links to our videos are exactly the targets of a
+    treated `midas` backlinks intervention with `applied_at` set. Any other
+    link to one of our videos next to the block makes it not Midas's, so a
+    human link added beside a block is still recorded.
     """
+    if _midas_block(video_id, description):
+        return True
     target = _normalised(description)
     audits = all_rows(
         supabase().table("audits")
@@ -109,6 +114,28 @@ def made_by_midas(video_id: str, description: str | None) -> bool:
         if a.get("status") == AuditStatus.REVERTED:
             written.append(a.get("description_before"))
         if any(w is not None and _normalised(w) == target for w in written):
+            return True
+    return False
+
+
+def _midas_block(video_id: str, description: str | None) -> bool:
+    """Whether the description's links to our videos are exactly an applied
+    Midas backlinks block's targets (app/backlinks_apply.py)."""
+    links = video_links(description) - {video_id}
+    if not links:
+        return False
+    rows = all_rows(
+        supabase().table("interventions")
+        .select("id,arm,applied_at,payload")
+        .eq("video_id", video_id)
+        .eq("origin", InterventionOrigin.MIDAS)
+        .eq("lever", InterventionLever.BACKLINKS)
+    )
+    for r in rows:
+        if r.get("arm") != InterventionArm.TREATED or not r.get("applied_at"):
+            continue
+        targets = {t.get("video_id") for t in (r.get("payload") or {}).get("targets") or []}
+        if targets and targets <= links and not _our_videos(links - targets):
             return True
     return False
 

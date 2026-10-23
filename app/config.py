@@ -267,6 +267,10 @@ class Settings:
     # or fewer, whatever its status, so a `no_change` (declined, not active)
     # isn't offered again on the next tick (app/warm.py, warm_pool()).
     TRIAGE_COOLDOWN_DAYS = int(os.getenv("TRIAGE_COOLDOWN_DAYS") or "7")
+    # Slice 1 · S1.3 (spec Part 4 Config): the kill switch for backlink writes to
+    # YouTube. While false, app/backlinks_apply.py's apply and revert refuse
+    # (`apply_disabled`) and send nothing. DRY_RUN is honoured on top of it.
+    BACKLINK_APPLY_ENABLED = os.getenv("BACKLINK_APPLY_ENABLED", "false").lower() == "true"
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).
