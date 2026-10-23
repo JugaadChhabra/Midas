@@ -96,7 +96,8 @@ def made_by_midas(video_id: str, description: str | None) -> bool:
 
     Slice 1 (S1.3, Part 4 finding 4): also an applied Midas backlinks block.
     The description's links to our videos are exactly the targets of a
-    treated `midas` backlinks intervention with `applied_at` set. Any other
+    treated `midas` backlinks intervention with `applied_at` set and not
+    reverted (`cancelled`). Any other
     link to one of our videos next to the block makes it not Midas's, so a
     human link added beside a block is still recorded.
     """
@@ -126,13 +127,15 @@ def _midas_block(video_id: str, description: str | None) -> bool:
         return False
     rows = all_rows(
         supabase().table("interventions")
-        .select("id,arm,applied_at,payload")
+        .select("id,arm,status,applied_at,payload")
         .eq("video_id", video_id)
         .eq("origin", InterventionOrigin.MIDAS)
         .eq("lever", InterventionLever.BACKLINKS)
     )
     for r in rows:
-        if r.get("arm") != InterventionArm.TREATED or not r.get("applied_at"):
+        # A reverted block is gone: the same links added later are the team's.
+        if (r.get("arm") != InterventionArm.TREATED or not r.get("applied_at")
+                or r.get("status") == InterventionStatus.CANCELLED):
             continue
         targets = {t.get("video_id") for t in (r.get("payload") or {}).get("targets") or []}
         if targets and targets <= links and not _our_videos(links - targets):

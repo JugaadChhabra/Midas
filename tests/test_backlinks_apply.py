@@ -242,7 +242,7 @@ def test_a_refused_render_fails_without_an_update(edges):
         ba.apply_backlinks(_intervention())
     assert exc.value.outcome is ApplyOutcome.FAILED
     assert "heading" in exc.value.detail
-    assert yt.updates == []
+    assert yt.lists == [] and yt.updates == []          # refused before any YouTube call
 
 
 def test_a_team_edit_since_the_last_sync_is_still_recorded(edges):
@@ -393,6 +393,8 @@ def test_a_human_link_added_next_to_a_midas_block_still_records_one(edges):
     {"arm": "holdout", "status": "holdout",      # would-have-got targets: never written
      "applied_at": "2026-10-20T00:00:00+00:00"},
     {"status": "planned"},                        # not applied
+    {"status": "cancelled",                       # reverted: the same links later are the team's
+     "applied_at": "2026-10-20T00:00:00+00:00"},
 ])
 def test_only_an_applied_treated_block_counts_as_midas(edges, change):
     row = _intervention(**change)

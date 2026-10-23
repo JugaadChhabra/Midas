@@ -141,9 +141,11 @@ def apply_backlinks(intervention: dict) -> dict:
     video = supabase().table("videos").select("description").eq(
         "id", video_id).single().execute().data or {}
 
+    # Rendered onto the stored text first, so a refusal (no heading, too many
+    # targets) costs no YouTube call. The write renders again onto the live text.
+    rendered = _rendered(lambda d: backlinks.render(d, targets, language),
+                         video.get("description"))
     if settings.DRY_RUN:
-        rendered = _rendered(lambda d: backlinks.render(d, targets, language),
-                             video.get("description"))
         log.warning("[DRY_RUN] would add backlinks to %s: %s", video_id,
                     [t["video_id"] for t in targets])
         return {"status": "dry_run", "description": rendered}
