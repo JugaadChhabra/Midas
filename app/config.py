@@ -271,6 +271,11 @@ class Settings:
     # YouTube. While false, app/backlinks_apply.py's apply and revert refuse
     # (`apply_disabled`) and send nothing. DRY_RUN is honoured on top of it.
     BACKLINK_APPLY_ENABLED = os.getenv("BACKLINK_APPLY_ENABLED", "false").lower() == "true"
+    # Slice 1 · S1.6 (spec Part 4 Config, Part 2 §1.7): the floor on the SOURCE
+    # video's total views in a backlinks intervention's post window. Under it
+    # the window is extended once to 14 days, then `insufficient_data`
+    # (app/lever_measurement.py). Nobody clicks a link on a video nobody watched.
+    LEVER_MIN_SOURCE_VIEWS = int(os.getenv("LEVER_MIN_SOURCE_VIEWS") or "100")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

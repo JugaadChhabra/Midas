@@ -220,6 +220,30 @@ ACTIVE_INTERVENTION_STATUSES = frozenset({
 })
 
 
+class InterventionMeasurement:
+    """`interventions.measurement_status` — where a row's pair measurement stands
+    (Slice 1 S1.6, app/lever_measurement.py).
+
+    `status` is the row's lifecycle and carries the outcome (`judged`,
+    `insufficient_data`); this column only says how far the measurement got, so
+    the two never disagree about the outcome. NULL until the first run.
+    """
+
+    #: The 7-day post window isn't complete in every target channel's traffic yet.
+    AWAITING_WINDOW = "awaiting_window"
+    #: The source was under LEVER_MIN_SOURCE_VIEWS at 7 days: waiting for 14.
+    EXTENDED = "extended"
+    #: Judged or insufficient_data. Still recomputed while the window is within
+    #: the restatement horizon (lever_measurement.RESTATEMENT_HORIZON_DAYS).
+    DONE = "done"
+
+
+ALL_INTERVENTION_MEASUREMENTS = frozenset({
+    InterventionMeasurement.AWAITING_WINDOW, InterventionMeasurement.EXTENDED,
+    InterventionMeasurement.DONE,
+})
+
+
 class DecisionUsed:
     """`decision_log.used` — whose answer a decision acted on (spec Part 2 §7).
 

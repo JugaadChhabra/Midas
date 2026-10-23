@@ -91,6 +91,16 @@ def test_intervention_values_are_the_persisted_strings():
     }
 
 
+def test_intervention_measurement_values_are_the_persisted_strings():
+    """interventions.measurement_status (S1.6a); the outcome lives in `status`."""
+    assert sv.InterventionMeasurement.AWAITING_WINDOW == "awaiting_window"
+    assert sv.InterventionMeasurement.EXTENDED == "extended"
+    assert sv.InterventionMeasurement.DONE == "done"
+    assert sv.ALL_INTERVENTION_MEASUREMENTS == {"awaiting_window", "extended", "done"}
+    assert not sv.ALL_INTERVENTION_MEASUREMENTS & {
+        sv.InterventionStatus.JUDGED, sv.InterventionStatus.INSUFFICIENT_DATA}
+
+
 def test_decision_used_values_are_the_persisted_strings():
     """decision_log.used (B5, spec Part 2 §7)."""
     assert sv.DecisionUsed.RULES == "rules"
