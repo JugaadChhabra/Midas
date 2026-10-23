@@ -383,7 +383,7 @@ Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.
 | `PLAYLIST_RECONCILE_WRITES_ENABLED` | `:116` same form, `"false"` | default false (A4) | no |
 | `PLAYLIST_TUNING_ENABLED` | `:117` same form, `"false"` | default false (A4) | no |
 | `REFLECTION_ENABLED` | `:34` same form, `"false"` | default false (A4) | no |
-| `STRATEGY_LABEL` | `:274` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
+| `STRATEGY_LABEL` | `:284` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
 | `MIN_IMPRESSIONS` | `:185` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | no (a separate setting, same default) |
 | `MEASUREMENT_WINDOW_DAYS` | `:184` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
 | `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:120-122` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** in use: B6 calibrates per channel into `channels.playlist_thresholds` (`app/reembed.py` `calibrate_channel`, never writing `settings`), but the engine still reads these globals |
@@ -1176,9 +1176,9 @@ from (select channel_id, video_id, sum(impressions) imp
       from video_reach_daily where date > current_date - 30 group by 1,2) t
 where imp >= 500 group by 1 order by 2 desc;
 
--- B9b: Marathi's warm pool (B4; S1.4a's five-argument form once 20261023000000 is applied, the four-argument
--- form before). Arguments: WARM_MIN_IMPRESSIONS, WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS, TRIAGE_COOLDOWN_DAYS.
--- 0 rows also when reach isn't certified.
+-- B9b: Marathi's warm pool (B4; S1.4a's five-argument form, which needs 20261023000000 applied; before it, drop
+-- the last argument). Arguments: WARM_MIN_IMPRESSIONS, WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS,
+-- TRIAGE_COOLDOWN_DAYS. 0 rows also when reach isn't certified.
 select count(1) warm_videos, min(impressions) floor_, max(impressions) top
 from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7);
 

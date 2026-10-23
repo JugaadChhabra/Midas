@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from app import warm
+from app.status_vocab import ACTIVE_INTERVENTION_STATUSES
 from tests.fakes import FakeSupabase
 
 psycopg = pytest.importorskip("psycopg")
@@ -211,8 +212,8 @@ def test_sql_and_python_agree_on_random_worlds(pg, seed):
     # Every world has closed Midas rows that only S1.4a's rules count: recent
     # ones, and backlinks rows of either arm, old ones included.
     closed = [i for i in tables["interventions"] if i["origin"] == "midas"
-              and i["status"] not in ("planned", "applied", "measuring", "holdout")]
-    recent = datetime.now(timezone.utc) - timedelta(days=7)
+              and i["status"] not in ACTIVE_INTERVENTION_STATUSES]
+    recent = datetime.now(timezone.utc) - timedelta(days=warm.settings.TRIAGE_COOLDOWN_DAYS)
     assert any(datetime.fromisoformat(i["created_at"]) > recent for i in closed)
     assert any(i["lever"] == "backlinks" and i["arm"] != "n/a"
                and datetime.fromisoformat(i["created_at"]) < recent for i in closed)
