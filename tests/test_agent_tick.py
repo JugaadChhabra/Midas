@@ -98,6 +98,7 @@ def world(*, channel=None, interventions=(), description=SRC_DESCRIPTION, audits
 
 _DB_MODULES = ("autopilot", "eligibility", "reach", "warm", "backlinks", "embeddings",
                "human_edits", "interventions", "decide", "agent_tick", "backlinks_apply",
+               "lever_verdicts",
                "quota", "channel_audits")
 
 

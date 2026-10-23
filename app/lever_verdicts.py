@@ -14,20 +14,25 @@ judged that week into one `lever_verdicts` row per comparison:
     count and mean delta, never a lift, a verdict or a stop.
 
 `week_start` is the Monday (UTC) of the week a row was judged in
-(`measurement_result.judged_at`, which S1.6a keeps across recomputes). Rows of
-past weeks are never rewritten: a rerun in the same week replaces that week's
-row only. A recompute after a restatement still reaches the verdicts, through
-the cumulative lift, which reads every judged row's current delta.
+(`measurement_result.judged_at`, which S1.6a keeps across recomputes). Each run
+writes the current week and any earlier week that has judged rows but no
+verdict row yet (a run that measured, then died before its verdicts), oldest
+first. A week's row, once written, is never rewritten after its week: a rerun
+in the same week replaces that week's row only. A recompute after a restatement
+still reaches the verdicts, through the cumulative lift, which reads every
+judged row's current delta.
 
 Stop rule (P1): once `windows_judged` (the channel's treated-vs-holdout weeks so
 far, this one included) reaches BACKLINK_EXPERIMENT_WINDOWS and the cumulative
 lift is under BACKLINK_MIN_LIFT, the row is `stop_rule_triggered`, and from then
 on triage answers `no_change` for the channel (agent_tick.backlinks_stopped).
 Blocks already applied stay (D8). It doesn't undo itself: a later week's row
-doesn't clear an earlier one's flag.
+doesn't clear an earlier one's flag, and a same-week rerun keeps a flag already
+set.
 
     run_weekly()               -- the `lever_measurement` job: measure, then verdicts
-    write_verdicts(channel_id) -- this week's rows for one channel
+    write_verdicts(channel_id) -- the week's rows (and any missed week's) for one channel
+    stopped(channel_id)        -- the stop state triage reads
 """
 from __future__ import annotations
 
@@ -36,7 +41,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app import agent_tick, eligibility, job_status, lever_measurement
+from app import eligibility, job_status, lever_measurement
 from app.config import settings
 from app.db import supabase
 from app.rows import PAGE_SIZE, all_rows
@@ -140,70 +145,98 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int]) -> di
     return out
 
 
-def write_verdicts(channel_id: str, *, today: date | None = None,
-                   lever: str = InterventionLever.BACKLINKS) -> dict[str, dict]:
-    """Write this week's verdict rows for the channel; returns them by scope.
+def write_verdicts(channel_id: str, *, today: date | None = None) -> dict[str, dict]:
+    """Write the week's verdict rows for the channel; returns the current week's
+    by scope.
 
-    A scope with no row this week has any row a same-week earlier run wrote for
-    it deleted (its judged rows moved on, e.g. a restatement made one
-    `insufficient_data`), so a stale verdict can't stand.
+    Also writes an earlier week that has judged rows and no verdict row of any
+    scope yet. A scope with no row this week has any row a same-week earlier
+    run wrote for it deleted (its judged rows moved on, e.g. a restatement made
+    one `insufficient_data`), unless that row triggered the stop rule.
     """
     today = today or datetime.now(timezone.utc).date()
-    week = week_start(today)
+    current = week_start(today)
+    lever = InterventionLever.BACKLINKS
     judged = all_rows(
         supabase().table("interventions")
         .select("id,origin,arm,status,measurement_result")
         .eq("channel_id", channel_id).eq("lever", lever)
         .eq("status", InterventionStatus.JUDGED)
     )
-    earlier = all_rows(
-        supabase().table("lever_verdicts").select("id,arm_scope,week_start")
+    stored = all_rows(
+        supabase().table("lever_verdicts").select("id,arm_scope,week_start,stop_rule_triggered")
         .eq("channel_id", channel_id).eq("lever", lever)
-        .lt("week_start", week.isoformat())
+        .lte("week_start", current.isoformat())
     )
-    windows_before: dict[str, int] = {}
-    for v in earlier:
-        windows_before[v["arm_scope"]] = windows_before.get(v["arm_scope"], 0) + 1
+    written = {v["week_start"] for v in stored if v["week_start"] < current.isoformat()}
+    missed = sorted({w for w in map(_judged_week, judged)
+                     if w is not None and w < current and w.isoformat() not in written})
 
-    out = verdicts(judged, week, windows_before)
     now = datetime.now(timezone.utc).isoformat()
-    for scope in (LeverVerdictScope.TREATED_VS_HOLDOUT, LeverVerdictScope.HUMAN):
-        key = {"channel_id": channel_id, "lever": lever, "arm_scope": scope,
-               "week_start": week.isoformat()}
-        if scope in out:
-            supabase().table("lever_verdicts").upsert(
-                {**key, **out[scope], "computed_at": now}, on_conflict=_ON_CONFLICT,
-            ).execute()
-        else:
-            q = supabase().table("lever_verdicts").delete()
-            for column, value in key.items():
-                q = q.eq(column, value)
-            q.execute()
-    log.info("lever_verdicts %s week %s: %s", channel_id, week, out or "no verdict")
+    out: dict[str, dict] = {}
+    for week in missed + [current]:
+        windows_before: dict[str, int] = {}
+        for v in stored:
+            if v["week_start"] < week.isoformat():
+                windows_before[v["arm_scope"]] = windows_before.get(v["arm_scope"], 0) + 1
+        this_week = {v["arm_scope"]: v for v in stored if v["week_start"] == week.isoformat()}
+        out = verdicts(judged, week, windows_before)
+        for scope in (LeverVerdictScope.TREATED_VS_HOLDOUT, LeverVerdictScope.HUMAN):
+            key = {"channel_id": channel_id, "lever": lever, "arm_scope": scope,
+                   "week_start": week.isoformat()}
+            held = (this_week.get(scope) or {}).get("stop_rule_triggered") is True
+            if scope in out:
+                row = {**key, **out[scope], "computed_at": now}
+                row["stop_rule_triggered"] = row["stop_rule_triggered"] or held
+                supabase().table("lever_verdicts").upsert(row, on_conflict=_ON_CONFLICT).execute()
+                stored = [v for v in stored if not (v["arm_scope"] == scope
+                                                    and v["week_start"] == key["week_start"])]
+                stored.append(row)
+            elif scope in this_week and not held:
+                q = supabase().table("lever_verdicts").delete()
+                for column, value in key.items():
+                    q = q.eq(column, value)
+                q.execute()
+                stored = [v for v in stored if v is not this_week[scope]]
+        log.info("lever_verdicts %s week %s: %s", channel_id, week, out or "no verdict")
     return out
 
 
-def run_weekly() -> dict | None:
+def stopped(channel_id: str, lever: str = InterventionLever.BACKLINKS) -> bool:
+    """Whether the lever has stopped for the channel (the P1 stop rule): any of
+    its treated-vs-holdout weekly verdicts has `stop_rule_triggered`."""
+    rows = (
+        supabase().table("lever_verdicts").select("id")
+        .eq("channel_id", channel_id).eq("lever", lever)
+        .eq("arm_scope", LeverVerdictScope.TREATED_VS_HOLDOUT)
+        .eq("stop_rule_triggered", True).limit(1).execute()
+    ).data or []
+    return bool(rows)
+
+
+def run_weekly(*, today: date | None = None) -> dict | None:
     """APScheduler entry point (`lever_measurement`). Per channel: S1.6a's
     measurement, then this week's verdicts.
 
     traffic_poll's failure model: a channel that raises fails the run once
     every channel has run; per-row errors are judged by
     job_status.item_error_verdict (every row errored fails the channel, some
-    is `degraded`).
+    is `degraded`). A channel whose every row errored gets no verdicts this
+    run: the next run writes the week it missed.
     """
     crashed: dict[str, str] = {}
     partial_errors: dict[str, str] = {}
     for cid in eligibility.channel_ids_for(eligibility.Job.EVERY):
         try:
-            counts = lever_measurement.measure_channel(cid)
-            write_verdicts(cid)
+            counts = lever_measurement.measure_channel(cid, today=today)
             failure, partial = job_status.item_error_verdict(
                 {"interventions": (counts["errored"], counts["attempted"])})
             if failure:
                 log.error("lever_measurement %s: every intervention failed: %s", cid, failure)
                 crashed[cid] = f"ItemsFailed: {failure}"
-            elif partial:
+                continue
+            write_verdicts(cid, today=today)
+            if partial:
                 partial_errors[cid] = partial
         except Exception as e:
             log.exception("lever_measurement %s crashed: %s", cid, e)
@@ -253,4 +286,4 @@ def channel_lever_verdicts(channel_id: str):
         supabase().table("lever_verdicts").select("*")
         .eq("channel_id", channel_id).order("week_start", desc=True)
     )
-    return {"verdicts": rows, "backlinks_stopped": agent_tick.backlinks_stopped(channel_id)}
+    return {"verdicts": rows, "backlinks_stopped": stopped(channel_id)}

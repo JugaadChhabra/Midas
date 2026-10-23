@@ -5,7 +5,7 @@ The real write_verdicts, run_weekly, measure_channel and rows paging run
 against FakeSupabase.
 """
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date
 from unittest.mock import patch
 
 import pytest
@@ -235,6 +235,38 @@ def test_a_rerun_after_the_weeks_holdout_was_undecided_deletes_the_stale_row():
     assert sb.rows("lever_verdicts") == []
 
 
+def test_a_week_judged_but_never_written_is_written_by_the_next_run():
+    """A run that measured on W1, then died before its verdicts: W2's run writes W1 first."""
+    rows = [judged(1, "treated", 4, W1), judged(2, "holdout", 1, W1),
+            judged(3, "treated", 2, W2), judged(4, "holdout", 1, W2), human(5, 7, W1)]
+    with db(rows) as sb:
+        current = lv.write_verdicts(CH, today=W2)
+        lv.write_verdicts(CH, today=W2)                # a rerun doesn't duplicate it
+    one, two = verdict_rows(sb)
+    assert (one["week_start"], one["lift"], one["windows_judged"]) == ("2026-10-05", 3, 1)
+    assert (two["week_start"], two["lift"], two["windows_judged"]) == ("2026-10-12", 1, 2)
+    assert current["treated_vs_holdout"]["lift"] == 1
+    assert [r["week_start"] for r in verdict_rows(sb, "human")] == ["2026-10-05"]
+
+
+def test_a_same_week_rerun_keeps_a_triggered_stop():
+    rows = [judged(1, "treated", 0, W1), judged(2, "holdout", 0, W1)]
+    with db(rows) as sb, patch.object(settings, "BACKLINK_EXPERIMENT_WINDOWS", 1):
+        lv.write_verdicts(CH, today=W1)
+        assert agent_tick.backlinks_stopped(CH) is True
+        # A restatement lifts the cumulative lift over the bar...
+        sb.table("interventions").update(
+            {"measurement_result": {**rows[0]["measurement_result"], "delta": 5}}
+        ).eq("id", 1).execute()
+        lv.write_verdicts(CH, today=W1)
+        assert verdict_rows(sb)[0]["lift"] == 5
+        assert agent_tick.backlinks_stopped(CH) is True
+        # ...or takes the week's holdout away: the triggered row isn't deleted.
+        sb.table("interventions").update({"status": "insufficient_data"}).eq("id", 2).execute()
+        lv.write_verdicts(CH, today=W1)
+        assert agent_tick.backlinks_stopped(CH) is True
+
+
 def test_the_week_is_the_monday_of_the_utc_judged_date():
     assert lv.week_start(date(2026, 10, 11)) == date(2026, 10, 5)     # a Sunday
     assert lv.week_start(date(2026, 10, 12)) == date(2026, 10, 12)    # a Monday
@@ -266,9 +298,10 @@ def test_the_job_measures_then_writes_verdicts_for_every_channel():
     calls = []
     with db(channels=({"id": CH}, {"id": OTHER})), \
          patch.object(lever_measurement, "measure_channel",
-                      side_effect=lambda cid: calls.append(("measure", cid))
+                      side_effect=lambda cid, **_: calls.append(("measure", cid))
                       or {"attempted": 0, "errored": 0}), \
-         patch.object(lv, "write_verdicts", side_effect=lambda cid: calls.append(("verdicts", cid))):
+         patch.object(lv, "write_verdicts",
+                      side_effect=lambda cid, **_: calls.append(("verdicts", cid))):
         assert lv.run_weekly() is None
     assert sorted(calls) == sorted([("measure", CH), ("verdicts", CH),
                                    ("measure", OTHER), ("verdicts", OTHER)])
@@ -280,7 +313,7 @@ def test_the_job_measures_then_writes_verdicts_for_every_channel():
 def test_a_channel_crash_fails_the_run_after_every_channel_ran():
     seen = []
 
-    def measure(cid):
+    def measure(cid, **_):
         seen.append(cid)
         if cid == CH:
             raise RuntimeError("boom")
@@ -301,11 +334,12 @@ def test_a_channel_crash_fails_the_run_after_every_channel_ran():
 def test_per_intervention_errors_are_judged_by_item_error_verdict(errored, attempted, outcome):
     with db(), patch.object(lever_measurement, "measure_channel",
                             return_value={"attempted": attempted, "errored": errored}), \
-         patch.object(lv, "write_verdicts"):
+         patch.object(lv, "write_verdicts") as write:
         if outcome == "failed":
             with pytest.raises(JobRunFailed) as exc:
                 lv.run_weekly()
             assert exc.value.failed_channels == {CH: "ItemsFailed: interventions: all 3 failed"}
+            write.assert_not_called()      # no verdicts from a channel whose every row errored
         elif outcome == "degraded":
             assert lv.run_weekly() == {"partial_errors": {CH: "interventions: 1/3 failed"}}
         else:
@@ -314,10 +348,8 @@ def test_per_intervention_errors_are_judged_by_item_error_verdict(errored, attem
 
 def test_the_real_job_end_to_end_writes_the_weeks_verdict():
     rows = [judged(1, "treated", 4, W1), judged(2, "holdout", 1, W1)]
-    with db(rows) as sb, patch.object(lv, "datetime") as dt:
-        dt.now.return_value = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
-        dt.fromisoformat = datetime.fromisoformat
-        assert lv.run_weekly() is None
+    with db(rows) as sb:
+        assert lv.run_weekly(today=date(2026, 10, 6)) is None
     [row] = verdict_rows(sb)
     assert row["week_start"] == "2026-10-05" and row["lift"] == 3
 

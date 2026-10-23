@@ -16,7 +16,8 @@
 -- `delta` is in attributable views per week (lever_measurement._result), so
 -- lift and BACKLINK_MIN_LIFT share D6's unit. The vocabularies live in
 -- app/status_vocab.py (LeverVerdictScope, LeverVerdict). Rows of past weeks are
--- not rewritten; a rerun in the same week replaces that week's row.
+-- not rewritten (a week a failed run missed is written by the next); a rerun in
+-- the same week replaces that week's row but keeps a triggered stop.
 
 create table if not exists lever_verdicts (
     id                   bigserial        primary key,

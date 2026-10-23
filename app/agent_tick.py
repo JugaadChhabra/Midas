@@ -35,7 +35,8 @@ import random
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from app import backlinks, backlinks_apply, decide, human_edits, interventions, reach, warm
+from app import (backlinks, backlinks_apply, decide, human_edits, interventions,
+                 lever_verdicts, reach, warm)
 from app.apply_outcome import ApplyError
 from app.config import settings
 from app.db import supabase
@@ -46,7 +47,6 @@ from app.status_vocab import (
     InterventionLever,
     InterventionOrigin,
     InterventionStatus,
-    LeverVerdictScope,
 )
 
 log = logging.getLogger("midas.agent_tick")
@@ -71,15 +71,8 @@ _VIDEO_COLUMNS = "id,channel_id,title,description"
 
 def backlinks_stopped(channel_id: str) -> bool:
     """Whether the backlinks lever has stopped for the channel (the P1 stop
-    rule, spec Part 4 S1.6): any of its treated-vs-holdout weekly verdicts has
-    `stop_rule_triggered` (app/lever_verdicts.py). Once stopped, it stays so."""
-    rows = (
-        supabase().table("lever_verdicts").select("id")
-        .eq("channel_id", channel_id).eq("lever", InterventionLever.BACKLINKS)
-        .eq("arm_scope", LeverVerdictScope.TREATED_VS_HOLDOUT)
-        .eq("stop_rule_triggered", True).limit(1).execute()
-    ).data or []
-    return bool(rows)
+    rule, spec Part 4 S1.6): `lever_verdicts.stopped`. Once stopped, it stays so."""
+    return lever_verdicts.stopped(channel_id)
 
 
 def _video(video_id: str) -> dict | None:
