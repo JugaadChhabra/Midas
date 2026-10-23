@@ -34,6 +34,7 @@ PICKER_SQL = REPO / "supabase/migrations/20260730010000_next_audit_candidate_exc
 STATUS_JS = REPO / "app/static/status.js"
 INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql"
 WARM_POOL_SQL = REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"
+LEVER_VERDICTS_SQL = REPO / "supabase/migrations/20261023010000_lever_verdicts.sql"
 
 
 def _sql_not_in_lists(sql: str) -> list[set[str]]:
@@ -209,3 +210,14 @@ def test_re_exports_are_the_same_object_not_a_copy(module, attr):
     assert getattr(mod, attr) is getattr(sv, attr), (
         f"{module}.{attr} is a separate copy — it can drift from status_vocab"
     )
+
+
+def test_lever_verdict_values_are_the_persisted_strings():
+    """lever_verdicts.arm_scope and .verdict (S1.6b), as the migration's comments list them."""
+    assert sv.ALL_LEVER_VERDICT_SCOPES == {"treated_vs_holdout", "human"}
+    assert sv.ALL_LEVER_VERDICTS == {"helped", "no_change", "worse"}
+    ddl = LEVER_VERDICTS_SQL.read_text()
+    for column, values in (("arm_scope", sv.ALL_LEVER_VERDICT_SCOPES),
+                           ("verdict", sv.ALL_LEVER_VERDICTS)):
+        [line] = [l for l in ddl.splitlines() if l.strip().startswith(column + " ")]
+        assert set(line.split("--")[1].strip().split("|")) == values

@@ -33,6 +33,7 @@ from app.reporting_poll import poll_reporting
 from app.traffic_poll import poll_traffic
 from app.measurement import router as measurement_router
 from app.backlinks_apply import router as backlinks_apply_router
+from app.lever_verdicts import router as lever_verdicts_router, run_weekly as lever_measurement_weekly
 from app.playlist_health import score_channel as playlist_health_score_channel
 
 def _configure_logging() -> None:
@@ -465,6 +466,20 @@ def _register_jobs(sched) -> None:
         coalesce=True,
     )
     sched.add_job(
+        lever_measurement_weekly,
+        "cron",
+        day_of_week="mon",
+        hour=9,
+        minute=0,
+        # UTC, after traffic_poll (06:30), so the week's newest traffic days are
+        # in before the pairs are measured (spec Part 4 S1.6). Reads the DB and
+        # writes interventions and lever_verdicts only; nothing reaches YouTube.
+        timezone="UTC",
+        id="lever_measurement",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
         run_nightly_backup,
         "cron",
         hour=settings.BACKUP_HOUR,
@@ -541,6 +556,7 @@ app.include_router(shorts_video_router)
 app.include_router(autoshorts_router)
 app.include_router(measurement_router)
 app.include_router(backlinks_apply_router)
+app.include_router(lever_verdicts_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

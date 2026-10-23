@@ -276,6 +276,15 @@ class Settings:
     # the window is extended once to 14 days, then `insufficient_data`
     # (app/lever_measurement.py). Nobody clicks a link on a video nobody watched.
     LEVER_MIN_SOURCE_VIEWS = int(os.getenv("LEVER_MIN_SOURCE_VIEWS") or "100")
+    # Slice 1 · S1.6b (spec Part 4 Config, P1): the P1 time box. Once this many
+    # weekly treated-vs-holdout verdicts are written for a channel and the
+    # cumulative lift is under BACKLINK_MIN_LIFT, the backlinks lever stops there
+    # (app/lever_verdicts.py; triage reads it, app/agent_tick.backlinks_stopped).
+    BACKLINK_EXPERIMENT_WINDOWS = int(os.getenv("BACKLINK_EXPERIMENT_WINDOWS") or "3")
+    # Slice 1 · S1.6b (spec Part 4 Config, D6): attributable views per treated
+    # video per week that the treated arm must beat holdout by. Both the weekly
+    # verdict's band (helped / no_change / worse) and the stop rule's bar.
+    BACKLINK_MIN_LIFT = float(os.getenv("BACKLINK_MIN_LIFT") or "1.0")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

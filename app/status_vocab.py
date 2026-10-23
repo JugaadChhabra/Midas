@@ -244,6 +244,33 @@ ALL_INTERVENTION_MEASUREMENTS = frozenset({
 })
 
 
+class LeverVerdictScope:
+    """`lever_verdicts.arm_scope` — which comparison a weekly verdict row is
+    (Slice 1 S1.6, app/lever_verdicts.py)."""
+
+    #: The treated arm's mean delta minus the holdout arm's (spec Part 2 §1.3).
+    TREATED_VS_HOLDOUT = "treated_vs_holdout"
+    #: The SEO team's own edits, reported on their own (§1.4). Never in a lift.
+    HUMAN = "human"
+
+
+ALL_LEVER_VERDICT_SCOPES = frozenset({LeverVerdictScope.TREATED_VS_HOLDOUT,
+                                      LeverVerdictScope.HUMAN})
+
+
+class LeverVerdict:
+    """`lever_verdicts.verdict` — directional, not a significance test (spec
+    Part 2 §1.5), against BACKLINK_MIN_LIFT (Part 4 D6). NULL on `human` rows."""
+
+    HELPED = "helped"
+    NO_CHANGE = "no_change"
+    WORSE = "worse"
+
+
+ALL_LEVER_VERDICTS = frozenset({LeverVerdict.HELPED, LeverVerdict.NO_CHANGE,
+                                LeverVerdict.WORSE})
+
+
 class DecisionUsed:
     """`decision_log.used` — whose answer a decision acted on (spec Part 2 §7).
 

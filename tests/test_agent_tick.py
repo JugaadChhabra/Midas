@@ -59,7 +59,7 @@ VECTORS = {SRC: [1.0, 0.0], T1: [1.0, 0.1], T2: [1.0, 0.2], T3: [1.0, 0.3],
 
 
 def world(*, channel=None, interventions=(), description=SRC_DESCRIPTION, audits=(),
-          reach_days=28):
+          reach_days=28, verdicts=()):
     tables = {
         "channels": [channel or _channel()],
         "videos": [_video(SRC, description=description)]
@@ -88,6 +88,7 @@ def world(*, channel=None, interventions=(), description=SRC_DESCRIPTION, audits
         "decision_log": [],
         "audits": list(audits),
         "quota_log": [],
+        "lever_verdicts": list(verdicts),
     }
     for name, rows in tables.items():
         for i, r in enumerate(rows, 1):
@@ -374,8 +375,34 @@ def test_too_few_candidates_gets_no_change():
     assert "fewer than BACKLINK_MIN_CANDIDATES = 4" in row["payload"]["rationale"]
 
 
-def test_backlinks_is_not_stopped_until_the_stop_rule_exists():
-    assert agent_tick.backlinks_stopped(CH) is False
+def _verdict(stopped, **kw):
+    return {"channel_id": CH, "lever": "backlinks", "arm_scope": "treated_vs_holdout",
+            "week_start": "2026-10-12", "stop_rule_triggered": stopped, **kw}
+
+
+def test_backlinks_stops_once_any_treated_vs_holdout_verdict_triggered_the_stop_rule():
+    with wired(world()):
+        assert agent_tick.backlinks_stopped(CH) is False
+    with wired(world(verdicts=[_verdict(False)])):
+        assert agent_tick.backlinks_stopped(CH) is False
+    # A human row never stops the lever, nor another channel's verdict.
+    with wired(world(verdicts=[_verdict(True, arm_scope="human"),
+                               _verdict(True, channel_id="UCother")])):
+        assert agent_tick.backlinks_stopped(CH) is False
+    # An earlier week's trigger holds even after a later week that didn't.
+    with wired(world(verdicts=[_verdict(True, week_start="2026-10-05"), _verdict(False)])):
+        assert agent_tick.backlinks_stopped(CH) is True
+
+
+def test_a_triggered_stop_rule_row_makes_the_real_tick_decline():
+    """S1.6b acceptance: stopped triage returns `no_change`, read from lever_verdicts."""
+    sb = world(verdicts=[_verdict(True)])
+    with wired(sb) as p:
+        ap.tick()
+    [row] = midas_rows(sb)
+    assert row["status"] == "declined" and "stopped" in row["payload"]["rationale"]
+    assert row["triage_json"]["context"]["backlinks_stopped"] is True
+    assert p["yt"].lists == []
 
 
 # ── the decision and the intervention link both ways ──────────────────────
