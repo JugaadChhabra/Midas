@@ -233,6 +233,25 @@ def test_the_shipped_table_has_no_hashtag_and_one_line_headings():
         assert heading == heading.strip(), lang
 
 
+def test_every_channel_language_has_a_heading():
+    """Fleet readiness (owner, 2026-10-25): the 13 channels' default_language
+    values (STATE.md §1). Bhojpuri, Rajasthani and 3D Animated use `hi`."""
+    assert set(backlinks.HEADINGS) - {LANG} == {"mr", "hi", "bgc", "pa", "gu", "en", "ta", "ml", "kn", "te"}
+
+
+def test_headings_are_distinct_so_find_knows_the_language():
+    assert len(set(backlinks.HEADINGS.values())) == len(backlinks.HEADINGS)
+
+
+@pytest.mark.parametrize("lang", ["mr", "hi", "bgc", "pa", "gu", "en", "ta", "ml", "kn", "te"])
+def test_each_shipped_heading_round_trips(lang):
+    out = backlinks.render("First", TARGETS, lang)
+    assert out.splitlines()[1] == backlinks.HEADINGS[lang]
+    block = backlinks.find(out)
+    assert block.language == lang
+    assert backlinks.strip(out) == "First"
+
+
 # ── 5,000 characters ──────────────────────────────────────────────────────
 
 

@@ -54,9 +54,24 @@ from app.rows import all_rows, rows_for_ids
 # The heading line per channel `default_language`. A language missing here
 # makes `render` refuse; there is no English fallback. Marathi's ("watch more
 # songs") was chosen by the owner on 2026-10-23: D3 left it to the SEO team, who
-# had no preference. It must stay fixed: `find`/`strip` match it exactly, so
-# changing it orphans every block already on YouTube.
-HEADINGS: dict[str, str] = {"mr": "आणखी गाणी पहा:"}
+# had no preference. The others say the same thing; Claude wrote them and a
+# native reader skims each before its channel goes live (owner, 2026-10-25).
+# Bhojpuri, Rajasthani and 3D Animated are `hi` channels and share its line.
+# Every heading must stay fixed once a channel has blocks: `find`/`strip` match
+# it exactly, so changing it orphans every block already on YouTube. Headings
+# must also differ from each other: `find` reads the language off the heading.
+HEADINGS: dict[str, str] = {
+    "mr": "आणखी गाणी पहा:",
+    "hi": "और गाने देखें:",
+    "bgc": "और गाणे देखो:",
+    "pa": "ਹੋਰ ਗੀਤ ਵੇਖੋ:",
+    "gu": "વધુ ગીતો જુઓ:",
+    "en": "Watch more songs:",
+    "ta": "மேலும் பாடல்களைப் பாருங்கள்:",
+    "ml": "കൂടുതൽ പാട്ടുകൾ കാണൂ:",
+    "kn": "ಇನ್ನಷ್ಟು ಹಾಡುಗಳನ್ನು ನೋಡಿ:",
+    "te": "మరిన్ని పాటలు చూడండి:",
+}
 
 _VIDEO_ID = r"[A-Za-z0-9_-]{11}"
 _VIDEO_ID_RE = re.compile(_VIDEO_ID)

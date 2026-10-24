@@ -243,7 +243,8 @@ def test_tick_that_cannot_afford_the_apply_makes_no_youtube_call_and_pauses_noth
         ap.tick()
     p["apply"].assert_not_called()                          # no videos.update
     p["audit"].assert_not_called()                          # no LLM spend on a write we can't make
-    p["afford"].assert_any_call(ap.quota.cost_of(*ap.quota.APPLY))
+    p["afford"].assert_any_call(ap.quota.cost_of(*ap.quota.APPLY),
+                                reserve=ap.settings.YT_QUOTA_COLLECTION_RESERVE)
     p["rec"].set.assert_any_call(**{"tick.outcome": "quota_insufficient"})
     assert sb.rows("channels")[0]["autopilot_paused_reason"] is None   # not paused
     assert not any(op == "update" and payload.get("autopilot_paused_reason")
@@ -284,3 +285,16 @@ def test_quota_exceeded_log_says_it_is_fleet_wide(caplog):
         ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
     assert "project-wide" in caplog.text and "fleet-wide" in caplog.text
     ap._yt_quota_exhausted_until = None
+
+
+def test_the_apply_gate_keeps_the_collection_reserve():
+    """Fleet readiness (2026-10-25): applies stop YT_QUOTA_COLLECTION_RESERVE
+    short of the ceiling, so video_sync and the polls late in the quota day
+    still have units."""
+    from app import autopilot, quota
+    cost = quota.cost_of(*quota.APPLY)
+    for left, ok in ((cost - 1, False), (cost, True)):
+        with patch.multiple(autopilot.settings, YT_DAILY_QUOTA=10_000, YT_QUOTA_SAFETY_BUFFER=300,
+                            YT_QUOTA_COLLECTION_RESERVE=3000), \
+             patch.object(quota, "units_used_today", return_value=10_000 - 300 - 3000 - left):
+            assert autopilot._can_afford_apply("UC1") is ok

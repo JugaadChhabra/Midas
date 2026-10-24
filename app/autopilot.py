@@ -514,17 +514,19 @@ QUOTA_INSUFFICIENT = "quota_insufficient"
 
 
 def _can_afford_apply(channel_id: str) -> bool:
-    """Ask the quota ledger whether one apply fits in what is left today.
+    """Ask the quota ledger whether one apply fits in what is left today,
+    above `YT_QUOTA_COLLECTION_RESERVE` (kept for the day's syncs and polls).
 
     A no here is the ledger's estimate, not YouTube's verdict, so it is handled
     as a skip: no pause, no failure count, no fleet-wide dormancy.
     """
     cost = quota.cost_of(*quota.APPLY)
-    if quota.can_afford(cost):
+    reserve = settings.YT_QUOTA_COLLECTION_RESERVE
+    if quota.can_afford(cost, reserve=reserve):
         return True
     log.info(
-        "%s: skipping apply for %s, needs %du, %du remaining today",
-        QUOTA_INSUFFICIENT, channel_id, cost, quota.units_remaining(),
+        "%s: skipping apply for %s, needs %du, %du remaining today above the %du collection reserve",
+        QUOTA_INSUFFICIENT, channel_id, cost, quota.units_remaining(reserve), reserve,
     )
     return False
 
