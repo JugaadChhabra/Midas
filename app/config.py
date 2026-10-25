@@ -53,6 +53,12 @@ class Settings:
     # applies/day at APPLY_COST=51 — comfortably above the fleet's observed
     # 12-22/day. Only jobs that opt in (JobBudget) respect it.
     YT_QUOTA_APPLY_RESERVE = int(os.getenv("YT_QUOTA_APPLY_RESERVE") or "1500")
+    # The mirror image (fleet readiness, 2026-10-25): autopilot applies, title or
+    # backlinks, stop this many units short of the ceiling so the day's
+    # collection (playlist_reconcile, video_sync, metrics_poll, which run late in
+    # YouTube's Pacific quota day) is never starved by applies spent earlier.
+    # 10,000 - 300 - 3,000 leaves ≈ 6,700u ≈ 130 applies at 51u, fleet-wide.
+    YT_QUOTA_COLLECTION_RESERVE = int(os.getenv("YT_QUOTA_COLLECTION_RESERVE") or "3000")
     AUTOPILOT_TICK_SECONDS = int(os.getenv("AUTOPILOT_TICK_SECONDS") or "120")
     # When true, the autopilot picks the next video to audit via the
     # next_audit_candidate() RPC (returns ONE row) instead of pulling the

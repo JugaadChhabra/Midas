@@ -53,7 +53,7 @@ def test_routine_sync_incremental_otherwise():
 def _run_job(rows, routine):
     with patch.object(main.eligibility, "channels_for", return_value=rows), \
          patch.object(main.sync, "routine_sync", side_effect=routine):
-        main._daily_video_sync()
+        return main._daily_video_sync()
 
 
 def test_job_syncs_every_channel_including_autopilot_off():
@@ -68,7 +68,14 @@ def test_job_treats_expired_token_as_a_skip_not_a_failure():
         if ch["id"] == "expired":
             raise TokenExpiredError("expired")
         return "incremental"
-    _run_job([{"id": "expired"}, {"id": "ok"}], routine)    # no raise
+    out = _run_job([{"id": "expired"}, {"id": "ok"}], routine)    # no raise
+    # …but degraded, naming the channel: the 2026-10-16 outage was a week of
+    # skips that /health/jobs showed as success.
+    assert out == {"partial_errors": {"expired": "token_expired: re-consent needed"}}
+
+
+def test_job_with_no_skip_returns_nothing_so_it_records_success():
+    assert _run_job([{"id": "ok"}], lambda ch: "incremental") is None
 
 
 def test_job_fails_the_run_naming_the_channel_but_syncs_the_rest():

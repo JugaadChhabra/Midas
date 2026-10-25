@@ -34,6 +34,7 @@ from app.traffic_poll import poll_traffic
 from app.measurement import router as measurement_router
 from app.backlinks_apply import router as backlinks_apply_router
 from app.lever_verdicts import router as lever_verdicts_router, run_weekly as lever_measurement_weekly
+from app.channel_health import router as channel_health_router, run_daily as channel_health_daily
 from app.playlist_health import score_channel as playlist_health_score_channel
 
 def _configure_logging() -> None:
@@ -251,11 +252,13 @@ def _daily_video_sync():
     an incremental pass (new uploads + refresh_stats) normally, a full pass every
     `sync.FULL_SYNC_INTERVAL`. Channels autopilot synced within
     `sync.SYNC_STALE_AFTER` are skipped. An expired token is an expected skip
-    (re-consent fixes it), not a failure; anything else fails the run for that
-    channel.
+    (re-consent fixes it), not a failure: the run is `degraded`, naming the
+    channel. Anything else fails the run for that channel.
     """
     rows = {c["id"]: c for c in eligibility.channels_for(
         eligibility.Job.EVERY, columns="id,last_synced_at,last_full_synced_at")}
+
+    skipped: dict[str, str] = {}
 
     def _one(channel_id: str) -> None:
         try:
@@ -263,10 +266,15 @@ def _daily_video_sync():
         except TokenExpiredError:
             _main_log.warning("video_sync %s: OAuth token expired; skipping until re-consent",
                               channel_id)
+            skipped[channel_id] = "token_expired: re-consent needed"
             return
         _main_log.info("video_sync %s: %s", channel_id, kind)
 
     _run_per_channel(_one, "Daily video sync", channel_ids=list(rows), job_id="video_sync")
+    # A skip isn't a failure, but it mustn't look like success either: the
+    # 2026-10-16 outage was four skipped channels and a week of `success`.
+    if skipped:
+        return {"partial_errors": skipped}
 
 
 def _daily_measurement_eval():
@@ -480,6 +488,20 @@ def _register_jobs(sched) -> None:
         coalesce=True,
     )
     sched.add_job(
+        channel_health_daily,
+        "cron",
+        hour=10,
+        minute=0,
+        # UTC, after the day's sync (04:00) and polls (05:00-06:30): fails,
+        # naming them, when a channel has stopped syncing or ingesting, or is
+        # paused. The 2026-10-16 sign-in outage left every job `success` for a
+        # week. Read-only.
+        timezone="UTC",
+        id="channel_health",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
         run_nightly_backup,
         "cron",
         hour=settings.BACKUP_HOUR,
@@ -557,6 +579,7 @@ app.include_router(autoshorts_router)
 app.include_router(measurement_router)
 app.include_router(backlinks_apply_router)
 app.include_router(lever_verdicts_router)
+app.include_router(channel_health_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
