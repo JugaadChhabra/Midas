@@ -66,10 +66,25 @@ def test_check_lists_problems_first_and_counts_them():
     rows = [{"id": "ok", "name": "A", "last_synced_at": NOW.isoformat()},
             {"id": "bad", "name": "B", "last_synced_at": None}]
     with patch.object(ch_health.eligibility, "channel_ids_for", return_value=[]), \
-         patch.object(ch_health.eligibility, "channels_for", return_value=rows):
+         patch.object(ch_health.eligibility, "channels_for", return_value=rows), \
+         patch.object(ch_health, "has_videos", return_value=True):
         out = ch_health.check(now=NOW)
     assert out["with_problems"] == 1
     assert [c["id"] for c in out["channels"]] == ["bad", "ok"]
+
+
+def test_a_channel_with_no_videos_is_listed_but_never_has_a_problem():
+    """Kannada and Telugu had no uploads (2026-10-26): never synced feeds, no reach."""
+    rows = [{"id": "empty", "name": "K", "last_synced_at": None},
+            {"id": "bad", "name": "B", "last_synced_at": None}]
+    with patch.object(ch_health.eligibility, "channel_ids_for", return_value=["empty", "bad"]), \
+         patch.object(ch_health.eligibility, "channels_for", return_value=rows), \
+         patch.object(ch_health.reach, "coverage", return_value=set()), \
+         patch.object(ch_health, "has_videos", side_effect=lambda cid: cid != "empty"):
+        out = ch_health.check(now=NOW)
+    empty = next(c for c in out["channels"] if c["id"] == "empty")
+    assert empty["no_videos"] is True and empty["problems"] == []
+    assert out["with_problems"] == 1
 
 
 def test_the_daily_job_fails_naming_each_channel_with_a_problem():
