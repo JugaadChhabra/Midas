@@ -16,6 +16,11 @@ A channel has a problem when:
     more than `TRAFFIC_STALE_DAYS` behind (steady lag 2 days, A1.1);
   * its autopilot is paused (`autopilot_paused_reason`, e.g. `token_expired`).
 
+A channel with no videos in `videos` is listed with `no_videos: true` and never
+has a problem: there is nothing on it to sync, measure or change, and its feeds
+stay empty (Kannada and Telugu had no uploads on 2026-10-26). It is judged again
+from the first sync that finds a video.
+
 `check()` serves `GET /health/channels`; `run_daily()` is the `channel_health`
 job, which fails (and so shows in /health/jobs and logs `JOB FAILED`) naming each
 channel with a problem. Read-only.
@@ -27,6 +32,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter
 
 from app import eligibility, job_status, reach
+from app.db import supabase
 from app.reporting_client import TRAFFIC_REPORT_TYPE_ID
 
 SYNC_STALE_HOURS = 30
@@ -57,9 +63,21 @@ def _frontier_problem(label: str, covered: set[str], today: date, limit: int) ->
     return behind, None
 
 
+def has_videos(channel_id: str) -> bool:
+    return bool(
+        supabase().table("videos").select("id").eq("channel_id", channel_id).limit(1)
+        .execute().data
+    )
+
+
 def channel_status(ch: dict, *, reach_ids: set[str], traffic_ids: set[str],
-                   now: datetime) -> dict:
+                   now: datetime, no_videos: bool = False) -> dict:
     """One channel's freshness and the problems found, as `check()` lists it."""
+    if no_videos:
+        return {"id": ch["id"], "name": ch.get("name"), "last_synced_at": ch.get("last_synced_at"),
+                "reach_days_behind": None, "traffic_days_behind": None,
+                "autopilot_paused_reason": ch.get("autopilot_paused_reason"),
+                "no_videos": True, "problems": []}
     today = now.date()
     problems: list[str] = []
 
@@ -89,6 +107,7 @@ def channel_status(ch: dict, *, reach_ids: set[str], traffic_ids: set[str],
         "reach_days_behind": reach_behind,
         "traffic_days_behind": traffic_behind,
         "autopilot_paused_reason": ch.get("autopilot_paused_reason"),
+        "no_videos": False,
         "problems": problems,
     }
 
@@ -100,7 +119,8 @@ def check(*, now: datetime | None = None) -> dict:
     traffic_ids = set(eligibility.channel_ids_for(eligibility.Job.TRAFFIC))
     rows = eligibility.channels_for(
         eligibility.Job.EVERY, columns="id,name,last_synced_at,autopilot_paused_reason")
-    channels = [channel_status(c, reach_ids=reach_ids, traffic_ids=traffic_ids, now=now)
+    channels = [channel_status(c, reach_ids=reach_ids, traffic_ids=traffic_ids, now=now,
+                               no_videos=not has_videos(c["id"]))
                 for c in rows]
     channels.sort(key=lambda c: (not c["problems"], c.get("name") or c["id"]))
     return {"checked_at": now.isoformat(),
