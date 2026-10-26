@@ -77,6 +77,17 @@ class Pool(NamedTuple):
     unembedded: int
 
 
+def _videos(ids) -> list[dict]:
+    return rows_for_ids(
+        lambda c: (
+            supabase().table("videos")
+            .select("id,channel_id,title,privacy_status,is_short")
+            .in_("id", c)
+        ),
+        list(ids),
+    )
+
+
 def shorts(channel_id: str) -> list[dict]:
     """The channel's Shorts (`is_short` true), public or NULL, with at least
     SHORT_LINK_MIN_FEED_VIEWS Shorts-feed (type 24) views over its latest
@@ -102,14 +113,8 @@ def shorts(channel_id: str) -> list[dict]:
     listed = [
         {"id": v["id"], "channel_id": v["channel_id"], "title": v.get("title"),
          "feed_views": views[v["id"]]}
-        for v in rows_for_ids(
-            lambda c: (
-                supabase().table("videos")
-                .select("id,channel_id,title,privacy_status,is_short")
-                .in_("id", c)
-            ),
-            [vid for vid, n in views.items() if n >= settings.SHORT_LINK_MIN_FEED_VIEWS],
-        )
+        for v in _videos(vid for vid, n in views.items()
+                         if n >= settings.SHORT_LINK_MIN_FEED_VIEWS)
         if v["channel_id"] == channel_id
         and v.get("is_short") is True
         and v.get("privacy_status") in (None, "public")
@@ -128,14 +133,7 @@ def _pool(channel_id: str) -> tuple[Pool | None, str | None]:
 
     impressions = warm.warm_impressions(channel_id)
     eligible = [
-        v for v in rows_for_ids(
-            lambda c: (
-                supabase().table("videos")
-                .select("id,channel_id,title,privacy_status,is_short")
-                .in_("id", c)
-            ),
-            impressions,
-        )
+        v for v in _videos(impressions)
         if v["channel_id"] == channel_id
         and v.get("privacy_status") in (None, "public")
         and v.get("is_short") is not True
@@ -226,21 +224,18 @@ def _next_watch(short: dict, target: dict, join_low: float) -> int | None:
 
 
 def _write(channel_id: str, short: dict, join_low: float) -> int:
-    """One Short's `pending` rows, rank 1…, then each pair's shadow next-watch,
-    its log id written onto the row. Returns the rows written."""
-    written = supabase().table("short_link_recommendations").insert([
+    """Each pair's shadow next-watch, then one Short's `pending` rows, rank
+    1…, with their log ids, in one insert: a Short is written whole or not at
+    all, so one that raises is tried again next run. Returns the rows written."""
+    rows = [
         {"channel_id": channel_id, "short_id": short["id"], "target_video_id": t["video_id"],
          "rank": rank, "similarity": t["similarity"], "impressions": t["impressions"],
-         "feed_views": short["feed_views"], "status": ShortLinkStatus.PENDING}
+         "feed_views": short["feed_views"], "status": ShortLinkStatus.PENDING,
+         "decision_log_id": _next_watch(short, t, join_low)}
         for rank, t in enumerate(short["targets"], 1)
-    ]).execute().data or []
-    id_of = {r["target_video_id"]: r["id"] for r in written}
-    for t in short["targets"]:
-        log_id = _next_watch(short, t, join_low)
-        if log_id is not None:
-            supabase().table("short_link_recommendations").update(
-                {"decision_log_id": log_id}).eq("id", id_of[t["video_id"]]).execute()
-    return len(written)
+    ]
+    supabase().table("short_link_recommendations").insert(rows).execute()
+    return len(rows)
 
 
 def _counts(plan: dict) -> dict:

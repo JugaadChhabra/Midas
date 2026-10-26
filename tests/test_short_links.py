@@ -424,6 +424,10 @@ def test_every_short_failing_fails_the_channel_some_is_degraded():
     with wired(sb), patch.object(sb, "table", _failing_insert(sb, {"S1"})):
         assert short_links.run_weekly() == {"partial_errors": {CH: "shorts: 1/2 failed"}}
     assert {r["short_id"] for r in recs(sb)} == {"S2"}
+    with wired(sb):                                        # the failed Short is tried again
+        assert short_links.run_weekly() is None
+    assert sorted(r["short_id"] for r in recs(sb)) == ["S1", "S2"]
+    assert all(r["decision_log_id"] for r in recs(sb))
 
 
 def test_refused_thresholds_make_the_channel_degraded_naming_the_reason():

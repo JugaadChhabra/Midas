@@ -351,6 +351,7 @@ class ShortLinkStatus:
     SET = "set"
     #: Another of the Short's targets was set.
     NOT_CHOSEN = "not_chosen"
+    #: The team said this target is wrong for the Short; no intervention.
     DISMISSED = "dismissed"
 
 
