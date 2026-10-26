@@ -172,6 +172,20 @@ def test_rejecting_a_test_proposal_marks_it_rejected_and_sends_nothing():
     assert p["status"] == "rejected" and p["decided_at"]
 
 
+def test_reject_relabels_only_pending_proposals():
+    """An approved test add may already be on YouTube; rejecting it must not
+    hide that (nor relabel an approved legacy proposal already executed)."""
+    sb = _proposals_world(
+        proposal(1, 7, "PL1", "v1", status="pending"),
+        proposal(2, 7, "PL1", "v2", applied_at="2026-10-27T11:00:00+00:00", playlist_item_id="i2"),
+        proposal(3, 7, "PL1", "v3"))
+    yt = FakeYouTube()
+    assert _decide(sb, yt, [1, 2, 3], "rejected") == {"executed": 0, "rejected": 1}
+    assert yt.calls == []
+    assert {pid: p["status"] for pid, p in proposals_by_id(sb).items()} == {
+        1: "rejected", 2: "approved", 3: "approved"}
+
+
 def test_a_proposal_without_arm_id_still_executes_at_once_unchanged():
     legacy = {"id": 2, "video_id": "v2", "playlist_id": "PL1", "action": "add",
               "similarity": 0.8, "decision_source": "embedding", "status": "pending"}

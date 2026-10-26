@@ -408,17 +408,28 @@ def _page(channel_id: str, status: str | None, limit: int, offset: int) -> dict:
             "next_offset": offset + limit if len(page) == limit else None}
 
 
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _cell(value):
+    """A spreadsheet reads a cell starting with = + - @ as a formula. Titles are
+    free text, so such a cell gets a leading apostrophe."""
+    if isinstance(value, str) and value.startswith(_FORMULA_LEAD):
+        return "'" + value
+    return value
+
+
 def _csv(channel_id: str, body: dict) -> StreamingResponse:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS)
     w.writeheader()
     for s in body["shorts"]:
         for t in s["recommendations"]:
-            w.writerow({"short_id": s["short_id"], "short_title": s["title"],
+            w.writerow({"short_id": s["short_id"], "short_title": _cell(s["title"]),
                         "short_url": s["youtube_url"], "studio_url": s["studio_url"],
                         "feed_views": s["feed_views"], "recommendation_id": t["id"],
                         "rank": t["rank"], "target_video_id": t["target_video_id"],
-                        "target_title": t["title"], "target_url": t["youtube_url"],
+                        "target_title": _cell(t["title"]), "target_url": t["youtube_url"],
                         "similarity": t["similarity"], "impressions": t["impressions"],
                         "status": t["status"], "decided_at": t["decided_at"]})
     return StreamingResponse(
@@ -468,6 +479,39 @@ def _ledger_id(key: str) -> int:
             .eq("ledger_key", key).limit(1).execute().data)[0]["id"]
 
 
+def _pair_ids(key: str) -> list[int]:
+    """The pair's ledger rows, oldest first: `key`, then `key:2`, `key:3`, …
+    for each later period the team set the same target back (`_episode_key`)."""
+    ids, n = [], 1
+    while True:
+        k = key if n == 1 else f"{key}:{n}"
+        rows = (supabase().table("interventions").select("id")
+                .eq("ledger_key", k).limit(1).execute().data or [])
+        if not rows:
+            return ids
+        ids.append(rows[0]["id"])
+        n += 1
+
+
+def _episode_key(rec: Mapping) -> str:
+    """The ledger key a tick of `rec` records under: the pair's key, unless the
+    pair is already in the ledger and another target of the same Short was
+    ticked after it. Then the team switched the link away and back, and this is
+    a new period, measured from this tick, under `<pair key>:<n>`."""
+    key = _ledger_key(rec)
+    ids = _pair_ids(key)
+    if not ids:
+        return key
+    others = [r["intervention_id"] for r in (
+        supabase().table("short_link_recommendations").select("intervention_id")
+        .eq("short_id", rec["short_id"]).neq("id", rec["id"]).execute().data or [])
+        if r.get("intervention_id")]
+    # Ledger ids are a sequence, so a larger id is a later tick.
+    if any(i > ids[-1] for i in others):
+        return f"{key}:{len(ids) + 1}"
+    return key if len(ids) == 1 else f"{key}:{len(ids)}"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -484,14 +528,15 @@ def set_short_link(recommendation_id: int):
     redone whole by the next. Ticking a row already `set` changes nothing.
     Setting another target for a Short moves `set` and records a new
     intervention; the old one stays, since the link was on the Short. Setting
-    an earlier target back links its first intervention again (the key is per
-    pair), with that tick's `detected_at`.
+    an earlier target back after another was ticked records a new
+    intervention too, under `<pair key>:<n>` (`_episode_key`), so the later
+    period is measured from its own tick.
     """
     rec = _recommendation(recommendation_id)
     if rec["status"] == ShortLinkStatus.SET:
         return {"recommendation": rec, "intervention_id": rec.get("intervention_id"),
                 "recorded": False}
-    now, key = _now(), _ledger_key(rec)
+    now, key = _now(), _episode_key(rec)
     # The column is nullable (S2.4); refresh always fills it, the Short's own
     # channel is the fallback.
     channel_id = rec["channel_id"] or _videos([rec["short_id"]])[0]["channel_id"]
