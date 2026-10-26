@@ -37,7 +37,7 @@ from app.lever_verdicts import router as lever_verdicts_router, run_weekly as le
 from app.channel_health import router as channel_health_router, run_daily as channel_health_daily
 from app.playlist_health import score_channel as playlist_health_score_channel
 from app.playlist_test import router as playlist_test_router, run_apply as playlist_test_apply_daily
-from app.short_links import run_weekly as short_link_refresh_weekly
+from app.short_links import router as short_links_router, run_weekly as short_link_refresh_weekly
 
 def _configure_logging() -> None:
     """Log to stdout AND a rotating file under settings.LOG_DIR.
@@ -609,6 +609,7 @@ app.include_router(measurement_router)
 app.include_router(backlinks_apply_router)
 app.include_router(lever_verdicts_router)
 app.include_router(playlist_test_router)
+app.include_router(short_links_router)
 app.include_router(channel_health_router)
 
 STATIC_DIR = Path(__file__).parent / "static"

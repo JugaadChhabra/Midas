@@ -308,21 +308,34 @@ class FakeTable:
         q._count = count
         return q
 
+    def _numbered(self, payload):
+        """bigserial: the next id after the largest stored, as Postgres would
+        hand out; `writes` records the row with its id."""
+        if not self._serial:
+            return payload
+        items = payload if isinstance(payload, list) else [payload]
+        next_id = max((r.get("id") or 0 for r in self._rows), default=0) + 1
+        numbered = []
+        for item in items:
+            if item.get("id") is None:
+                item, next_id = {**item, "id": next_id}, next_id + 1
+            numbered.append(item)
+        return numbered if isinstance(payload, list) else numbered[0]
+
     def insert(self, payload, **kw):
-        if self._serial:
-            # bigserial: the next id after the largest stored, as Postgres
-            # would hand out; `writes` records the row with its id.
-            items = payload if isinstance(payload, list) else [payload]
-            next_id = max((r.get("id") or 0 for r in self._rows), default=0) + 1
-            numbered = []
-            for item in items:
-                if item.get("id") is None:
-                    item, next_id = {**item, "id": next_id}, next_id + 1
-                numbered.append(item)
-            payload = numbered if isinstance(payload, list) else numbered[0]
-        return FakeQuery(self._name, self._rows, self._writes).insert(payload, **kw)
+        return FakeQuery(self._name, self._rows, self._writes).insert(self._numbered(payload), **kw)
 
     def upsert(self, payload, **kw):
+        # A row an upsert on a key other than `id` inserts gets a fresh id; one
+        # it updates keeps its own, as in Postgres.
+        keys = [k.strip() for k in (kw.get("on_conflict") or "id").split(",")]
+        if keys != ["id"]:
+            items = payload if isinstance(payload, list) else [payload]
+            new = [i for i in items
+                   if not any(all(r.get(k) == i.get(k) for k in keys) for r in self._rows)]
+            numbered = iter(self._numbered(new))
+            items = [next(numbered) if any(i is n for n in new) else i for i in items]
+            payload = items if isinstance(payload, list) else items[0]
         return FakeQuery(self._name, self._rows, self._writes).upsert(payload, **kw)
 
     def update(self, payload, **kw):

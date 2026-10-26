@@ -230,6 +230,12 @@ def test_upsert_ignore_duplicates_keeps_the_stored_row_and_returns_nothing():
     assert sb.rows("t") == [{"k": "a", "n": 1}]
 
 
+def test_a_serial_upsert_on_another_key_numbers_new_rows_and_keeps_stored_ids():
+    sb = FakeSupabase({"t": [{"id": 7, "k": "a", "n": 1}]}, serial=("t",))
+    sb.table("t").upsert([{"k": "a", "n": 2}, {"k": "b", "n": 3}], on_conflict="k").execute()
+    assert sorted((r["id"], r["k"], r["n"]) for r in sb.rows("t")) == [(7, "a", 2), (8, "b", 3)]
+
+
 def test_delete_removes_the_filtered_rows():
     sb = _sb(t=[{"id": 1}, {"id": 2}])
     sb.table("t").delete().eq("id", 1).execute()

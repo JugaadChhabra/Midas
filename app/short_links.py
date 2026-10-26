@@ -14,6 +14,12 @@ S2.4, the recommendations:
     preview(channel_id)   -- the same, writing nothing and asking no backend
     run_weekly()          -- the `short_link_refresh` job
 
+S2.5, the team's page and the tick (`router`, mounted in app/main.py):
+
+    GET  /channels/{id}/short-links  -- Shorts with their recommendations, paged; ?format=csv
+    POST /short-links/{id}/set       -- the team set this target in Studio: the human ledger
+    POST /short-links/{id}/dismiss   -- the team says this target is wrong; no intervention
+
 Targets are on the Short's own channel only: Studio links a Short only to a
 video on its channel (Part 5 finding 6), unlike backlinks' siblings. Similarity
 is on B6 vectors only (`reembed.MODEL_VERSION`), against the channel's
@@ -25,11 +31,17 @@ decision_log row's id is stored on the recommendation, and the log row's
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from collections import defaultdict
-from typing import Mapping, NamedTuple
+from datetime import datetime, timezone
+from typing import Literal, Mapping, NamedTuple
 
-from app import decide, job_status, reach, warm
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
+from app import decide, interventions, job_status, reach, warm
 from app.backlinks import NO_THRESHOLDS, SOURCE_NOT_EMBEDDED, THRESHOLDS_OTHER_MODEL, _thresholds
 from app.config import settings
 from app.db import supabase
@@ -37,8 +49,15 @@ from app.embeddings import pooled_embeddings
 from app.playlists import _cosine_sim
 from app.reembed import MODEL_VERSION
 from app.reporting_client import TRAFFIC_REPORT_TYPE_ID
-from app.rows import all_rows, rows_for_ids
-from app.status_vocab import ShortLinkStatus
+from app.rows import PAGE_SIZE, all_rows, rows_for_ids
+from app.status_vocab import (
+    ALL_SHORT_LINK_STATUSES,
+    InterventionArm,
+    InterventionLever,
+    InterventionOrigin,
+    InterventionStatus,
+    ShortLinkStatus,
+)
 
 log = logging.getLogger(__name__)
 
@@ -310,3 +329,193 @@ def run_weekly() -> dict | None:
     if crashed:
         raise job_status.JobRunFailed("short_link_refresh", crashed)
     return {"partial_errors": partial_errors} if partial_errors else None
+
+
+# ── S2.5: the page, the tick, the ledger ─────────────────────────────────
+
+router = APIRouter(tags=["short-links"])
+
+_CSV_COLUMNS = ["short_id", "short_title", "short_url", "studio_url", "feed_views",
+                "recommendation_id", "rank", "target_video_id", "target_title", "target_url",
+                "similarity", "impressions", "status", "decided_at"]
+
+
+def _short_url(video_id: str) -> str:
+    return f"https://www.youtube.com/shorts/{video_id}"
+
+
+def _studio_url(video_id: str) -> str:
+    """Where the team sets a Short's related video."""
+    return f"https://studio.youtube.com/video/{video_id}/edit"
+
+
+def _video_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def _page(channel_id: str, status: str | None, limit: int, offset: int) -> dict:
+    """One page of the channel's Shorts with their recommendations (rank
+    order), Shorts with a pending row first, then by feed views, then id.
+
+    The page is of Shorts, not rows, so a Short's targets never split across
+    pages; that grouping is done here over the channel's rows (`all_rows`),
+    which grow by at most SHORT_LINK_MAX_PER_RUN × SHORT_LINK_TARGETS a week.
+    `status` keeps only the rows in it, and the Shorts that have one.
+    """
+    q = supabase().table("short_link_recommendations").select("*").eq("channel_id", channel_id)
+    if status is not None:
+        q = q.eq("status", status)
+    by_short: dict[str, list[dict]] = defaultdict(list)
+    for r in all_rows(q):
+        by_short[r["short_id"]].append(r)
+    feed_views = {sid: max(r.get("feed_views") or 0 for r in rows) for sid, rows in by_short.items()}
+    order = sorted(by_short, key=lambda sid: (
+        not any(r["status"] == ShortLinkStatus.PENDING for r in by_short[sid]),
+        -feed_views[sid], sid))
+    page = order[offset:offset + limit]
+
+    recs = [r for sid in page for r in by_short[sid]]
+    titles = {v["id"]: v.get("title") for v in _videos(
+        {r["short_id"] for r in recs} | {r["target_video_id"] for r in recs})}
+    listed = []
+    for sid in page:
+        rows = sorted(by_short[sid], key=lambda r: (r["rank"], r["id"]))
+        listed.append({
+            "short_id": sid, "title": titles.get(sid),
+            "youtube_url": _short_url(sid), "studio_url": _studio_url(sid),
+            "feed_views": feed_views[sid],
+            "recommendations": [
+                {"id": r["id"], "rank": r["rank"], "target_video_id": r["target_video_id"],
+                 "title": titles.get(r["target_video_id"]),
+                 "youtube_url": _video_url(r["target_video_id"]),
+                 "similarity": r["similarity"], "impressions": r.get("impressions"),
+                 "feed_views": r.get("feed_views"), "status": r["status"],
+                 "decided_at": r.get("decided_at"), "intervention_id": r.get("intervention_id")}
+                for r in rows],
+        })
+    return {"shorts": listed, "limit": limit, "offset": offset,
+            "next_offset": offset + limit if len(page) == limit else None}
+
+
+def _csv(channel_id: str, body: dict) -> StreamingResponse:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS)
+    w.writeheader()
+    for s in body["shorts"]:
+        for t in s["recommendations"]:
+            w.writerow({"short_id": s["short_id"], "short_title": s["title"],
+                        "short_url": s["youtube_url"], "studio_url": s["studio_url"],
+                        "feed_views": s["feed_views"], "recommendation_id": t["id"],
+                        "rank": t["rank"], "target_video_id": t["target_video_id"],
+                        "target_title": t["title"], "target_url": t["youtube_url"],
+                        "similarity": t["similarity"], "impressions": t["impressions"],
+                        "status": t["status"], "decided_at": t["decided_at"]})
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="short-links-{channel_id}.csv"'},
+    )
+
+
+@router.get("/channels/{channel_id}/short-links")
+def channel_short_links(
+    channel_id: str,
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
+    format: Literal["json", "csv"] = Query(default="json"),
+):
+    """The channel's Shorts with their recommended targets, one page of Shorts
+    at a time (`_page`), as JSON or, with `format=csv`, the same page as CSV,
+    one line per recommendation.
+
+    Paged as `GET /channels/{id}/interventions`: `next_offset` is set whenever
+    the page came back full, an unknown `status` is 400, and `limit` is at
+    most PAGE_SIZE (422 above).
+    """
+    if status is not None and status not in ALL_SHORT_LINK_STATUSES:
+        raise HTTPException(400, f"unknown status {status!r}")
+    body = _page(channel_id, status, limit, offset)
+    return _csv(channel_id, body) if format == "csv" else body
+
+
+def _recommendation(recommendation_id: int) -> dict:
+    rows = (supabase().table("short_link_recommendations").select("*")
+            .eq("id", recommendation_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(404, f"unknown Short-link recommendation {recommendation_id}")
+    return rows[0]
+
+
+def _ledger_key(rec: Mapping) -> str:
+    """The pair's human-ledger key; S2.6's traffic detection writes the same."""
+    return f"short_link:{rec['short_id']}:{rec['target_video_id']}"
+
+
+def _ledger_id(key: str) -> int:
+    return (supabase().table("interventions").select("id")
+            .eq("ledger_key", key).limit(1).execute().data)[0]["id"]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/short-links/{recommendation_id}/set")
+def set_short_link(recommendation_id: int):
+    """The team set this target on its Short in Studio (Part 2 §1.4, E11).
+
+    Records one `human` `short_link` intervention on the target, keyed by the
+    pair, so a pair already in the ledger (an earlier tick, or S2.6 seeing
+    the link in the traffic) is linked rather than recorded twice. Then the
+    Short's other pending or set rows become `not_chosen` (a dismissed one
+    stays dismissed), and this one `set`, last: a tick that dies partway is
+    redone whole by the next. Ticking a row already `set` changes nothing.
+    Setting another target for a Short moves `set` and records a new
+    intervention; the old one stays, since the link was on the Short. Setting
+    an earlier target back links its first intervention again (the key is per
+    pair), with that tick's `detected_at`.
+    """
+    rec = _recommendation(recommendation_id)
+    if rec["status"] == ShortLinkStatus.SET:
+        return {"recommendation": rec, "intervention_id": rec.get("intervention_id"),
+                "recorded": False}
+    now, key = _now(), _ledger_key(rec)
+    # The column is nullable (S2.4); refresh always fills it, the Short's own
+    # channel is the fallback.
+    channel_id = rec["channel_id"] or _videos([rec["short_id"]])[0]["channel_id"]
+    stored = interventions.record(
+        video_id=rec["target_video_id"], channel_id=channel_id,
+        lever=InterventionLever.SHORT_LINK, origin=InterventionOrigin.HUMAN,
+        arm=InterventionArm.NOT_APPLICABLE, status=InterventionStatus.APPLIED,
+        detected_at=now, ledger_key=key,
+        payload={"short_id": rec["short_id"], "target_video_id": rec["target_video_id"],
+                 "recommendation_id": rec["id"], "timing": "ticked"},
+    )
+    intervention_id = stored["id"] if stored else _ledger_id(key)
+    table = supabase().table("short_link_recommendations")
+    (table.update({"status": ShortLinkStatus.NOT_CHOSEN, "decided_at": now})
+     .eq("short_id", rec["short_id"]).neq("id", rec["id"])
+     .in_("status", [ShortLinkStatus.PENDING, ShortLinkStatus.SET]).execute())
+    updated = (supabase().table("short_link_recommendations")
+               .update({"status": ShortLinkStatus.SET, "decided_at": now,
+                        "intervention_id": intervention_id})
+               .eq("id", rec["id"]).execute().data)[0]
+    return {"recommendation": updated, "intervention_id": intervention_id,
+            "recorded": stored is not None}
+
+
+@router.post("/short-links/{recommendation_id}/dismiss")
+def dismiss_short_link(recommendation_id: int):
+    """The team says this target is wrong for its Short: `dismissed`, no
+    intervention. A `set` row is refused (409): the link is on the Short, and
+    the ledger says so; the team changes it by setting another target."""
+    rec = _recommendation(recommendation_id)
+    if rec["status"] == ShortLinkStatus.SET:
+        raise HTTPException(409, "set: tick another target to change the Short's link")
+    if rec["status"] == ShortLinkStatus.DISMISSED:
+        return {"recommendation": rec}
+    updated = (supabase().table("short_link_recommendations")
+               .update({"status": ShortLinkStatus.DISMISSED, "decided_at": _now()})
+               .eq("id", rec["id"]).execute().data)[0]
+    return {"recommendation": updated}
