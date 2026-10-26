@@ -334,7 +334,8 @@ def test_the_audit_tick_never_picks_from_the_warm_pool():
 def test_only_the_agent_tick_picks_and_s1_1_candidates_use_only_the_warmth_measure():
     """S1.4b's agent tick picks from the pool (`warm_pool`, with its explore
     share); S1.1's candidates read only `warm_impressions` for their targets,
-    and so do S2.1's playlist-test candidates (app/playlist_test.py)."""
+    and so do S2.1's playlist-test candidates (app/playlist_test.py) and S2.4's
+    Short-link targets (app/short_links.py)."""
     users = sorted(
         p.relative_to(REPO).as_posix()
         for p in (REPO / "app").rglob("*.py")
@@ -342,8 +343,9 @@ def test_only_the_agent_tick_picks_and_s1_1_candidates_use_only_the_warmth_measu
         and re.search(r"\bapp\.warm\b|from app import[^\n]*\bwarm\b|[\"']warm_pool[\"']",
                       p.read_text())
     )
-    assert users == ["app/agent_tick.py", "app/backlinks.py", "app/playlist_test.py"], users
-    for path in ("app/backlinks.py", "app/playlist_test.py"):
+    assert users == ["app/agent_tick.py", "app/backlinks.py", "app/playlist_test.py",
+                     "app/short_links.py"], users
+    for path in ("app/backlinks.py", "app/playlist_test.py", "app/short_links.py"):
         src = (REPO / path).read_text()
         assert not re.search(r"warm\.(ranked_pool|warm_pool|explore_order)\b", src), path
     agent = (REPO / "app/agent_tick.py").read_text()
