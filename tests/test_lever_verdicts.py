@@ -41,7 +41,7 @@ def human(id_, delta, week, **kw) -> dict:
 def db(interventions=(), verdicts=(), channels=({"id": CH},)):
     sb = FakeSupabase({"interventions": list(interventions), "lever_verdicts": list(verdicts),
                        "channels": list(channels), "video_traffic_source_daily": [],
-                       "reporting_reports_ingested": [], "videos": []})
+                       "reporting_reports_ingested": [], "videos": [], "playlist_arms": []})
     with patch.object(lv, "supabase", return_value=sb), \
          patch.object(agent_tick, "supabase", return_value=sb), \
          patch.object(lever_measurement, "supabase", return_value=sb), \

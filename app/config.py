@@ -314,6 +314,13 @@ class Settings:
     # Slice 2 · S2.2 (spec Part 5 Config): the runs a failing test add is tried
     # in before it counts as failed for good.
     PLAYLIST_TEST_MAX_ATTEMPTS = int(os.getenv("PLAYLIST_TEST_MAX_ATTEMPTS") or "3")
+    # Slice 2 · S2.3 (spec Part 5 Config, E8): the playlist test's weekly post
+    # windows before its answer (app/playlist_test.measure_channel).
+    PLAYLIST_EXPERIMENT_WINDOWS = int(os.getenv("PLAYLIST_EXPERIMENT_WINDOWS") or "4")
+    # Slice 2 · S2.3 (spec Part 5 Config, E8): playlist starts per playlist per
+    # week. The weekly verdict band (±it), and the cumulative lift the test must
+    # reach at PLAYLIST_EXPERIMENT_WINDOWS for "yes" (lever_verdicts.directional).
+    PLAYLIST_MIN_LIFT = float(os.getenv("PLAYLIST_MIN_LIFT") or "1.0")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).
