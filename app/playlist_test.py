@@ -122,10 +122,18 @@ def assign_arm(playlist_id: str) -> str:
     return PlaylistArm.TREATED
 
 
-def _pool(channel_id: str) -> tuple[dict[str, int], list[dict], dict[str, list[float]]]:
-    """(impressions, videos, vectors) of the channel's warm videos that could
-    join any playlist: public (or NULL), not a Short, not an episode. A NULL
-    `is_short` or `is_episode` is not yet known, and eligible (as warm_pool())."""
+class Pool(NamedTuple):
+    """The channel's videos that could join any of its playlists, read once per draw."""
+
+    impressions: dict[str, int]
+    videos: list[dict]
+    vectors: dict[str, list[float]]
+
+
+def _pool(channel_id: str) -> Pool:
+    """The channel's warm videos that could join any playlist: public (or
+    NULL), not a Short, not an episode. A NULL `is_short` or `is_episode` is
+    not yet known, and eligible (as warm_pool())."""
     impressions = warm.warm_impressions(channel_id)
     videos = [
         v for v in rows_for_ids(
@@ -142,10 +150,10 @@ def _pool(channel_id: str) -> tuple[dict[str, int], list[dict], dict[str, list[f
         and v.get("is_episode") is not True
     ]
     vectors = pooled_embeddings([v["id"] for v in videos], model_version=MODEL_VERSION)
-    return impressions, videos, vectors
+    return Pool(impressions, videos, vectors)
 
 
-def _score(playlist: dict, join_high: float, pool) -> Candidates:
+def _score(playlist: dict, join_high: float, pool: Pool) -> Candidates:
     impressions, videos, vectors = pool
     # Cosine ignores scale, so the sum stands in for the members' mean.
     centroid = [sum(col) for col in zip(*playlist["vectors"])]
@@ -213,7 +221,7 @@ def _plan(channel_id: str) -> dict:
         return plan
     found = survey(channel_id)
     plan["skipped"] = found.skipped
-    pool = _pool(channel_id) if found.eligible else ({}, [], {})
+    pool = _pool(channel_id) if found.eligible else Pool({}, [], {})
     for p in found.eligible:
         arm = assign_arm(p["playlist_id"])
         if arm == PlaylistArm.HOLDOUT:
