@@ -308,21 +308,28 @@ class FakeTable:
         q._count = count
         return q
 
+    def _numbered(self, payload):
+        """bigserial: the next id after the largest stored, as Postgres would
+        hand out; `writes` records the row with its id."""
+        if not self._serial:
+            return payload
+        items = payload if isinstance(payload, list) else [payload]
+        next_id = max((r.get("id") or 0 for r in self._rows), default=0) + 1
+        numbered = []
+        for item in items:
+            if item.get("id") is None:
+                item, next_id = {**item, "id": next_id}, next_id + 1
+            numbered.append(item)
+        return numbered if isinstance(payload, list) else numbered[0]
+
     def insert(self, payload, **kw):
-        if self._serial:
-            # bigserial: the next id after the largest stored, as Postgres
-            # would hand out; `writes` records the row with its id.
-            items = payload if isinstance(payload, list) else [payload]
-            next_id = max((r.get("id") or 0 for r in self._rows), default=0) + 1
-            numbered = []
-            for item in items:
-                if item.get("id") is None:
-                    item, next_id = {**item, "id": next_id}, next_id + 1
-                numbered.append(item)
-            payload = numbered if isinstance(payload, list) else numbered[0]
-        return FakeQuery(self._name, self._rows, self._writes).insert(payload, **kw)
+        return FakeQuery(self._name, self._rows, self._writes).insert(self._numbered(payload), **kw)
 
     def upsert(self, payload, **kw):
+        # An upsert on a conflict key other than `id` inserts with a fresh id;
+        # one on `id` itself carries its own.
+        if (kw.get("on_conflict") or "id") != "id":
+            payload = self._numbered(payload)
         return FakeQuery(self._name, self._rows, self._writes).upsert(payload, **kw)
 
     def update(self, payload, **kw):
