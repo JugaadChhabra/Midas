@@ -96,6 +96,8 @@
   #pl-proposals .dt { --dt-cols: 1.1rem 5.5rem minmax(200px,1.6fr) minmax(150px,1.1fr) 5rem 7rem; --dt-min: 760px; }
   #pl-health .dt   { --dt-cols: 7.5rem minmax(200px,1.7fr) 4.5rem 4.5rem 4.5rem 6rem 6.5rem; --dt-min: 900px; }
   #pl-health .dt-row { align-items:start; }
+  #sl-links .dt { --dt-cols: 2.5rem minmax(200px,1.8fr) 5rem 6rem 6.5rem 11rem; --dt-min: 760px; }
+  #sl-links .sl-short { display:block; padding:.6rem .75rem .35rem; border-bottom:1px solid var(--border-soft); }
   .pl-title { font-weight:600; }
   .pl-sub { font-size:.75rem; opacity:.6; margin-top:.15rem; }
   .pl-why > summary { font-size:.75rem; opacity:.6; cursor:pointer; }
@@ -229,6 +231,18 @@
         <button id="pl-reject-all-btn" disabled>Reject selected</button>
       </div>
       <div id="pl-proposals"><div class="skel" data-skeleton data-rows="5"></div></div>
+    </div>
+
+    <div class="card" id="sl-card">
+      <div class="sec-head">
+        <h3>Short links <span class="sec-tag">suggestions only</span></h3>
+        <button id="sl-refresh-btn" class="btn-link">Refresh</button>
+      </div>
+      <p class="note">For each Short, the long videos it could link to as its related video. Midas can't set the link itself: open the Short in Studio, set one, then tick it here so Midas can measure it.</p>
+      <div class="act-bar" style="margin-top:0">
+        <a id="sl-csv-link" class="btn-link" href="#" download>Download CSV</a>
+      </div>
+      <div id="sl-links"><div class="skel" data-skeleton data-rows="4"></div></div>
     </div>
 
     <div class="card" id="pl-health-card">
@@ -430,7 +444,7 @@ const tabLoaders = {
     loadChannelState(); loadAutopilotLog();
     if (!apInterval) apInterval = setInterval(pollAutopilotLog, 30000);
   },
-  playlists: () => { loadPlaylistStatus(); loadProposals(); loadHealth(); },
+  playlists: () => { loadPlaylistStatus(); loadProposals(); loadShortLinks(); loadHealth(); },
   settings:  () => { loadConfig(); loadReflectionData(); },
 };
 
@@ -1668,6 +1682,79 @@ $('pl-approve-all-btn').onclick = () => decideProposals('approved');
 $('pl-reject-all-btn').onclick = () => decideProposals('rejected');
 $('pl-refresh-btn').onclick = loadProposals;
 
+
+// ── Short links ────────────────────────────────────────────────────────
+// Recommend-only: YouTube's API can't set a Short's related video, so the team
+// sets it in Studio and ticks it here, which records it in the ledger. Shorts
+// with something still to do come first (the endpoint's order).
+const SL_STATUS = {
+  pending:    { label: 'To do',      role: 'info' },
+  set:        { label: 'Set',        role: 'ok' },
+  not_chosen: { label: 'Not chosen', role: 'neutral' },
+  dismissed:  { label: 'Dismissed',  role: 'neutral' },
+};
+
+function renderShortLinks(data) {
+  const shorts = data.shorts || [];
+  if (!shorts.length) {
+    $('sl-links').innerHTML = '<div class="dt"><div class="dt-empty muted">No Short links to review yet.</div></div>';
+    return;
+  }
+  const blocks = shorts.map(s => {
+    const rows = s.recommendations.map(t => {
+      const st = SL_STATUS[t.status] || { label: t.status, role: 'neutral' };
+      const open = t.status === 'pending' || t.status === 'not_chosen' || t.status === 'dismissed';
+      return `<div class="dt-row">
+        <span class="dt-num muted">#${t.rank}</span>
+        <span class="truncate"><a href="${escapeHtml(t.youtube_url)}" target="_blank" rel="noopener" title="${escapeHtml(t.title || t.target_video_id)}">${escapeHtml(t.title || t.target_video_id)}</a></span>
+        <span class="dt-num">${(t.similarity * 100).toFixed(1)}%</span>
+        <span class="dt-num">${fmt(t.impressions)}</span>
+        <span><span class="pill pill--${st.role} pill--sm">${escapeHtml(st.label)}</span></span>
+        <span>${open ? `<button type="button" class="btn-link" data-sl-set="${t.id}">Set in Studio</button>` : ''}${t.status === 'pending' ? `<button type="button" class="btn-link" data-sl-dismiss="${t.id}">Dismiss</button>` : ''}</span>
+      </div>`;
+    }).join('');
+    return `<div class="sl-short">
+        <a class="pl-title" href="${escapeHtml(s.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(s.title || s.short_id)}</a>
+        <div class="pl-sub">${fmt(s.feed_views)} Shorts-feed views · <a href="${escapeHtml(s.studio_url)}" target="_blank" rel="noopener">Open in Studio</a></div>
+      </div>${rows}`;
+  }).join('');
+  $('sl-links').innerHTML = `<div class="dt"><div class="dt-scroll"><div class="dt-body">
+    <div class="dt-head">
+      <span>Rank</span><span>Link to</span><span>How close a match</span><span>Impressions</span><span>Status</span><span></span>
+    </div>${blocks}</div></div></div>`;
+  $('sl-links').querySelectorAll('[data-sl-set]').forEach(b => {
+    b.onclick = () => decideShortLink(b.dataset.slSet, 'set');
+  });
+  $('sl-links').querySelectorAll('[data-sl-dismiss]').forEach(b => {
+    b.onclick = () => decideShortLink(b.dataset.slDismiss, 'dismiss');
+  });
+}
+
+function loadShortLinks() {
+  const url = `/channels/${channelId}/short-links?limit=1000`;
+  $('sl-csv-link').href = `/channels/${channelId}/short-links?format=csv&limit=1000`;
+  SWR.swr(url, renderShortLinks, {
+    onError: () => {
+      if (SWR.get(url) === undefined) {
+        $('sl-links').innerHTML = '<em class="muted">Could not load Short links.</em>';
+      }
+    },
+  });
+}
+
+async function decideShortLink(id, action) {
+  try {
+    const r = await fetch(`/short-links/${id}/${action}`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+    toast(action === 'set' ? 'Recorded: link set in Studio.' : 'Dismissed.', 'ok');
+    SWR.invalidatePrefix(`/channels/${channelId}/short-links`);
+    loadShortLinks();
+  } catch (e) { toast('Failed: ' + escapeHtml(String(e)), 'err'); }
+}
+
+$('sl-refresh-btn').onclick = loadShortLinks;
+// ── end Short links
 
 // Only one of these figures has a target to reach, so only that one becomes a
 // meter; the rest sit in the lede's meta line as context rather than competing
