@@ -340,6 +340,26 @@ class PlaylistProposalSource:
     EXPERIMENT = "experiment"
 
 
+class ShortLinkStatus:
+    """`short_link_recommendations.status` — one recommended Short → video link
+    (Slice 2 S2.4, spec Part 5). Recommend-only: the team sets the link in
+    Studio and ticks it (S2.5); Midas writes nothing to YouTube."""
+
+    #: Recommended by `short_links.refresh`, not acted on yet.
+    PENDING = "pending"
+    #: The team set this target on the Short in Studio.
+    SET = "set"
+    #: Another of the Short's targets was set.
+    NOT_CHOSEN = "not_chosen"
+    DISMISSED = "dismissed"
+
+
+ALL_SHORT_LINK_STATUSES = frozenset({
+    ShortLinkStatus.PENDING, ShortLinkStatus.SET, ShortLinkStatus.NOT_CHOSEN,
+    ShortLinkStatus.DISMISSED,
+})
+
+
 class DecisionUsed:
     """`decision_log.used` — whose answer a decision acted on (spec Part 2 §7).
 

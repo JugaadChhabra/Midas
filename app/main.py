@@ -37,6 +37,7 @@ from app.lever_verdicts import router as lever_verdicts_router, run_weekly as le
 from app.channel_health import router as channel_health_router, run_daily as channel_health_daily
 from app.playlist_health import score_channel as playlist_health_score_channel
 from app.playlist_test import router as playlist_test_router, run_apply as playlist_test_apply_daily
+from app.short_links import run_weekly as short_link_refresh_weekly
 
 def _configure_logging() -> None:
     """Log to stdout AND a rotating file under settings.LOG_DIR.
@@ -499,6 +500,20 @@ def _register_jobs(sched) -> None:
         # week. Read-only.
         timezone="UTC",
         id="channel_health",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        short_link_refresh_weekly,
+        "cron",
+        day_of_week="mon",
+        hour=10,
+        minute=30,
+        # UTC, after lever_measurement (09:00) and channel_health (10:00)
+        # (spec Part 5 S2.4): recommends long-video targets for Shorts that
+        # have none yet. DB and OpenRouter only; nothing reaches YouTube.
+        timezone="UTC",
+        id="short_link_refresh",
         max_instances=1,
         coalesce=True,
     )

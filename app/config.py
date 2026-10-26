@@ -321,6 +321,24 @@ class Settings:
     # week. The weekly verdict band (±it), and the cumulative lift the test must
     # reach at PLAYLIST_EXPERIMENT_WINDOWS for "yes" (lever_verdicts.directional).
     PLAYLIST_MIN_LIFT = float(os.getenv("PLAYLIST_MIN_LIFT") or "1.0")
+    # Slice 2 · S2.4 (spec Part 5 Config, E13): channels whose Shorts get link
+    # recommendations (app/short_links.py), comma-separated ids as
+    # TRAFFIC_INGEST_CHANNELS; the job runs only those also in it. Default:
+    # Marathi. Widening is a setting, once a channel's Shorts are synced and embedded.
+    SHORT_LINK_CHANNELS = {
+        c.strip()
+        for c in (os.getenv("SHORT_LINK_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",")
+        if c.strip()
+    }
+    # Slice 2 · S2.4 (spec Part 5 Config, E10): the most targets recommended per Short.
+    SHORT_LINK_TARGETS = int(os.getenv("SHORT_LINK_TARGETS") or "3")
+    # Slice 2 · S2.4 (spec Part 5 Config, E9): a Short is listed with at least
+    # this many Shorts-feed (type 24) views over its channel's latest 28
+    # ingested traffic data-days.
+    SHORT_LINK_MIN_FEED_VIEWS = int(os.getenv("SHORT_LINK_MIN_FEED_VIEWS") or "1")
+    # Slice 2 · S2.4 (spec Part 5 Config): Shorts recommended per weekly run,
+    # which bounds its shadow next-watch calls at SHORT_LINK_TARGETS × this.
+    SHORT_LINK_MAX_PER_RUN = int(os.getenv("SHORT_LINK_MAX_PER_RUN") or "50")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

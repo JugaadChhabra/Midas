@@ -36,6 +36,7 @@ INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql
 WARM_POOL_SQL = REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"
 LEVER_VERDICTS_SQL = REPO / "supabase/migrations/20261023010000_lever_verdicts.sql"
 PLAYLIST_ARMS_SQL = REPO / "supabase/migrations/20261027000000_playlist_arms.sql"
+SHORT_LINKS_SQL = REPO / "supabase/migrations/20261027010000_short_link_recommendations.sql"
 CHANNEL_HTML = REPO / "app/static/channel.html"
 
 
@@ -241,6 +242,16 @@ def test_playlist_arm_values_are_the_persisted_strings():
                            ("measurement_status", sv.ALL_PLAYLIST_ARM_MEASUREMENTS)):
         [line] = [l for l in ddl.splitlines() if l.strip().startswith(column + " ")]
         assert set(line.split("--")[1].strip().split("|")) == values
+
+
+def test_short_link_status_values_are_the_persisted_strings():
+    """short_link_recommendations.status (Slice 2 S2.4), as the migration's
+    comment lists them, and its default."""
+    assert sv.ALL_SHORT_LINK_STATUSES == {"pending", "set", "not_chosen", "dismissed"}
+    [line] = [l for l in SHORT_LINKS_SQL.read_text().splitlines()
+              if l.strip().startswith("status ")]
+    assert set(line.split("--")[1].strip().split("|")) == sv.ALL_SHORT_LINK_STATUSES
+    assert f"default '{sv.ShortLinkStatus.PENDING}'" in line
 
 
 def test_the_experiment_decision_source_is_labelled_in_the_proposals_card():
