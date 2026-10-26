@@ -437,3 +437,17 @@ def test_the_settings_start_values():
     from app.config import Settings
     s = Settings()
     assert (s.PLAYLIST_EXPERIMENT_WINDOWS, s.PLAYLIST_MIN_LIFT) == (4, 1.0)
+
+
+def test_backlinks_still_run_when_the_playlist_arms_table_is_unreadable():
+    # Before 20261027000000 is applied the table doesn't exist: the weekly job
+    # must still measure backlinks (live on Marathi) and skip the playlist test.
+    with _job_world() as sb, \
+         patch.object(lever_measurement, "measure_channel",
+                      return_value={"attempted": 0, "errored": 0}), \
+         patch.object(lv, "write_verdicts") as write, \
+         patch.object(playlist_test, "measure_channel") as measure:
+        del sb._tables["playlist_arms"]
+        assert lv.run_weekly() is None
+    assert sorted(c.args[0] for c in write.call_args_list) == sorted([CH, OTHER])
+    measure.assert_not_called()

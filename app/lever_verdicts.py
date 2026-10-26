@@ -133,13 +133,13 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
         lift = _mean(treated) - _mean(held)
         cumulative = (_mean(so_far[InterventionArm.TREATED])
                       - _mean(so_far[InterventionArm.HOLDOUT]))
-        judged_ = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
+        windows_judged = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
         out[LeverVerdictScope.TREATED_VS_HOLDOUT] = {
             "n_treated": len(treated), "n_holdout": len(held),
             "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
-            "lift": lift, "cumulative_lift": cumulative, "windows_judged": judged_,
+            "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows_judged,
             "verdict": directional(lift, min_lift),
-            "stop_rule_triggered": judged_ >= windows and cumulative < min_lift,
+            "stop_rule_triggered": windows_judged >= windows and cumulative < min_lift,
         }
     human = this_week.get(LeverVerdictScope.HUMAN)
     if human:
@@ -241,9 +241,15 @@ def run_weekly(*, today: date | None = None) -> dict | None:
     def note(into: dict[str, str], cid: str, message: str) -> None:
         into[cid] = "; ".join(filter(None, [into.get(cid), message]))
 
-    # The channels whose playlist test is drawn.
-    drawn = {r["channel_id"] for r in all_rows(
-        supabase().table("playlist_arms").select("id,channel_id"))}
+    # The channels whose playlist test is drawn. A failed read (e.g. before
+    # 20261027000000 is applied) skips the playlist test this run, never
+    # backlinks: the next run recomputes every week anyway.
+    try:
+        drawn = {r["channel_id"] for r in all_rows(
+            supabase().table("playlist_arms").select("id,channel_id"))}
+    except Exception as e:
+        log.error("lever_measurement: playlist_arms unreadable; playlist test skipped: %s", e)
+        drawn = set()
     for cid in eligibility.channel_ids_for(eligibility.Job.EVERY):
         try:
             counts = lever_measurement.measure_channel(cid, today=today)
