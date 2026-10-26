@@ -53,7 +53,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app import eligibility, job_status, lever_measurement, playlist_test, short_links
 from app.config import settings
 from app.db import supabase
-from app.rows import PAGE_SIZE, all_rows
+from app.rows import PAGE_SIZE, all_rows, rows_for_ids
 from app.status_vocab import (
     ALL_INTERVENTION_LEVERS,
     ALL_INTERVENTION_STATUSES,
@@ -158,6 +158,22 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
     return out
 
 
+def _without_shorts(rows: list[dict]) -> list[dict]:
+    """The rows whose video isn't a Short (`is_short` true; NULL stays in).
+
+    Before 2026-10-26 (#103) the agent's pick took Shorts, where description
+    links aren't clickable, so their backlinks rows (either arm, or the team's)
+    would only pull the means toward zero. The arm is a hash of the video id,
+    so dropping them from both arms keeps the comparison fair. They stay
+    measured; only the verdicts leave them out."""
+    shorts = {v["id"] for v in rows_for_ids(
+        lambda chunk: supabase().table("videos").select("id,is_short")
+        .in_("id", chunk).eq("is_short", True),
+        sorted({r["video_id"] for r in rows if r.get("video_id")}),
+    )}
+    return [r for r in rows if r.get("video_id") not in shorts]
+
+
 def write_verdicts(channel_id: str, *, today: date | None = None,
                    lever: str = InterventionLever.BACKLINKS) -> dict[str, dict]:
     """Write the week's verdict rows of the lever (backlinks, or the human-only
@@ -172,10 +188,12 @@ def write_verdicts(channel_id: str, *, today: date | None = None,
     current = week_start(today)
     judged = all_rows(
         supabase().table("interventions")
-        .select("id,origin,arm,status,measurement_result")
+        .select("id,video_id,origin,arm,status,measurement_result")
         .eq("channel_id", channel_id).eq("lever", lever)
         .eq("status", InterventionStatus.JUDGED)
     )
+    if lever == InterventionLever.BACKLINKS:
+        judged = _without_shorts(judged)
     stored = all_rows(
         supabase().table("lever_verdicts").select("id,arm_scope,week_start,stop_rule_triggered")
         .eq("channel_id", channel_id).eq("lever", lever)

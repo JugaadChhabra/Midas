@@ -38,10 +38,10 @@ def human(id_, delta, week, **kw) -> dict:
 
 
 @contextmanager
-def db(interventions=(), verdicts=(), channels=({"id": CH},)):
+def db(interventions=(), verdicts=(), channels=({"id": CH},), videos=()):
     sb = FakeSupabase({"interventions": list(interventions), "lever_verdicts": list(verdicts),
                        "channels": list(channels), "video_traffic_source_daily": [],
-                       "reporting_reports_ingested": [], "videos": [], "playlist_arms": []})
+                       "reporting_reports_ingested": [], "videos": list(videos), "playlist_arms": []})
     with patch.object(lv, "supabase", return_value=sb), \
          patch.object(agent_tick, "supabase", return_value=sb), \
          patch.object(lever_measurement, "supabase", return_value=sb), \
@@ -197,6 +197,33 @@ def test_human_rows_never_enter_the_lift_and_get_their_own_row():
     assert bench["holdout_mean_delta"] is None and bench["lift"] is None
     assert bench["cumulative_lift"] is None and bench["verdict"] is None
     assert bench["stop_rule_triggered"] is False and bench["windows_judged"] == 1
+
+
+def test_backlinks_rows_on_shorts_stay_out_of_every_verdict():
+    """The pick took Shorts before 2026-10-26 (#103); a Short's description links
+    aren't clickable, so its rows, either arm or human, would only pull the means
+    toward zero. A NULL is_short (not yet probed) still counts."""
+    long_ = [judged(1, "treated", 4, W1), judged(2, "holdout", 1, W1), human(3, 50, W1)]
+    on_shorts = [judged(4, "treated", 0, W1), judged(5, "holdout", 30, W1), human(6, -90, W1)]
+    unprobed = judged(7, "treated", 10, W1)
+    videos = ([{"id": r["video_id"], "is_short": False} for r in long_]
+              + [{"id": r["video_id"], "is_short": True} for r in on_shorts]
+              + [{"id": unprobed["video_id"], "is_short": None}])
+    with db(long_ + on_shorts + [unprobed], videos=videos) as sb:
+        lv.write_verdicts(CH, today=W1)
+    [row], [bench] = verdict_rows(sb), verdict_rows(sb, "human")
+    assert (row["n_treated"], row["n_holdout"]) == (2, 1)
+    assert (row["treated_mean_delta"], row["holdout_mean_delta"]) == (7, 1)
+    assert (bench["n_treated"], bench["treated_mean_delta"]) == (1, 50)
+
+
+def test_short_link_rows_are_not_dropped_as_shorts():
+    """A short_link row's video is the long target; nothing to drop, but the
+    Short filter is backlinks-only all the same."""
+    row = short_link(1, 5, W1)
+    with db([row], videos=[{"id": row["video_id"], "is_short": True}]) as sb:
+        lv.write_verdicts(CH, today=W1, lever="short_link")
+    assert len([r for r in sb.rows("lever_verdicts") if r["lever"] == "short_link"]) == 1
 
 
 def test_a_human_only_week_writes_only_the_human_row_and_never_stops_the_lever():
