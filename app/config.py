@@ -297,6 +297,13 @@ class Settings:
     # video per week that the treated arm must beat holdout by. Both the weekly
     # verdict's band (helped / no_change / worse) and the stop rule's bar.
     BACKLINK_MIN_LIFT = float(os.getenv("BACKLINK_MIN_LIFT") or "1.0")
+    # Slice 2 · S2.1 (spec Part 5 Config, E4): the share of a channel's eligible
+    # playlists held out of the playlist test (measured, never dosed). Per
+    # playlist, by a stable hash of its id: app/playlist_test.assign_arm.
+    PLAYLIST_HOLDOUT_PCT = float(os.getenv("PLAYLIST_HOLDOUT_PCT") or "0.5")
+    # Slice 2 · S2.1 (spec Part 5 Config, E5): the most videos one treated
+    # playlist is proposed in the test's one dose (app/playlist_test.candidates).
+    PLAYLIST_TEST_MAX_ADDS = int(os.getenv("PLAYLIST_TEST_MAX_ADDS") or "5")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

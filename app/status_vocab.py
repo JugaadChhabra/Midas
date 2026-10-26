@@ -271,6 +271,75 @@ ALL_LEVER_VERDICTS = frozenset({LeverVerdict.HELPED, LeverVerdict.NO_CHANGE,
                                 LeverVerdict.WORSE})
 
 
+class PlaylistArm:
+    """`playlist_arms.arm` — the playlist test's split (Slice 2 S2.1, spec Part 5
+    E4). Per playlist, by a stable hash: app/playlist_test.assign_arm."""
+
+    TREATED = "treated"
+    #: Drawn and measured, never given a dose: the comparison group.
+    HOLDOUT = "holdout"
+
+
+ALL_PLAYLIST_ARMS = frozenset({PlaylistArm.TREATED, PlaylistArm.HOLDOUT})
+
+
+class PlaylistArmStatus:
+    """`playlist_arms.status` — the lifecycle of one playlist in the playlist
+    test (Slice 2, spec Part 5 S2.1). Shares spellings with InterventionStatus
+    only; this is a different column on a different table."""
+
+    #: Drawn: a treated arm whose proposals await the one human review.
+    PLANNED = "planned"
+    #: Approved adds queued, or partly sent.
+    APPLYING = "applying"
+    #: Every approved add sent, or failed for good.
+    DOSED = "dosed"
+    #: Treated, but no candidate was found, no add was approved, or none landed.
+    NO_DOSE = "no_dose"
+    #: The holdout arm's state: measured, never changed.
+    HOLDOUT = "holdout"
+    JUDGED = "judged"
+    #: The playlist vanished before the test's last window.
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
+ALL_PLAYLIST_ARM_STATUSES = frozenset({
+    PlaylistArmStatus.PLANNED, PlaylistArmStatus.APPLYING, PlaylistArmStatus.DOSED,
+    PlaylistArmStatus.NO_DOSE, PlaylistArmStatus.HOLDOUT, PlaylistArmStatus.JUDGED,
+    PlaylistArmStatus.INSUFFICIENT_DATA,
+})
+
+
+class PlaylistArmMeasurement:
+    """`playlist_arms.measurement_status` — how far an arm's measurement got, as
+    InterventionMeasurement; the outcome lives in `status`. NULL until the first
+    run (Slice 2 S2.3)."""
+
+    AWAITING_WINDOW = "awaiting_window"
+    MEASURING = "measuring"
+    DONE = "done"
+
+
+ALL_PLAYLIST_ARM_MEASUREMENTS = frozenset({
+    PlaylistArmMeasurement.AWAITING_WINDOW, PlaylistArmMeasurement.MEASURING,
+    PlaylistArmMeasurement.DONE,
+})
+
+
+class PlaylistProposalSource:
+    """`playlist_proposals.decision_source` values added since Slice 2.
+
+    The older ones (`embedding`, `llm_confirmed`, `discovery`, and `sync` on
+    `playlist_assignments`) are written as literals by the frozen playlist
+    engine and not listed here. Mirrored by `DECIDED_BY` in
+    app/static/channel.html, which labels it in the proposals card.
+    """
+
+    #: The playlist test's dose (S2.1). Not `sync`, so human_edits.added_by_midas
+    #: counts an add from it as Midas's (spec Part 5 finding 3).
+    EXPERIMENT = "experiment"
+
+
 class DecisionUsed:
     """`decision_log.used` — whose answer a decision acted on (spec Part 2 §7).
 
