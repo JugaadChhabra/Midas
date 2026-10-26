@@ -261,6 +261,26 @@ def test_a_refused_position_is_retried_once_appended_and_noted():
     assert got[101]["applied_at"] and got[101]["apply_error"] is None
 
 
+def test_a_playlist_that_refused_a_position_is_appended_to_in_later_runs():
+    a, ps = dose(1, "PL1", 3, status="applying")
+    ps[0].update(applied_at="2026-10-28T11:00:00+00:00", playlist_item_id="i0",
+                 apply_error={"reason": playlist_test.POSITION_REFUSED, "detail": "x"})
+    ps[1]["apply_error"] = {"reason": "failed", "detail": "x", "attempts": 1}
+    sb, yt = world([a], ps), FakeYouTube(manual_sort=False)
+    with wired(sb, yt):
+        playlist_test.run_apply()
+    assert yt.sent() == [("PL1", "PL1-v1", None), ("PL1", "PL1-v2", None)]
+
+
+def test_a_quota_stop_on_a_channels_only_add_does_not_fail_the_run():
+    a, ps = dose(1, "PL1", 1)
+    sb, yt = world([a], ps), FakeYouTube(fail={"PL1-v0": [QUOTA]})
+    with wired(sb, yt):
+        assert playlist_test.run_apply() == {
+            "partial_errors": {CH: "youtube_quota_exceeded: stopped for the day"}}
+    assert arms_by_id(sb)[1]["status"] == "planned"
+
+
 def test_a_400_that_is_not_about_the_position_is_a_normal_error():
     a, ps = dose(1, "PL1", 1)
     sb = world([a], ps)
@@ -361,15 +381,32 @@ def test_an_arm_is_dosed_with_its_first_and_last_applied_at():
     assert (got["first_applied_at"], got["last_applied_at"]) == (sent[0], sent[-1])
 
 
-def test_an_arm_with_a_pending_proposal_stays_applying():
+def test_an_undecided_proposal_does_not_hold_a_dosed_arm_open():
     a, ps = dose(1, "PL1", 2)
     ps[1]["status"] = "pending"
     sb, yt = world([a], ps), FakeYouTube()
     with wired(sb, yt):
         playlist_test.run_apply()
     got = arms_by_id(sb)[1]
-    assert got["status"] == "applying" and got["first_applied_at"] == got["last_applied_at"]
+    assert got["status"] == "dosed" and got["first_applied_at"] == got["last_applied_at"]
     assert len(yt.calls) == 1
+
+
+def test_an_arm_with_nothing_approved_yet_stays_planned_while_proposals_are_pending():
+    a, ps = dose(1, "PL1", 2)
+    ps[0]["status"], ps[1]["status"] = "pending", "rejected"
+    sb, yt = world([a], ps), FakeYouTube()
+    with wired(sb, yt):
+        playlist_test.run_apply()
+    assert yt.calls == [] and arms_by_id(sb)[1]["status"] == "planned"
+
+
+def test_an_add_failing_while_retryable_keeps_the_arm_applying():
+    a, ps = dose(1, "PL1", 2)
+    sb, yt = world([a], ps), FakeYouTube(fail={"PL1-v1": [BROKEN]})
+    with wired(sb, yt):
+        playlist_test.run_apply()
+    assert arms_by_id(sb)[1]["status"] == "applying"
 
 
 def test_a_planned_arm_with_nothing_approved_becomes_no_dose():
@@ -449,7 +486,8 @@ def test_youtube_quota_exceeded_stops_the_job_without_using_up_an_attempt():
     sb = world([a1, a2, a3], p1 + p2 + p3)
     yt = FakeYouTube(fail={"PL1-v1": [QUOTA]})
     with wired(sb, yt):
-        assert playlist_test.run_apply() == {"partial_errors": {CH: "playlist adds: 1/2 failed"}}
+        assert playlist_test.run_apply() == {
+            "partial_errors": {CH: "youtube_quota_exceeded: stopped for the day"}}
     assert [s[1] for s in yt.sent()] == ["PL1-v0", "PL1-v1"]
     err = proposals_by_id(sb)[101]["apply_error"]
     assert (err["reason"], err["attempts"]) == ("youtube_quota_exceeded", 0)

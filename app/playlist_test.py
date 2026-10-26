@@ -385,21 +385,26 @@ def _affordable(budget: quota.JobBudget, cost: int) -> bool:
 def _send(channel_id: str, yt, ranked: list[dict], counts: dict) -> str | None:
     """Send one arm's sendable adds at the top, in rank. Returns
     `youtube_quota_exceeded` when YouTube says so; raises ApplyError on a token
-    error. Each failure is written to its proposal's `apply_error`."""
-    ahead, append = 0, False
+    error. Each failure is written to its proposal's `apply_error`. A
+    quotaExceeded isn't counted as an errored add: it is a stop, not the add's
+    failure."""
+    ahead = 0
+    # A position refused before, in this run or an earlier one, means the
+    # playlist isn't sorted manually: append, without paying for the refusal again.
+    append = any((p.get("apply_error") or {}).get("reason") == POSITION_REFUSED for p in ranked)
     for p in ranked:
         if p.get("applied_at"):
             ahead += 1
             continue
         if not _sendable(p):
             continue
-        counts["attempted"] += 1
         try:
-            # After one refusal the playlist isn't sorted manually: append the rest.
             item_id, note = _insert(yt, channel_id, p, None if append else ahead)
         except Exception as e:
             err = _classified(e)
-            counts["errored"] += 1
+            if err.outcome is not ApplyOutcome.QUOTA_EXCEEDED:
+                counts["attempted"] += 1
+                counts["errored"] += 1
             # Quota and token errors aren't the add's fault: no attempt is used up.
             attempts = _attempts(p) + (err.outcome is ApplyOutcome.FAILED)
             _update(p, {"apply_error": {"reason": err.outcome.value, "detail": str(e),
@@ -411,6 +416,7 @@ def _send(channel_id: str, yt, ranked: list[dict], counts: dict) -> str | None:
             if err.outcome is ApplyOutcome.TOKEN_EXPIRED:
                 raise err
             continue
+        counts["attempted"] += 1
         append = append or note is not None
         fields = {"applied_at": datetime.now(timezone.utc).isoformat(),
                   "playlist_item_id": item_id}
@@ -426,12 +432,15 @@ def _send(channel_id: str, yt, ranked: list[dict], counts: dict) -> str | None:
 
 def _settle(arm: dict, ranked: list[dict]) -> None:
     """The arm's status from its proposals: `applying` once one add is sent;
-    once nothing is pending, unsent or retryable, `dosed` (some add landed) or
-    `no_dose` (none did). `first_applied_at`, `last_applied_at` = the first and
-    last success."""
+    once no approved add is left unsent or retryable, `dosed` (some add landed)
+    or `no_dose` (none did). An arm with nothing approved stays open while any
+    proposal is pending (`no_dose` once all are rejected). `first_applied_at`,
+    `last_applied_at` = the first and last success."""
     sent = sorted((p["applied_at"] for p in ranked if p.get("applied_at")),
                   key=lambda t: datetime.fromisoformat(str(t).replace("Z", "+00:00")))
-    still_open = any(p["status"] == "pending" or _sendable(p) for p in ranked)
+    approved = any(p["status"] == "approved" for p in ranked)
+    still_open = (any(_sendable(p) for p in ranked)
+                  or (not approved and any(p["status"] == "pending" for p in ranked)))
     if still_open:
         status = PlaylistArmStatus.APPLYING if sent else arm["status"]
     else:
@@ -471,7 +480,7 @@ def apply_channel(channel_id: str, budget: quota.JobBudget) -> dict:
     yt = None
     for arm in sorted(arms, key=lambda a: a["id"]):
         ranked = _ranked(arm, by_arm.get(arm["id"], []))
-        todo = [p for p in ranked if not p.get("applied_at") and _sendable(p)]
+        todo = [p for p in ranked if _sendable(p)]
         if settings.DRY_RUN:
             if todo:
                 log.warning("[DRY_RUN] playlist_test_apply %s: would add %s to the top of %s",
@@ -532,6 +541,8 @@ def run_apply() -> dict | None:
                 continue
             failure, partial = job_status.item_error_verdict(
                 {ITEMS: (counts["errored"], counts["attempted"])})
+            if counts["stopped"] == ApplyOutcome.QUOTA_EXCEEDED.value:
+                partial = "; ".join(filter(None, [partial, "youtube_quota_exceeded: stopped for the day"]))
             if failure:
                 crashed[cid] = f"ItemsFailed: {failure}"
             elif partial:
