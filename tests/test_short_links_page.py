@@ -115,16 +115,29 @@ def test_changing_a_shorts_target_moves_set_and_records_a_new_intervention():
     assert {i["status"] for i in sb.rows("interventions")} == {"applied"}
 
 
-def test_setting_an_earlier_target_back_links_its_first_intervention():
-    """The key is per pair, so A, then B, then A again is two interventions,
-    the second tick of A linked to the first."""
+def test_setting_an_earlier_target_back_records_a_new_period():
+    """A, then B, then A again: three interventions, the second period of A
+    under its own key, so it is measured from its own tick."""
     with db(short_with_three("s1", 1)) as (sb, client):
         first = client.post("/short-links/1/set").json()
         client.post("/short-links/2/set")
         back = client.post("/short-links/1/set").json()
-    assert back["recorded"] is False and back["intervention_id"] == first["intervention_id"]
-    assert len(sb.rows("interventions")) == 2
+        again = client.post("/short-links/1/set").json()
+    assert back["recorded"] is True and back["intervention_id"] != first["intervention_id"]
+    assert again["recorded"] is False and again["intervention_id"] == back["intervention_id"]
+    keys = [i["ledger_key"] for i in sb.rows("interventions")]
+    assert keys == ["short_link:s1:s1-t1", "short_link:s1:s1-t2", "short_link:s1:s1-t1:2"]
     assert status_of(sb) == {1: "set", 2: "not_chosen", 3: "not_chosen"}
+
+
+def test_a_pair_seen_in_the_traffic_then_ticked_is_still_linked_not_a_new_period():
+    stored = [{"id": 40, "ledger_key": "short_link:s1:s1-t1", "video_id": "s1-t1",
+               "channel_id": CH, "lever": "short_link", "origin": "human", "arm": "n/a",
+               "status": "applied", "payload": {"short_id": "s1", "timing": "inferred_from_traffic"}}]
+    with db(short_with_three("s1", 1), stored_interventions=stored) as (sb, client):
+        r = client.post("/short-links/1/set").json()
+    assert r["recorded"] is False and r["intervention_id"] == 40
+    assert len(sb.rows("interventions")) == 1
 
 
 def test_a_recommendation_without_a_channel_takes_the_shorts():
@@ -250,6 +263,26 @@ def test_csv_is_the_same_page_one_line_per_recommendation():
     assert lines[0]["studio_url"] == "https://studio.youtube.com/video/s1/edit"
     assert lines[0]["target_title"] == "Title s1-t1" and lines[0]["status"] == "pending"
     assert bad.status_code == 422
+
+
+def test_csv_titles_that_a_spreadsheet_would_run_as_formulas_are_escaped():
+    recs = short_with_three("s1", 1)
+    videos = _videos_for(recs)
+    for v in videos:
+        if v["id"] == "s1":
+            v["title"] = "=HYPERLINK(\"x\")"
+        if v["id"] == "s1-t1":
+            v["title"] = "-5 little ducks"
+        if v["id"] == "s1-t2":
+            v["title"] = "Five = five"
+    with db(recs, videos) as (_, client):
+        r = client.get(f"/channels/{CH}/short-links", params={"format": "csv"})
+        js = client.get(f"/channels/{CH}/short-links").json()
+    lines = list(csv.DictReader(io.StringIO(r.text)))
+    assert {l["short_title"] for l in lines} == {"'=HYPERLINK(\"x\")"}
+    assert [l["target_title"] for l in lines][:2] == ["'-5 little ducks", "Five = five"]
+    # JSON is not a spreadsheet: titles stay as they are there.
+    assert js["shorts"][0]["title"] == "=HYPERLINK(\"x\")"
 
 
 # ── the card ─────────────────────────────────────────────────────────────

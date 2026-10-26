@@ -306,10 +306,12 @@ def decide_proposals(channel_id: str, body: DecideBody):
     executed = rejected = queued = 0
 
     if body.decision == "rejected":
-        supabase().table("playlist_proposals").update(
+        # Pending ones only: an approved proposal is already on YouTube or, for
+        # the playlist test, queued or sent; relabelling it would hide that.
+        done = (supabase().table("playlist_proposals").update(
             {"status": "rejected", "decided_at": now}
-        ).in_("id", body.ids).execute()
-        return {"executed": 0, "rejected": len(body.ids)}
+        ).in_("id", body.ids).eq("status", "pending").execute()).data or []
+        return {"executed": 0, "rejected": len(done)}
 
     proposals = (
         supabase().table("playlist_proposals")
