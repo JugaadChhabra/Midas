@@ -370,3 +370,74 @@ def test_reads_are_paged_past_the_row_cap():
     with db([treated()], rows + [traffic(T1, 2, 3)], ledger(CH, 7)) as sb:
         lm.measure_channel(CH, today=TODAY)
     assert stored(sb)["measurement_result"]["source_views"] == 1400
+
+
+# ── Short links (Slice 2 S2.6, #92) ──────────────────────────────────────
+
+SHORT = "shortVid001"
+
+
+def short_link(id_=10, target=T1, **kw) -> dict:
+    """A human `short_link` row: on the target, the Short in the payload."""
+    return {"id": id_, "video_id": target, "channel_id": CH, "lever": "short_link",
+            "origin": "human", "arm": "n/a", "status": "applied", "applied_at": None,
+            "created_at": f"{D0.isoformat()}T16:00:00+00:00",
+            "detected_at": "2026-10-01T00:00:00-07:00",
+            "payload": {"short_id": SHORT, "target_video_id": target,
+                        "timing": "inferred_from_traffic", "recommended": True},
+            "measurement_status": None, "measurement_result": None, **kw}
+
+
+def short_daily(views_per_day: int, days=range(1, 15)) -> list[dict]:
+    """The Short's own views (Shorts feed), for the floor."""
+    return [traffic(SHORT, n, views_per_day, source_type=24, detail="") for n in days]
+
+
+def test_pair_views_take_the_source_type():
+    rows = [traffic(T1, 2, 5, source_type=32, detail=SHORT), traffic(T1, 2, 7, detail=SHORT)]
+    with db([], rows, []):
+        assert lm.pair_views(SHORT, [T1], (day(1), day(7)), source_type=32) == 5
+        assert lm.pair_views(SHORT, [T1], (day(1), day(7))) == 7
+
+
+def test_a_short_link_is_measured_on_type_32_from_the_short_to_its_target():
+    rows = short_daily(50) + [
+        traffic(T1, -3, 2, source_type=32, detail=SHORT),
+        traffic(T1, 3, 9, source_type=32, detail=SHORT),
+        traffic(T1, 3, 100, detail=SHORT),                     # type 7 from the Short: not this lever
+        traffic(T1, 3, 100, source_type=32, detail="otherShort1"),
+        traffic(T2, 3, 100, source_type=32, detail=SHORT),     # not the target
+    ]
+    with db([short_link()], rows, ledger(CH, 10)) as sb:
+        counts = lm.measure_channel(CH, today=TODAY)
+    got = stored(sb, 10)
+    assert got["status"] == "judged" and got["measurement_status"] == "done"
+    r = got["measurement_result"]
+    assert (r["pre"], r["post"], r["delta"], r["source_views"]) == (2, 9, 7, 350)
+    assert r["window"]["d0"] == D0.isoformat()
+    assert counts["judged"] == 1
+
+
+def test_a_short_links_floor_is_on_the_shorts_own_views_then_extends_and_gives_up():
+    """The target's own views don't count toward the floor: the Short's do."""
+    rows = short_daily(5) + source_daily(500) + [
+        traffic(T1, n, 500, source_type=3, detail="") for n in range(1, 15)]
+    with db([short_link()], rows, ledger(CH, 10)) as sb:
+        lm.measure_channel(CH, today=TODAY)
+        assert stored(sb, 10)["status"] == "applied"
+        assert stored(sb, 10)["measurement_status"] == "extended"
+        sb._tables["reporting_reports_ingested"].extend(ledger(CH, 14, start=11))
+        lm.measure_channel(CH, today=TODAY)
+    got = stored(sb, 10)
+    assert got["status"] == "insufficient_data"
+    assert got["measurement_result"]["source_views"] == 70
+
+
+def test_short_link_rows_are_human_only_and_on_traffic_ingest_channels_only():
+    midas = short_link(11, origin="midas", arm="treated", status="measuring",
+                       applied_at=f"{D0.isoformat()}T10:00:00+00:00")
+    with db([short_link(), midas], short_daily(50), ledger(CH, 10)) as sb, \
+         patch.object(settings, "TRAFFIC_INGEST_CHANNELS", {SIB}):
+        counts = lm.measure_channel(CH, today=TODAY)
+    assert counts["attempted"] == 0
+    assert sb.writes == []

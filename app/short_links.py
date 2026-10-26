@@ -20,6 +20,12 @@ S2.5, the team's page and the tick (`router`, mounted in app/main.py):
     POST /short-links/{id}/set       -- the team set this target in Studio: the human ledger
     POST /short-links/{id}/dismiss   -- the team says this target is wrong; no intervention
 
+S2.6, the links seen in the traffic (`detect`, from the weekly
+`lever_measurement` job, app/lever_verdicts.py `run_weekly`): a (Short, target)
+pair with type-32 views gets `seen_at` on its recommendation, and a `human`
+`short_link` intervention if it has none, under S2.5's ledger key. Those are
+then measured by app/lever_measurement.py, as human backlinks are.
+
 Targets are on the Short's own channel only: Studio links a Short only to a
 video on its channel (Part 5 finding 6), unlike backlinks' siblings. Similarity
 is on B6 vectors only (`reembed.MODEL_VERSION`), against the channel's
@@ -41,7 +47,7 @@ from typing import Literal, Mapping, NamedTuple
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app import decide, interventions, job_status, reach, warm
+from app import decide, interventions, job_status, lever_measurement, reach, warm
 from app.backlinks import NO_THRESHOLDS, SOURCE_NOT_EMBEDDED, THRESHOLDS_OTHER_MODEL, _thresholds
 from app.config import settings
 from app.db import supabase
@@ -65,8 +71,13 @@ log = logging.getLogger(__name__)
 #: (E9), counted as `backlinks.siblings` counts them.
 FEED_WINDOW_DAYS = 28
 _SHORTS_FEED = 24
+_RELATED_VIDEO = 32
 #: job_status.item_error_verdict's category for the job's per-Short errors.
 SHORTS = "shorts"
+#: The same, for the detection's per-pair errors (S2.6, in `lever_measurement`).
+PAIRS = "short-link pairs"
+#: `payload.timing` of a Short link seen in the traffic rather than ticked (S2.6).
+INFERRED_TIMING = "inferred_from_traffic"
 
 
 class Targets(NamedTuple):
@@ -519,3 +530,104 @@ def dismiss_short_link(recommendation_id: int):
                .update({"status": ShortLinkStatus.DISMISSED, "decided_at": _now()})
                .eq("id", rec["id"]).execute().data)[0]
     return {"recommendation": updated}
+
+
+# ── S2.6: the links seen in the traffic ──────────────────────────────────
+
+def seen_pairs(channel_id: str) -> list[dict]:
+    """The (Short, target) pairs in the channel's traffic: type-32 rows on one
+    of its videos (`video_id` = the target, in `videos`) whose `source_detail`
+    is a Short in `videos` (`is_short` true), with at least
+    SHORT_LINK_SEEN_MIN_VIEWS views over its latest FEED_WINDOW_DAYS ingested
+    `channel_traffic_source_a3` data-days. B1 keeps type-32 detail
+    (`traffic_poll.keeps_detail`). As `{short_id, short_channel_id,
+    target_video_id, views, first_day}`, `first_day` the first data-day with
+    views, sorted by Short, then target."""
+    covered = reach.coverage(channel_id, report_type=TRAFFIC_REPORT_TYPE_ID)
+    if not covered:
+        return []
+    window = set(sorted(covered, reverse=True)[:FEED_WINDOW_DAYS])
+
+    views: dict[tuple[str, str], int] = defaultdict(int)
+    first: dict[tuple[str, str], str] = {}
+    for r in all_rows(
+        supabase().table("video_traffic_source_daily")
+        .select("video_id,source_detail,date,views")
+        .eq("channel_id", channel_id)
+        .eq("source_type", _RELATED_VIDEO)
+        .gte("date", min(window))
+        .lte("date", max(window))
+    ):
+        if r["date"] not in window or not r["source_detail"] or r["views"] <= 0:
+            continue
+        pair = (r["source_detail"], r["video_id"])
+        views[pair] += r["views"]
+        first[pair] = min(first.get(pair, r["date"]), r["date"])
+
+    reached = sorted(p for p, n in views.items() if n >= settings.SHORT_LINK_SEEN_MIN_VIEWS)
+    known = {v["id"]: v for v in _videos({s for s, _ in reached} | {t for _, t in reached})}
+    return [
+        {"short_id": s, "short_channel_id": known[s]["channel_id"], "target_video_id": t,
+         "views": views[(s, t)], "first_day": first[(s, t)]}
+        for s, t in reached
+        if (known.get(s) or {}).get("is_short") is True and t in known
+    ]
+
+
+def detect(channel_id: str) -> dict:
+    """Record the Short links seen in the channel's traffic (`seen_pairs`).
+
+    Per pair: its recommendation, if any, gets `seen_at` (the first data-day
+    with views) unless it has one; and a pair with no `short_link`
+    intervention gets a `human` one on the target, `detected_at` that same
+    day, `payload {short_id, target_video_id, recommended, timing:
+    "inferred_from_traffic"}` and S2.5's ledger key, so a ticked pair is never
+    recorded twice and a later tick links this row. For a link set before
+    detection first saw it, `detected_at` is when the traffic showed it, not
+    when the team set it; `timing` says so.
+
+    Returns counts: `pairs`, `attempted`/`errored` (pairs, for
+    job_status.item_error_verdict under PAIRS), `seen` and `inferred`. A pair
+    that raises is logged and the others still run. Nothing reaches YouTube.
+    """
+    pairs = seen_pairs(channel_id)
+    counts = {"pairs": len(pairs), "attempted": 0, "errored": 0, "seen": 0, "inferred": 0}
+    if not pairs:
+        return counts
+    recs = {(r["short_id"], r["target_video_id"]): r for r in rows_for_ids(
+        lambda c: supabase().table("short_link_recommendations")
+        .select("id,short_id,target_video_id,seen_at").in_("short_id", c),
+        sorted({p["short_id"] for p in pairs}))}
+    keys = {r["ledger_key"] for r in rows_for_ids(
+        lambda c: supabase().table("interventions").select("ledger_key").in_("ledger_key", c),
+        [_ledger_key(p) for p in pairs])}
+
+    for pair in pairs:
+        counts["attempted"] += 1
+        try:
+            rec = recs.get((pair["short_id"], pair["target_video_id"]))
+            at = lever_measurement.data_day_start(pair["first_day"])
+            if rec and not rec.get("seen_at"):
+                (supabase().table("short_link_recommendations").update({"seen_at": at})
+                 .eq("id", rec["id"]).execute())
+                counts["seen"] += 1
+            key = _ledger_key(pair)
+            if key in keys:
+                continue
+            stored = interventions.record(
+                video_id=pair["target_video_id"], channel_id=pair["short_channel_id"],
+                lever=InterventionLever.SHORT_LINK, origin=InterventionOrigin.HUMAN,
+                arm=InterventionArm.NOT_APPLICABLE, status=InterventionStatus.APPLIED,
+                detected_at=at, ledger_key=key,
+                payload={"short_id": pair["short_id"],
+                         "target_video_id": pair["target_video_id"],
+                         "recommended": rec is not None, "timing": INFERRED_TIMING},
+            )
+            if stored:
+                counts["inferred"] += 1
+        except Exception as e:
+            counts["errored"] += 1
+            log.warning("short_link detect %s: %s -> %s failed: %s", channel_id,
+                        pair["short_id"], pair["target_video_id"], e)
+    log.info("short_link detect %s: %s", channel_id, counts)
+    return counts

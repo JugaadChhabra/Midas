@@ -339,6 +339,10 @@ class Settings:
     # Slice 2 · S2.4 (spec Part 5 Config): Shorts recommended per weekly run,
     # which bounds its shadow next-watch calls at SHORT_LINK_TARGETS × this.
     SHORT_LINK_MAX_PER_RUN = int(os.getenv("SHORT_LINK_MAX_PER_RUN") or "50")
+    # Slice 2 · S2.6 (spec Part 5 Config): a (Short, target) pair counts as set
+    # once it has this many type-32 views over the target channel's latest 28
+    # ingested traffic data-days (app/short_links.py `seen_pairs`).
+    SHORT_LINK_SEEN_MIN_VIEWS = int(os.getenv("SHORT_LINK_SEEN_MIN_VIEWS") or "1")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).
