@@ -304,6 +304,16 @@ class Settings:
     # Slice 2 · S2.1 (spec Part 5 Config, E5): the most videos one treated
     # playlist is proposed in the test's one dose (app/playlist_test.candidates).
     PLAYLIST_TEST_MAX_ADDS = int(os.getenv("PLAYLIST_TEST_MAX_ADDS") or "5")
+    # Slice 2 · S2.2 (spec Part 5 Config): the kill switch for the playlist
+    # test's YouTube writes. While false the daily playlist_test_apply job does
+    # nothing (app/playlist_test.run_apply); approval only queues the adds.
+    PLAYLIST_APPLY_ENABLED = os.getenv("PLAYLIST_APPLY_ENABLED", "false").lower() == "true"
+    # Slice 2 · S2.2 (spec Part 5 Config, E5): what one playlist_test_apply run
+    # may spend (quota.JobBudget), on top of the YT_QUOTA_COLLECTION_RESERVE gate.
+    PLAYLIST_TEST_DAILY_UNITS = int(os.getenv("PLAYLIST_TEST_DAILY_UNITS") or "2000")
+    # Slice 2 · S2.2 (spec Part 5 Config): the runs a failing test add is tried
+    # in before it counts as failed for good.
+    PLAYLIST_TEST_MAX_ATTEMPTS = int(os.getenv("PLAYLIST_TEST_MAX_ATTEMPTS") or "3")
     # Tier 2 (Supabase free-tier): the daily metrics_poll used to pull an Analytics
     # report for EVERY public video (~39k/day → one units=0 quota_log row + one
     # video_metrics upsert each, and reporting_poll then backfilled every row).

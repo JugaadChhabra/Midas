@@ -266,18 +266,23 @@ def yt_playlists_insert(yt, channel_id: str, title: str, description: str) -> st
         _log_quota(channel_id, quota.Op.PLAYLISTS_INSERT, success)
 
 
-def yt_playlist_items_insert(yt, channel_id: str, playlist_id: str, video_id: str) -> str:
-    """Add a video to a playlist. Returns the playlistItem id."""
+def yt_playlist_items_insert(yt, channel_id: str, playlist_id: str, video_id: str,
+                             position: int | None = None) -> str:
+    """Add a video to a playlist. Returns the playlistItem id.
+
+    `position` (0 = the top) is sent as `snippet.position` only when given;
+    YouTube refuses it unless the playlist is sorted manually."""
+    snippet = {
+        "playlistId": playlist_id,
+        "resourceId": {"kind": "youtube#video", "videoId": video_id},
+    }
+    if position is not None:
+        snippet["position"] = position
     success = False
     try:
         resp = yt.playlistItems().insert(
             part="snippet",
-            body={
-                "snippet": {
-                    "playlistId": playlist_id,
-                    "resourceId": {"kind": "youtube#video", "videoId": video_id},
-                }
-            },
+            body={"snippet": snippet},
         ).execute()
         success = True
         return resp["id"]
