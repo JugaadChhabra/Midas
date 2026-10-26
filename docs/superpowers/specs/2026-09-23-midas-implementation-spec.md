@@ -1,7 +1,7 @@
 # Midas — implementation spec: the discoverability agent
 
 Date: 2026-09-23
-Status: Part 1 done (exit gate passed 2026-10-06) · Part 3 (Phase B) done (exit gate passed 2026-10-13) · **Part 4 (Slice 1) ready to build** (owner decisions D1–D8 accepted 2026-10-07) · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
+Status: Part 1 done (exit gate passed 2026-10-06) · Part 3 (Phase B) done (exit gate passed 2026-10-13) · Part 4 (Slice 1) built, live on Marathi since 2026-10-24 (exit gate pending, #70) · **Part 5 (Slice 2) ready to build** (owner decisions E1–E13 accepted 2026-10-26) · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
 Supersedes:
 - `2026-09-22-discoverability-agent-spec.md`
 - The separate 2026-09-23 discoverability and Phase A specs (merged here)
@@ -18,12 +18,13 @@ Ground truth used: `STATE.md` @ `bddd373`.
 
 ## How to use this document (read first)
 
-This file has four parts, and they are used differently.
+This file has five parts, and they are used differently.
 
 - **Part 1 is Phase A, now done.** It is kept as the record of what Phase A did; evidence is in `docs/PHASE_A_FINDINGS.md`.
 - **Part 2 is the design.** It describes the whole target system and the order its stages arrive, amended by Phase A's findings (§0.6). **Do not implement anything from Part 2 directly.** That holds even where Part 2 describes code in detail.
 - **Part 3 is Phase B, now done.** It is kept as the record of what Phase B did; evidence is in `docs/PHASE_B_FINDINGS.md`.
-- **Part 4 is the build task: Slice 1.** It is the only part to implement now, in its run order. Its owner decisions (D1–D8) were accepted on 2026-10-07.
+- **Part 4 is Slice 1, built and live on Marathi since 2026-10-24.** Its exit gate (the first weekly verdict) is pending.
+- **Part 5 is the build task: Slice 2.** It is the only part to implement now, in its run order. Its owner decisions (E1–E13) were accepted on 2026-10-26. It is built while Slice 1's experiment runs (owner, 2026-10-25, `docs/PLAN_TO_2026-11-27.md`).
 
 **After Phase A's exit gate**, the Phase B build section is written into this file as a new Part, using Phase A's findings. Each later slice follows the same pattern. Part 2 is updated if a finding changes the design. At any time, exactly one Part is marked "ready to build."
 
@@ -465,8 +466,8 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 | Lever | Slice 1–2 (pipeline) | Slice 3+ (agent challenger, §3) |
 |---|---|---|
 | Backlinks | Candidates = top performers above the floor **on the source's channel or a sibling channel (P2)**, filtered by similarity on the re-embed's vectors (§4). **(Slice 1, 2026-10-07)** Embeddings only, with no tag/title-overlap fallback (Part 4 S1.1). A sibling is one of our channels that already sends suggested traffic to the source channel, measured over the trailing 28 days of the source channel's own `video_traffic_source_daily` rows (at least `SIBLING_MIN_VIEWS`). **(Slice 1, 2026-10-07)** A sibling counts only if it is itself in `TRAFFIC_INGEST_CHANNELS`: a link A→B is measured from B's channel's report, so a target on an un-ingested channel can't be measured. `TRAFFIC_INGEST_CHANNELS` is widened to Marathi's siblings before Slice 1 launches, so their pre-windows exist (Part 4 D1). The decide() backend answers "would a viewer of A plausibly watch B next?" per pair, in shadow until it beats the rules (Part 4 S1.5). Keep top `BACKLINK_MAX`. | Agent gathers context and chooses |
-| Playlist | Candidates from playlist inventory. Jev fit judgment replaces `playlists._llm_judge`. Written to `playlist_proposals`. | Agent |
-| Short link | Jev picks the best long video for each Short. Queued for the team. | Agent |
+| Playlist | Candidates from playlist inventory. Jev fit judgment replaces `playlists._llm_judge`. Written to `playlist_proposals`. **(Slice 2, 2026-10-26)** For P3's test: warm videos with cosine ≥ the channel's `join_high` to a treated playlist's member centroid, up to 5, reviewed by a person; no Jev fit check (Part 5 S2.1, E12). | Agent |
+| Short link | Jev picks the best long video for each Short. Queued for the team. **(Slice 2, 2026-10-26)** The top 3 warm long videos on the Short's own channel by embedding similarity (≥ `join_low`), shown to the team; next-watch asked in shadow (Part 5 S2.4). | Agent |
 | Title | Existing `audit_video` path, only when triage says `title` | Agent with writer model (§3.3) |
 
 #### 2.4 Step 4: checks (code first, then Jev)
@@ -489,7 +490,7 @@ The warm filter is added to `next_audit_candidate` (SQL) and to its in-app parit
 #### 2.5 Step 5: apply
 
 - **Backlinks.** **(Slice 1, 2026-10-07)** Not `build_update_payload`, which always sends category, language and `status` fields and takes title and tags from the caller. The write fetches the live snippet with `videos.list` (1u), renders the canonical block (§3.4) onto the live description, and sends `videos.update` with `part=snippet` only, sending the fetched snippet back with only `description` replaced. Charged through the existing ledger gate (`quota.APPLY`, 51u) (Part 4 S1.3).
-- **Playlist.** Recommend-only (Slice 2). Confirmed proposals apply via `yt_playlist_items_insert` (50u).
+- **Playlist.** Recommend-only (Slice 2). Confirmed proposals apply via `yt_playlist_items_insert` (50u). **(Slice 2, 2026-10-26)** The test's approved proposals are queued, not sent at approval; a daily job sends them under a budget, behind `PLAYLIST_APPLY_ENABLED` (Part 5 S2.2).
 - **Short link.** Recommend-only to the team, **permanently (P4)**: Phase A2 found no readable or writable API field. The team sets it in Studio. It enters the §1.4 human ledger when the team applies it, and it's measured through type 32.
 - **Title.** The existing apply path, unchanged.
 
@@ -567,7 +568,8 @@ The replacement for `search_competitors`. Only the agent's title work reads it, 
 As 2026-09-22 §4, with these changes:
 
 - **(P3) One test first.** Our `PL…` playlists got 50 of 259,868 Marathi views (A1.1), and YouTube's Mixes 45%. Slice 2's playlist work is one measured test: curate a small number of playlists on the rollout channel and see whether they earn `playlist_starts` at all. The rest of this section waits until they do.
-- **Recommend-only first.** Proposals go to `playlist_proposals`, with the Jev fit check replacing `_llm_judge`.
+- **(Slice 2, 2026-10-26) The test as built:** the rollout channel's existing non-series playlists, split 50/50 by a stable hash; each treated playlist gets one dose of up to 5 warm, similar videos at the top, approved once by a person; treated vs holdout weekly `playlist_starts` over four weeks answers P3 (Part 5, E1–E8).
+- **Recommend-only first.** Proposals go to `playlist_proposals`, with the Jev fit check replacing `_llm_judge`. (Slice 2 defers the fit check, E12.)
 - **Frozen writers (§0.5 item 8) stay frozen** until Slice 2 ships the measured replacement.
 - **Re-embedding is a Phase B task,** not a Slice 2 pre-req.
   - Embed one consistent input for every video under a new `model_version`, starting with the rollout channel and
@@ -639,6 +641,7 @@ Every stage ships to one channel first, gets about a week of watching, then wide
   - `id, decided_at, question_set_version, subject (video/pair/candidate), rules_answer, jev_answer, jev_probs jsonb, used text (rules|jev), intervention_id`
 - **`channels`**
   - `agent_enabled bool default false`
+- **`playlist_arms`, `short_link_recommendations`** (Slice 2, 2026-10-26): Part 5 S2.1, S2.4.
 - **Niche reference (Slice 3)**, on `channels`:
   - `niche_reference_json jsonb` (summary + example titles), `niche_reference_built_at timestamptz`, `niche_reference_inputs jsonb` (queries used + raw results)
 - **Status vocab**
@@ -661,6 +664,7 @@ Every stage ships to one channel first, gets about a week of watching, then wide
 | `BACKLINK_APPLY_ENABLED` | false | Slice 1, 2026-10-07: kill switch for backlink writes to YouTube |
 | `TRIAGE_COOLDOWN_DAYS` | 7 | Slice 1, 2026-10-07: §2.1 pick exclusion after any Midas intervention |
 | `LEVER_MIN_SOURCE_VIEWS` | 100 | Slice 1, 2026-10-07: §1.7 floor, on the source's post-window views |
+| `PLAYLIST_HOLDOUT_PCT`, `PLAYLIST_TEST_MAX_ADDS`, `PLAYLIST_APPLY_ENABLED`, `PLAYLIST_TEST_DAILY_UNITS`, `PLAYLIST_TEST_MAX_ATTEMPTS`, `PLAYLIST_EXPERIMENT_WINDOWS`, `PLAYLIST_MIN_LIFT`, `SHORT_LINK_*` | see Part 5 | Slice 2, 2026-10-26 (Part 5 "Config (new)") |
 | `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` | 5 | §1.5 |
 | `AGENT_MAX_TURNS` | 12 | Slice 3; tune from traces |
 | `WRITER_MODEL` | = `AUDIT_MODEL` | Slice 3 bake-off replaces it |
@@ -955,7 +959,7 @@ what was spec'd but not built and what was built but not spec'd, with a check of
 
 ---
 
-## Part 4 — Slice 1: backlinks + no change (ready to build since 2026-10-13)
+## Part 4 — Slice 1: backlinks + no change (built; live on Marathi since 2026-10-24)
 
 **Purpose.** Midas changes YouTube again, on one channel, with one lever, as a measured experiment. Each tick
 picks a warm video and decides, by rules, whether it gets a code-rendered block of links to related videos
@@ -1255,3 +1259,371 @@ is this question.
 
 As Parts 1 and 3: an independent clean-context review per task against this Part, and a slice review at the end
 listing spec'd-but-not-built and built-but-not-spec'd, with a check of `STATE.md` §1–§4 and §7.
+
+---
+
+## Part 5 — Slice 2: playlist test + Short links (ready to build since 2026-10-26)
+
+**Purpose.** Two routing levers that Slice 1 left out, each built so that someone other than the owner can run it
+after 2026-11-27 (`docs/PLAN_TO_2026-11-27.md`).
+
+1. **The playlist test (P3).** Can a curated `PL…` playlist earn `playlist_starts` at all? Midas splits a channel's
+   existing playlists into treated and holdout halves, gives each treated playlist one dose of up to five warm,
+   similar videos (approved once by a person), and compares the two halves' weekly starts. It is a one-off
+   experiment, not a running lever: after `PLAYLIST_EXPERIMENT_WINDOWS` weekly windows the answer is yes or no.
+2. **Short → video links (P4).** Recommend-only, permanently. Midas lists, per Short, the long videos it should link
+   to. The team sets the link in Studio and ticks it on a dashboard page, and the weekly job also spots links from
+   the traffic data. Every set link enters the human ledger and is measured through type 32.
+
+**Rollout channel:** Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`. All the code is per channel **(E13)**: the operator widens
+with settings and one command per channel, not code.
+
+**Inputs.** Slice 1 as built and deployed (`STATE.md` §1): B6 vectors and `channels.playlist_thresholds`,
+`app/warm.py` `warm_impressions`, `decide()` with `NEXT_WATCH`, `interventions` and the human-edit ledger,
+`app/lever_measurement.py` (pair measurement), `lever_verdicts` and the weekly `lever_measurement` job,
+`playlist_traffic_daily` and `video_traffic_source_daily`, the `playlist_proposals` table with its dashboard review
+card (`app/static/channel.html`) and `POST /channels/{id}/playlists/proposals/decide`. Where this Part and Part 2
+disagree, this Part wins; the Part 2 corrections are listed under "Changes to Part 2" and applied 2026-10-26.
+
+**Owner decisions.** Items marked **(E#)** point to the "Owner decisions" table at the end. All were decided with
+the owner on 2026-10-26.
+
+**Breaks the spec's one-Part-at-a-time rule** on purpose (owner, 2026-10-25, `docs/PLAN_TO_2026-11-27.md`):
+Slice 2 is built while Slice 1's experiment is still running, because each lever carries its own holdout or
+ledger and neither touches the other's measure (finding 4).
+
+### What the code and Phase A found that shapes this Part
+
+1. **The test's unit is a playlist, and `interventions` is per video.** `interventions.video_id` is `not null`, and
+   one active Midas row per video is enforced by an index. One row per added video would lock warm videos out of
+   Slice 1's pool for the window, and a holdout playlist has no video to carry. The test gets its own table,
+   `playlist_arms` **(E6)**.
+2. **`/playlists/proposals/decide` applies an approved add at once,** with no kill switch, no quota gate and no
+   `DRY_RUN` check (`app/playlists_router.py` `decide_proposals`). A batch of ~125 adds is ~6,250u, most of a day's
+   quota. The test's proposals are therefore *queued* by approval and sent by a budgeted daily job (S2.2).
+3. **The human ledger already counts Midas's playlist adds as Midas's.** `human_edits.added_by_midas` treats any
+   `playlist_assignments` `added` row whose `decision_source` isn't `sync`, and any approved `add` proposal, as
+   Midas's. A new `decision_source` value, `experiment`, keeps working without a change there.
+4. **Neither lever touches backlinks' measure.** A playlist add doesn't change a video's description, and backlinks
+   are measured on type 7 from the source; playlists are measured on `playlist_starts` and type 14. A Short link is
+   set by humans on the Short. So no Slice 2 change is an intervention on a video in §1.6's sense, and none enters
+   the warm pool's exclusions.
+5. **Midas doesn't know a Short's parent video.** Midas cuts Shorts from NAS files (`shorts_jobs.source_nas_path`),
+   usually with no `source_video_id`, and Phase A's 12 type-32 sources were the team's own Shorts, not in `videos`
+   (A1.1). Shorts must be synced into `videos` (`channels.sync_shorts`, NULL = on, `app/sync.py`) and re-embedded
+   with the B6 recipe before Midas can match them (S2.7).
+6. **Studio links a Short only to a video on its own channel.** Short-link targets are same-channel only, unlike
+   backlinks' siblings (P2).
+7. **Inserting at a position needs a manually ordered playlist.** `playlistItems.insert` takes `snippet.position`
+   only when the playlist's sort order is manual; otherwise YouTube refuses the position. The apply falls back to
+   appending (S2.2).
+
+### Run order
+
+The overnight runner stacks the tickets in one chain:
+
+```
+#87 S2.1 → #88 S2.2 → #89 S2.3 → #90 S2.4 → #91 S2.5 → #92 S2.6
+```
+
+S2.1 and S2.4 add migrations. #93 S2.7 (deploy, office) and #94 S2.8 (docs) are the owner's.
+
+### S2.1 — Playlist arms, candidates, draw and preview (Part 2 §4, P3)
+
+**Change.**
+- **Migration** (`playlist_arms`, and four columns on `playlist_proposals`):
+
+  ```
+  playlist_arms: id bigserial pk, channel_id → channels, playlist_id text not null (no FK: playlists can be
+    deleted on YouTube), arm text not null (treated | holdout), status text not null, eligible_members int,
+    proposal_ids bigint[], first_applied_at timestamptz, last_applied_at timestamptz,
+    measurement_status text, measurement_result jsonb, drawn_at timestamptz default now(),
+    unique (playlist_id)
+  playlist_proposals: + arm_id bigint → playlist_arms, + applied_at timestamptz, + playlist_item_id text,
+    + apply_error jsonb
+  ```
+
+  `status` vocab (`app/status_vocab.py`, mirror and guard test): `planned` (drawn, proposals pending),
+  `applying` (approved adds queued or partly sent), `dosed` (every approved add sent or failed for good),
+  `no_dose` (treated, but no add was approved or none landed), `holdout`, `judged`, `insufficient_data`.
+  `measurement_status`: `awaiting_window|measuring|done`, as `InterventionMeasurement`. `playlist_proposals.
+  decision_source` gains `experiment`.
+- **A new module, `app/playlist_test.py`:**
+  - `eligible(channel_id)`: the channel's playlists in `playlists` with `role` not `series` (episode order must
+    not move) and at least 3 current members with a `reembed.MODEL_VERSION` vector. Current members are
+    `playlists._current_members`, as `reembed.calibrate_channel` reads them.
+  - `assign_arm(playlist_id)`: stable sha256 bucket of `playlist_id` against `PLAYLIST_HOLDOUT_PCT` (0.5)
+    **(E4)**, as `interventions.assign_arm` does for videos.
+  - `candidates(channel_id, playlist_id)`: videos on the playlist's channel that are warm
+    (`warm.warm_impressions`), public (or NULL), not a Short (`is_short` true), not an episode
+    (`is_episode` true), not already a member, with a `MODEL_VERSION` vector whose cosine to the centroid of the
+    playlist's members' vectors is ≥ the channel's `playlist_thresholds.join_high` (refused, with a reason, if the
+    thresholds are missing or another model version's). Ranked by impressions, then similarity, then id. At most
+    `PLAYLIST_TEST_MAX_ADDS` (5) **(E5)**. A video may be proposed for more than one treated playlist.
+  - `draw(channel_id)`: once per channel (refuses if the channel already has `playlist_arms` rows). Writes one
+    `playlist_arms` row per eligible playlist; for a treated one, its `candidates` as `pending` `add` proposals
+    with `decision_source = 'experiment'`, `arm_id` set and `similarity` filled, and `status = 'planned'`
+    (`no_dose` if it got no candidates); a holdout row is `holdout`, with no proposals. Its result says how many
+    playlists, arms and proposals, and why any playlist was skipped.
+  - `preview(channel_id)`: the same as `draw`, writing nothing: per playlist its arm and the videos it would get,
+    with similarity and impressions.
+- **Script:** `scripts/playlist_test.py --channel <id> --preview | --draw`. The owner runs `--preview`, reads it,
+  then `--draw` (S2.7). `--draw` asks for no confirmation; it is the owner's command.
+- **Review:** the proposals show up in the existing dashboard card (`channel.html`, `GET /playlists/proposals`)
+  **(E3)**; `DECIDED_BY` gains a label for `experiment` ("Playlist test"). Nothing else in the card changes.
+
+**Tests.** Eligibility (series, members without vectors); a stable 50/50 split; each candidate exclusion; the
+`join_high` bar on the centroid; ranking and the cap; `draw` refusing a second time; `preview` writing nothing
+(FakeSupabase records no writes); reads paged through `app/rows.py`.
+
+### S2.2 — Queued, budgeted apply behind a kill switch (Part 2 §2.5)
+
+**Change.**
+- **Approval queues; it doesn't send.** In `decide_proposals`, a proposal with `arm_id` set is only marked
+  `approved` (or `rejected`), with `decided_at`; nothing is sent to YouTube there. Proposals without `arm_id`
+  behave exactly as today (finding 2).
+- **A daily job, `playlist_test_apply`** (cron 11:00 UTC, after `channel_health`; `app/main.py` `_register_jobs`):
+  for each channel with treated arms in `planned` or `applying` that have approved, unsent proposals:
+  - Does nothing unless `PLAYLIST_APPLY_ENABLED` is true (default false), logging that it skipped.
+  - Works a playlist at a time, **whole playlists only:** a playlist's approved, unsent adds are sent together if
+    their cost (n × `quota.cost(Op.PLAYLIST_ITEMS_INSERT)`, 50u each) fits both the job's
+    `JobBudget("playlist_test_apply", PLAYLIST_TEST_DAILY_UNITS)` (2,000u) and the ledger above
+    `YT_QUOTA_COLLECTION_RESERVE`, as `autopilot._can_afford_apply`. Otherwise the job stops for the day.
+  - **Order (E2):** the playlist's adds go in at the top, strongest first: position 0, 1, … in candidate rank.
+    A refused position (finding 7) is retried once without one (appended), and the proposal's `apply_error`
+    notes it. `yt_playlist_items_insert` gains an optional `position`.
+  - On success: the proposal gets `applied_at` and `playlist_item_id`, and a `playlist_assignments` `added` row
+    with `decision_source = 'experiment'` (through `playlists_router._record_assignment`). On a YouTube error:
+    `apply_error = {reason, detail}`, the typed reactions of `apply_outcome.py` (a quota error stops the job, a
+    token error skips the channel), and the proposal isn't retried more than `PLAYLIST_TEST_MAX_ATTEMPTS` (3) runs.
+  - Arm status: `applying` once one add is sent (`first_applied_at`); `dosed` once no approved proposal is left
+    unsent or retryable (`last_applied_at` = the last success); `no_dose` if that leaves it with no success.
+    A `planned` arm whose proposals are all decided and none approved becomes `no_dose`.
+  - `DRY_RUN`: logs what it would send, sends and writes nothing.
+  - Failure semantics as `traffic_poll`: per-channel fan-out raising `JobRunFailed`, per-item errors through
+    `job_status.item_error_verdict` (category `playlist adds`).
+- **The test's dates are per channel.** Once no treated arm of the channel is `planned` or `applying`, the
+  channel's test is dosed: `test_start` = the Pacific date of its first `first_applied_at`, `test_end` = that of
+  its last `last_applied_at`. Holdout arms get no dates of their own. S2.3 reads both through one function,
+  `playlist_test.test_dates(channel_id)`, which returns None until the channel is dosed.
+
+**Tests.** Approval of an `arm_id` proposal sends nothing and other proposals still execute at once; the kill
+switch and `DRY_RUN` each send nothing; whole-playlist budgeting (a playlist that doesn't fit isn't half-sent);
+positions in rank order and the append fallback; assignments rows written; status transitions and `test_dates`;
+retries capped; a fake YouTube client records every call.
+
+### S2.3 — Playlist test measurement and verdict (Part 2 §1.2, §1.3, §1.5, P3)
+
+**Change.**
+- **Indicator.** A playlist's starts over a span = Σ `playlist_starts` in `playlist_traffic_daily` for that
+  `playlist_id`, every video and source type.
+- **Windows (E8),** per channel from `test_dates`: pre = the 28 data-days ending `test_start` − 1, as a weekly
+  mean (sum × 7 / 28). Post week k = `test_end` + 1 + 7(k − 1) … `test_end` + 7k. A week is complete when the
+  channel's `playlist_traffic_source_a2` ledger frontier (`reach.frontier`, `report_type`) is ≥ its last day.
+  Missing days inside a span count as zero and are listed in `missing_days`, as S1.6a.
+- **Per arm, per complete week k:** `delta_k` = post week k − pre. Stored on the arm's `measurement_result`:
+  `{pre_weekly, weeks: [{k, start, end, starts, delta}], missing_days, added_video_views, computed_at}`, where
+  `added_video_views` is, per week, the added videos' views from `video_traffic_source_daily` with
+  `source_type = 14` and `source_detail` = the playlist id (reported, never judged). Holdout and `no_dose` arms
+  are measured too; `no_dose` arms never enter a mean.
+- **Weekly verdict** into `lever_verdicts`, `lever = 'playlist'`, `arm_scope = 'treated_vs_holdout'`, one row per
+  complete post week (`week_start` = that week's first day, not a Monday: the weeks follow the dose):
+  `n_treated`, `n_holdout`, the two mean deltas for week k, `lift`, `cumulative_lift` (treated mean minus holdout
+  mean over weeks 1…k pooled), `windows_judged` = k, `verdict` directional against `PLAYLIST_MIN_LIFT` (1.0 starts
+  per playlist per week). At k = `PLAYLIST_EXPERIMENT_WINDOWS` (4): `stop_rule_triggered` = `cumulative_lift` <
+  `PLAYLIST_MIN_LIFT`, i.e. **"curated playlists don't earn starts"**; otherwise the answer is yes. Arms become
+  `judged` then; an arm whose playlist vanished from `playlists` becomes `insufficient_data`. Nothing is sent or
+  removed either way: the adds stay.
+  `lever_verdicts.verdicts` and `directional` take the lever's thresholds as arguments instead of reading the
+  `BACKLINK_*` settings (backlinks' behaviour unchanged).
+- **Job.** The weekly `lever_measurement` job (`lever_verdicts.run_weekly`) also runs
+  `playlist_test.measure_channel` for every channel with `playlist_arms` rows; its errors are a separate category
+  (`playlist arms`) under the same failure semantics.
+- **Endpoint.** `GET /channels/{id}/playlist-test` → `{test_start, test_end, arms: [...], verdicts: [...],
+  answer: "pending" | "yes" | "no"}`.
+
+**Tests.** The indicator; pre and post windows; completeness waiting for the frontier; `no_dose` excluded; the
+verdict arithmetic and the answer at window 4; backlinks' verdicts unchanged by the threshold refactor; the job's
+failure categories.
+
+### S2.4 — Short-link recommendations (Part 2 §2.3, P4)
+
+**Change.**
+- **Migration** (`short_link_recommendations`):
+
+  ```
+  id bigserial pk, channel_id → channels, short_id text not null references videos(id) on delete cascade,
+  target_video_id text not null references videos(id) on delete cascade, rank smallint not null,
+  similarity double precision not null, impressions bigint, feed_views bigint,
+  decision_log_id bigint references decision_log(id) on delete set null,
+  status text not null default 'pending', decided_at timestamptz, seen_at timestamptz,
+  intervention_id bigint references interventions(id) on delete set null, created_at timestamptz default now(),
+  unique (short_id, target_video_id)
+  ```
+
+  `status` vocab (`app/status_vocab.py`, mirror and guard test): `pending|set|not_chosen|dismissed`.
+- **A new module, `app/short_links.py`:**
+  - `shorts(channel_id)` **(E9):** the channel's videos with `is_short` true, public (or NULL), with at least
+    `SHORT_LINK_MIN_FEED_VIEWS` (1) type-24 views over the channel's latest 28 ingested `channel_traffic_source_a3`
+    data-days (`reach.coverage(report_type=)`, as `backlinks.siblings`), most views first.
+  - `targets(short)` **(E10):** the channel's own long videos (`is_short` not true), public (or NULL), warm
+    (`warm.warm_impressions`), with cosine between the two `MODEL_VERSION` vectors ≥ the channel's
+    `playlist_thresholds.join_low` (refused with a reason as `backlinks.candidates`); ranked by similarity, then
+    impressions, then id; at most `SHORT_LINK_TARGETS` (3). A Short without a vector is skipped and counted.
+  - `refresh(channel_id)`: for each Short from `shorts` with no recommendation rows yet, up to
+    `SHORT_LINK_MAX_PER_RUN` (50) Shorts per run, writes its targets as `pending` rows (rank 1…3) and asks
+    `decide(NEXT_WATCH, "<short>-><target>", context)` in shadow per pair (context as `agent_tick._next_watch`),
+    storing `decision_log_id` and pointing the log row back with `decide.link`-style linking (the column is on
+    the recommendation, not an intervention, so it gets its own small update). A Short that already has rows is
+    never re-recommended, so a person's tick or dismissal stands.
+- **Job.** `short_link_refresh`, weekly Monday 10:30 UTC (after `lever_measurement`), for the channels in
+  `SHORT_LINK_CHANNELS` (default Marathi, comma list as `TRAFFIC_INGEST_CHANNELS`) that are also in
+  `TRAFFIC_INGEST_CHANNELS`. Failure semantics as `traffic_poll`. DB and OpenRouter only; nothing reaches YouTube.
+- **Script.** `scripts/short_links.py --channel <id> --preview` prints what `refresh` would write, writing nothing
+  and calling no backend.
+
+**Tests.** The feed-views rule over ingested days; each target exclusion; same-channel only; ranking and the cap;
+the skip count; `refresh` idempotent per Short and capped per run; one `decision_log` row per pair in shadow;
+preview writes nothing.
+
+### S2.5 — The Short-links page, the tick, and the ledger (Part 2 §1.4, §2.5, P4)
+
+**Change.**
+- **Endpoints** (a small router, mounted in `app/main.py`):
+  - `GET /channels/{id}/short-links?status=&limit=&offset=` → Shorts with their recommendations (title, YouTube and
+    Studio links, rank, similarity, impressions, feed views, status), paged as `GET /channels/{id}/interventions`.
+    `?format=csv` returns the same as CSV.
+  - `POST /short-links/{id}/set`: the team set this target in Studio. The row becomes `set` with `decided_at`; the
+    Short's other rows become `not_chosen`. Writes one `interventions` row through `interventions.record`:
+    `origin = 'human'`, `lever = 'short_link'`, `arm = 'n/a'`, `status = 'applied'`, `video_id` = the target,
+    `detected_at` = now, `payload = {short_id, target_video_id, recommendation_id, timing: "ticked"}`,
+    `ledger_key = short_link:<short>:<target>`. A second tick of the same pair is a no-op (the key). Setting a
+    different target for a Short already `set` moves `set` to the new row and records a new intervention (the
+    team changed the link).
+  - `POST /short-links/{id}/dismiss`: `dismissed`, no intervention.
+- **Page.** A "Short links" card on `app/static/channel.html` in the existing dashboard idiom (`components.js`,
+  `theme.css`), listing pending Shorts first, with "Set in Studio" and "Dismiss" per target and a CSV link
+  **(E11)**. No other page changes.
+
+**Tests.** Set writes one human intervention with the ledger key, idempotently, and marks the siblings
+`not_chosen`; changing the target; dismiss; paging and CSV; unknown ids 404.
+
+### S2.6 — Short links seen in the traffic, and their measurement (Part 2 §1.2, §1.4)
+
+**Change.**
+- **Seen in the data.** In the weekly `lever_measurement` job, per channel in `TRAFFIC_INGEST_CHANNELS`: every
+  (Short, target) pair with type-32 rows (`video_traffic_source_daily`, `video_id` = the target, `source_type =
+  32`, `source_detail` = a Short in `videos` with `is_short` true) whose views over the channel's latest 28
+  ingested data-days reach `SHORT_LINK_SEEN_MIN_VIEWS` (1):
+  - a matching recommendation gets `seen_at` (first data-day with views) if it has none;
+  - a pair with no `short_link` intervention gets one, `timing: "inferred_from_traffic"`, `detected_at` = the
+    first data-day with views, `payload.recommended` = whether a recommendation exists for it, same `ledger_key`
+    shape (so a later tick is a no-op). This also records the team's own links, recommended or not: the §1.4
+    benchmark.
+  - For a link set before the detection first runs, `detected_at` is the first data-day with views in the
+    window, not when the team set the link; `timing` says so.
+- **Measurement.** `app/lever_measurement.py` learns the `short_link` lever: source = `payload.short_id`,
+  targets = [`video_id`], `source_type = 32` instead of 7, d0 = the Pacific date of `detected_at`, and the
+  source floor on the Short's own views (`LEVER_MIN_SOURCE_VIEWS`). Everything else as for human backlinks:
+  windows, completeness, extension, `judged`/`insufficient_data`. The pair-view and source-floor helpers take the
+  source type as a parameter; backlinks' behaviour is unchanged.
+- **Verdict.** `lever_verdicts` gets `lever = 'short_link'`, `arm_scope = 'human'` rows per week, as backlinks'
+  human rows (`n_treated`, `treated_mean_delta`; no lift, no verdict, never stopped).
+- **Shadow agreement.** A read-only query in `STATE.md` §8: per question set, rows, backend failures, and how often
+  `jev_answer` equals `rules_answer` in `decision_log` **(E12)**.
+
+**Tests.** Detection writes one inferred intervention per pair and never duplicates a ticked one; `seen_at`;
+`payload.recommended`; the type-32 measurement and the floor on the Short; backlinks' measurement unchanged; the
+verdict rows.
+
+### S2.7 — Deploy, preview, go (owner, office machine)
+
+1. Deploy S2.1–S2.6: apply the two migrations, `docker compose restart postgrest rest`, restart the app. Refresh the
+   NAS snapshot once the migrations are verified.
+2. **Shorts into `videos`:** if Marathi's `sync_shorts` is `false`, set it to NULL or true; run a full sync of
+   Marathi; then `scripts/reembed.py --channels UCr5-YUqBiW7PUmeAtxUWuRg --skip-calibrate` (the Shorts only need
+   vectors; recalibrating would move `join_low`/`join_high` mid-experiment).
+3. `scripts/playlist_test.py --channel <Marathi> --preview`; read it; then `--draw`.
+4. Review the "Playlist test" proposals in the dashboard card and approve or reject them in one sitting **(E3)**.
+5. Set `PLAYLIST_APPLY_ENABLED=true` in the office `.env`, restart. Check the next day's `playlist_test_apply` log
+   and two playlists in Studio: the new videos at the top, nothing removed.
+6. `scripts/short_links.py --channel <Marathi> --preview`; then let Monday's `short_link_refresh` run (or call
+   `short_links.refresh` once by hand). Hand the "Short links" card to the SEO team.
+7. **Widening (E13):** Short links to the sibling channels in the 11-09 week, by adding them to
+   `SHORT_LINK_CHANNELS` after their Shorts are synced and embedded, if the team keeps up with Marathi's ticks.
+   The playlist test stays on Marathi.
+
+### S2.8 — Docs
+
+- `STATE.md` updated for every task (each ticket does its own).
+- The findings doc records the playlist preview and draw (eligible playlists, arms, proposals approved), the dose
+  dates, each weekly playlist verdict and, at window 4, the answer; and Short-link volume: recommendations, ticks,
+  inferred links, and their pair views.
+- Mark Part 5 done when its exit gate passes; write the Slice 3 Part.
+
+### Config (new)
+
+| Setting | Start | Notes |
+|---|---|---|
+| `PLAYLIST_HOLDOUT_PCT` | 0.5 | E4. Per playlist, stable hash |
+| `PLAYLIST_TEST_MAX_ADDS` | 5 | E5. Per treated playlist |
+| `PLAYLIST_APPLY_ENABLED` | false | Kill switch for the test's YouTube writes |
+| `PLAYLIST_TEST_DAILY_UNITS` | 2000 | `JobBudget` for `playlist_test_apply` |
+| `PLAYLIST_TEST_MAX_ATTEMPTS` | 3 | Runs a failing add is retried |
+| `PLAYLIST_EXPERIMENT_WINDOWS` | 4 | E8. Weekly windows before the answer |
+| `PLAYLIST_MIN_LIFT` | 1.0 | E8. Starts per playlist per week that cumulative lift must reach for "yes" |
+| `SHORT_LINK_CHANNELS` | Marathi | E13. Channels whose Shorts get recommendations |
+| `SHORT_LINK_TARGETS` | 3 | E10. Targets shown per Short |
+| `SHORT_LINK_MIN_FEED_VIEWS` | 1 | E9. Type-24 views over 28 ingested data-days for a Short to be listed |
+| `SHORT_LINK_MAX_PER_RUN` | 50 | Shorts recommended per weekly run (bounds the shadow LLM calls at 150) |
+| `SHORT_LINK_SEEN_MIN_VIEWS` | 1 | Type-32 views for a pair to count as set |
+
+### Exit gate
+
+- Marathi's playlist test is drawn, dosed (both arms non-empty, at least 10 treated arms `dosed`), and has its
+  first weekly verdict. The answer at window 4 lands after 2026-11-27, for the operator.
+- No add reached YouTube before approval or while `PLAYLIST_APPLY_ENABLED` was false, and none was removed.
+- No human intervention was recorded for a test add.
+- Short-link recommendations exist for Marathi; at least one link is recorded in the ledger (ticked or inferred).
+- `/health/jobs` shows `playlist_test_apply`, `short_link_refresh` and `lever_measurement` `success`.
+
+### Not doing in Slice 2
+
+- No playlist creation, deletion, renaming or removal of members. Frozen writers stay frozen.
+- No weekly top-up: one dose per treated playlist **(E7)**.
+- No Jev or LLM fit check on proposals, and nothing goes live from shadow **(E12)**.
+- No playlist lever in triage: `TRIAGE` still answers only `backlinks` or `no_change`.
+- No Short-link writes: the API has none (A2). No holdout for Short links (E11).
+- The playlist test only on Marathi; Short links widen by setting (E13).
+
+### Changes to Part 2 (applied 2026-10-26)
+
+- **§2.3.** Playlist: the test's candidates are warm videos ≥ `join_high` to the playlist's centroid, reviewed by a
+  person; no Jev fit check. Short link: embeddings, same channel, top 3 shown to the team, next-watch in shadow.
+- **§2.5.** Playlist: approval queues, and a budgeted daily job behind `PLAYLIST_APPLY_ENABLED` sends.
+- **§4.** P3's test is per playlist with a 50/50 holdout, one dose, measured on `playlist_starts` over four weeks.
+- **§7.** `playlist_arms` and `short_link_recommendations` added.
+- **§8.** Slice 2 settings added.
+
+### Owner decisions (decided 2026-10-26: all recommendations accepted)
+
+| # | Question | Decision and why |
+|---|---|---|
+| E1 | The test's unit | **Existing playlists, split treated/holdout.** No creation (human-confirmed by Part 2 §4), reuses the B6 thresholds and the proposal machinery, and gives a comparison group. Small n is the cost |
+| E2 | What changes on a treated playlist | **Members and order only.** Adds at the top, strongest first; no removals, no title or description changes. One variable |
+| E3 | Who approves | **One batch review** in the existing dashboard card, approved in bulk; nothing pending for the operator |
+| E4 | Split | **50/50 by stable hash** (`PLAYLIST_HOLDOUT_PCT`). Small n needs balanced arms; holding a playlist out costs nothing |
+| E5 | Dose | **Up to 5 adds, warm, ≥ `join_high`.** ≈125 adds ≈ 6,250u, over ~3 days at 2,000u/day |
+| E6 | Where the test lives | **A new `playlist_arms` table** (finding 1); verdicts in `lever_verdicts` |
+| E7 | Cadence | **One dose,** then only measured |
+| E8 | Verdict | **28-day pre (weekly mean), weekly post, 4 windows,** "yes" at cumulative lift ≥ 1 start per playlist per week |
+| E9 | Which Shorts | **Every public Marathi Short with Shorts-feed views,** after syncing Shorts into `videos` |
+| E10 | Short targets | **Embedding similarity to warm long videos on the same channel, top 3,** next-watch in shadow |
+| E11 | Delivery and ledger | **A dashboard card with a "set" tick, a CSV, and a traffic-data check;** no holdout |
+| E12 | Jev items in the spec's Slice 2 row | **Deferred.** Nothing goes live from shadow; no fit check; a read-only agreement query |
+| E13 | Scope | **Code per channel, run on Marathi;** Short links widen to the siblings by setting |
+
+### Review protocol
+
+As Part 4: an independent clean-context review per task against this Part, and a slice review at the end
+listing spec'd-but-not-built and built-but-not-spec'd, with a check of `STATE.md` §1–§5 and §7.
