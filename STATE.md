@@ -739,7 +739,7 @@ Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playboo
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
 | `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard. `channel.html`'s proposals card labels `decision_source` through `DECIDED_BY`, which has `experiment: 'Playlist test'` since S2.1 (the playlist test's proposals show up there unchanged otherwise). Since S2.5 the Playlists tab has a "Short links" card (`#sl-card`, `loadShortLinks`, `renderShortLinks`, `decideShortLink`), loaded with the tab: `GET /channels/{id}/short-links?limit=1000` (from the SWR cache, as the other cards), per Short its title (YouTube link), feed views and an "Open in Studio" link, per target its rank, title, similarity, impressions and status pill, "Set in Studio" (`POST /short-links/{id}/set`) on a target not `set` and "Dismiss" (`POST /short-links/{id}/dismiss`) on a `pending` one, and a "Download CSV" link (`?format=csv&limit=1000`) |
+| `static/*` | vanilla-JS dashboard. `channel.html`'s proposals card labels `decision_source` through `DECIDED_BY`, which has `experiment: 'Playlist test'` since S2.1 (the playlist test's proposals show up there unchanged otherwise). Since S2.5 the Playlists tab has a "Short links" card (`#sl-card`, `loadShortLinks`, `renderShortLinks`, `decideShortLink`), loaded with the tab: `GET /channels/{id}/short-links?limit=1000` (from the SWR cache, as the other cards), per Short its title (YouTube link), feed views and an "Open in Studio" link, per target its rank, title, similarity, impressions and status pill, "Set in Studio" (`POST /short-links/{id}/set`, after a `confirmDialog`) on a target not `set` and "Dismiss" (`POST /short-links/{id}/dismiss`) on a `pending` one, and a "Download CSV" link (`?format=csv&limit=1000`) |
 
 **Scripts:** `scripts/short_links.py` (S2.4: `--channel` and `--preview` (required); prints per Short `refresh` would recommend its feed views and targets (rank, similarity, impressions), then the counts; exits 1 when the thresholds are refused; writes nothing, asks no backend), `scripts/playlist_test.py` (S2.1: `--channel` and one of `--preview` (prints per eligible playlist its arm, status and the videos it would get, the skipped playlists and the counts; writes nothing) or `--draw` (`playlist_test.draw`, no confirmation; exits 1 when refused or already drawn)), `scripts/preview_backlinks.py` (S1.4b: `--channel`, `--n` default 20; prints each video's rules answer, arm, targets, context and description before/after, or the render refusal; read-only), `scripts/reembed.py` (B6: `--channels` comma list, `--estimate` with `--usd-per-mtok`, `--skip-calibrate`;
 the real run re-embeds then calibrates each channel), `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`),
@@ -1398,8 +1398,13 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    per pair. *A dismissed sibling* stays `dismissed` when another target is set (the spec says "the Short's other
    rows become `not_chosen`"; a dismissal is the stronger statement); only `pending` and `set` siblings become
    `not_chosen`, with `decided_at`. *Dismissing a `set` row* is refused (409): the ledger says the link is on the
-   Short; the team changes it by setting another target. A `not_chosen` or `dismissed` row can still be set. *The
-   intervention's `channel_id`* is the recommendation's (`refresh` always writes it). *The card* lives on the
+   Short; the team changes it by setting another target. A `not_chosen` or `dismissed` row can still be set.
+   *Setting an earlier target back* (A, then B, then A) records no third row: the ledger key is per pair (the
+   ticket's shape, shared with S2.6), so A's tick is linked to its first intervention, whose `detected_at` is the
+   first tick; the spec's "records a new intervention" holds only for a pair not ticked before. Nothing records when
+   a changed-away link came off the Short (no `removed_detected_at`, unlike B3a). *The intervention's
+   `channel_id`* is the recommendation's, or the Short's in `videos` when it is NULL (`refresh` always writes it).
+   *The card's tick* asks for confirmation ("I set it") before it records, since there is no undo route. *The card* lives on the
    Playlists tab, after the playlist proposals, since the channel page has no Shorts tab and the spec allows no other
    page change; it reads one page of up to 1000 Shorts.
 

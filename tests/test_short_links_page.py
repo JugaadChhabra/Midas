@@ -14,6 +14,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app import interventions, main, short_links
+from app.status_vocab import ALL_SHORT_LINK_STATUSES
 from tests.fakes import FakeSupabase
 
 CH, OTHER = "c1", "c2"
@@ -112,6 +113,26 @@ def test_changing_a_shorts_target_moves_set_and_records_a_new_intervention():
     # The earlier link's intervention stays as it was: the ledger records what
     # the team did, and they did set it for a while.
     assert {i["status"] for i in sb.rows("interventions")} == {"applied"}
+
+
+def test_setting_an_earlier_target_back_links_its_first_intervention():
+    """The key is per pair, so A, then B, then A again is two interventions,
+    the second tick of A linked to the first."""
+    with db(short_with_three("s1", 1)) as (sb, client):
+        first = client.post("/short-links/1/set").json()
+        client.post("/short-links/2/set")
+        back = client.post("/short-links/1/set").json()
+    assert back["recorded"] is False and back["intervention_id"] == first["intervention_id"]
+    assert len(sb.rows("interventions")) == 2
+    assert status_of(sb) == {1: "set", 2: "not_chosen", 3: "not_chosen"}
+
+
+def test_a_recommendation_without_a_channel_takes_the_shorts():
+    recs = short_with_three("s1", 1, channel=None)
+    with db(recs, [video("s1", is_short=True)]) as (sb, client):
+        r = client.post("/short-links/1/set")
+    assert r.status_code == 200
+    assert [i["channel_id"] for i in sb.rows("interventions")] == [CH]
 
 
 def test_set_keeps_a_dismissed_sibling_dismissed():
@@ -255,3 +276,6 @@ def test_the_card_reads_fields_the_endpoint_returns():
     assert {"short_id", "studio_url", "recommendations"} <= set(re.findall(r"\bs\.(\w+)", card))
     assert {"id", "status", "title"} <= set(re.findall(r"\bt\.(\w+)", card))
     assert {"shorts", "next_offset"} <= set(body)
+    # The card's status labels are the vocabulary's, no more, no fewer.
+    labels = card[card.index("const SL_STATUS"):card.index("};", card.index("const SL_STATUS"))]
+    assert set(re.findall(r"^\s*(\w+):", labels, re.M)) == ALL_SHORT_LINK_STATUSES

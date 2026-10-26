@@ -1743,6 +1743,8 @@ function loadShortLinks() {
 }
 
 async function decideShortLink(id, action) {
+  if (action === 'set'
+      && !await confirmDialog('Did you set this video as the Short\'s related video in Studio? Midas records it and measures it from today.', 'I set it')) return;
   try {
     const r = await fetch(`/short-links/${id}/${action}`, { method: 'POST' });
     const j = await r.json();

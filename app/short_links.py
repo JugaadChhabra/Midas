@@ -368,9 +368,10 @@ def _page(channel_id: str, status: str | None, limit: int, offset: int) -> dict:
     by_short: dict[str, list[dict]] = defaultdict(list)
     for r in all_rows(q):
         by_short[r["short_id"]].append(r)
+    feed_views = {sid: max(r.get("feed_views") or 0 for r in rows) for sid, rows in by_short.items()}
     order = sorted(by_short, key=lambda sid: (
         not any(r["status"] == ShortLinkStatus.PENDING for r in by_short[sid]),
-        -max(r.get("feed_views") or 0 for r in by_short[sid]), sid))
+        -feed_views[sid], sid))
     page = order[offset:offset + limit]
 
     recs = [r for sid in page for r in by_short[sid]]
@@ -382,7 +383,7 @@ def _page(channel_id: str, status: str | None, limit: int, offset: int) -> dict:
         listed.append({
             "short_id": sid, "title": titles.get(sid),
             "youtube_url": _short_url(sid), "studio_url": _studio_url(sid),
-            "feed_views": max(r.get("feed_views") or 0 for r in rows),
+            "feed_views": feed_views[sid],
             "recommendations": [
                 {"id": r["id"], "rank": r["rank"], "target_video_id": r["target_video_id"],
                  "title": titles.get(r["target_video_id"]),
@@ -471,15 +472,20 @@ def set_short_link(recommendation_id: int):
     stays dismissed), and this one `set`, last: a tick that dies partway is
     redone whole by the next. Ticking a row already `set` changes nothing.
     Setting another target for a Short moves `set` and records a new
-    intervention; the old one stays, since the link was on the Short.
+    intervention; the old one stays, since the link was on the Short. Setting
+    an earlier target back links its first intervention again (the key is per
+    pair), with that tick's `detected_at`.
     """
     rec = _recommendation(recommendation_id)
     if rec["status"] == ShortLinkStatus.SET:
         return {"recommendation": rec, "intervention_id": rec.get("intervention_id"),
                 "recorded": False}
     now, key = _now(), _ledger_key(rec)
+    # The column is nullable (S2.4); refresh always fills it, the Short's own
+    # channel is the fallback.
+    channel_id = rec["channel_id"] or _videos([rec["short_id"]])[0]["channel_id"]
     stored = interventions.record(
-        video_id=rec["target_video_id"], channel_id=rec["channel_id"],
+        video_id=rec["target_video_id"], channel_id=channel_id,
         lever=InterventionLever.SHORT_LINK, origin=InterventionOrigin.HUMAN,
         arm=InterventionArm.NOT_APPLICABLE, status=InterventionStatus.APPLIED,
         detected_at=now, ledger_key=key,

@@ -326,10 +326,16 @@ class FakeTable:
         return FakeQuery(self._name, self._rows, self._writes).insert(self._numbered(payload), **kw)
 
     def upsert(self, payload, **kw):
-        # An upsert on a conflict key other than `id` inserts with a fresh id;
-        # one on `id` itself carries its own.
-        if (kw.get("on_conflict") or "id") != "id":
-            payload = self._numbered(payload)
+        # A row an upsert on a key other than `id` inserts gets a fresh id; one
+        # it updates keeps its own, as in Postgres.
+        keys = [k.strip() for k in (kw.get("on_conflict") or "id").split(",")]
+        if keys != ["id"]:
+            items = payload if isinstance(payload, list) else [payload]
+            new = [i for i in items
+                   if not any(all(r.get(k) == i.get(k) for k in keys) for r in self._rows)]
+            numbered = iter(self._numbered(new))
+            items = [next(numbered) if any(i is n for n in new) else i for i in items]
+            payload = items if isinstance(payload, list) else items[0]
         return FakeQuery(self._name, self._rows, self._writes).upsert(payload, **kw)
 
     def update(self, payload, **kw):
