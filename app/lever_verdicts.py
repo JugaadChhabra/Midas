@@ -91,21 +91,25 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def directional(lift: float) -> str:
-    """helped / no_change / worse against BACKLINK_MIN_LIFT (§1.5, D6)."""
-    if lift >= settings.BACKLINK_MIN_LIFT:
+def directional(lift: float, min_lift: float) -> str:
+    """helped / no_change / worse against the lever's `min_lift` (§1.5;
+    BACKLINK_MIN_LIFT, D6, or PLAYLIST_MIN_LIFT, E8)."""
+    if lift >= min_lift:
         return LeverVerdict.HELPED
-    if lift <= -settings.BACKLINK_MIN_LIFT:
+    if lift <= -min_lift:
         return LeverVerdict.WORSE
     return LeverVerdict.NO_CHANGE
 
 
-def verdicts(rows: list[dict], week: date, windows_before: dict[str, int]) -> dict[str, dict]:
+def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
+             min_lift: float, windows: int) -> dict[str, dict]:
     """{arm_scope: the verdict row's numbers} for `week`, from judged rows.
 
     `rows` are the channel's judged rows of one lever; those judged after
     `week` are ignored. `windows_before` counts each scope's verdict weeks
     before this one. A scope with nothing to report this week is absent.
+    `min_lift` and `windows` are the lever's verdict band and time box
+    (BACKLINK_MIN_LIFT, BACKLINK_EXPERIMENT_WINDOWS for backlinks).
     """
     this_week: dict[str, list[float]] = {}
     so_far: dict[str, list[float]] = {}
@@ -124,14 +128,13 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int]) -> di
         lift = _mean(treated) - _mean(held)
         cumulative = (_mean(so_far[InterventionArm.TREATED])
                       - _mean(so_far[InterventionArm.HOLDOUT]))
-        windows = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
+        judged_ = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
         out[LeverVerdictScope.TREATED_VS_HOLDOUT] = {
             "n_treated": len(treated), "n_holdout": len(held),
             "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
-            "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows,
-            "verdict": directional(lift),
-            "stop_rule_triggered": (windows >= settings.BACKLINK_EXPERIMENT_WINDOWS
-                                    and cumulative < settings.BACKLINK_MIN_LIFT),
+            "lift": lift, "cumulative_lift": cumulative, "windows_judged": judged_,
+            "verdict": directional(lift, min_lift),
+            "stop_rule_triggered": judged_ >= windows and cumulative < min_lift,
         }
     human = this_week.get(LeverVerdictScope.HUMAN)
     if human:
@@ -180,7 +183,8 @@ def write_verdicts(channel_id: str, *, today: date | None = None) -> dict[str, d
             if v["week_start"] < week.isoformat():
                 windows_before[v["arm_scope"]] = windows_before.get(v["arm_scope"], 0) + 1
         this_week = {v["arm_scope"]: v for v in stored if v["week_start"] == week.isoformat()}
-        out = verdicts(judged, week, windows_before)
+        out = verdicts(judged, week, windows_before, min_lift=settings.BACKLINK_MIN_LIFT,
+                       windows=settings.BACKLINK_EXPERIMENT_WINDOWS)
         for scope in (LeverVerdictScope.TREATED_VS_HOLDOUT, LeverVerdictScope.HUMAN):
             key = {"channel_id": channel_id, "lever": lever, "arm_scope": scope,
                    "week_start": week.isoformat()}

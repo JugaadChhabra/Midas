@@ -87,8 +87,7 @@ def test_lift_cumulative_lift_and_the_directional_verdict():
 @pytest.mark.parametrize("lift, verdict", [(1.0, "helped"), (0.99, "no_change"),
                                            (-0.99, "no_change"), (-1.0, "worse")])
 def test_the_verdict_band_is_plus_or_minus_backlink_min_lift(lift, verdict):
-    with patch.object(settings, "BACKLINK_MIN_LIFT", 1.0):
-        assert lv.directional(lift) == verdict
+    assert lv.directional(lift, 1.0) == verdict
 
 
 def test_insufficient_data_and_unjudged_rows_stay_out_of_the_means():
