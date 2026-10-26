@@ -36,6 +36,7 @@ from app.backlinks_apply import router as backlinks_apply_router
 from app.lever_verdicts import router as lever_verdicts_router, run_weekly as lever_measurement_weekly
 from app.channel_health import router as channel_health_router, run_daily as channel_health_daily
 from app.playlist_health import score_channel as playlist_health_score_channel
+from app.playlist_test import run_apply as playlist_test_apply_daily
 
 def _configure_logging() -> None:
     """Log to stdout AND a rotating file under settings.LOG_DIR.
@@ -498,6 +499,19 @@ def _register_jobs(sched) -> None:
         # week. Read-only.
         timezone="UTC",
         id="channel_health",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        playlist_test_apply_daily,
+        "cron",
+        hour=11,
+        minute=0,
+        # UTC, after channel_health (spec Part 5 S2.2): sends the playlist
+        # test's approved adds under its own budget. Does nothing while
+        # PLAYLIST_APPLY_ENABLED is false (the default), so it always registers.
+        timezone="UTC",
+        id="playlist_test_apply",
         max_instances=1,
         coalesce=True,
     )

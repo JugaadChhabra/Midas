@@ -18,7 +18,18 @@ S2.1, the draw:
 
 The dose is written as pending `add` rows in `playlist_proposals` with
 `decision_source = 'experiment'` and `arm_id`, reviewed in the dashboard's
-existing proposals card (E3). Nothing here reaches YouTube.
+existing proposals card (E3). Approving one there only queues it
+(`playlists_router.decide_proposals`).
+
+S2.2, the apply:
+
+    run_apply()                       -- the daily `playlist_test_apply` job
+    apply_channel(channel_id, budget) -- one channel's approved, unsent adds
+    test_dates(channel_id)            -- (test_start, test_end), once dosed
+
+The job is the test's only YouTube write: `playlistItems.insert`, at the top
+in candidate rank (E2), behind PLAYLIST_APPLY_ENABLED and DRY_RUN, whole
+playlists at a time under its JobBudget. Nothing removes, renames or creates.
 
 Similarity is on B6 vectors only (`reembed.MODEL_VERSION`), against the
 channel's calibrated `join_high`; thresholds are never recalibrated here.
@@ -28,17 +39,25 @@ Current members are the latest `playlist_assignments` action per pair being
 from __future__ import annotations
 
 import hashlib
+import logging
+from datetime import date, datetime, timezone
 from typing import NamedTuple
 
-from app import warm
+from app import job_status, quota, warm
+from app.apply_outcome import ApplyOutcome
 from app.backlinks import NO_THRESHOLDS, THRESHOLDS_OTHER_MODEL, _thresholds
+from app.backlinks_apply import _classified
 from app.config import settings
 from app.db import supabase
 from app.embeddings import pooled_embeddings
-from app.playlists import _cosine_sim
+from app.lever_measurement import _day
+from app.playlists import _cosine_sim, _record_assignment
 from app.reembed import MODEL_VERSION, _members
 from app.rows import all_rows, rows_for_ids
 from app.status_vocab import PlaylistArm, PlaylistArmStatus, PlaylistProposalSource
+from app.youtube_client import youtube_for_channel, yt_playlist_items_insert
+
+log = logging.getLogger("midas.playlist_test")
 
 #: A playlist needs this many current members with a B6 vector to have a
 #: centroid worth scoring against (as reembed.member_similarities).
@@ -294,3 +313,265 @@ def preview(channel_id: str) -> dict:
     similarity and impressions; none for a holdout arm)."""
     plan = _plan(channel_id)
     return {**_summary(plan), "already_drawn": plan["already_drawn"], "plan": plan["arms"]}
+
+
+# ── S2.2, the apply ───────────────────────────────────────────────────────
+
+#: A treated arm the job still works on.
+_OPEN = (PlaylistArmStatus.PLANNED, PlaylistArmStatus.APPLYING)
+
+#: playlist_proposals.apply_error.reason for an add YouTube took only appended,
+#: because the playlist isn't sorted manually (Part 5 finding 7).
+POSITION_REFUSED = "position_refused"
+
+#: apply_channel's `stopped`: the job's budget or the ledger can't take the
+#: next playlist whole.
+BUDGET = "budget"
+
+#: The job_status.item_error_verdict category.
+ITEMS = "playlist adds"
+
+
+def _attempts(proposal: dict) -> int:
+    return (proposal.get("apply_error") or {}).get("attempts", 0)
+
+
+def _sendable(proposal: dict) -> bool:
+    """Approved, not yet sent, and not failed PLAYLIST_TEST_MAX_ATTEMPTS runs."""
+    return (proposal["status"] == "approved" and not proposal.get("applied_at")
+            and _attempts(proposal) < settings.PLAYLIST_TEST_MAX_ATTEMPTS)
+
+
+def _ranked(arm: dict, proposals: list[dict]) -> list[dict]:
+    """The arm's proposals in candidate rank (`proposal_ids` order)."""
+    rank = {pid: i for i, pid in enumerate(arm.get("proposal_ids") or [])}
+    return sorted(proposals, key=lambda p: (rank.get(p["id"], len(rank)), p["id"]))
+
+
+def _position_refused(e: Exception) -> bool:
+    """YouTube's 400 for a position on a playlist that isn't sorted manually
+    (manualSortRequired): a 400 that names the position or the sort order."""
+    status = getattr(getattr(e, "resp", None), "status", None)
+    text = str(e).lower()
+    return status == 400 and ("position" in text or "sort" in text)
+
+
+def _insert(yt, channel_id: str, proposal: dict, position: int | None):
+    """(playlist item id, apply_error note or None). A refused position is
+    retried once, appended."""
+    try:
+        return yt_playlist_items_insert(yt, channel_id, proposal["playlist_id"],
+                                        proposal["video_id"], position=position), None
+    except Exception as e:
+        if position is None or not _position_refused(e):
+            raise
+        note = {"reason": POSITION_REFUSED, "detail": str(e)}
+    return yt_playlist_items_insert(yt, channel_id, proposal["playlist_id"],
+                                    proposal["video_id"]), note
+
+
+def _update(proposal: dict, fields: dict) -> None:
+    supabase().table("playlist_proposals").update(fields).eq("id", proposal["id"]).execute()
+    proposal.update(fields)
+
+
+def _affordable(budget: quota.JobBudget, cost: int) -> bool:
+    """The job's own budget, and the ledger above YT_QUOTA_COLLECTION_RESERVE
+    (as autopilot._can_afford_apply)."""
+    return budget.can_spend(cost) and quota.can_afford(
+        cost, reserve=settings.YT_QUOTA_COLLECTION_RESERVE)
+
+
+def _send(channel_id: str, yt, ranked: list[dict], counts: dict) -> str | None:
+    """Send one arm's sendable adds at the top, in rank. Returns
+    `youtube_quota_exceeded` when YouTube says so; raises ApplyError on a token
+    error. Each failure is written to its proposal's `apply_error`. A
+    quotaExceeded isn't counted as an errored add: it is a stop, not the add's
+    failure."""
+    ahead = 0
+    # A position refused before, in this run or an earlier one, means the
+    # playlist isn't sorted manually: append, without paying for the refusal again.
+    append = any((p.get("apply_error") or {}).get("reason") == POSITION_REFUSED for p in ranked)
+    for p in ranked:
+        if p.get("applied_at"):
+            ahead += 1
+            continue
+        if not _sendable(p):
+            continue
+        try:
+            item_id, note = _insert(yt, channel_id, p, None if append else ahead)
+        except Exception as e:
+            err = _classified(e)
+            if err.outcome is not ApplyOutcome.QUOTA_EXCEEDED:
+                counts["attempted"] += 1
+                counts["errored"] += 1
+            # Quota and token errors aren't the add's fault: no attempt is used up.
+            attempts = _attempts(p) + (err.outcome is ApplyOutcome.FAILED)
+            _update(p, {"apply_error": {"reason": err.outcome.value, "detail": str(e),
+                                        "attempts": attempts}})
+            log.warning("playlist_test_apply %s: add %s (%s to %s) failed: %s",
+                        channel_id, p["id"], p["video_id"], p["playlist_id"], e)
+            if err.outcome is ApplyOutcome.QUOTA_EXCEEDED:
+                return err.outcome.value
+            if err.outcome is ApplyOutcome.TOKEN_EXPIRED:
+                raise err
+            continue
+        counts["attempted"] += 1
+        append = append or note is not None
+        fields = {"applied_at": datetime.now(timezone.utc).isoformat(),
+                  "playlist_item_id": item_id}
+        if note:
+            fields["apply_error"] = note
+        _update(p, fields)
+        _record_assignment(p["video_id"], p["playlist_id"], item_id, "added",
+                           p.get("similarity"), PlaylistProposalSource.EXPERIMENT)
+        counts["sent"] += 1
+        ahead += 1
+    return None
+
+
+def _settle(arm: dict, ranked: list[dict]) -> None:
+    """The arm's status from its proposals: `applying` once one add is sent;
+    once no approved add is left unsent or retryable, `dosed` (some add landed)
+    or `no_dose` (none did). An arm with nothing approved stays open while any
+    proposal is pending (`no_dose` once all are rejected). `first_applied_at`,
+    `last_applied_at` = the first and last success."""
+    sent = sorted((p["applied_at"] for p in ranked if p.get("applied_at")),
+                  key=lambda t: datetime.fromisoformat(str(t).replace("Z", "+00:00")))
+    approved = any(p["status"] == "approved" for p in ranked)
+    still_open = (any(_sendable(p) for p in ranked)
+                  or (not approved and any(p["status"] == "pending" for p in ranked)))
+    if still_open:
+        status = PlaylistArmStatus.APPLYING if sent else arm["status"]
+    else:
+        status = PlaylistArmStatus.DOSED if sent else PlaylistArmStatus.NO_DOSE
+    fields = {}
+    if status != arm["status"]:
+        fields["status"] = status
+    if sent and not arm.get("first_applied_at"):
+        fields["first_applied_at"] = sent[0]
+    if sent and arm.get("last_applied_at") != sent[-1]:
+        fields["last_applied_at"] = sent[-1]
+    if fields:
+        supabase().table("playlist_arms").update(fields).eq("id", arm["id"]).execute()
+        arm.update(fields)
+
+
+def apply_channel(channel_id: str, budget: quota.JobBudget) -> dict:
+    """Send the channel's approved, unsent test adds, a treated playlist at a time.
+
+    A playlist goes whole or not at all: if its adds' cost doesn't fit
+    `budget` and the ledger above YT_QUOTA_COLLECTION_RESERVE, the channel
+    stops with `stopped = 'budget'`, and so does the job. YouTube's
+    quotaExceeded stops it too (`stopped = 'youtube_quota_exceeded'`); a token
+    error raises ApplyError (the channel is skipped). Under DRY_RUN it logs what
+    it would send and writes nothing. Returns `{attempted, errored, sent,
+    stopped}`.
+    """
+    counts = {"attempted": 0, "errored": 0, "sent": 0, "stopped": None}
+    arms = all_rows(
+        supabase().table("playlist_arms").select("*")
+        .eq("channel_id", channel_id).eq("arm", PlaylistArm.TREATED).in_("status", list(_OPEN)))
+    by_arm: dict[int, list[dict]] = {}
+    for p in rows_for_ids(
+            lambda c: supabase().table("playlist_proposals").select("*").in_("arm_id", c),
+            [a["id"] for a in arms]):
+        by_arm.setdefault(p["arm_id"], []).append(p)
+    yt = None
+    for arm in sorted(arms, key=lambda a: a["id"]):
+        ranked = _ranked(arm, by_arm.get(arm["id"], []))
+        todo = [p for p in ranked if _sendable(p)]
+        if settings.DRY_RUN:
+            if todo:
+                log.warning("[DRY_RUN] playlist_test_apply %s: would add %s to the top of %s",
+                            channel_id, [p["video_id"] for p in todo], arm["playlist_id"])
+            continue
+        try:
+            if todo:
+                cost = quota.cost(quota.Op.PLAYLIST_ITEMS_INSERT, len(todo))
+                if not _affordable(budget, cost):
+                    log.info("playlist_test_apply: stopping for the day; %s needs %du for %d "
+                             "adds, %s, %du left above the %du collection reserve",
+                             arm["playlist_id"], cost, len(todo), budget,
+                             quota.units_remaining(settings.YT_QUOTA_COLLECTION_RESERVE),
+                             settings.YT_QUOTA_COLLECTION_RESERVE)
+                    counts["stopped"] = BUDGET
+                    return counts
+                if yt is None:
+                    yt = youtube_for_channel(channel_id)
+                counts["stopped"] = _send(channel_id, yt, ranked, counts)
+        finally:
+            _settle(arm, ranked)
+        if counts["stopped"]:
+            return counts
+    return counts
+
+
+def _open_channels() -> list[str]:
+    rows = all_rows(
+        supabase().table("playlist_arms").select("channel_id")
+        .eq("arm", PlaylistArm.TREATED).in_("status", list(_OPEN)))
+    return sorted({r["channel_id"] for r in rows})
+
+
+def run_apply() -> dict | None:
+    """APScheduler entry point (`playlist_test_apply`, daily 11:00 UTC).
+
+    Does nothing unless PLAYLIST_APPLY_ENABLED. Otherwise `apply_channel` for
+    every channel with a treated arm still `planned` or `applying`, under one
+    JobBudget("playlist_test_apply", PLAYLIST_TEST_DAILY_UNITS), until a
+    playlist doesn't fit or YouTube says quotaExceeded. traffic_poll's failure
+    model: a channel that raises (a token error included) fails the run once
+    every channel has run; per-add errors are judged by
+    job_status.item_error_verdict under `playlist adds`.
+    """
+    if not settings.PLAYLIST_APPLY_ENABLED:
+        log.info("playlist_test_apply skipped: PLAYLIST_APPLY_ENABLED=false")
+        return None
+    budget = quota.JobBudget("playlist_test_apply", settings.PLAYLIST_TEST_DAILY_UNITS)
+    crashed: dict[str, str] = {}
+    partial_errors: dict[str, str] = {}
+    with quota.spending(budget):
+        for cid in _open_channels():
+            try:
+                counts = apply_channel(cid, budget)
+            except Exception as e:
+                log.exception("playlist_test_apply %s crashed: %s", cid, e)
+                crashed[cid] = job_status.describe(e)
+                continue
+            failure, partial = job_status.item_error_verdict(
+                {ITEMS: (counts["errored"], counts["attempted"])})
+            if counts["stopped"] == ApplyOutcome.QUOTA_EXCEEDED.value:
+                partial = "; ".join(filter(None, [partial, "youtube_quota_exceeded: stopped for the day"]))
+            if failure:
+                crashed[cid] = f"ItemsFailed: {failure}"
+            elif partial:
+                partial_errors[cid] = partial
+            log.info("playlist_test_apply %s: %d sent, %d failed (%s)",
+                     cid, counts["sent"], counts["errored"], budget)
+            if counts["stopped"]:
+                break
+    if crashed:
+        raise job_status.JobRunFailed("playlist_test_apply", crashed)
+    return {"partial_errors": partial_errors} if partial_errors else None
+
+
+def test_dates(channel_id: str) -> tuple[date, date] | None:
+    """(test_start, test_end): the Pacific dates of the channel's first
+    `first_applied_at` and last `last_applied_at` over its treated arms. None
+    until the test is dosed (no treated arm `planned` or `applying`), and when
+    no add ever landed. Holdout arms have no dates of their own."""
+    arms = all_rows(
+        supabase().table("playlist_arms").select("id,status,first_applied_at,last_applied_at")
+        .eq("channel_id", channel_id).eq("arm", PlaylistArm.TREATED))
+    if not arms or any(a["status"] in _OPEN for a in arms):
+        return None
+    firsts = [_day(a["first_applied_at"]) for a in arms if a.get("first_applied_at")]
+    lasts = [_day(a["last_applied_at"]) for a in arms if a.get("last_applied_at")]
+    if not firsts:
+        return None
+    return min(firsts), max(lasts)
+
+
+# The module's name matches pytest's `*_test.py`, and this is no test.
+test_dates.__test__ = False

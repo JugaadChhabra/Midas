@@ -295,13 +295,15 @@ class DecideBody(BaseModel):
 
 @router.post("/channels/{channel_id}/playlists/proposals/decide")
 def decide_proposals(channel_id: str, body: DecideBody):
-    """Approve or reject a list of proposal IDs. Approved adds/removes execute immediately."""
+    """Approve or reject a list of proposal IDs. Approved adds/removes execute immediately,
+    except the playlist test's (`arm_id` set): those are only marked approved, and
+    the daily `playlist_test_apply` job sends them (app/playlist_test.py, spec Part 5 S2.2)."""
     if body.decision not in ("approved", "rejected"):
         from fastapi import HTTPException
         raise HTTPException(400, "decision must be 'approved' or 'rejected'")
 
     now = datetime.now(timezone.utc).isoformat()
-    executed = rejected = 0
+    executed = rejected = queued = 0
 
     if body.decision == "rejected":
         supabase().table("playlist_proposals").update(
@@ -320,6 +322,13 @@ def decide_proposals(channel_id: str, body: DecideBody):
     yt_clients: dict[str, object] = {}
 
     for p in proposals:
+        if p.get("arm_id") is not None:
+            supabase().table("playlist_proposals").update(
+                {"status": "approved", "decided_at": now}
+            ).eq("id", p["id"]).execute()
+            queued += 1
+            continue
+
         playlist_id = p["playlist_id"]
         video_id = p["video_id"]
 
@@ -351,4 +360,6 @@ def decide_proposals(channel_id: str, body: DecideBody):
             import logging
             logging.getLogger("midas.playlists").warning("Failed to execute proposal %s: %s", p["id"], e)
 
+    if queued:
+        return {"executed": executed, "rejected": rejected, "queued": queued}
     return {"executed": executed, "rejected": rejected}
