@@ -35,6 +35,8 @@ STATUS_JS = REPO / "app/static/status.js"
 INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql"
 WARM_POOL_SQL = REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"
 LEVER_VERDICTS_SQL = REPO / "supabase/migrations/20261023010000_lever_verdicts.sql"
+PLAYLIST_ARMS_SQL = REPO / "supabase/migrations/20261027000000_playlist_arms.sql"
+CHANNEL_HTML = REPO / "app/static/channel.html"
 
 
 def _sql_not_in_lists(sql: str) -> list[set[str]]:
@@ -222,3 +224,29 @@ def test_lever_verdict_values_are_the_persisted_strings():
                            ("verdict", sv.ALL_LEVER_VERDICTS)):
         [line] = [l for l in ddl.splitlines() if l.strip().startswith(column + " ")]
         assert set(line.split("--")[1].strip().split("|")) == values
+
+
+def test_playlist_arm_values_are_the_persisted_strings():
+    """playlist_arms.arm, .status and .measurement_status (Slice 2 S2.1), as the
+    migration's comments list them."""
+    assert sv.ALL_PLAYLIST_ARMS == {"treated", "holdout"}
+    assert sv.ALL_PLAYLIST_ARM_STATUSES == {
+        "planned", "applying", "dosed", "no_dose", "holdout", "judged", "insufficient_data"}
+    assert sv.ALL_PLAYLIST_ARM_MEASUREMENTS == {"awaiting_window", "measuring", "done"}
+    assert not sv.ALL_PLAYLIST_ARM_MEASUREMENTS & {
+        sv.PlaylistArmStatus.JUDGED, sv.PlaylistArmStatus.INSUFFICIENT_DATA}
+    ddl = PLAYLIST_ARMS_SQL.read_text()
+    for column, values in (("arm", sv.ALL_PLAYLIST_ARMS),
+                           ("status", sv.ALL_PLAYLIST_ARM_STATUSES),
+                           ("measurement_status", sv.ALL_PLAYLIST_ARM_MEASUREMENTS)):
+        [line] = [l for l in ddl.splitlines() if l.strip().startswith(column + " ")]
+        assert set(line.split("--")[1].strip().split("|")) == values
+
+
+def test_the_experiment_decision_source_is_labelled_in_the_proposals_card():
+    """playlist_proposals.decision_source `experiment` (S2.1), and its mirror,
+    DECIDED_BY in channel.html: unlabelled, the card would show the raw string."""
+    assert sv.PlaylistProposalSource.EXPERIMENT == "experiment"
+    block = re.search(r"const DECIDED_BY = \{(.*?)\n  \};", CHANNEL_HTML.read_text(), re.S)
+    assert block, "DECIDED_BY not found in channel.html"
+    assert re.search(r"^\s*experiment:\s*'Playlist test',", block.group(1), re.M)
