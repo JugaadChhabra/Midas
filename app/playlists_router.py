@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import supabase
-from app.rows import all_rows
+from app.rows import all_rows, rows_for_ids
 from app.embeddings import bootstrap_embeddings, embedded_video_ids
 from app.openrouter import EMBED_MODEL
 from app.playlists import reconcile_channel, _record_assignment
@@ -270,22 +270,24 @@ def reconcile(channel_id: str):
 
 @router.get("/channels/{channel_id}/playlists/proposals")
 def list_proposals(channel_id: str):
-    """List pending playlist proposals for a channel."""
+    """List every pending playlist proposal for a channel: the playlist test's
+    (`arm_id` set) first, then the rest, each oldest first.
+
+    Paged past PostgREST's 1,000-row cap: the frozen engine's backlog alone is
+    over it, which hid the test's newer proposals from the card (#93)."""
     playlist_ids = [
-        p["id"] for p in (
-            supabase().table("playlists").select("id").eq("channel_id", channel_id).execute()
-        ).data or []
+        p["id"] for p in all_rows(
+            supabase().table("playlists").select("id").eq("channel_id", channel_id)
+        )
     ]
     if not playlist_ids:
         return []
-    return (
-        supabase().table("playlist_proposals")
-        .select("*")
-        .in_("playlist_id", playlist_ids)
-        .eq("status", "pending")
-        .order("proposed_at", desc=False)
-        .execute()
-    ).data or []
+    rows = rows_for_ids(
+        lambda chunk: supabase().table("playlist_proposals").select("*")
+        .in_("playlist_id", chunk).eq("status", "pending"),
+        playlist_ids,
+    )
+    return sorted(rows, key=lambda p: (p.get("arm_id") is None, p.get("proposed_at") or "", p["id"]))
 
 
 class DecideBody(BaseModel):
