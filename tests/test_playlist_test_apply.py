@@ -572,3 +572,21 @@ def test_only_channels_with_open_treated_arms_are_worked():
     with wired(sb, yt):
         assert playlist_test.run_apply() is None
     assert yt.calls == [] and sb.writes == []
+
+
+def test_the_card_lists_every_pending_proposal_past_the_row_cap_test_ones_first():
+    """The card read one capped page, oldest first: with 1,000+ old engine
+    proposals pending, the playlist test's (newer) never showed (#93 D3)."""
+    from tests.test_backlink_candidates import postgrest_cap
+    old = [{**proposal(i, None, "PL1", f"old{i:05d}", status="pending"),
+            "decision_source": "embedding", "proposed_at": f"2026-09-01T00:00:{i % 60:02d}+00:00"}
+           for i in range(1, 1201)]
+    test = [{**proposal(5000 + i, 7, "PL1", f"new{i}", status="pending"),
+             "proposed_at": "2026-10-26T04:10:00+00:00"} for i in range(3)]
+    done = {**proposal(6000, 7, "PL1", "done"), "proposed_at": "2026-10-26T04:10:00+00:00"}
+    sb = _proposals_world(*old, *test, done)
+    with patch.object(playlists_router, "supabase", return_value=sb), postgrest_cap():
+        listed = playlists_router.list_proposals(CH)
+    assert len(listed) == 1203
+    assert [p["id"] for p in listed[:3]] == [5000, 5001, 5002]
+    assert len({p["id"] for p in listed}) == 1203
