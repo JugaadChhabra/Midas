@@ -14,7 +14,15 @@ window is the sum of those views over its targets:
 The weekly `lever_measurement` job (S1.6b, app/lever_verdicts.py `run_weekly`)
 calls `measure_channel` per channel, then writes the week's verdicts.
 
-Which rows: `backlinks` interventions on the channel (the source's channel),
+Short links (Slice 2 S2.6, #92) are measured the same way, as human backlinks
+are: a Short S linked to a video B sends views that land as `video_id = B,
+source_type = 32 (related video), source_detail = S` (A1.1; B1 keeps type-32
+detail, `traffic_poll.keeps_detail`). Source = `payload.short_id`, targets =
+[`video_id`], the floor on the Short's own views. Only `human` rows: the team
+sets the link in Studio (P4), ticked (S2.5) or seen in the traffic (S2.6).
+
+Which rows: `backlinks` and `short_link` interventions on the channel (the
+source's channel),
 
   - treated (`midas`, arm `treated`, `measuring`): d0 = the `applied_at` date;
   - holdout (`midas`, arm `holdout`, `holdout`): d0 = the `created_at` date;
@@ -73,13 +81,15 @@ EXTENDED_DAYS = 14
 RESTATEMENT_HORIZON_DAYS = 28
 
 _SUGGESTED = 7
+#: The traffic source type each lever's pair views arrive as.
+SOURCE_TYPES = {InterventionLever.BACKLINKS: _SUGGESTED, InterventionLever.SHORT_LINK: 32}
 #: Traffic data-days are YouTube's, which roll over on Pacific time (as reach's,
 #: app/reach.py), so d0 is the Pacific date of the timestamp: the apply's own
 #: data-day, never in either window, whatever the UTC hour.
 _DATA_DAY_TZ = ZoneInfo("America/Los_Angeles")
 
 _DECIDED = (InterventionStatus.JUDGED, InterventionStatus.INSUFFICIENT_DATA)
-_COLUMNS = ("id,video_id,channel_id,origin,arm,status,payload,applied_at,created_at,"
+_COLUMNS = ("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,created_at,"
             "detected_at,measurement_status,measurement_result")
 
 Window = tuple[str, str]
@@ -111,10 +121,25 @@ def windows(d0: date, post_days: int = WEEK) -> tuple[Window, Window]:
     return pre, post
 
 
+def _lever(row: dict) -> str:
+    return row.get("lever") or InterventionLever.BACKLINKS
+
+
+def source(row: dict) -> str:
+    """The video whose views the pair carries: a Short link's Short (S2.5's
+    `payload.short_id`), else the intervention's own video."""
+    if _lever(row) == InterventionLever.SHORT_LINK:
+        return (row.get("payload") or {}).get("short_id")
+    return row["video_id"]
+
+
 def targets(row: dict) -> list[str]:
     """The intervention's target video ids: a Midas row's `payload.targets`
-    (S1.4b), a human row's single `payload.target_video_id` (B3a)."""
+    (S1.4b), a human row's single `payload.target_video_id` (B3a), a Short
+    link's own video (S2.5)."""
     payload = row.get("payload") or {}
+    if _lever(row) == InterventionLever.SHORT_LINK:
+        return [row["video_id"]]
     if row.get("origin") == InterventionOrigin.HUMAN:
         target = payload.get("target_video_id")
         return [target] if target else []
@@ -125,12 +150,13 @@ def _in(window: Window, day: str) -> bool:
     return window[0] <= day <= window[1]
 
 
-def _pair_rows(source: str, target_ids: list[str], span: Window) -> list[dict]:
+def _pair_rows(source: str, target_ids: list[str], span: Window,
+               source_type: int) -> list[dict]:
     return rows_for_ids(
         lambda chunk: supabase().table("video_traffic_source_daily")
         .select("video_id,date,views")
         .in_("video_id", chunk)
-        .eq("source_type", _SUGGESTED)
+        .eq("source_type", source_type)
         .eq("source_detail", source)
         .gte("date", span[0])
         .lte("date", span[1]),
@@ -138,9 +164,11 @@ def _pair_rows(source: str, target_ids: list[str], span: Window) -> list[dict]:
     )
 
 
-def pair_views(source: str, target_ids: list[str], window: Window) -> int:
-    """Views the targets got as suggested (type 7) from `source`, over `window`."""
-    return sum(r["views"] for r in _pair_rows(source, target_ids, window)
+def pair_views(source: str, target_ids: list[str], window: Window,
+               source_type: int = _SUGGESTED) -> int:
+    """Views the targets got from `source` as `source_type` (suggested, 7, for
+    backlinks; related video, 32, for Short links), over `window`."""
+    return sum(r["views"] for r in _pair_rows(source, target_ids, window, source_type)
                if _in(window, r["date"]))
 
 
@@ -157,7 +185,8 @@ def source_views(source: str, window: Window) -> int:
 
 
 def _result(source: str, target_ids: list[str], d0: date, post_days: int,
-            views_of_source: int, missing: Callable[[Window, Window], list[str]]) -> dict:
+            views_of_source: int, missing: Callable[[Window, Window], list[str]],
+            source_type: int = _SUGGESTED) -> dict:
     """`measurement_result` for a decided row. `delta` is in views per week:
     an extended post window is scaled to 7 days before the pre is subtracted,
     so it compares with the 7-day pre and with unextended rows.
@@ -167,8 +196,8 @@ def _result(source: str, target_ids: list[str], d0: date, post_days: int,
     window). They count as zero views; the row says so instead of hiding it.
     """
     pre, post = windows(d0, post_days)
-    pre_views = pair_views(source, target_ids, pre)
-    post_views = pair_views(source, target_ids, post)
+    pre_views = pair_views(source, target_ids, pre, source_type)
+    post_views = pair_views(source, target_ids, post, source_type)
     delta = (post_views - pre_views if post_days == WEEK
              else post_views * WEEK / post_days - pre_views)
     return {
@@ -194,28 +223,34 @@ def evaluate(row: dict, complete_through: Callable[[str], bool],
     d0 = as_of(row)
     if d0 is None:
         raise ValueError(f"intervention {row.get('id')} has no as-of date")
-    source, target_ids = row["video_id"], targets(row)
+    source_id, target_ids = source(row), targets(row)
+    if not source_id:
+        raise ValueError(f"intervention {row.get('id')} has no source")
     if not target_ids:
         raise ValueError(f"intervention {row.get('id')} has no targets")
+    source_type = SOURCE_TYPES[_lever(row)]
 
     for post_days, waiting in ((WEEK, InterventionMeasurement.AWAITING_WINDOW),
                                (EXTENDED_DAYS, InterventionMeasurement.EXTENDED)):
         _, post = windows(d0, post_days)
         if not complete_through(post[1]):
             return waiting, None, None
-        seen = source_views(source, post)
+        seen = source_views(source_id, post)
         if seen >= settings.LEVER_MIN_SOURCE_VIEWS:
             return (InterventionMeasurement.DONE, InterventionStatus.JUDGED,
-                    _result(source, target_ids, d0, post_days, seen, missing))
+                    _result(source_id, target_ids, d0, post_days, seen, missing, source_type))
     # Extended once and still under the floor (Part 2 §1.7).
     return (InterventionMeasurement.DONE, InterventionStatus.INSUFFICIENT_DATA,
-            _result(source, target_ids, d0, EXTENDED_DAYS, seen, missing))
+            _result(source_id, target_ids, d0, EXTENDED_DAYS, seen, missing, source_type))
 
 
 def _measured(row: dict, channel_id: str) -> bool:
-    """Whether the row is one of the three kinds this measures."""
+    """Whether the row is one of the kinds this measures: a Short link only
+    as a human row."""
     if row.get("origin") == InterventionOrigin.HUMAN:
         return channel_id in settings.TRAFFIC_INGEST_CHANNELS
+    if _lever(row) == InterventionLever.SHORT_LINK:
+        return False
     return row.get("arm") in (InterventionArm.TREATED, InterventionArm.HOLDOUT)
 
 
@@ -233,11 +268,11 @@ def _in_horizon(row: dict, today: date) -> bool:
 
 
 def _rows(channel_id: str, today: date) -> list[dict]:
-    """The channel's backlinks rows awaiting a verdict, and the decided ones
-    still within the restatement horizon."""
+    """The channel's backlinks and Short-link rows awaiting a verdict, and the
+    decided ones still within the restatement horizon."""
     def base():
         return (supabase().table("interventions").select(_COLUMNS)
-                .eq("channel_id", channel_id).eq("lever", InterventionLever.BACKLINKS))
+                .eq("channel_id", channel_id).in_("lever", list(SOURCE_TYPES)))
 
     pending = all_rows(base().in_("status", [InterventionStatus.MEASURING,
                                              InterventionStatus.HOLDOUT,
@@ -267,7 +302,8 @@ def _target_channels(rows: list[dict]) -> dict[str, str]:
 
 
 def measure_channel(channel_id: str, *, today: date | None = None) -> dict:
-    """Measure the channel's backlinks interventions (source on the channel).
+    """Measure the channel's backlinks and Short-link interventions (source on
+    the channel).
 
     Returns counts: `attempted` and `errored` (rows, for
     job_status.item_error_verdict), `judged`, `insufficient_data`,

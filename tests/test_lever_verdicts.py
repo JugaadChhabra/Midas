@@ -5,14 +5,14 @@ The real write_verdicts, run_weekly, measure_channel and rows paging run
 against FakeSupabase.
 """
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi.testclient import TestClient
 
-from app import agent_tick, eligibility, job_status, lever_measurement, main, reach
+from app import agent_tick, eligibility, interventions, job_status, lever_measurement, main, reach, short_links
 from app import lever_verdicts as lv
 from app.config import settings
 from app.job_status import JobRunFailed, JobStatusRegistry
@@ -420,3 +420,106 @@ def test_lever_verdicts_endpoint_reads_past_the_row_cap():
     with db(verdicts=verdicts), postgrest_cap():
         body = TestClient(main.app).get(f"/channels/{CH}/lever-verdicts").json()
     assert len(body["verdicts"]) == 1205
+
+
+# ── Short links (Slice 2 S2.6, #92) ──────────────────────────────────────
+
+def short_link(id_, delta, week, **kw) -> dict:
+    return {**human(id_, delta, week, **kw), "lever": "short_link"}
+
+
+def test_short_link_rows_get_human_verdict_rows_and_never_a_lift_or_a_stop():
+    rows = [short_link(1, 6, W1), short_link(2, 2, W1), short_link(3, 9, W2),
+            human(4, 50, W1), judged(5, "treated", 4, W1), judged(6, "holdout", 1, W1)]
+    with db(rows) as sb, patch.object(settings, "BACKLINK_EXPERIMENT_WINDOWS", 1):
+        lv.write_verdicts(CH, today=W1, lever="short_link")
+        lv.write_verdicts(CH, today=W2, lever="short_link")
+        stopped = lv.stopped(CH, "short_link")
+    mine = sorted((r for r in sb.rows("lever_verdicts") if r["lever"] == "short_link"),
+                  key=lambda r: r["week_start"])
+    assert [(r["arm_scope"], r["week_start"], r["n_treated"], r["treated_mean_delta"],
+             r["windows_judged"]) for r in mine] == [
+        ("human", "2026-10-05", 2, 4, 1), ("human", "2026-10-12", 1, 9, 2)]
+    for r in mine:
+        assert r["n_holdout"] == 0 and r["holdout_mean_delta"] is None
+        assert r["lift"] is None and r["cumulative_lift"] is None and r["verdict"] is None
+        assert r["stop_rule_triggered"] is False
+    assert stopped is False
+    # Backlinks' rows are written by their own call, untouched by this one.
+    assert [r for r in sb.rows("lever_verdicts") if r["lever"] == "backlinks"] == []
+
+
+def test_the_job_detects_short_links_before_measuring_on_traffic_ingest_channels():
+    calls = []
+    with db(channels=({"id": CH}, {"id": OTHER})), \
+         patch.object(settings, "TRAFFIC_INGEST_CHANNELS", {CH}), \
+         patch.object(short_links, "detect",
+                      side_effect=lambda cid: calls.append(("detect", cid))
+                      or {"attempted": 0, "errored": 0}), \
+         patch.object(lever_measurement, "measure_channel",
+                      side_effect=lambda cid, **_: calls.append(("measure", cid))
+                      or {"attempted": 0, "errored": 0}), \
+         patch.object(lv, "write_verdicts",
+                      side_effect=lambda cid, lever="backlinks", **_:
+                      calls.append(("verdicts", cid, lever))):
+        assert lv.run_weekly() is None
+    mine = [c for c in calls if c[1] == CH]
+    assert mine == [("detect", CH), ("measure", CH), ("verdicts", CH, "backlinks"),
+                    ("verdicts", CH, "short_link")]
+    assert [c for c in calls if c[1] == OTHER] == [("measure", OTHER),
+                                                   ("verdicts", OTHER, "backlinks")]
+
+
+@pytest.mark.parametrize("detected, outcome", [
+    ({"attempted": 2, "errored": 2}, {CH: "ItemsFailed: short-link pairs: all 2 failed"}),
+    ({"attempted": 2, "errored": 1}, {"partial_errors": {CH: "short-link pairs: 1/2 failed"}}),
+    (RuntimeError("boom"), {CH: "RuntimeError: boom"}),
+])
+def test_detection_errors_are_their_own_category_and_measurement_still_runs(detected, outcome):
+    with db(), patch.object(settings, "TRAFFIC_INGEST_CHANNELS", {CH}), \
+         patch.object(short_links, "detect", side_effect=[detected]
+                      if isinstance(detected, Exception) else None,
+                      return_value=detected), \
+         patch.object(lever_measurement, "measure_channel",
+                      return_value={"attempted": 0, "errored": 0}) as measure, \
+         patch.object(lv, "write_verdicts") as write:
+        if "partial_errors" in outcome:
+            assert lv.run_weekly() == outcome
+        else:
+            with pytest.raises(JobRunFailed) as exc:
+                lv.run_weekly()
+            assert exc.value.failed_channels == outcome
+    measure.assert_called_once()
+    assert write.call_count == 2
+
+
+def test_the_real_job_end_to_end_detects_measures_and_writes_the_short_link_week():
+    """A Short link seen in the traffic is recorded, judged on type 32 and
+    lands in a `short_link` human verdict row, in one run."""
+    short, target = "short000001", "tgtVideo001"
+    # judged_at is the wall clock, which picks the verdict week: dates are relative to it.
+    today = datetime.now(timezone.utc).date()
+    d0 = today - timedelta(days=20)
+    days = [date.fromordinal(d0.toordinal() + n).isoformat() for n in range(-10, 11)]
+    traffic = ([{"video_id": target, "channel_id": CH, "date": d, "source_type": 32,
+                 "source_detail": short, "views": 3} for d in days if d >= d0.isoformat()]
+               + [{"video_id": short, "channel_id": CH, "date": d, "source_type": 24,
+                   "source_detail": "", "views": 50} for d in days])
+    ingested = [{"report_id": d, "channel_id": CH, "report_type": "channel_traffic_source_a3",
+                 "data_date": d} for d in days]
+    with db() as sb, patch.object(settings, "TRAFFIC_INGEST_CHANNELS", {CH}), \
+         patch.object(short_links, "supabase", return_value=sb), \
+         patch.object(interventions, "supabase", return_value=sb):
+        sb._tables["video_traffic_source_daily"].extend(traffic)
+        sb._tables["reporting_reports_ingested"].extend(ingested)
+        sb._tables["videos"].extend([{"id": short, "channel_id": CH, "is_short": True},
+                                     {"id": target, "channel_id": CH, "is_short": False}])
+        sb._tables["short_link_recommendations"] = []
+        sb._serial.add("interventions")
+        assert lv.run_weekly(today=today) is None
+    [row] = [r for r in sb.rows("interventions") if r["lever"] == "short_link"]
+    assert row["status"] == "judged"
+    assert row["measurement_result"]["window"]["d0"] == d0.isoformat()
+    assert row["measurement_result"]["post"] == 21 and row["measurement_result"]["pre"] == 0
+    [verdict] = [r for r in sb.rows("lever_verdicts") if r["lever"] == "short_link"]
+    assert verdict["arm_scope"] == "human" and verdict["treated_mean_delta"] == 21

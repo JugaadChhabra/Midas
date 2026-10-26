@@ -37,6 +37,11 @@ set.
 The playlist test's verdicts (Slice 2 S2.3, `lever = 'playlist'`) are written
 by app/playlist_test.py `measure_channel`, which run_weekly also calls, with
 `directional` and this table's key.
+
+Short links (Slice 2 S2.6, `lever = 'short_link'`) are human rows only, so
+`write_verdicts(lever='short_link')` writes `human` rows alone, as backlinks'
+human rows: no lift, no verdict, never a stop. Before measuring, run_weekly has
+app/short_links.py `detect` record the links seen in the traffic.
 """
 from __future__ import annotations
 
@@ -45,7 +50,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app import eligibility, job_status, lever_measurement, playlist_test
+from app import eligibility, job_status, lever_measurement, playlist_test, short_links
 from app.config import settings
 from app.db import supabase
 from app.rows import PAGE_SIZE, all_rows
@@ -153,9 +158,10 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
     return out
 
 
-def write_verdicts(channel_id: str, *, today: date | None = None) -> dict[str, dict]:
-    """Write the week's verdict rows for the channel; returns the current week's
-    by scope.
+def write_verdicts(channel_id: str, *, today: date | None = None,
+                   lever: str = InterventionLever.BACKLINKS) -> dict[str, dict]:
+    """Write the week's verdict rows of the lever (backlinks, or the human-only
+    short_link) for the channel; returns the current week's by scope.
 
     Also writes an earlier week that has judged rows and no verdict row of any
     scope yet. A scope with no row this week has any row a same-week earlier
@@ -164,7 +170,6 @@ def write_verdicts(channel_id: str, *, today: date | None = None) -> dict[str, d
     """
     today = today or datetime.now(timezone.utc).date()
     current = week_start(today)
-    lever = InterventionLever.BACKLINKS
     judged = all_rows(
         supabase().table("interventions")
         .select("id,origin,arm,status,measurement_result")
@@ -227,7 +232,10 @@ def run_weekly(*, today: date | None = None) -> dict | None:
     """APScheduler entry point (`lever_measurement`). Per channel: S1.6a's
     measurement, then this week's verdicts; then, for a channel with
     `playlist_arms` rows, the playlist test's measurement and verdicts
-    (playlist_test.measure_channel, S2.3), errors under `playlist arms`.
+    (playlist_test.measure_channel, S2.3), errors under `playlist arms`. On a
+    channel in TRAFFIC_INGEST_CHANNELS, first the Short links seen in its
+    traffic (short_links.detect, S2.6), errors under `short-link pairs`, and
+    after backlinks' verdicts the week's `short_link` ones.
 
     traffic_poll's failure model: a channel that raises fails the run once
     every channel has run; per-row errors are judged by
@@ -251,6 +259,22 @@ def run_weekly(*, today: date | None = None) -> dict | None:
         log.error("lever_measurement: playlist_arms unreadable; playlist test skipped: %s", e)
         drawn = set()
     for cid in eligibility.channel_ids_for(eligibility.Job.EVERY):
+        ingested = cid in settings.TRAFFIC_INGEST_CHANNELS
+        if ingested:
+            # Short links seen in the traffic (S2.6), so they're measured below.
+            # Its own category: a failure here doesn't stop the measurement.
+            try:
+                counts = short_links.detect(cid)
+                failure, partial = job_status.item_error_verdict(
+                    {short_links.PAIRS: (counts["errored"], counts["attempted"])})
+                if failure:
+                    log.error("lever_measurement %s: every Short-link pair failed: %s", cid, failure)
+                    note(crashed, cid, f"ItemsFailed: {failure}")
+                elif partial:
+                    note(partial_errors, cid, partial)
+            except Exception as e:
+                log.exception("lever_measurement %s: Short-link detection crashed: %s", cid, e)
+                note(crashed, cid, job_status.describe(e))
         try:
             counts = lever_measurement.measure_channel(cid, today=today)
             failure, partial = job_status.item_error_verdict(
@@ -260,6 +284,8 @@ def run_weekly(*, today: date | None = None) -> dict | None:
                 note(crashed, cid, f"ItemsFailed: {failure}")
             else:
                 write_verdicts(cid, today=today)
+                if ingested:
+                    write_verdicts(cid, today=today, lever=InterventionLever.SHORT_LINK)
                 if partial:
                     note(partial_errors, cid, partial)
         except Exception as e:
