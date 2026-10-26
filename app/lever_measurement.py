@@ -51,7 +51,7 @@ within RESTATEMENT_HORIZON_DAYS, so a restated day is re-read on the next run.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Callable
 from zoneinfo import ZoneInfo
 
@@ -81,8 +81,10 @@ EXTENDED_DAYS = 14
 RESTATEMENT_HORIZON_DAYS = 28
 
 _SUGGESTED = 7
+_RELATED_VIDEO = 32
 #: The traffic source type each lever's pair views arrive as.
-SOURCE_TYPES = {InterventionLever.BACKLINKS: _SUGGESTED, InterventionLever.SHORT_LINK: 32}
+SOURCE_TYPES = {InterventionLever.BACKLINKS: _SUGGESTED,
+                InterventionLever.SHORT_LINK: _RELATED_VIDEO}
 #: Traffic data-days are YouTube's, which roll over on Pacific time (as reach's,
 #: app/reach.py), so d0 is the Pacific date of the timestamp: the apply's own
 #: data-day, never in either window, whatever the UTC hour.
@@ -103,6 +105,12 @@ def _day(value) -> date | None:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(_DATA_DAY_TZ).date()
+
+
+def data_day_start(day: str) -> str:
+    """A data-day's first instant (Pacific midnight), which `_day` reads back
+    as that day: the timestamp for a row detected on a data-day (S2.6)."""
+    return datetime.combine(date.fromisoformat(day), time(), tzinfo=_DATA_DAY_TZ).isoformat()
 
 
 def as_of(row: dict) -> date | None:

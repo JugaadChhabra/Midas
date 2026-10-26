@@ -41,7 +41,7 @@ import csv
 import io
 import logging
 from collections import defaultdict
-from datetime import date, datetime, time, timezone
+from datetime import datetime, timezone
 from typing import Literal, Mapping, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Query
@@ -76,6 +76,8 @@ _RELATED_VIDEO = 32
 SHORTS = "shorts"
 #: The same, for the detection's per-pair errors (S2.6, in `lever_measurement`).
 PAIRS = "short-link pairs"
+#: `payload.timing` of a Short link seen in the traffic rather than ticked (S2.6).
+INFERRED_TIMING = "inferred_from_traffic"
 
 
 class Targets(NamedTuple):
@@ -532,13 +534,6 @@ def dismiss_short_link(recommendation_id: int):
 
 # ── S2.6: the links seen in the traffic ──────────────────────────────────
 
-def _data_day_start(day: str) -> str:
-    """A data-day's first instant (Pacific midnight), so `lever_measurement.as_of`
-    reads it back as that day."""
-    return datetime.combine(date.fromisoformat(day), time(),
-                            tzinfo=lever_measurement._DATA_DAY_TZ).isoformat()
-
-
 def seen_pairs(channel_id: str) -> list[dict]:
     """The (Short, target) pairs in the channel's traffic: type-32 rows on one
     of its videos (`video_id` = the target, in `videos`) whose `source_detail`
@@ -611,7 +606,7 @@ def detect(channel_id: str) -> dict:
         counts["attempted"] += 1
         try:
             rec = recs.get((pair["short_id"], pair["target_video_id"]))
-            at = _data_day_start(pair["first_day"])
+            at = lever_measurement.data_day_start(pair["first_day"])
             if rec and not rec.get("seen_at"):
                 (supabase().table("short_link_recommendations").update({"seen_at": at})
                  .eq("id", rec["id"]).execute())
@@ -626,7 +621,7 @@ def detect(channel_id: str) -> dict:
                 detected_at=at, ledger_key=key,
                 payload={"short_id": pair["short_id"],
                          "target_video_id": pair["target_video_id"],
-                         "recommended": rec is not None, "timing": "inferred_from_traffic"},
+                         "recommended": rec is not None, "timing": INFERRED_TIMING},
             )
             if stored:
                 counts["inferred"] += 1
