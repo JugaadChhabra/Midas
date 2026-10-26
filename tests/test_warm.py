@@ -286,6 +286,33 @@ def test_warm_pool_applies_the_explore_share_over_the_ranking():
     assert [r["id"] for r in pool] == [f"v{i}" for i in range(19, -1, -1)]
 
 
+def test_the_pick_leaves_out_shorts_and_keeps_unprobed_videos():
+    """A backlink block on a Short isn't clickable. ranked_pool (the SQL twin)
+    keeps them; warm_pool, the pick, drops them. NULL is_short stays in."""
+    vids = [video("long"), {**video("short"), "is_short": True}, {**video("unprobed"), "is_short": None}]
+    sb = sb_for(reach_rows=[reach("long", 900), reach("short", 5000), reach("unprobed", 700)],
+                videos=vids)
+    with patch.object(warm, "supabase", return_value=sb), \
+         patch("app.reach.supabase", return_value=sb), \
+         patch.object(warm.settings, "WARM_POOL_USE_RPC", False):
+        ranked = [r["id"] for r in warm.ranked_pool(CH)]
+        picked = [r["id"] for r in warm.warm_pool(CH, rng=random.Random(0))
+                  if not r["explore"]]
+        everything = {r["id"] for r in warm.warm_pool(CH, rng=random.Random(0))}
+    assert ranked == ["short", "long", "unprobed"]
+    assert everything == {"long", "unprobed"} and "short" not in picked
+
+
+def test_the_rpc_pick_leaves_out_shorts_too():
+    rows = [{"id": "short", "impressions": 5000}, {"id": "long", "impressions": 900}]
+    sb = FakeSupabase({"videos": [{**video("short"), "is_short": True}, video("long")]},
+                      rpc={"warm_pool": rows})
+    with patch.object(warm, "supabase", return_value=sb), \
+         patch.object(warm.settings, "WARM_POOL_USE_RPC", True), \
+         patch.object(warm.settings, "WARM_EXPLORE_PCT", 0.0):
+        assert [r["id"] for r in warm.warm_pool(CH)] == ["long"]
+
+
 # ── the RPC path ──────────────────────────────────────────────────────────
 
 def test_rpc_path_pages_the_function_and_passes_the_settings():

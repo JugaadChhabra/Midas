@@ -32,6 +32,11 @@ drawn here, over either, with an injectable `random.Random`.
 
 The agent tick (app/agent_tick.py, S1.4b) picks from `warm_pool`; the tick
 checks `channels.agent_enabled` itself (`eligibility.can_run_agent`).
+
+`warm_pool` also leaves out Shorts (`videos.is_short` true; NULL, not yet
+probed, stays in), on either path: links in a Short's description aren't
+clickable, so a backlink block there is a wasted apply and a row the
+experiment can't learn from. `ranked_pool` stays the twin of the SQL function.
 """
 from __future__ import annotations
 
@@ -184,7 +189,19 @@ def explore_order(ranked: list[dict], explore_pct: float, rng: random.Random) ->
     return order
 
 
+def _without_shorts(pool: list[dict]) -> list[dict]:
+    shorts = {
+        v["id"] for v in rows_for_ids(
+            lambda c: supabase().table("videos").select("id,is_short").in_("id", c),
+            [r["id"] for r in pool],
+        )
+        if v.get("is_short") is True
+    }
+    return [r for r in pool if r["id"] not in shorts]
+
+
 def warm_pool(channel_id: str, *, rng: random.Random | None = None) -> list[dict]:
-    """The channel's warm pool in pick order, WARM_EXPLORE_PCT of it exploration."""
-    return explore_order(ranked_pool(channel_id), settings.WARM_EXPLORE_PCT,
+    """The channel's warm pool in pick order, WARM_EXPLORE_PCT of it
+    exploration, Shorts left out (module docstring)."""
+    return explore_order(_without_shorts(ranked_pool(channel_id)), settings.WARM_EXPLORE_PCT,
                          rng or random.Random())
