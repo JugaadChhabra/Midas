@@ -33,6 +33,10 @@ set.
     run_weekly()               -- the `lever_measurement` job: measure, then verdicts
     write_verdicts(channel_id) -- the week's rows (and any missed week's) for one channel
     stopped(channel_id)        -- the stop state triage reads
+
+The playlist test's verdicts (Slice 2 S2.3, `lever = 'playlist'`) are written
+by app/playlist_test.py `measure_channel`, which run_weekly also calls, with
+`directional` and this table's key.
 """
 from __future__ import annotations
 
@@ -41,7 +45,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app import eligibility, job_status, lever_measurement
+from app import eligibility, job_status, lever_measurement, playlist_test
 from app.config import settings
 from app.db import supabase
 from app.rows import PAGE_SIZE, all_rows
@@ -60,7 +64,8 @@ log = logging.getLogger("midas.lever_verdicts")
 
 router = APIRouter(tags=["interventions"])
 
-_ON_CONFLICT = "channel_id,lever,arm_scope,week_start"
+#: The table's unique key, which every verdict writer upserts on (playlist_test too).
+ON_CONFLICT = "channel_id,lever,arm_scope,week_start"
 
 
 def week_start(day: date) -> date:
@@ -91,21 +96,25 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def directional(lift: float) -> str:
-    """helped / no_change / worse against BACKLINK_MIN_LIFT (§1.5, D6)."""
-    if lift >= settings.BACKLINK_MIN_LIFT:
+def directional(lift: float, min_lift: float) -> str:
+    """helped / no_change / worse against the lever's `min_lift` (§1.5;
+    BACKLINK_MIN_LIFT, D6, or PLAYLIST_MIN_LIFT, E8)."""
+    if lift >= min_lift:
         return LeverVerdict.HELPED
-    if lift <= -settings.BACKLINK_MIN_LIFT:
+    if lift <= -min_lift:
         return LeverVerdict.WORSE
     return LeverVerdict.NO_CHANGE
 
 
-def verdicts(rows: list[dict], week: date, windows_before: dict[str, int]) -> dict[str, dict]:
+def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
+             min_lift: float, windows: int) -> dict[str, dict]:
     """{arm_scope: the verdict row's numbers} for `week`, from judged rows.
 
     `rows` are the channel's judged rows of one lever; those judged after
     `week` are ignored. `windows_before` counts each scope's verdict weeks
     before this one. A scope with nothing to report this week is absent.
+    `min_lift` and `windows` are the lever's verdict band and time box
+    (BACKLINK_MIN_LIFT, BACKLINK_EXPERIMENT_WINDOWS for backlinks).
     """
     this_week: dict[str, list[float]] = {}
     so_far: dict[str, list[float]] = {}
@@ -124,14 +133,13 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int]) -> di
         lift = _mean(treated) - _mean(held)
         cumulative = (_mean(so_far[InterventionArm.TREATED])
                       - _mean(so_far[InterventionArm.HOLDOUT]))
-        windows = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
+        windows_judged = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
         out[LeverVerdictScope.TREATED_VS_HOLDOUT] = {
             "n_treated": len(treated), "n_holdout": len(held),
             "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
-            "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows,
-            "verdict": directional(lift),
-            "stop_rule_triggered": (windows >= settings.BACKLINK_EXPERIMENT_WINDOWS
-                                    and cumulative < settings.BACKLINK_MIN_LIFT),
+            "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows_judged,
+            "verdict": directional(lift, min_lift),
+            "stop_rule_triggered": windows_judged >= windows and cumulative < min_lift,
         }
     human = this_week.get(LeverVerdictScope.HUMAN)
     if human:
@@ -180,7 +188,8 @@ def write_verdicts(channel_id: str, *, today: date | None = None) -> dict[str, d
             if v["week_start"] < week.isoformat():
                 windows_before[v["arm_scope"]] = windows_before.get(v["arm_scope"], 0) + 1
         this_week = {v["arm_scope"]: v for v in stored if v["week_start"] == week.isoformat()}
-        out = verdicts(judged, week, windows_before)
+        out = verdicts(judged, week, windows_before, min_lift=settings.BACKLINK_MIN_LIFT,
+                       windows=settings.BACKLINK_EXPERIMENT_WINDOWS)
         for scope in (LeverVerdictScope.TREATED_VS_HOLDOUT, LeverVerdictScope.HUMAN):
             key = {"channel_id": channel_id, "lever": lever, "arm_scope": scope,
                    "week_start": week.isoformat()}
@@ -188,7 +197,7 @@ def write_verdicts(channel_id: str, *, today: date | None = None) -> dict[str, d
             if scope in out:
                 row = {**key, **out[scope], "computed_at": now}
                 row["stop_rule_triggered"] = row["stop_rule_triggered"] or held
-                supabase().table("lever_verdicts").upsert(row, on_conflict=_ON_CONFLICT).execute()
+                supabase().table("lever_verdicts").upsert(row, on_conflict=ON_CONFLICT).execute()
                 stored = [v for v in stored if not (v["arm_scope"] == scope
                                                     and v["week_start"] == key["week_start"])]
                 stored.append(row)
@@ -216,7 +225,9 @@ def stopped(channel_id: str, lever: str = InterventionLever.BACKLINKS) -> bool:
 
 def run_weekly(*, today: date | None = None) -> dict | None:
     """APScheduler entry point (`lever_measurement`). Per channel: S1.6a's
-    measurement, then this week's verdicts.
+    measurement, then this week's verdicts; then, for a channel with
+    `playlist_arms` rows, the playlist test's measurement and verdicts
+    (playlist_test.measure_channel, S2.3), errors under `playlist arms`.
 
     traffic_poll's failure model: a channel that raises fails the run once
     every channel has run; per-row errors are judged by
@@ -226,6 +237,19 @@ def run_weekly(*, today: date | None = None) -> dict | None:
     """
     crashed: dict[str, str] = {}
     partial_errors: dict[str, str] = {}
+
+    def note(into: dict[str, str], cid: str, message: str) -> None:
+        into[cid] = "; ".join(filter(None, [into.get(cid), message]))
+
+    # The channels whose playlist test is drawn. A failed read (e.g. before
+    # 20261027000000 is applied) skips the playlist test this run, never
+    # backlinks: the next run recomputes every week anyway.
+    try:
+        drawn = {r["channel_id"] for r in all_rows(
+            supabase().table("playlist_arms").select("id,channel_id"))}
+    except Exception as e:
+        log.error("lever_measurement: playlist_arms unreadable; playlist test skipped: %s", e)
+        drawn = set()
     for cid in eligibility.channel_ids_for(eligibility.Job.EVERY):
         try:
             counts = lever_measurement.measure_channel(cid, today=today)
@@ -233,14 +257,30 @@ def run_weekly(*, today: date | None = None) -> dict | None:
                 {"interventions": (counts["errored"], counts["attempted"])})
             if failure:
                 log.error("lever_measurement %s: every intervention failed: %s", cid, failure)
-                crashed[cid] = f"ItemsFailed: {failure}"
-                continue
-            write_verdicts(cid, today=today)
-            if partial:
-                partial_errors[cid] = partial
+                note(crashed, cid, f"ItemsFailed: {failure}")
+            else:
+                write_verdicts(cid, today=today)
+                if partial:
+                    note(partial_errors, cid, partial)
         except Exception as e:
             log.exception("lever_measurement %s crashed: %s", cid, e)
-            crashed[cid] = job_status.describe(e)
+            note(crashed, cid, job_status.describe(e))
+        if cid not in drawn:
+            continue
+        # The playlist test (S2.3), its own category: a failure here doesn't
+        # stop the channel's backlinks above, nor theirs this.
+        try:
+            counts = playlist_test.measure_channel(cid)
+            failure, partial = job_status.item_error_verdict(
+                {playlist_test.ARMS: (counts["errored"], counts["attempted"])})
+            if failure:
+                log.error("lever_measurement %s: every playlist arm failed: %s", cid, failure)
+                note(crashed, cid, f"ItemsFailed: {failure}")
+            elif partial:
+                note(partial_errors, cid, partial)
+        except Exception as e:
+            log.exception("lever_measurement %s: playlist test crashed: %s", cid, e)
+            note(crashed, cid, job_status.describe(e))
     if crashed:
         raise job_status.JobRunFailed("lever_measurement", crashed)
     return {"partial_errors": partial_errors} if partial_errors else None

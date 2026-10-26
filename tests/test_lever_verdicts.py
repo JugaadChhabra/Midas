@@ -41,7 +41,7 @@ def human(id_, delta, week, **kw) -> dict:
 def db(interventions=(), verdicts=(), channels=({"id": CH},)):
     sb = FakeSupabase({"interventions": list(interventions), "lever_verdicts": list(verdicts),
                        "channels": list(channels), "video_traffic_source_daily": [],
-                       "reporting_reports_ingested": [], "videos": []})
+                       "reporting_reports_ingested": [], "videos": [], "playlist_arms": []})
     with patch.object(lv, "supabase", return_value=sb), \
          patch.object(agent_tick, "supabase", return_value=sb), \
          patch.object(lever_measurement, "supabase", return_value=sb), \
@@ -87,8 +87,7 @@ def test_lift_cumulative_lift_and_the_directional_verdict():
 @pytest.mark.parametrize("lift, verdict", [(1.0, "helped"), (0.99, "no_change"),
                                            (-0.99, "no_change"), (-1.0, "worse")])
 def test_the_verdict_band_is_plus_or_minus_backlink_min_lift(lift, verdict):
-    with patch.object(settings, "BACKLINK_MIN_LIFT", 1.0):
-        assert lv.directional(lift) == verdict
+    assert lv.directional(lift, 1.0) == verdict
 
 
 def test_insufficient_data_and_unjudged_rows_stay_out_of_the_means():

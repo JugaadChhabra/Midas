@@ -31,6 +31,18 @@ The job is the test's only YouTube write: `playlistItems.insert`, at the top
 in candidate rank (E2), behind PLAYLIST_APPLY_ENABLED and DRY_RUN, whole
 playlists at a time under its JobBudget. Nothing removes, renames or creates.
 
+S2.3, the measurement and verdict (E8):
+
+    measure_channel(channel_id)       -- weekly, from the `lever_measurement` job
+    GET /channels/{id}/playlist-test  -- dates, arms, verdicts and the answer
+
+The indicator is a playlist's `playlist_starts` (every video and source type),
+pre = the 28 data-days before the dose as a weekly mean, then post weeks after
+it. Each complete week writes a `lever = 'playlist'` row to `lever_verdicts`;
+at PLAYLIST_EXPERIMENT_WINDOWS the answer is "yes" unless the cumulative lift
+is under PLAYLIST_MIN_LIFT. Nothing reads it to stop anything: there is no
+further dose (E7), and the adds stay.
+
 Similarity is on B6 vectors only (`reembed.MODEL_VERSION`), against the
 channel's calibrated `join_high`; thresholds are never recalibrated here.
 Current members are the latest `playlist_assignments` action per pair being
@@ -40,10 +52,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
-from app import job_status, quota, warm
+from fastapi import APIRouter
+
+from app import job_status, lever_verdicts, quota, reach, warm
 from app.apply_outcome import ApplyOutcome
 from app.backlinks import NO_THRESHOLDS, THRESHOLDS_OTHER_MODEL, _thresholds
 from app.backlinks_apply import _classified
@@ -53,8 +67,16 @@ from app.embeddings import pooled_embeddings
 from app.lever_measurement import _day
 from app.playlists import _cosine_sim, _record_assignment
 from app.reembed import MODEL_VERSION, _members
+from app.reporting_client import PLAYLIST_TRAFFIC_REPORT_TYPE_ID
 from app.rows import all_rows, rows_for_ids
-from app.status_vocab import PlaylistArm, PlaylistArmStatus, PlaylistProposalSource
+from app.status_vocab import (
+    InterventionLever,
+    LeverVerdictScope,
+    PlaylistArm,
+    PlaylistArmMeasurement,
+    PlaylistArmStatus,
+    PlaylistProposalSource,
+)
 from app.youtube_client import youtube_for_channel, yt_playlist_items_insert
 
 log = logging.getLogger("midas.playlist_test")
@@ -575,3 +597,242 @@ def test_dates(channel_id: str) -> tuple[date, date] | None:
 
 # The module's name matches pytest's `*_test.py`, and this is no test.
 test_dates.__test__ = False
+
+
+# ── S2.3, the measurement and verdict ─────────────────────────────────────
+
+#: The pre window, in data-days, taken as a weekly mean (E8); a post week.
+PRE_DAYS = 28
+WEEK = 7
+
+#: The traffic-source type of a view from a playlist (type 14, B1).
+_PLAYLISTS = 14
+
+#: run_weekly's job_status.item_error_verdict category.
+ARMS = "playlist arms"
+
+#: GET /channels/{id}/playlist-test's `answer`.
+PENDING, YES, NO = "pending", "yes", "no"
+
+router = APIRouter(tags=["playlists"])
+
+Window = tuple[date, date]
+
+
+def windows(test_start: date, test_end: date, k: int) -> tuple[Window, list[Window]]:
+    """(pre, post weeks 1 … k): the PRE_DAYS data-days ending test_start − 1,
+    and week j = test_end + 1 + 7(j − 1) … test_end + 7j. The dose's own days
+    are in neither."""
+    pre = (test_start - timedelta(days=PRE_DAYS), test_start - timedelta(days=1))
+    weeks = [(test_end + timedelta(days=1 + WEEK * (j - 1)), test_end + timedelta(days=WEEK * j))
+             for j in range(1, k + 1)]
+    return pre, weeks
+
+
+def _span_sum(daily: dict[str, float], span: Window) -> float:
+    lo, hi = span[0].isoformat(), span[1].isoformat()
+    return sum(n for day, n in daily.items() if lo <= day <= hi)
+
+
+def daily_starts(playlist_ids: list[str], span: Window) -> dict[str, dict[str, float]]:
+    """The indicator, per day: {playlist_id: {date: Σ playlist_starts}} over
+    `span`, every video and source type of the playlist."""
+    out: dict[str, dict[str, float]] = {}
+    for r in rows_for_ids(
+        lambda c: supabase().table("playlist_traffic_daily")
+        .select("id,playlist_id,date,playlist_starts")
+        .in_("playlist_id", c)
+        .gte("date", span[0].isoformat())
+        .lte("date", span[1].isoformat()),
+        playlist_ids,
+    ):
+        by_day = out.setdefault(r["playlist_id"], {})
+        by_day[r["date"]] = by_day.get(r["date"], 0) + r["playlist_starts"]
+    return out
+
+
+def _added_views(arms: list[dict], weeks: list[Window]) -> dict[int, list[dict]]:
+    """{arm id: [{k, views}]}: per week, the arm's landed adds' type-14 views
+    with `source_detail` = its playlist. Reported, never judged; an arm with
+    no landed add has none."""
+    by_id = {a["id"]: a for a in arms}
+    added = [p for p in rows_for_ids(
+        lambda c: supabase().table("playlist_proposals")
+        .select("id,arm_id,video_id,applied_at").in_("arm_id", c),
+        [a["id"] for a in arms if a["arm"] == PlaylistArm.TREATED],
+    ) if p.get("applied_at")]
+    if not added or not weeks:
+        return {}
+    views: dict[tuple[str, str], dict[str, float]] = {}
+    for r in rows_for_ids(
+        lambda c: supabase().table("video_traffic_source_daily")
+        .select("id,video_id,date,source_detail,views")
+        .in_("video_id", c)
+        .eq("source_type", _PLAYLISTS)
+        .gte("date", weeks[0][0].isoformat())
+        .lte("date", weeks[-1][1].isoformat()),
+        sorted({p["video_id"] for p in added}),
+    ):
+        by_day = views.setdefault((r["video_id"], r["source_detail"]), {})
+        by_day[r["date"]] = by_day.get(r["date"], 0) + r["views"]
+    out: dict[int, list[dict]] = {}
+    for arm_id in sorted({p["arm_id"] for p in added}):
+        pid = by_id[arm_id]["playlist_id"]
+        vids = {p["video_id"] for p in added if p["arm_id"] == arm_id}
+        out[arm_id] = [{"k": k, "views": sum(_span_sum(views.get((v, pid), {}), w) for v in vids)}
+                       for k, w in enumerate(weeks, 1)]
+    return out
+
+
+def _compares(arm: dict, present: set[str]) -> str | None:
+    """Which mean the arm enters: treated (dosed), holdout, or none (`no_dose`,
+    or its playlist vanished)."""
+    if arm["playlist_id"] not in present or arm["status"] == PlaylistArmStatus.NO_DOSE:
+        return None
+    return arm["arm"]
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _week_verdicts(channel_id: str, measured: list[tuple[dict, dict]], present: set[str],
+                   weeks: list[Window]) -> list[dict]:
+    """One `lever_verdicts` row per complete post week with a dosed treated and
+    a holdout arm in it: week k's lift, the lift pooled over weeks 1 … k, and
+    at k = PLAYLIST_EXPERIMENT_WINDOWS the stop rule (the answer "no")."""
+    deltas: dict[str, list[list[float]]] = {}
+    for arm, result in measured:
+        side = _compares(arm, present)
+        if side:
+            deltas.setdefault(side, []).append([w["delta"] for w in result["weeks"]])
+    treated, held = deltas.get(PlaylistArm.TREATED), deltas.get(PlaylistArm.HOLDOUT)
+    if not treated or not held:
+        return []
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for k, (start, _) in enumerate(weeks, 1):
+        t_k, h_k = [d[k - 1] for d in treated], [d[k - 1] for d in held]
+        lift = _mean(t_k) - _mean(h_k)
+        cumulative = (_mean([x for d in treated for x in d[:k]])
+                      - _mean([x for d in held for x in d[:k]]))
+        rows.append({
+            "channel_id": channel_id, "lever": InterventionLever.PLAYLIST,
+            "arm_scope": LeverVerdictScope.TREATED_VS_HOLDOUT, "week_start": start.isoformat(),
+            "n_treated": len(t_k), "n_holdout": len(h_k),
+            "treated_mean_delta": _mean(t_k), "holdout_mean_delta": _mean(h_k),
+            "lift": lift, "cumulative_lift": cumulative, "windows_judged": k,
+            "verdict": lever_verdicts.directional(lift, settings.PLAYLIST_MIN_LIFT),
+            "stop_rule_triggered": (k >= settings.PLAYLIST_EXPERIMENT_WINDOWS
+                                    and cumulative < settings.PLAYLIST_MIN_LIFT),
+            "computed_at": now,
+        })
+    return rows
+
+
+def measure_channel(channel_id: str) -> dict:
+    """Measure the channel's playlist test, and write its weekly verdicts.
+
+    Nothing until the test is dosed (`test_dates`). Then every arm, holdout and
+    `no_dose` included, gets `measurement_result = {pre_weekly, weeks: [{k,
+    start, end, starts, delta}], missing_days, added_video_views,
+    computed_at}` over the post weeks the channel's playlist_traffic_source_a2
+    frontier covers, up to PLAYLIST_EXPERIMENT_WINDOWS. Every complete week
+    gets its `lever_verdicts` row, rewritten in place each run. At the last
+    window the arms become `judged` (`insufficient_data` if the playlist
+    vanished from `playlists`; a `no_dose` arm stays `no_dose`) and the test is
+    done: later runs do nothing. Nothing is sent or removed.
+
+    Returns counts: `attempted` and `errored` (arms, for
+    job_status.item_error_verdict), `weeks` and `changed` (arms written). While
+    any arm errored, no verdict is written and no arm is decided.
+    """
+    counts = {"attempted": 0, "errored": 0, "weeks": 0, "changed": 0}
+    arms = all_rows(supabase().table("playlist_arms").select("*").eq("channel_id", channel_id))
+    dates = test_dates(channel_id)
+    if dates is None or all(a.get("measurement_status") == PlaylistArmMeasurement.DONE
+                            for a in arms):
+        return counts
+    covered = reach.coverage(channel_id, report_type=PLAYLIST_TRAFFIC_REPORT_TYPE_ID)
+    frontier = reach.frontier(covered) or ""
+    pre, weeks = windows(*dates, settings.PLAYLIST_EXPERIMENT_WINDOWS)
+    weeks = [w for w in weeks if frontier >= w[1].isoformat()]
+    counts["weeks"] = len(weeks)
+    present = {p["id"] for p in all_rows(
+        supabase().table("playlists").select("id").eq("channel_id", channel_id))}
+    daily = daily_starts(sorted({a["playlist_id"] for a in arms}),
+                         (pre[0], weeks[-1][1] if weeks else pre[1]))
+    added = _added_views(arms, weeks)
+    missing = reach.missing_days(covered, *[(a.isoformat(), b.isoformat())
+                                            for a, b in [pre, *weeks]])
+
+    measured: list[tuple[dict, dict]] = []
+    for arm in sorted(arms, key=lambda a: a["id"]):
+        counts["attempted"] += 1
+        try:
+            by_day = daily.get(arm["playlist_id"], {})
+            pre_weekly = _span_sum(by_day, pre) * WEEK / PRE_DAYS
+            result = {
+                "pre_weekly": pre_weekly,
+                "weeks": [{"k": k, "start": a.isoformat(), "end": b.isoformat(),
+                           "starts": _span_sum(by_day, (a, b)),
+                           "delta": _span_sum(by_day, (a, b)) - pre_weekly}
+                          for k, (a, b) in enumerate(weeks, 1)],
+                "missing_days": missing,
+                "added_video_views": added.get(arm["id"], []),
+            }
+        except Exception as e:
+            counts["errored"] += 1
+            log.warning("playlist_test measure %s: arm %s failed: %s", channel_id, arm.get("id"), e)
+            continue
+        measured.append((arm, result))
+
+    done = counts["errored"] == 0 and len(weeks) == settings.PLAYLIST_EXPERIMENT_WINDOWS
+    if counts["errored"] == 0:
+        for row in _week_verdicts(channel_id, measured, present, weeks):
+            supabase().table("lever_verdicts").upsert(
+                row, on_conflict=lever_verdicts.ON_CONFLICT).execute()
+    now = datetime.now(timezone.utc).isoformat()
+    for arm, result in measured:
+        fields = {"measurement_status": (PlaylistArmMeasurement.DONE if done
+                                         else PlaylistArmMeasurement.MEASURING if weeks
+                                         else PlaylistArmMeasurement.AWAITING_WINDOW)}
+        previous = {k: v for k, v in (arm.get("measurement_result") or {}).items()
+                    if k != "computed_at"}
+        if previous != result:
+            fields["measurement_result"] = {**result, "computed_at": now}
+        if done and arm["status"] != PlaylistArmStatus.NO_DOSE:
+            fields["status"] = (PlaylistArmStatus.JUDGED if arm["playlist_id"] in present
+                                else PlaylistArmStatus.INSUFFICIENT_DATA)
+        fields = {k: v for k, v in fields.items() if arm.get(k) != v}
+        if fields:
+            supabase().table("playlist_arms").update(fields).eq("id", arm["id"]).execute()
+            counts["changed"] += 1
+    log.info("playlist_test measure %s: %s", channel_id, counts)
+    return counts
+
+
+def _answer(verdicts: list[dict]) -> str:
+    final = [v for v in verdicts
+             if v["arm_scope"] == LeverVerdictScope.TREATED_VS_HOLDOUT
+             and v["windows_judged"] >= settings.PLAYLIST_EXPERIMENT_WINDOWS]
+    if not final:
+        return PENDING
+    return NO if any(v["stop_rule_triggered"] for v in final) else YES
+
+
+@router.get("/channels/{channel_id}/playlist-test")
+def channel_playlist_test(channel_id: str):
+    """The channel's playlist test: its dates (None until dosed), every arm,
+    its weekly verdicts (oldest first), and the answer: `pending` until the
+    window-PLAYLIST_EXPERIMENT_WINDOWS verdict, then `yes`, or `no` when it
+    triggered the stop rule ("curated playlists don't earn starts")."""
+    dates = test_dates(channel_id)
+    arms = all_rows(supabase().table("playlist_arms").select("*").eq("channel_id", channel_id))
+    verdicts = all_rows(
+        supabase().table("lever_verdicts").select("*")
+        .eq("channel_id", channel_id).eq("lever", InterventionLever.PLAYLIST)
+        .order("week_start"))
+    return {"test_start": dates[0].isoformat() if dates else None,
+            "test_end": dates[1].isoformat() if dates else None,
+            "arms": arms, "verdicts": verdicts, "answer": _answer(verdicts)}
