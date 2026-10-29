@@ -1,7 +1,7 @@
 # Midas — implementation spec: the discoverability agent
 
 Date: 2026-09-23
-Status: Part 1 done (exit gate passed 2026-10-06) · Part 3 (Phase B) done (exit gate passed 2026-10-13) · Part 4 (Slice 1) built, live on Marathi since 2026-10-24 (exit gate pending, #70) · **Part 5 (Slice 2) ready to build** (owner decisions E1–E13 accepted 2026-10-26) · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
+Status: Part 1 done (exit gate passed 2026-10-06) · Part 3 (Phase B) done (exit gate passed 2026-10-13) · Part 4 (Slice 1) built, live on Marathi since 2026-10-24 (exit gate pending, #70) · **Part 5 (Slice 2) ready to build** (owner decisions E1–E13 accepted 2026-10-26; built, deployed on Marathi 2026-10-26, exit gate pending, #94) · Part 6 (Slice 3) **draft**, owner decisions F1–F14 pending (2026-10-30) · Part 2 approved design, amended 2026-10-06 from Phase A findings (§0.6)
 Supersedes:
 - `2026-09-22-discoverability-agent-spec.md`
 - The separate 2026-09-23 discoverability and Phase A specs (merged here)
@@ -18,13 +18,14 @@ Ground truth used: `STATE.md` @ `bddd373`.
 
 ## How to use this document (read first)
 
-This file has five parts, and they are used differently.
+This file has six parts, and they are used differently.
 
 - **Part 1 is Phase A, now done.** It is kept as the record of what Phase A did; evidence is in `docs/PHASE_A_FINDINGS.md`.
 - **Part 2 is the design.** It describes the whole target system and the order its stages arrive, amended by Phase A's findings (§0.6). **Do not implement anything from Part 2 directly.** That holds even where Part 2 describes code in detail.
 - **Part 3 is Phase B, now done.** It is kept as the record of what Phase B did; evidence is in `docs/PHASE_B_FINDINGS.md`.
 - **Part 4 is Slice 1, built and live on Marathi since 2026-10-24.** Its exit gate (the first weekly verdict) is pending.
 - **Part 5 is the build task: Slice 2.** It is the only part to implement now, in its run order. Its owner decisions (E1–E13) were accepted on 2026-10-26. It is built while Slice 1's experiment runs (owner, 2026-10-25, `docs/PLAN_TO_2026-11-27.md`).
+- **Part 6 is a draft: Slice 3** (titles + the agent challenger). Not to be built until the owner decides F1–F14; it then becomes the Part marked ready to build.
 
 **After Phase A's exit gate**, the Phase B build section is written into this file as a new Part, using Phase A's findings. Each later slice follows the same pattern. Part 2 is updated if a finding changes the design. At any time, exactly one Part is marked "ready to build."
 
@@ -1627,3 +1628,287 @@ verdict rows.
 
 As Part 4: an independent clean-context review per task against this Part, and a slice review at the end
 listing spec'd-but-not-built and built-but-not-spec'd, with a check of `STATE.md` §1–§5 and §7.
+
+---
+
+## Part 6 — Slice 3: titles + the agent challenger (DRAFT 2026-10-30, owner decisions F1–F14 pending)
+
+**Purpose.** Bring the title lever back, measured against a holdout, and test whether a tool-using agent writes
+better titles than a single-call pipeline. Both are built so that someone other than the owner can run them after
+2026-11-27 (`docs/PLAN_TO_2026-11-27.md`): the title verdicts and the §3.5 adoption decision land in December.
+
+1. **The title lever (P5).** Midas rewrites the **title only**, aimed at browse/suggested click-through, on warm
+   videos whose CTR is below their channel's median, with a 20% holdout. The description, tags and every other field
+   are untouched. A title that loses click-through is put back automatically.
+2. **The agent challenger (§3).** Treated title videos are split by hash between the **pipeline** (one writer call)
+   and the **agent** (a hand-rolled tool loop that can also `decline`). Each path is judged against the same holdout.
+   The agent is adopted for titles only if traces show it uses its tools differently per video and its verdicts
+   beat the pipeline's (§3.5).
+
+**Rollout channels (F3):** Marathi `UCr5-YUqBiW7PUmeAtxUWuRg`, Gujarati `UCOVKJdzghm2gOnuaGeJTonA`, Punjabi
+`UC8KjoL0Z9mTHKqB6gFutkJw`, by setting (`TITLE_CHANNELS`); per-channel code, as Part 5 (E13).
+
+**Inputs.** Slices 1–2 as built and deployed (`STATE.md` §1): the agent tick (`app/agent_tick.py`, `_agent_tick`),
+the warm pool, `decide()` and `TRIAGE`, `interventions` with `assign_arm`, the snippet-only write in
+`app/backlinks_apply.py`, `video_reach_daily` and `reach.weighted_ctr`, `video_traffic_source_daily` (type-5 search
+terms keep their detail, `traffic_poll.keeps_detail`), `lever_verdicts` and the weekly `lever_measurement` job,
+`app/tracing.py`. Where this Part and Part 2 disagree, this Part wins; the corrections are listed under "Changes to
+Part 2".
+
+**Owner decisions.** Items marked **(F#)** point to the table at the end. **None is decided yet**: each row carries
+a recommendation.
+
+### What the code and Phase A found that shapes this Part
+
+1. **The old title path rewrites three fields at once.** `audit_video` always produces title, description and tags
+   (`AuditSuggestion.rejection()` requires a description), and `apply_audit_internal` sends
+   `build_update_payload`: the whole snippet plus `status` (`app/youtube_metadata.py:78-100`, `parts="snippet,status"`).
+   On a channel with live backlinks that wipes the block (the model sees only 1,500 description characters), and no
+   verdict can say which field did it (`verdicts.levers`, `attribution="bundle"`). Slice 3 writes the title alone,
+   through a snippet-only write like `backlinks_apply` (F1). `audit_video` and its prompt are not used.
+2. **Title verdicts today have no control group.** `app/measurement.py` compares each video with its own 21-day
+   past; `AUTO_REVERT_ON_REGRESSION` is read nowhere, and reflection's auto-revert rolls back prompts, not titles.
+   The 64 wins vs 106 regressions (A7) are self-comparisons. Slice 3 measures titles treated vs holdout (§1.3) in
+   `lever_verdicts`, like backlinks, and builds the per-video auto-revert (F8).
+3. **Click-through is not available per traffic source.** `channel_reach_basic_a1` gives one impressions/CTR pair
+   per video per day (`video_reach_daily`); `channel_traffic_source_a3` gives views per source but no impressions.
+   P5's "browse/suggested CTR" is therefore measured as overall impression-weighted CTR (primary) plus browse (3) and
+   suggested (7) views per week (recorded, not judged) (F6). Browse and suggested are most of a warm video's
+   impressions (A1.1), so overall CTR is mostly theirs.
+4. **The warm pool shuts a backlinks video out of every lever, for good.** `warm_pool()` and `warm._holds` exclude
+   any video with a `midas` `backlinks` row of arm `treated` or `holdout`, whatever lever is asking. That is right
+   for titles too: a new title changes the source's own views, which is the backlinks pair measure's floor and
+   denominator. So titles go to warm videos backlinks didn't take: the ones triage `declined` (they already link to
+   our videos (D5), or have too few candidates), and every warm long video on a channel without backlinks. On Marathi,
+   where 93 long videos are used up, that is the declined rest of the pool once their cooldown passes (F2).
+5. **Triage already offers `title`; its rules never choose it.** `TRIAGE` lists five answers, `_triage_rules`
+   returns only `backlinks` or `no_change`, and `agent_tick.run` records any other answer as `declined` with
+   `lever='backlinks'` hard-coded. The title rule slots in after the backlinks rule (S3.3).
+6. **OpenRouter calls have no tool calling and no retries** (`app/openrouter.py` `chat_json`, `chat_text`). The agent
+   needs `chat_tools` (S3.4).
+7. **Search terms are cheap; competitor search is not.** Type-5 rows keep their `source_detail` (the term) in
+   `video_traffic_source_daily` on all 13 channels, at no quota cost. `_sample_competitors` costs 200u a call, and
+   §3.6's niche reference states "what ranks, not what gets clicked", while search is 1.1% of views (A1.1). Slice 3
+   builds `get_search_terms` from the stored rows and not the niche reference (F10).
+8. **A title write costs 51u** (`videos.list` 1u + `videos.update` 50u), as a backlink. Titles share the channel's
+   `autopilot_daily_cap` and the ledger gate with backlinks; no new quota is needed (F4).
+9. **Verdicts land after 2026-11-27.** A 14-day post window, the reach report's lag (1–6 days) and a weekly job put
+   the first title verdict ~3 weeks after go-live (~2026-12-07 for a 11-17 start). The exit gate is therefore "live
+   and recording", and the adoption decision is handed to the operator.
+
+### Run order
+
+```
+S3.1 → S3.2 → S3.3 → S3.4 → S3.5
+```
+
+S3.3 and S3.4 add migrations (`interventions.trajectory`; none other). S3.6 (deploy, office) and S3.7 (docs) are
+the owner's.
+
+### S3.1 — The title write and its revert (Part 2 §2.5)
+
+**Change.**
+- `app/titles_apply.py` `apply_title(intervention)` for a `planned`, `treated`, `midas` `title` row with
+  `payload.title` (else `ValueError`). As `apply_backlinks`: refuses `apply_disabled` while `TITLE_APPLY_ENABLED` is
+  false; under `DRY_RUN` returns `{"status": "dry_run", "title"}` and writes nothing; ledger gate on `quota.APPLY`
+  (51u); fetches the live snippet (`yt_videos_list_full`), replaces only `snippet.title`, sends `videos.update`
+  `part=snippet`. A live title that differs from `payload.title_before` (someone edited it since the triage) refuses
+  with `failed`, reason `title_changed`, and sends nothing.
+- Success: `measuring`, `applied_at`, `before_state = {title: <live>}`; `videos.title` updated. Failures typed as
+  `backlinks_apply._classified`, row untouched (the caller cancels it).
+- `POST /interventions/{id}/revert` gains `title` rows: puts `before_state.title` back with the same snippet-only
+  write, only if the live title is still the one Midas applied (else 409 `title_changed`); `cancelled`,
+  `payload.revert`. Same gates as the backlinks revert.
+- `app/autopilot.py` `_applies_today` already counts applied `midas` interventions of any lever: check, don't change.
+
+**Acceptance.** Tests with a fake YouTube client: only `snippet.title` differs between the fetched and sent snippet
+(description, tags, category, language byte-identical); a backlink block in the description survives; DRY_RUN and
+the kill switch send nothing; a changed live title refuses; the revert restores only the title.
+
+### S3.2 — The title writer, its checks, the preview and the bake-off (Part 2 §3.3, P5)
+
+**Change.**
+- `app/titles.py`:
+  - `context(video)`: title, first 1,500 description characters, the transcript (`fetch_transcript`, cached),
+    `default_language`, the video's 28-day CTR and impressions (`reach.weighted_ctr`), the channel's median CTR over
+    its warm pool, its traffic mix (as `agent_tick._assess`), its top 10 search terms by views over 28 ingested days
+    (type 5), and the 5 highest-CTR warm long videos of its channel with their titles (`MIN_IMPRESSIONS` floor).
+  - `TITLE_PROMPT` (new, verbatim in the code and pasted into `STATE.md` §6): browse/suggested objective (the
+    viewer sees the title next to a thumbnail on the home page or beside another video, not in a search list);
+    keep the rhyme's name in the channel's language and script; keep the series name if the current title has one;
+    plain words a parent recognises over keyword lists; no new hashtags; ≤ `TITLE_MAX`. It asks for
+    `TITLE_CANDIDATES` (3) candidates, each with a one-line reason, best first.
+  - `write_candidates(context, model=WRITER_MODEL)` → `chat_json` with `label="titles.write"`.
+  - `check(title, video)` (code, Part 2 §2.4): 1–`TITLE_MAX` characters; differs from the current title after
+    whitespace and case folding; for a language other than `en`, contains a character of that language's script;
+    no more `#` than the current title; no URL. Returns the first failure or None.
+  - `pipeline(video)`: `write_candidates`, then the first candidate that passes `check`; none passing → one retry
+    with the failures (§2.4), then `None` with the reasons.
+  - `strategy_version` for title rows: the A6 stamp over `{lever: "title", path, prompt_sha256, writer_model,
+    decision_question_set_version}`, upserted into `audit_strategies` as `_stamp_strategy` does.
+- `scripts/preview_titles.py --channel --n 20`: the triage rules, arm and path for the pool's first `n`, and for
+  treated ones the pipeline's candidates and the chosen title beside the current one. Writes nothing, no YouTube.
+  Prints a CSV for the SEO team (F12).
+- `scripts/title_bakeoff.py --channel --n 20 --models a,b,c`: the same `n` videos through `write_candidates` once
+  per model; one CSV row per (video, model) with the candidates and check results, for the SEO team to score
+  blind (model names in a separate key column). Writes nothing (F9).
+
+**Acceptance.** Fake `chat_json` tests: candidates that fail every check give `None` with reasons; the retry carries
+the reasons; the script check rejects a Gujarati title with no Gujarati character; the preview writes no row.
+
+### S3.3 — Triage and routing for titles (Part 2 §2.2, §1.3, §3.5)
+
+**Change.**
+- `app/decide.py` `TRIAGE` rules, in order: `backlinks_stopped` false, no related block and ≥
+  `BACKLINK_MIN_CANDIDATES` candidates → `backlinks`; else the channel is in `TITLE_CHANNELS`, `title_stopped` is
+  false, the video is not a Short, and its CTR < the channel's median warm-pool CTR → `title`; else `no_change`.
+  New context keys `title_enabled`, `title_stopped`, `channel_median_ctr`. `QUESTION_SET_VERSION` →
+  `2026.11-s3-v1` (every audit's `strategy_version` moves again, as in S1.4b).
+- `app/agent_tick.py` `run`: the lever comes from the answer (`backlinks` or `title`; `no_change` stays a
+  `declined` `backlinks` row as today). For `title`: `assign_arm(video, 'title')` (`HOLDOUT_PCT`, 0.20) → holdout:
+  `holdout` row with `payload.title_before`, no writer call; treated: `path = title_path(video_id)` (sha256 of
+  `video_id` + `"|path"`, `agent` below `TITLE_AGENT_PCT`, else `pipeline`) → the path's writer (S3.2 or S3.4) →
+  `planned` row with `payload {title_before, title, candidates, reason, path}` → `apply_title`. A pipeline that
+  returns `None` → `cancelled`, `payload.error = {reason: "checks_failed", detail}`; an agent `decline` →
+  `declined`, arm `treated`, `payload {path: "agent", rationale}` (measured, see S3.5).
+- `app/autopilot.py` `_agent_tick`: the `BACKLINK_APPLY_ENABLED` / heading gates stop only the backlinks branch; a
+  channel in `TITLE_CHANNELS` with `TITLE_APPLY_ENABLED` still runs titles. `TITLE_AUTOPILOT_ENABLED` (the old path)
+  stays false and is not read by the new path.
+- `title_stopped(channel_id)`: `lever_verdicts.stopped(channel_id, 'title')`.
+
+**Acceptance.** The backlinks answer still wins when both apply; a Short never gets `title`; a channel outside
+`TITLE_CHANNELS` never does; holdout rows make no writer call; the path split is stable and ~`TITLE_AGENT_PCT`; with
+`TITLE_APPLY_ENABLED` false nothing is written to YouTube and treated rows don't use up the video (as S1 review fix).
+
+### S3.4 — The agent loop and its tools (Part 2 §3.1, §3.2)
+
+**Change.**
+- `app/openrouter.py` `chat_tools(messages, tools, model=None, label=None)`: OpenAI-format `tools`, returns the
+  assistant message (text and tool calls), traced like `chat_json`; one retry on a timeout or 5xx.
+- `app/agent/loop.py` `run_title_agent(video)`: system prompt = `TITLE_PROMPT`'s objective and rules plus "you may
+  decline"; first user message = the video id and `default_language` only (the agent fetches the rest). Executes
+  tool calls, returns tool errors as text, stops on a terminal tool or after `AGENT_MAX_TURNS` (12) → `cancelled`,
+  reason `turn_cap`. A `submit_title` failing `check` gets the failure as the tool result once; a second failure
+  ends the run `cancelled`, reason `checks_failed`.
+- `app/agent/tools.py`, each pure, capped and compact: `get_video`, `get_transcript` (≤ `TRANSCRIPT_MAX_CHARS`),
+  `get_traffic_mix`, `get_search_terms` (top 25), `get_channel_top_performers(order="best"|"worst")` (10, by CTR,
+  `MIN_IMPRESSIONS` floor), `get_title_history` (its `audits` and `title` interventions with verdicts),
+  `write_candidates` (S3.2's writer, `WRITER_MODEL`); terminal `submit_title(title, reasoning)`, `decline(reason)`.
+  No YouTube calls in any tool.
+- Migration: `alter table interventions add column if not exists trajectory jsonb;` — the agent's messages, tool
+  calls, tool results (truncated to 2,000 characters each), turns and model, written on every agent row, whatever
+  its end.
+
+**Acceptance.** Fake `chat_tools`: the turn cap cancels; a tool error comes back as text; `decline` costs no quota
+and writes no YouTube call; an invalid submit is retried once then cancelled; the trajectory is stored.
+
+### S3.5 — Title measurement, verdicts, auto-revert (Part 2 §1.2, §1.3, §1.5, §1.7)
+
+**Change.**
+- `app/lever_measurement.py` measures `title` rows (`midas`; treated `measuring`, holdout `holdout`, and agent
+  `declined` rows of arm `treated`): d0 = the Pacific date of `applied_at` (treated) or `created_at` (holdout,
+  declined); pre = d0−14 … d0−1, post = d0+1 … d0+`TITLE_WINDOW_DAYS` (14). Complete when the channel's reach ledger
+  frontier passes the post's last day. `pre`/`post` = `{impressions, ctr}` (impression-weighted,
+  `reach.weighted_ctr`); `delta` = post CTR − pre CTR in percentage points; also browse + suggested views per week,
+  pre and post (recorded only). Floor: post impressions ≥ `TITLE_MIN_IMPRESSIONS` (500), else extend once to 21
+  days, then `insufficient_data` (§1.7).
+- `app/lever_verdicts.py`: `write_verdicts(lever='title')` writes one row per week and **path**: `arm_scope`
+  `pipeline_vs_holdout` and `agent_vs_holdout` (new `LeverVerdictScope` values), each with the backlinks
+  arithmetic (`lift` = path mean Δ − holdout mean Δ, cumulative pooled), `verdict` at ±`TITLE_MIN_LIFT`, and the stop
+  rule on `pipeline_vs_holdout` only (the lever's baseline): `windows_judged` ≥ `TITLE_EXPERIMENT_WINDOWS` and
+  cumulative lift < `TITLE_MIN_LIFT` → `title_stopped`. Agent `declined` rows count in the agent path's mean (an
+  intention-to-treat comparison: declining is the agent's choice).
+- **Auto-revert (F8):** after a treated row is judged, if its `delta` ≤ −`TITLE_REVERT_PP` and its post impressions
+  meet the floor, the job reverts the title (S3.1's revert; skipped with a log line when the live title isn't
+  Midas's, the kill switch is off, or quota is short; retried next run). `payload.revert.auto = true`. The row keeps
+  its judged numbers.
+- `GET /channels/{id}/lever-verdicts` returns the title rows unchanged; `GET /channels/{id}/title-test` (read-only):
+  per path n, mean Δ, cumulative lift, auto-reverts, agent declines, and the §3.5 trace check (below).
+- **§3.5 (a), as a number:** over the agent's rows, the share of runs whose set of tools called differs from the most
+  common set, and the share calling each tool. Reported, not judged by code.
+
+**Acceptance.** Tests on fixed reach rows: windows and Pacific d0; extension then `insufficient_data`; the two path
+scopes and the holdout shared between them; the stop rule reads only the pipeline; an auto-revert happens once and
+not on a human-edited title.
+
+### S3.6 — Deploy, preview, go (owner, office machine)
+
+1. Deploy S3.1–S3.5; apply the migration, `docker compose restart postgrest rest`, restart; NAS snapshot.
+2. `scripts/title_bakeoff.py` on Marathi and Gujarati, 20 videos, 3 models; the SEO team scores blind; set
+   `WRITER_MODEL` (F9).
+3. `scripts/preview_titles.py --n 20` per channel; the SEO team reads the CSV (F12).
+4. `TITLE_CHANNELS=<Marathi>`, `TITLE_APPLY_ENABLED=true`; restart; check the next day's rows and two treated
+   videos in Studio (only the title changed). Then Gujarati and Punjabi (`agent_enabled = autopilot_enabled = t`,
+   cap 10 on Punjabi in one statement).
+
+### S3.7 — Docs
+
+`STATE.md` per task; the findings doc records the bake-off scores, the previews, first-week volumes per path and
+every auto-revert; the operator handover page names `GET /channels/{id}/title-test` and the adoption decision
+(§3.5) as theirs.
+
+### Config (new)
+
+| Setting | Start | Notes |
+|---|---|---|
+| `TITLE_CHANNELS` | Marathi | F3. Channels where triage may answer `title` |
+| `TITLE_APPLY_ENABLED` | false | Kill switch for title writes |
+| `TITLE_AGENT_PCT` | 0.5 | F5. Share of treated title videos given to the agent |
+| `TITLE_CANDIDATES` | 3 | Candidates per writer call |
+| `TITLE_WINDOW_DAYS` | 14 | F6. Post window; pre is 14 days |
+| `TITLE_MIN_IMPRESSIONS` | 500 | §1.7 floor on post impressions |
+| `TITLE_MIN_LIFT` | 0.25 | F7. Percentage points of CTR, verdict band and stop bar |
+| `TITLE_EXPERIMENT_WINDOWS` | 4 | F7. Weekly windows before the stop rule |
+| `TITLE_REVERT_PP` | 1.0 | F8. Per-video CTR drop (points) that reverts a title |
+| `AGENT_MAX_TURNS` | 12 | Part 2 §8 |
+| `WRITER_MODEL` | = `AUDIT_MODEL` | F9. Set from the bake-off |
+
+### Exit gate
+
+- Titles live on the rollout channels with both paths writing; no field other than the title changed on any video
+  (Studio check on two per path), and no backlink block lost.
+- At least one auto-revert or a test proving it; agent trajectories stored for every agent row.
+- `/health/jobs` green. The first title verdict and the §3.5 decision are the operator's (finding 9).
+
+### Not doing in Slice 3
+
+- No description or tag rewrites; no house format; `audit_video` and autopilot's old title path stay off.
+- No niche reference and no `search.list` (F10). No thumbnails.
+- The agent writes titles only; backlinks, playlists and Short links stay pipelines (F11).
+- No Jev checks; no change of triage from shadow (as E12). No revert of the 106 old regressions (P5).
+
+### Changes to Part 2 (to apply on acceptance)
+
+- **§1.2.** Title: CTR treated vs holdout over 14-day windows; browse + suggested views recorded.
+- **§1.6.** Title rewrites no longer replace the description; the re-append rule is moot.
+- **§2.2.** The rules may answer `title`.
+- **§3.2.** `get_title_history` added; `get_related_top_performers`, `get_playlists`, `get_niche_reference`,
+  `get_channel_playbook` not built in Slice 3.
+- **§3.3.** Bake-off offline, scored by the SEO team; one writer online.
+- **§3.6.** Deferred (F10).
+- **§6.** Slice 3's exit gate is "live and recording"; the adoption decision moves to the operator.
+- **§7–§8.** `interventions.trajectory`; Slice 3 settings.
+
+### Owner decisions (pending; recommendations marked)
+
+| # | Question | Recommendation and why |
+|---|---|---|
+| F1 | What the title lever changes | **Title only, snippet-only write.** One variable, measurable; keeps backlink blocks. The house format (title+description+tags) lost 106–64 and can't be attributed |
+| F2 | Which videos | **Warm long videos triage didn't send to backlinks, CTR below the channel median.** Keeps the backlinks experiment clean (finding 4); low CTR is where a title has room |
+| F3 | Channels | **Marathi, Gujarati, Punjabi.** Gujarati and Punjabi have the most title history (A7: 364 and 172 judged), Punjabi has no backlinks so its whole warm pool is open. Owner's 10-25 decision: Marathi + 2–3 |
+| F4 | Cap | **Shared `autopilot_daily_cap`** (Marathi 40, others 10); titles and backlinks draw from it together |
+| F5 | Agent vs pipeline | **50/50 of treated, holdout 20% shared.** Small n; both paths need numbers for §3.5 by mid-December |
+| F6 | Measure | **Overall CTR, 14+14 days, treated vs holdout;** browse/suggested views recorded. Per-source CTR doesn't exist (finding 3) |
+| F7 | "Beats holdout" | **Cumulative lift ≥ 0.25 CTR points after 4 weekly windows, else stop.** About 3% relative at a 7–12% CTR (the warm videos' range in the 10-29 previews) |
+| F8 | Auto-revert | **Per video, CTR drop ≥ 1.0 point with ≥ 500 post impressions,** after judging (the row keeps its numbers) |
+| F9 | Writer | **Offline bake-off of 3 models on 20 videos × 2 channels, SEO scores blind; one writer online** |
+| F10 | Niche reference | **Not built.** 200u per search, measures ranking not clicks, search is 1.1% of views; `get_search_terms` from stored rows instead |
+| F11 | Agent scope | **Titles only.** The routing levers are code-rendered; an agent adds cost there, not choice |
+| F12 | Human review before go-live | **SEO reads 20 previewed titles per channel once;** no per-title approval afterwards (the holdout and auto-revert are the guard) |
+| F13 | Old title path | **Stays off for good** (`TITLE_AUTOPILOT_ENABLED` false); `audit_video` kept only for manual audits |
+| F14 | Agent declines | **Measured in the agent path (intention-to-treat).** Declining is the choice under test |
+
+### Review protocol
+
+As Part 5: an independent clean-context review per task against this Part, and a slice review at the end listing
+spec'd-but-not-built and built-but-not-spec'd, with a check of `STATE.md` §1–§7.
