@@ -333,6 +333,16 @@ def target_pool(channel_id: str, *, sibling_ids: Iterable[str] | None = None,
     return Pool(thresholds["join_low"], eligible, vectors, impressions), None
 
 
+_HASHTAG = re.compile(r"#\S+")
+_NOT_WORD = re.compile(r"[\W_]+")
+
+
+def title_key(title: str | None) -> str:
+    """A title with hashtags, punctuation, case and spacing dropped: two
+    uploads of the same video (the channels have many) share it."""
+    return _NOT_WORD.sub(" ", _HASHTAG.sub(" ", (title or "").lower())).strip()
+
+
 def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
                pool: Pool | None = None) -> Candidates:
     """Link targets for the source `video` (a `videos` row with `id`,
@@ -343,7 +353,10 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
     already linked from its description; warm on its own channel (B4's
     measure, `warm.warm_impressions`); and at least the source channel's
     `join_low` similar to it on B6 vectors. A NULL privacy or `is_short` is
-    not yet known, and eligible (as warm_pool()). `pool` is the source
+    not yet known, and eligible (as warm_pool()). A target with the source's
+    title (`title_key`), or with the title of a better target already kept,
+    is left out: a block of re-uploads of the same video helps no viewer.
+    `pool` is the source
     channel's `target_pool`, for a caller asking for many sources; without it one is
     read for this call.
     """
@@ -380,5 +393,13 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
                          "title": v.get("title"), "similarity": similarity,
                          "impressions": pool.impressions[v["id"]]})
     rows.sort(key=lambda r: (-r["similarity"], -r["impressions"], r["video_id"]))
-    return Candidates(rows[:2 * settings.BACKLINK_MAX], skipped_unembedded=skipped,
+    seen = {title_key(video.get("title"))} - {""}
+    kept = []
+    for r in rows:
+        key = title_key(r["title"])
+        if key and key in seen:
+            continue
+        seen.add(key)
+        kept.append(r)
+    return Candidates(kept[:2 * settings.BACKLINK_MAX], skipped_unembedded=skipped,
                       join_low=pool.join_low)

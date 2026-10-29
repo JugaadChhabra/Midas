@@ -48,7 +48,7 @@ def _channel(**kw):
 
 
 def _video(vid, channel=CH, description=""):
-    return {"id": vid, "channel_id": channel, "title": f"Rhyme {vid[-1]}",
+    return {"id": vid, "channel_id": channel, "title": f"Rhyme {vid}",
             "description": description, "privacy_status": "public", "is_short": False,
             "is_episode": False}
 
@@ -416,6 +416,21 @@ def test_the_tick_reads_a_channels_target_pool_once_an_hour():
     assert all(type(v).__name__ == "array" for v in agent_tick._pools[CH][1].vectors.values())
 
 
+def test_a_block_that_would_not_fit_is_declined_before_the_arm_is_drawn():
+    """A description that the block would push past 5,000 characters: declined in
+    either arm alike, so it never becomes a treated failure that counts toward
+    the channel's pause."""
+    sb = world(description="x" * 4990)
+    with wired(sb, holdout_pct=1.0) as p:
+        ap.tick()
+    assert outcome(p) == "declined"
+    [row] = midas_rows(sb)
+    assert (row["status"], row["arm"]) == ("declined", "n/a")
+    assert "can't be rendered" in row["payload"]["rationale"]
+    assert "over 5000" in row["triage_json"]["render_refused"]
+    assert p["yt"].lists == [] and p["yt"].updates == []
+
+
 def test_d5_a_description_that_links_to_our_video_gets_no_change():
     sb = world(description=f"{SRC_DESCRIPTION}\nhttps://youtu.be/{OTHER_CH_VIDEO}")
     with wired(sb) as p:
@@ -585,17 +600,23 @@ def test_the_preview_writes_nothing_anywhere(heading, capsys):
     assert p["yt"].lists == [] and p["yt"].updates == []
 
     out = capsys.readouterr().out
-    assert SRC in out and "answer: backlinks  arm: treated" in out
     if heading:
-        assert f"{HEADING}\nRhyme 1 https://youtu.be/{T1}" in out
+        assert SRC in out and "answer: backlinks  arm: treated" in out
+        assert f"{HEADING}\nRhyme {T1} https://youtu.be/{T1}" in out
     else:
+        assert SRC in out and "answer: no_change  arm: -" in out
         assert "render refused: no backlink heading for language 'mr'" in out
 
 
 def test_the_preview_shows_the_arm_and_the_refusal_per_video():
     sb = world()
+    with wired(sb, holdout_pct=1.0):
+        [held] = agent_tick.preview(CH, 1)
+    assert held["arm"] == "holdout" and held["after"] and not held["refused"]
     with wired(sb, holdout_pct=1.0, heading=False):
         items = agent_tick.preview(CH, 2)
     assert [i["video_id"] for i in items] == [SRC, T1]
-    assert items[0]["arm"] == "holdout" and items[0]["refused"]
+    # A block that can't be rendered is declined before the arm is drawn, as in run.
+    assert items[0]["answer"] == "no_change" and items[0]["arm"] is None
+    assert items[0]["refused"] and "can't be rendered" in items[0]["rationale"]
     assert items[0]["after"] is None and items[0]["before"] == SRC_DESCRIPTION

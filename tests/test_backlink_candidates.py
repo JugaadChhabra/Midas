@@ -393,3 +393,20 @@ def test_known_vectors_are_not_read_again():
 def test_a_pool_with_refused_thresholds_says_why():
     with wired(scene(target("a", 0.95), channels=[{"id": SRC_CH, "playlist_thresholds": None}])):
         assert backlinks.target_pool(SRC_CH) == (None, backlinks.NO_THRESHOLDS)
+
+
+def test_reuploads_of_the_source_or_of_a_kept_target_are_left_out():
+    """The channels hold many uploads of one video under one title; a block that
+    lists the source's own re-uploads, or one video three times, helps no one."""
+    source = {**SOURCE, "title": "Top 10 Hindi Rhymes | TMKOC #tmkoc"}
+    sb = scene(target("same", 0.99, title="Top 10 Hindi Rhymes | TMKOC #trending"),
+               target("a", 0.95, title="Song A"),
+               target("a2", 0.94, title="song a!"),
+               target("b", 0.90, title="Song B"), source=source)
+    assert ids(candidates(sb, source=source)) == ["a", "b"]
+
+
+def test_title_key_ignores_hashtags_punctuation_case_and_spacing():
+    assert backlinks.title_key("Top 10 | TMKOC #a #b") == backlinks.title_key("top 10  TMKOC!! #c")
+    assert backlinks.title_key("Song A") != backlinks.title_key("Song B")
+    assert backlinks.title_key(None) == ""
