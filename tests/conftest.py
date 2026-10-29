@@ -43,3 +43,13 @@ def _no_network(request):
     finally:
         socket.socket.connect = _real_connect
         socket.socket.connect_ex = _real_connect_ex
+
+
+@pytest.fixture(autouse=True)
+def _fresh_backlink_pools():
+    """app/agent_tick.py keeps each channel's backlink target pool for an hour;
+    a test's fake database must not see the previous test's."""
+    from app import agent_tick
+    agent_tick._pools.clear()
+    yield
+    agent_tick._pools.clear()

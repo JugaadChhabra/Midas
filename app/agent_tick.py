@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import logging
 import random
+import time
+from array import array
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -144,9 +146,42 @@ def _has_related_block(video: dict) -> bool:
     return bool(linked and human_edits.our_videos(linked))
 
 
+#: How long a channel's backlink target pool (`backlinks.target_pool`) is
+#: reused before it is read again. Reading it pulls every warm target's
+#: vector(3072) on the channel and its siblings, minutes for a channel with
+#: many siblings; warmth and vectors change daily at most.
+POOL_TTL_SECONDS = 3600
+
+#: channel id -> (monotonic time read, pool or None, refusal reason).
+_pools: dict[str, tuple[float, backlinks.Pool | None, str | None]] = {}
+
+
+def _pool(channel_id: str) -> tuple[backlinks.Pool | None, str | None]:
+    """The channel's target pool, read at most once per POOL_TTL_SECONDS.
+
+    Vectors are kept as `array('d')` (a third of a list of floats' memory) and
+    shared between channels' pools, so a video that is a target for several
+    channels is held, and read, once."""
+    now = time.monotonic()
+    hit = _pools.get(channel_id)
+    if hit is not None and now - hit[0] < POOL_TTL_SECONDS:
+        return hit[1], hit[2]
+    known = {vid: vec for _, p, _ in _pools.values() if p is not None
+             for vid, vec in p.vectors.items()}
+    pool, reason = backlinks.target_pool(channel_id, known_vectors=known)
+    if pool is not None:
+        pool = pool._replace(vectors={
+            vid: vec if isinstance(vec, array) else array("d", vec)
+            for vid, vec in pool.vectors.items()})
+    _pools[channel_id] = (now, pool, reason)
+    return pool, reason
+
+
 def _assess(video: dict) -> tuple[backlinks.Candidates, dict]:
     """The candidates and the triage context for `video`. Reads only."""
-    found = backlinks.candidates(video)
+    pool, reason = _pool(video["channel_id"])
+    found = (backlinks.candidates(video, pool=pool) if pool is not None
+             else backlinks.Candidates([], reason=reason))
     impressions, ctr = _reach(video)
     context = {
         "has_related_block": _has_related_block(video),
