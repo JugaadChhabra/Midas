@@ -393,6 +393,29 @@ def test_triage_is_deterministic_for_a_given_context():
     assert {r["jev_answer"] for r in sb.rows("decision_log")} == {"no_change"}
 
 
+def test_the_tick_reads_a_channels_target_pool_once_an_hour():
+    """Reading the pool pulls every warm target's vector on the channel and its
+    siblings: minutes on a channel with many siblings, so it's kept an hour."""
+    sb = world()
+    reads = []
+    real = agent_tick.backlinks.target_pool
+
+    def counting(channel_id, **kw):
+        reads.append(channel_id)
+        return real(channel_id, **kw)
+
+    with wired(sb), patch.object(agent_tick.backlinks, "target_pool", counting):
+        video = agent_tick._video(SRC)
+        first, _ = agent_tick._assess(video)
+        again, _ = agent_tick._assess(video)
+        assert reads == [CH] and again == first
+        with patch.object(agent_tick, "POOL_TTL_SECONDS", 0):
+            stale, _ = agent_tick._assess(video)
+        assert reads == [CH, CH] and stale == first
+    assert first.rows
+    assert all(type(v).__name__ == "array" for v in agent_tick._pools[CH][1].vectors.values())
+
+
 def test_d5_a_description_that_links_to_our_video_gets_no_change():
     sb = world(description=f"{SRC_DESCRIPTION}\nhttps://youtu.be/{OTHER_CH_VIDEO}")
     with wired(sb) as p:

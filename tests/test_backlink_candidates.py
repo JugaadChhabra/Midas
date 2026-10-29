@@ -357,3 +357,39 @@ def test_candidates_read_past_the_1000_row_cap():
     sb = scene(*many)
     with postgrest_cap():
         assert ids(candidates(sb)) == ["v9999"]
+
+
+# ── the target pool, read once for many sources ───────────────────────────
+
+def test_a_prebuilt_pool_gives_the_same_candidates_as_reading_one():
+    sb = scene(target("a", 0.95, imp=700), target("b", 0.90, channel=SIB),
+               target("c", 0.80), target("x", 0.95, channel=OTHER))
+    with wired(sb):
+        alone = backlinks.candidates(SOURCE)
+        pool, reason = backlinks.target_pool(SRC_CH)
+        assert reason is None
+        assert backlinks.candidates(SOURCE, pool=pool) == alone
+    assert ids(alone) == ["a", "b", "c"]
+
+
+def test_known_vectors_are_not_read_again():
+    sb = scene(target("a", 0.95), target("b", 0.90))
+    asked = []
+    real = backlinks.pooled_embeddings
+
+    def counting(ids_, **kw):
+        asked.extend(ids_)
+        return real(ids_, **kw)
+
+    with wired(sb):
+        first, _ = backlinks.target_pool(SRC_CH)
+        asked.clear()
+        with patch.object(backlinks, "pooled_embeddings", counting):
+            second, _ = backlinks.target_pool(SRC_CH, known_vectors=first.vectors)
+    assert asked == []
+    assert second.vectors == first.vectors
+
+
+def test_a_pool_with_refused_thresholds_says_why():
+    with wired(scene(target("a", 0.95), channels=[{"id": SRC_CH, "playlist_thresholds": None}])):
+        assert backlinks.target_pool(SRC_CH) == (None, backlinks.NO_THRESHOLDS)

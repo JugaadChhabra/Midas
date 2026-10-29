@@ -21,6 +21,7 @@ that used to sit under the first line isn't read as one of the block's.
 Which videos to link to is S1.1 (Part 2 §2.3, P2), and reads the database:
 
     siblings(channel_id)   -- our channels that already send it suggested views
+    target_pool(channel_id) -- the targets a source on that channel can get, with vectors
     candidates(video)      -- ranked link targets, on its channel or a sibling
 
 Similarity is on B6's vectors only (`reembed.MODEL_VERSION`), against the
@@ -268,6 +269,23 @@ def siblings(channel_id: str) -> list[dict]:
     return out
 
 
+class Pool(NamedTuple):
+    """A source channel's link targets before any one source is looked at:
+    its `join_low`, the eligible targets (`{id, channel_id, title}`, warm,
+    public, not Shorts, on the channel or a sibling), their B6 vectors (only
+    those that have one) and their warm impressions.
+
+    Reading it is most of `candidates`' cost (every target's vector(3072)), so
+    a caller asking for many sources on one channel builds it once
+    (app/agent_tick.py keeps it for a while).
+    """
+
+    join_low: float
+    eligible: list[dict]
+    vectors: dict
+    impressions: dict[str, int]
+
+
 def _thresholds(channel_id: str) -> dict:
     rows = (
         supabase().table("channels").select("playlist_thresholds")
@@ -276,27 +294,17 @@ def _thresholds(channel_id: str) -> dict:
     return (rows[0].get("playlist_thresholds") if rows else None) or {}
 
 
-def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> Candidates:
-    """Link targets for the source `video` (a `videos` row with `id`,
-    `channel_id`, `description`), ranked by similarity, ties by impressions.
-
-    A target is on the source's channel or a sibling (`siblings`, unless the
-    caller passes `sibling_ids`); public, not a Short, not the source, and not
-    already linked from its description; warm on its own channel (B4's
-    measure, `warm.warm_impressions`); and at least the source channel's
-    `join_low` similar to it on B6 vectors. A NULL privacy or `is_short` is
-    not yet known, and eligible (as warm_pool()).
-    """
-    source_id, channel_id = video["id"], video["channel_id"]
+def target_pool(channel_id: str, *, sibling_ids: Iterable[str] | None = None,
+         known_vectors: Mapping | None = None) -> tuple[Pool | None, str | None]:
+    """(the channel's target `Pool`, None), or (None, why its thresholds were
+    refused). Siblings are `siblings(channel_id)` unless the caller passes
+    `sibling_ids`. A vector already in `known_vectors` (keyed by video id, B6
+    vectors only) isn't read again."""
     thresholds = _thresholds(channel_id)
     if thresholds.get("join_low") is None:
-        return Candidates([], reason=NO_THRESHOLDS)
+        return None, NO_THRESHOLDS
     if thresholds.get("model_version") != MODEL_VERSION:
-        return Candidates([], reason=THRESHOLDS_OTHER_MODEL)
-    source_vector = pooled_embeddings([source_id], model_version=MODEL_VERSION).get(source_id)
-    if source_vector is None:
-        return Candidates([], skipped_unembedded=1, reason=SOURCE_NOT_EMBEDDED,
-                          join_low=thresholds["join_low"])
+        return None, THRESHOLDS_OTHER_MODEL
 
     if sibling_ids is None:
         sibling_ids = [s["channel_id"] for s in siblings(channel_id)]
@@ -305,9 +313,9 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> C
     for ch in dict.fromkeys([channel_id, *sibling_ids]):
         impressions.update(warm.warm_impressions(ch))
 
-    linked = video_links(video.get("description"))
     eligible = [
-        v for v in rows_for_ids(
+        {"id": v["id"], "channel_id": v["channel_id"], "title": v.get("title")}
+        for v in rows_for_ids(
             lambda c: (
                 supabase().table("videos")
                 .select("id,channel_id,title,privacy_status,is_short")
@@ -315,24 +323,62 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None) -> C
             ),
             impressions,
         )
-        if v["id"] != source_id
-        and v["id"] not in linked
-        and v.get("privacy_status") in (None, "public")
+        if v.get("privacy_status") in (None, "public")
         and v.get("is_short") is not True
     ]
+    known = known_vectors or {}
+    vectors = {v["id"]: known[v["id"]] for v in eligible if v["id"] in known}
+    vectors.update(pooled_embeddings([v["id"] for v in eligible if v["id"] not in known],
+                                     model_version=MODEL_VERSION))
+    return Pool(thresholds["join_low"], eligible, vectors, impressions), None
 
-    vectors = pooled_embeddings([v["id"] for v in eligible], model_version=MODEL_VERSION)
+
+def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
+               pool: Pool | None = None) -> Candidates:
+    """Link targets for the source `video` (a `videos` row with `id`,
+    `channel_id`, `description`), ranked by similarity, ties by impressions.
+
+    A target is on the source's channel or a sibling (`siblings`, unless the
+    caller passes `sibling_ids`); public, not a Short, not the source, and not
+    already linked from its description; warm on its own channel (B4's
+    measure, `warm.warm_impressions`); and at least the source channel's
+    `join_low` similar to it on B6 vectors. A NULL privacy or `is_short` is
+    not yet known, and eligible (as warm_pool()). `pool` is the source
+    channel's `target_pool`, for a caller asking for many sources; without it one is
+    read for this call.
+    """
+    source_id, channel_id = video["id"], video["channel_id"]
+    if pool is None:
+        thresholds = _thresholds(channel_id)
+        if thresholds.get("join_low") is None:
+            return Candidates([], reason=NO_THRESHOLDS)
+        if thresholds.get("model_version") != MODEL_VERSION:
+            return Candidates([], reason=THRESHOLDS_OTHER_MODEL)
+    source_vector = (pool.vectors.get(source_id) if pool is not None else None) \
+        or pooled_embeddings([source_id], model_version=MODEL_VERSION).get(source_id)
+    if source_vector is None:
+        join_low = pool.join_low if pool is not None else thresholds["join_low"]
+        return Candidates([], skipped_unembedded=1, reason=SOURCE_NOT_EMBEDDED,
+                          join_low=join_low)
+    if pool is None:
+        pool, reason = target_pool(channel_id, sibling_ids=sibling_ids)
+        if pool is None:
+            return Candidates([], reason=reason)
+
+    linked = video_links(video.get("description"))
     rows, skipped = [], 0
-    for v in eligible:
-        vector = vectors.get(v["id"])
+    for v in pool.eligible:
+        if v["id"] == source_id or v["id"] in linked:
+            continue
+        vector = pool.vectors.get(v["id"])
         if vector is None:
             skipped += 1
             continue
         similarity = _cosine_sim(source_vector, vector)
-        if similarity >= thresholds["join_low"]:
+        if similarity >= pool.join_low:
             rows.append({"video_id": v["id"], "channel_id": v["channel_id"],
                          "title": v.get("title"), "similarity": similarity,
-                         "impressions": impressions[v["id"]]})
+                         "impressions": pool.impressions[v["id"]]})
     rows.sort(key=lambda r: (-r["similarity"], -r["impressions"], r["video_id"]))
     return Candidates(rows[:2 * settings.BACKLINK_MAX], skipped_unembedded=skipped,
-                      join_low=thresholds["join_low"])
+                      join_low=pool.join_low)
