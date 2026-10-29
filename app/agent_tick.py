@@ -205,6 +205,25 @@ def _rationale(context: dict) -> str:
             f"BACKLINK_MIN_CANDIDATES = {settings.BACKLINK_MIN_CANDIDATES}")
 
 
+def _language(channel_id: str) -> str | None:
+    rows = (
+        supabase().table("channels").select("default_language")
+        .eq("id", channel_id).limit(1).execute()
+    ).data or []
+    return rows[0].get("default_language") if rows else None
+
+
+def _unrenderable(video: dict, targets: list[dict], language: str | None) -> str | None:
+    """Why the block can't be rendered onto the stored description (e.g. the
+    description would pass 5,000 characters), or None. Checked before the arm
+    is drawn, so such a video is declined in either arm alike."""
+    try:
+        backlinks.render(video.get("description"), targets, language)
+    except backlinks.RenderRefused as e:
+        return str(e)
+    return None
+
+
 def _targets(found: backlinks.Candidates) -> list[dict]:
     """The top BACKLINK_MAX candidates, in link order."""
     return found.rows[:settings.BACKLINK_MAX]
@@ -266,12 +285,17 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
     common = dict(video_id=video["id"], channel_id=channel_id,
                   lever=InterventionLever.BACKLINKS, origin=InterventionOrigin.MIDAS,
                   triage_json=triage)
+    refused = (_unrenderable(video, _targets(found), _language(channel_id))
+               if decision.answer == InterventionLever.BACKLINKS else None)
+    if refused:
+        triage["render_refused"] = refused
     try:
-        if decision.answer != InterventionLever.BACKLINKS:
+        if decision.answer != InterventionLever.BACKLINKS or refused:
             row = interventions.record(
                 **common, arm=InterventionArm.NOT_APPLICABLE,
                 status=InterventionStatus.DECLINED,
-                payload={"rationale": _rationale(context)})
+                payload={"rationale": (f"the block can't be rendered: {refused}" if refused
+                                       else _rationale(context))})
         else:
             triage["next_watch"] = _next_watch(video, found)
             arm = interventions.assign_arm(video["id"], InterventionLever.BACKLINKS)
@@ -316,11 +340,7 @@ def preview(channel_id: str, n: int) -> list[dict]:
     rendered (no heading for the language yet, S1.2). A holdout's `after` is
     what it would have got.
     """
-    rows = (
-        supabase().table("channels").select("default_language")
-        .eq("id", channel_id).limit(1).execute()
-    ).data or []
-    language = rows[0].get("default_language") if rows else None
+    language = _language(channel_id)
 
     out = []
     for picked in warm.warm_pool(channel_id)[:n]:
@@ -335,12 +355,13 @@ def preview(channel_id: str, n: int) -> list[dict]:
                 "after": None, "refused": None, "context": context}
         if answer != InterventionLever.BACKLINKS:
             item["rationale"] = _rationale(context)
+        elif refused := _unrenderable(video, _targets(found), language):
+            # As run: declined before the arm is drawn.
+            item.update(answer="no_change", refused=refused,
+                        rationale=f"the block can't be rendered: {refused}")
         else:
             item["arm"] = interventions.assign_arm(video["id"], InterventionLever.BACKLINKS)
             item["targets"] = _targets(found)
-            try:
-                item["after"] = backlinks.render(video.get("description"), item["targets"], language)
-            except backlinks.RenderRefused as e:
-                item["refused"] = str(e)
+            item["after"] = backlinks.render(video.get("description"), item["targets"], language)
         out.append(item)
     return out
