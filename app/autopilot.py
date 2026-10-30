@@ -505,8 +505,8 @@ def _agent_tick(ch: dict) -> str:
         _touch_tick(channel_id)
         return "daily_cap"
 
-    # Before triage: a tick that can't afford the write
-    # shouldn't record a treated row only to cancel it.
+    # Before triage: a tick that can't afford the write shouldn't record a
+    # treated row only to cancel it.
     if not _can_afford_apply(channel_id):
         _touch_tick(channel_id)
         return QUOTA_INSUFFICIENT

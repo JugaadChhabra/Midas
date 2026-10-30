@@ -636,8 +636,10 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None, fo
 
     APPLY_COST = quota.cost_of(*quota.APPLY)
 
-    channel = supabase().table("channels").select("agent_enabled").eq("id", channel_id).single().execute().data
-    _refuse_on_agent_channel(channel, force=force)
+    # maybe_single: an unknown channel has no pending audits and answers as
+    # before; .execute() returns None (not an empty response) on 0 rows.
+    res = supabase().table("channels").select("agent_enabled").eq("id", channel_id).maybe_single().execute()
+    _refuse_on_agent_channel(res.data if res else None, force=force)
 
     # Latest audit per video for this channel (join-scoped — no 1000-row
     # truncation); only 'pending' ones are applied below.

@@ -1574,7 +1574,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    branch or any write, so a refused apply records nothing, not even the before-state a dry run stores; the
    single-apply route passes its `force` query param; apply-pending reads `channels.agent_enabled` once and refuses
    before any quota check or apply, then passes `force` on, so a channel that turns agent mid-run has its remaining
-   applies refused per audit (`failed` rows in the response). *`run-bulk` and `reaudit-quarantined`* never apply
+   applies refused per audit (`failed` rows in the response). The read is `maybe_single`, so an unknown channel id answers as before (nothing pending), not 500. *`run-bulk` and `reaudit-quarantined`* never apply
    (they only call `audit_video`, which writes a `pending` audit), so "when it applies" never holds and they are
    unchanged. *A NULL or missing `agent_enabled`* is a non-agent channel. *`force`* is a FastAPI `bool` query
    parameter (`?force=true`; `1`, `yes`, `on` also parse as true). The dashboard's apply buttons

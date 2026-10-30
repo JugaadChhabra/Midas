@@ -105,6 +105,15 @@ def test_apply_pending_on_an_agent_channel_goes_through_with_force():
     assert _status(sb) == "applied"
 
 
+def test_apply_pending_on_an_unknown_channel_answers_as_before():
+    sb = _db(agent_enabled=True)
+    with _edges(sb) as p:
+        r = _client().post("/channels/UCnobody/audits/apply-pending")
+    assert r.status_code == 200, r.text
+    assert r.json()["total_pending"] == 0
+    p["update"].assert_not_called()
+
+
 def test_apply_pending_on_another_channel_is_unchanged():
     sb = _db(agent_enabled=False)
     with _edges(sb) as p:
@@ -116,8 +125,9 @@ def test_apply_pending_on_another_channel_is_unchanged():
 
 # ── a suggest-only audit is unguarded ───────────────────────────────────────
 
-def test_a_suggest_only_audit_on_an_agent_channel_is_not_refused():
-    """POST /videos/{id}/audit writes no YouTube field, so it stays open."""
+def test_a_suggest_only_audit_is_not_guarded():
+    """POST /videos/{id}/audit writes no YouTube field, so it stays open: it
+    reads no channel flag and goes straight to audit_video."""
     with patch("app.audits.audit_video", return_value={"id": 8}) as audit:
         r = _client().post("/videos/vid1/audit")
     assert r.status_code == 200, r.text
