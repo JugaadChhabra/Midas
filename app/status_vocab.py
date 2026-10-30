@@ -252,10 +252,16 @@ class LeverVerdictScope:
     TREATED_VS_HOLDOUT = "treated_vs_holdout"
     #: The SEO team's own edits, reported on their own (§1.4). Never in a lift.
     HUMAN = "human"
+    #: Titles (Slice 3 S3.5): each path's treated mean delta minus the shared
+    #: holdout's (spec Part 6 S3.5, F7); the agent's includes its declines (F14).
+    PIPELINE_VS_HOLDOUT = "pipeline_vs_holdout"
+    AGENT_VS_HOLDOUT = "agent_vs_holdout"
 
 
 ALL_LEVER_VERDICT_SCOPES = frozenset({LeverVerdictScope.TREATED_VS_HOLDOUT,
-                                      LeverVerdictScope.HUMAN})
+                                      LeverVerdictScope.HUMAN,
+                                      LeverVerdictScope.PIPELINE_VS_HOLDOUT,
+                                      LeverVerdictScope.AGENT_VS_HOLDOUT})
 
 
 class LeverVerdict:

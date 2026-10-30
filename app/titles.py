@@ -10,7 +10,7 @@
                                         candidate, one retry with the failures
     title_path(video_id)             -- pipeline or agent, by hash
     route(channel_id, video_id)      -- the path, handed over when one has stopped
-                                        (path_stopped: S3.5 fills it)
+                                        (path_stopped: the title verdicts, S3.5)
     strategy_version(path)           -- the A6 stamp for a title, registered
     title_answers(channel_id, n)     -- the pool's first n videos TRIAGE's rules
                                         send to titles (the preview, the bake-off)
@@ -22,9 +22,10 @@ The title is aimed at browse and suggested views (P5): it is read beside a
 thumbnail on the home page or next to another video, not in a search list.
 Only the title changes; the write is app/titles_apply.py. Nothing here writes
 to YouTube, and nothing but `strategy_version` writes to the database (its
-`audit_strategies` row). With `cache_only`, the transcript comes from the cache
-alone, so the preview and the bake-off (scripts/preview_titles.py,
-scripts/title_bakeoff.py) write nothing and call no YouTube.
+`audit_strategies` row). Transcripts come from the cache alone
+(`video_transcripts`), never a live fetch, which can fall back to the captions
+API (~250u) outside the apply's quota gate (owner, 2026-10-30, Slice 3 final
+review); so the tick, the preview and the bake-off see the same context.
 """
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ import statistics
 from collections import defaultdict
 from typing import NamedTuple
 
-from app import agent_tick, decide, interventions, reach, warm
+from app import agent_tick, decide, interventions, lever_verdicts, reach, warm
 from app.audit_suggestion import TITLE_MAX
 from app.audits import _strategy_hash
 from app.config import settings
@@ -45,7 +46,7 @@ from app.openrouter import chat_json
 from app.reporting_client import TRAFFIC_REPORT_TYPE_ID
 from app.rows import all_rows, rows_for_ids
 from app.status_vocab import InterventionArm, InterventionLever
-from app.transcripts import _cache_read, fetch_transcript, lang_display_name
+from app.transcripts import _cache_read, lang_display_name
 
 log = logging.getLogger("midas.titles")
 
@@ -261,9 +262,8 @@ def _search_terms(video: dict, n: int = SEARCH_TERMS) -> list[dict]:
     return [{"term": t, "views": views[t]} for t in best]
 
 
-def _transcript(video: dict, cache_only: bool) -> str | None:
-    if not cache_only:
-        return fetch_transcript(video["id"], video["channel_id"])[0]
+def _transcript(video: dict) -> str | None:
+    """The video's cached transcript, or None. Never fetched live (module doc)."""
     try:
         row = _cache_read(video["id"])
     except Exception as e:
@@ -272,20 +272,17 @@ def _transcript(video: dict, cache_only: bool) -> str | None:
     return row.get("text") if row and row.get("available") else None
 
 
-def context(video: dict, *, channel: ChannelContext | None = None,
-            cache_only: bool = False) -> dict:
+def context(video: dict, *, channel: ChannelContext | None = None) -> dict:
     """What the writer is told about `video` (a `videos` row with id,
     channel_id, title, description). `channel` is the channel's
-    `channel_context`, read here when not passed. Reads only, except that a
-    live transcript fetch caches its result (`fetch_transcript`); `cache_only`
-    reads the cache alone."""
+    `channel_context`, read here when not passed. Reads only."""
     channel = channel or channel_context(video["channel_id"])
     impressions, ctr = agent_tick._reach(video)
     return {
         "video_id": video["id"],
         "title": video.get("title") or "",
         "description": (video.get("description") or "")[:DESCRIPTION_CHARS],
-        "transcript": _transcript(video, cache_only),
+        "transcript": _transcript(video),
         "default_language": channel.language,
         "impressions": impressions,
         "ctr": ctr,
@@ -389,12 +386,12 @@ class Written(NamedTuple):
     failures: list[str]
 
 
-def pipeline(video: dict, *, channel: ChannelContext | None = None, model: str | None = None,
-             cache_only: bool = False) -> Written:
+def pipeline(video: dict, *, channel: ChannelContext | None = None,
+             model: str | None = None) -> Written:
     """The pipeline path: `write_candidates`, then the first candidate passing
     `check`; none passing → one retry told the failures; still none → no title,
     with the reasons."""
-    ctx = context(video, channel=channel, cache_only=cache_only)
+    ctx = context(video, channel=channel)
     subject = {**video, "default_language": ctx["default_language"]}
     asked: list[dict] = []
     reasons: list[str] = []
@@ -472,22 +469,41 @@ def strategy_version(path: str) -> str:
 
 
 def path_stopped(channel_id: str, path: str) -> bool:
-    """Whether `path`'s stop rule has fired on the channel (Part 6 S3.5, F7).
-    Always False until #120 (S3.5) fills it from the title verdicts."""
-    return False
+    """Whether `path`'s stop rule has fired on the channel (Part 6 S3.5, F7):
+    any of its weekly title verdicts has `stop_rule_triggered`."""
+    return lever_verdicts.stopped(channel_id, InterventionLever.TITLE,
+                                  lever_verdicts.TITLE_SCOPES[path])
+
+
+def _share(path: str) -> float:
+    """The share of treated titles `path` gets by hash (TITLE_AGENT_PCT)."""
+    return settings.TITLE_AGENT_PCT if path == AGENT else 1 - settings.TITLE_AGENT_PCT
+
+
+def path_closed(channel_id: str, path: str) -> bool:
+    """Whether `path` takes no titles on the channel: its stop rule has fired,
+    or it has no share (TITLE_AGENT_PCT = 0 shuts the agent, F5; 1 the
+    pipeline). A path with no share never gets verdicts, so it never stops on
+    its own; counting it as closed lets the other path's stop close the lever
+    (F7) instead of handing titles to a path nobody switched on."""
+    return _share(path) <= 0 or path_stopped(channel_id, path)
 
 
 def stopped(channel_id: str) -> bool:
-    """Whether the title lever has stopped on the channel: both paths have."""
-    return all(path_stopped(channel_id, p) for p in PATHS)
+    """Whether the title lever has stopped on the channel: both paths are
+    closed (`path_closed`)."""
+    return all(path_closed(channel_id, p) for p in PATHS)
 
 
 def route(channel_id: str, video_id: str) -> str:
     """The path a treated title on the channel takes (Part 6 S3.3): `title_path`,
-    handed to the other path when that one has stopped."""
+    handed to the other path when that one is closed (`path_closed`) and the
+    other isn't. When both are closed the lever is stopped and no title is
+    picked (`stopped`), so the hash's path is returned unchanged."""
     path = title_path(video_id)
-    if path_stopped(channel_id, path):
-        return AGENT if path == PIPELINE else PIPELINE
+    other = AGENT if path == PIPELINE else PIPELINE
+    if path_closed(channel_id, path) and not path_closed(channel_id, other):
+        return other
     return path
 
 
@@ -563,10 +579,9 @@ def preview(channel_id: str, n: int, *, path: str = PIPELINE) -> list[dict]:
             else:
                 try:
                     if path == AGENT:
-                        item["agent"] = agent_loop.run_title_agent(
-                            video, channel=channel, cache_only=True)
+                        item["agent"] = agent_loop.run_title_agent(video, channel=channel)
                     else:
-                        item["written"] = pipeline(video, channel=channel, cache_only=True)
+                        item["written"] = pipeline(video, channel=channel)
                 except Exception as e:
                     item["error"] = f"{type(e).__name__}: {e}"
         out.append(item)

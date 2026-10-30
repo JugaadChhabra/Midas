@@ -42,6 +42,14 @@ Short links (Slice 2 S2.6, `lever = 'short_link'`) are human rows only, so
 `write_verdicts(lever='short_link')` writes `human` rows alone, as backlinks'
 human rows: no lift, no verdict, never a stop. Before measuring, run_weekly has
 app/short_links.py `detect` record the links seen in the traffic.
+
+Titles (Slice 3 S3.5, `lever = 'title'`) are measured per video by
+app/title_measurement.py. `write_verdicts(lever='title')` writes one row per
+path, `pipeline_vs_holdout` and `agent_vs_holdout`, each against the one
+holdout (an agent decline in the agent's mean, F14), with this arithmetic at
+TITLE_MIN_LIFT; a path also stops early on the harm guard (F7), and
+titles.path_stopped reads it. `auto_revert` then puts back the losing titles
+(F8), and `GET /channels/{id}/title-test` reports the test.
 """
 from __future__ import annotations
 
@@ -51,6 +59,9 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query
 
 from app import eligibility, job_status, lever_measurement, playlist_test, short_links
+from app import title_measurement, titles_apply
+from app.agent import loop as agent_loop
+from app.apply_outcome import ApplyError, ApplyOutcome
 from app.config import settings
 from app.db import supabase
 from app.rows import PAGE_SIZE, all_rows, rows_for_ids
@@ -71,6 +82,11 @@ router = APIRouter(tags=["interventions"])
 
 #: The table's unique key, which every verdict writer upserts on (playlist_test too).
 ON_CONFLICT = "channel_id,lever,arm_scope,week_start"
+#: A title row's `payload.path` (app/titles.py PATHS) → its path's verdict scope (S3.5).
+TITLE_SCOPES = {"pipeline": LeverVerdictScope.PIPELINE_VS_HOLDOUT,
+                "agent": LeverVerdictScope.AGENT_VS_HOLDOUT}
+#: The job's item category for the title auto-reverts (S3.5).
+REVERTS = "title reverts"
 
 
 def week_start(day: date) -> date:
@@ -111,6 +127,42 @@ def directional(lift: float, min_lift: float) -> str:
     return LeverVerdict.NO_CHANGE
 
 
+def _versus(this_week: dict[str, list[float]], so_far: dict[str, list[float]], arm: str,
+            windows_judged: int, *, min_lift: float, windows: int) -> dict | None:
+    """The verdict row's numbers for `arm`'s deltas against the holdout's, or
+    None when either has no judged row this week. `this_week` and `so_far` map
+    an arm to its deltas judged this week and up to it."""
+    treated, held = this_week.get(arm), this_week.get(InterventionArm.HOLDOUT)
+    if not (treated and held):
+        return None
+    lift = _mean(treated) - _mean(held)
+    cumulative = _mean(so_far[arm]) - _mean(so_far[InterventionArm.HOLDOUT])
+    return {
+        "n_treated": len(treated), "n_holdout": len(held),
+        "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
+        "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows_judged,
+        "verdict": directional(lift, min_lift),
+        "stop_rule_triggered": windows_judged >= windows and cumulative < min_lift,
+    }
+
+
+def _deltas(rows: list[dict], week: date, key) -> tuple[dict[str, list[float]],
+                                                       dict[str, list[float]]]:
+    """({group: deltas judged in `week`}, {group: deltas judged up to it}), the
+    group being `key(row)` (rows keyed None are left out)."""
+    this_week: dict[str, list[float]] = {}
+    so_far: dict[str, list[float]] = {}
+    for row in rows:
+        judged, group = _judged_week(row), key(row)
+        if judged is None or group is None or judged > week:
+            continue
+        delta = float(row["measurement_result"]["delta"])
+        so_far.setdefault(group, []).append(delta)
+        if judged == week:
+            this_week.setdefault(group, []).append(delta)
+    return this_week, so_far
+
+
 def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
              min_lift: float, windows: int) -> dict[str, dict]:
     """{arm_scope: the verdict row's numbers} for `week`, from judged rows.
@@ -121,31 +173,13 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
     `min_lift` and `windows` are the lever's verdict band and time box
     (BACKLINK_MIN_LIFT, BACKLINK_EXPERIMENT_WINDOWS for backlinks).
     """
-    this_week: dict[str, list[float]] = {}
-    so_far: dict[str, list[float]] = {}
-    for row in rows:
-        judged, scope = _judged_week(row), _scope(row)
-        if judged is None or scope is None or judged > week:
-            continue
-        delta = float(row["measurement_result"]["delta"])
-        so_far.setdefault(scope, []).append(delta)
-        if judged == week:
-            this_week.setdefault(scope, []).append(delta)
-
+    this_week, so_far = _deltas(rows, week, _scope)
     out: dict[str, dict] = {}
-    treated, held = this_week.get(InterventionArm.TREATED), this_week.get(InterventionArm.HOLDOUT)
-    if treated and held:
-        lift = _mean(treated) - _mean(held)
-        cumulative = (_mean(so_far[InterventionArm.TREATED])
-                      - _mean(so_far[InterventionArm.HOLDOUT]))
-        windows_judged = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
-        out[LeverVerdictScope.TREATED_VS_HOLDOUT] = {
-            "n_treated": len(treated), "n_holdout": len(held),
-            "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
-            "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows_judged,
-            "verdict": directional(lift, min_lift),
-            "stop_rule_triggered": windows_judged >= windows and cumulative < min_lift,
-        }
+    versus = _versus(this_week, so_far, InterventionArm.TREATED,
+                     windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1,
+                     min_lift=min_lift, windows=windows)
+    if versus:
+        out[LeverVerdictScope.TREATED_VS_HOLDOUT] = versus
     human = this_week.get(LeverVerdictScope.HUMAN)
     if human:
         out[LeverVerdictScope.HUMAN] = {
@@ -156,6 +190,53 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
             "verdict": None, "stop_rule_triggered": False,
         }
     return out
+
+
+def _title_arm(row: dict) -> str | None:
+    """Which mean a judged title row enters: the holdout, or its path's
+    (`payload.path`; an agent decline is in the agent's, F14)."""
+    if row.get("arm") == InterventionArm.HOLDOUT:
+        return InterventionArm.HOLDOUT
+    if row.get("arm") == InterventionArm.TREATED:
+        path = (row.get("payload") or {}).get("path")
+        return path if path in TITLE_SCOPES else None
+    return None
+
+
+def title_verdicts(rows: list[dict], week: date,
+                   windows_before: dict[str, int]) -> dict[str, dict]:
+    """{arm_scope: the verdict row's numbers} for `week`, one per path against
+    the shared holdout (Part 6 S3.5, F7): the backlinks arithmetic at
+    ±TITLE_MIN_LIFT, stopped at TITLE_EXPERIMENT_WINDOWS with a cumulative
+    lift under it, or early, at TITLE_HARM_WINDOWS with a cumulative lift at
+    or under −TITLE_HARM_LIFT."""
+    this_week, so_far = _deltas(rows, week, _title_arm)
+    out: dict[str, dict] = {}
+    for path, scope in TITLE_SCOPES.items():
+        versus = _versus(this_week, so_far, path, windows_before.get(scope, 0) + 1,
+                         min_lift=settings.TITLE_MIN_LIFT,
+                         windows=settings.TITLE_EXPERIMENT_WINDOWS)
+        if versus:
+            versus["stop_rule_triggered"] = versus["stop_rule_triggered"] or (
+                versus["windows_judged"] >= settings.TITLE_HARM_WINDOWS
+                and versus["cumulative_lift"] <= -settings.TITLE_HARM_LIFT)
+            out[scope] = versus
+    return out
+
+
+def _title_judged(channel_id: str) -> list[dict]:
+    """The channel's judged `midas` title rows, and those put back after they
+    were judged (`cancelled` with their numbers, pre at the floor or over):
+    a reverted title stays in its path's mean, as the decision it was."""
+    rows = all_rows(
+        supabase().table("interventions")
+        .select("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,"
+                "before_state,measurement_result")
+        .eq("channel_id", channel_id).eq("lever", InterventionLever.TITLE)
+        .eq("origin", InterventionOrigin.MIDAS)
+        .in_("status", [InterventionStatus.JUDGED, InterventionStatus.CANCELLED])
+    )
+    return [r for r in rows if _counted(r)]
 
 
 def _without_shorts(rows: list[dict]) -> list[dict]:
@@ -176,8 +257,9 @@ def _without_shorts(rows: list[dict]) -> list[dict]:
 
 def write_verdicts(channel_id: str, *, today: date | None = None,
                    lever: str = InterventionLever.BACKLINKS) -> dict[str, dict]:
-    """Write the week's verdict rows of the lever (backlinks, or the human-only
-    short_link) for the channel; returns the current week's by scope.
+    """Write the week's verdict rows of the lever (backlinks, the human-only
+    short_link, or title's two paths) for the channel; returns the current
+    week's by scope.
 
     Also writes an earlier week that has judged rows and no verdict row of any
     scope yet. A scope with no row this week has any row a same-week earlier
@@ -186,12 +268,17 @@ def write_verdicts(channel_id: str, *, today: date | None = None,
     """
     today = today or datetime.now(timezone.utc).date()
     current = week_start(today)
-    judged = all_rows(
-        supabase().table("interventions")
-        .select("id,video_id,origin,arm,status,measurement_result")
-        .eq("channel_id", channel_id).eq("lever", lever)
-        .eq("status", InterventionStatus.JUDGED)
-    )
+    if lever == InterventionLever.TITLE:
+        judged = _title_judged(channel_id)
+        scopes = tuple(TITLE_SCOPES.values())
+    else:
+        judged = all_rows(
+            supabase().table("interventions")
+            .select("id,video_id,origin,arm,status,measurement_result")
+            .eq("channel_id", channel_id).eq("lever", lever)
+            .eq("status", InterventionStatus.JUDGED)
+        )
+        scopes = (LeverVerdictScope.TREATED_VS_HOLDOUT, LeverVerdictScope.HUMAN)
     if lever == InterventionLever.BACKLINKS:
         judged = _without_shorts(judged)
     stored = all_rows(
@@ -211,9 +298,10 @@ def write_verdicts(channel_id: str, *, today: date | None = None,
             if v["week_start"] < week.isoformat():
                 windows_before[v["arm_scope"]] = windows_before.get(v["arm_scope"], 0) + 1
         this_week = {v["arm_scope"]: v for v in stored if v["week_start"] == week.isoformat()}
-        out = verdicts(judged, week, windows_before, min_lift=settings.BACKLINK_MIN_LIFT,
-                       windows=settings.BACKLINK_EXPERIMENT_WINDOWS)
-        for scope in (LeverVerdictScope.TREATED_VS_HOLDOUT, LeverVerdictScope.HUMAN):
+        out = (title_verdicts(judged, week, windows_before) if lever == InterventionLever.TITLE
+               else verdicts(judged, week, windows_before, min_lift=settings.BACKLINK_MIN_LIFT,
+                             windows=settings.BACKLINK_EXPERIMENT_WINDOWS))
+        for scope in scopes:
             key = {"channel_id": channel_id, "lever": lever, "arm_scope": scope,
                    "week_start": week.isoformat()}
             held = (this_week.get(scope) or {}).get("stop_rule_triggered") is True
@@ -234,16 +322,98 @@ def write_verdicts(channel_id: str, *, today: date | None = None,
     return out
 
 
-def stopped(channel_id: str, lever: str = InterventionLever.BACKLINKS) -> bool:
+def stopped(channel_id: str, lever: str = InterventionLever.BACKLINKS,
+            scope: str = LeverVerdictScope.TREATED_VS_HOLDOUT) -> bool:
     """Whether the lever has stopped for the channel (the P1 stop rule): any of
-    its treated-vs-holdout weekly verdicts has `stop_rule_triggered`."""
+    its weekly verdicts of `scope` (treated vs holdout; a title path's,
+    app/titles.py path_stopped) has `stop_rule_triggered`."""
     rows = (
         supabase().table("lever_verdicts").select("id")
         .eq("channel_id", channel_id).eq("lever", lever)
-        .eq("arm_scope", LeverVerdictScope.TREATED_VS_HOLDOUT)
+        .eq("arm_scope", scope)
         .eq("stop_rule_triggered", True).limit(1).execute()
     ).data or []
     return bool(rows)
+
+
+def auto_revert(channel_id: str) -> dict:
+    """Put back the channel's losing titles (Part 6 S3.5, F8).
+
+    A judged treated row that reached YouTube (not a decline) whose `delta`
+    minus the holdout mean Δ of its judged week (else the channel's cumulative
+    holdout mean; none yet → it waits) is ≤ −TITLE_REVERT_LIFT goes to
+    `titles_apply.revert_title(auto=True)`, worst first, at most
+    TITLE_REVERTS_PER_DAY a run. A live title someone else changed is left
+    alone (`title_changed`), and the kill switch or a short ledger stops the
+    run; both are retried next run. The row keeps its judged numbers.
+
+    Returns counts: `attempted`, `errored` (for job_status.item_error_verdict,
+    under REVERTS), `reverted`, `skipped`.
+    """
+    rows = _title_judged(channel_id)
+    holdout = [r for r in rows if r.get("arm") == InterventionArm.HOLDOUT]
+    cumulative = _mean([float(r["measurement_result"]["delta"]) for r in holdout])
+    by_week: dict[date, list[float]] = {}
+    for r in holdout:
+        by_week.setdefault(_judged_week(r), []).append(float(r["measurement_result"]["delta"]))
+
+    gaps = []
+    for r in rows:
+        if (r["status"] != InterventionStatus.JUDGED or r.get("arm") != InterventionArm.TREATED
+                or not r.get("applied_at")):
+            continue
+        held = _mean(by_week[_judged_week(r)]) if _judged_week(r) in by_week else cumulative
+        if held is None:
+            continue
+        gap = float(r["measurement_result"]["delta"]) - held
+        if gap <= -settings.TITLE_REVERT_LIFT:
+            gaps.append((gap, r["id"], r))
+
+    counts = dict.fromkeys(("attempted", "errored", "reverted", "skipped"), 0)
+    for gap, _, row in sorted(gaps, key=lambda g: (g[0], g[1])):
+        if counts["reverted"] >= settings.TITLE_REVERTS_PER_DAY:
+            break
+        counts["attempted"] += 1
+        try:
+            titles_apply.revert_title(row, auto=True)
+        except ApplyError as e:
+            if e.outcome in (ApplyOutcome.APPLY_DISABLED, ApplyOutcome.QUOTA_INSUFFICIENT):
+                counts["skipped"] += 1
+                log.info("title auto-revert %s: stopped for this run (%s); intervention %s "
+                         "waits", channel_id, e.detail, row["id"])
+                break
+            counts["errored"] += 1
+            log.warning("title auto-revert %s: intervention %s failed: %s",
+                        channel_id, row["id"], e.detail)
+            continue
+        except HTTPException as e:
+            if e.detail != titles_apply.TITLE_CHANGED:
+                counts["errored"] += 1
+                log.warning("title auto-revert %s: intervention %s failed: %s",
+                            channel_id, row["id"], e.detail)
+                continue
+            counts["skipped"] += 1
+            log.info("title auto-revert %s: intervention %s skipped: the live title isn't "
+                     "Midas's", channel_id, row["id"])
+            continue
+        except Exception as e:
+            counts["errored"] += 1
+            log.warning("title auto-revert %s: intervention %s failed: %s",
+                        channel_id, row["id"], e)
+            continue
+        counts["reverted"] += 1
+        log.info("title auto-revert %s: intervention %s put back (delta − holdout %.3f)",
+                 channel_id, row["id"], gap)
+    return counts
+
+
+def _has_titles(channel_id: str) -> bool:
+    """Whether the channel has any `midas` title row (else the title half is skipped)."""
+    return bool((
+        supabase().table("interventions").select("id")
+        .eq("channel_id", channel_id).eq("lever", InterventionLever.TITLE)
+        .eq("origin", InterventionOrigin.MIDAS).limit(1).execute()
+    ).data)
 
 
 def run_weekly(*, today: date | None = None) -> dict | None:
@@ -253,7 +423,10 @@ def run_weekly(*, today: date | None = None) -> dict | None:
     (playlist_test.measure_channel, S2.3), errors under `playlist arms`. On a
     channel in TRAFFIC_INGEST_CHANNELS, first the Short links seen in its
     traffic (short_links.detect, S2.6), errors under `short-link pairs`, and
-    after backlinks' verdicts the week's `short_link` ones.
+    after backlinks' verdicts the week's `short_link` ones. On a channel with
+    title rows, their measurement (app/title_measurement.py, errors under
+    `title interventions`), the week's verdicts per path, then the auto-revert
+    (errors under `title reverts`; S3.5).
 
     traffic_poll's failure model: a channel that raises fails the run once
     every channel has run; per-row errors are judged by
@@ -308,6 +481,32 @@ def run_weekly(*, today: date | None = None) -> dict | None:
                     note(partial_errors, cid, partial)
         except Exception as e:
             log.exception("lever_measurement %s crashed: %s", cid, e)
+            note(crashed, cid, job_status.describe(e))
+        # Titles (S3.5), their own categories: a failure here doesn't stop the
+        # channel's backlinks above, nor theirs this.
+        try:
+            if _has_titles(cid):
+                counts = title_measurement.measure_channel(cid, today=today)
+                failure, partial = job_status.item_error_verdict(
+                    {title_measurement.ROWS: (counts["errored"], counts["attempted"])})
+                if failure:
+                    log.error("lever_measurement %s: every title row failed: %s", cid, failure)
+                    note(crashed, cid, f"ItemsFailed: {failure}")
+                else:
+                    write_verdicts(cid, today=today, lever=InterventionLever.TITLE)
+                    if partial:
+                        note(partial_errors, cid, partial)
+                    counts = auto_revert(cid)
+                    failure, partial = job_status.item_error_verdict(
+                        {REVERTS: (counts["errored"], counts["attempted"])})
+                    if failure:
+                        log.error("lever_measurement %s: every title revert failed: %s",
+                                  cid, failure)
+                        note(crashed, cid, f"ItemsFailed: {failure}")
+                    elif partial:
+                        note(partial_errors, cid, partial)
+        except Exception as e:
+            log.exception("lever_measurement %s: titles crashed: %s", cid, e)
             note(crashed, cid, job_status.describe(e))
         if cid not in drawn:
             continue
@@ -373,3 +572,80 @@ def channel_lever_verdicts(channel_id: str):
         .eq("channel_id", channel_id).order("week_start", desc=True)
     )
     return {"verdicts": rows, "backlinks_stopped": stopped(channel_id)}
+
+
+def _counted(row: dict) -> bool:
+    """Whether a title row enters its path's mean (as `_title_judged` keeps it)."""
+    return (row["status"] == InterventionStatus.JUDGED
+            or (row["status"] == InterventionStatus.CANCELLED
+                and (row.get("measurement_result") or {}).get("pre", -1)
+                >= settings.TITLE_MIN_PRE_VIEWS))
+
+
+def _trace(rows: list[dict]) -> dict:
+    """The §3.5 (a) check over the agent's runs (Part 6 S3.5): how many runs
+    called a set of tools other than the most common one, and how many called
+    each tool. Reported, not judged."""
+    runs = [frozenset(agent_loop.tools_called(r["trajectory"])) for r in rows if r.get("trajectory")]
+    if not runs:
+        return {"runs": 0, "most_common": None, "share_differing": None, "share_calling": {}}
+    sets: dict[frozenset, int] = {}
+    for tools in runs:
+        sets[tools] = sets.get(tools, 0) + 1
+    common = max(sets, key=lambda t: (sets[t], sorted(t)))
+    names = sorted(set().union(*runs))
+    return {"runs": len(runs), "most_common": sorted(common),
+            "share_differing": (len(runs) - sets[common]) / len(runs),
+            "share_calling": {n: sum(n in t for t in runs) / len(runs) for n in names}}
+
+
+@router.get("/channels/{channel_id}/title-test")
+def channel_title_test(channel_id: str):
+    """The title test on the channel (Part 6 S3.5), read-only: per path its
+    treated, declined, cancelled (by reason; `reverted` for a title put back),
+    judged and insufficient rows, mean Δ, cumulative lift against the holdout,
+    auto-reverts and whether it has stopped; the holdout's n and mean Δ; and
+    the agent's trace numbers."""
+    rows = all_rows(
+        supabase().table("interventions")
+        .select("id,arm,status,payload,applied_at,measurement_result,trajectory")
+        .eq("channel_id", channel_id).eq("lever", InterventionLever.TITLE)
+        .eq("origin", InterventionOrigin.MIDAS)
+    )
+
+    def deltas(group: list[dict]) -> list[float]:
+        return [float(r["measurement_result"]["delta"]) for r in group if _counted(r)]
+
+    holdout = [r for r in rows if r.get("arm") == InterventionArm.HOLDOUT]
+    holdout_mean = _mean(deltas(holdout))
+    paths = {}
+    for path, scope in TITLE_SCOPES.items():
+        mine = [r for r in rows if r.get("arm") == InterventionArm.TREATED
+                and (r.get("payload") or {}).get("path") == path]
+        cancelled: dict[str, int] = {}
+        for r in mine:
+            if r["status"] == InterventionStatus.CANCELLED:
+                payload = r.get("payload") or {}
+                reason = ("reverted" if payload.get("revert")
+                          else (payload.get("error") or {}).get("reason") or "unknown")
+                cancelled[reason] = cancelled.get(reason, 0) + 1
+        mean = _mean(deltas(mine))
+        paths[path] = {
+            "treated": sum(bool(r.get("applied_at")) for r in mine),
+            "declined": sum(not r.get("applied_at") and r["status"] not in (
+                InterventionStatus.CANCELLED, InterventionStatus.PLANNED) for r in mine),
+            "cancelled": cancelled,
+            "judged": sum(_counted(r) for r in mine),
+            "insufficient": sum(r["status"] == InterventionStatus.INSUFFICIENT_DATA for r in mine),
+            "mean_delta": mean,
+            "cumulative_lift": (mean - holdout_mean if mean is not None
+                                and holdout_mean is not None else None),
+            "auto_reverts": sum(((r.get("payload") or {}).get("revert") or {}).get("auto") is True
+                                for r in mine),
+            "stopped": stopped(channel_id, InterventionLever.TITLE, scope),
+        }
+    agent = [r for r in rows if _title_arm(r) == "agent"]
+    return {"paths": paths,
+            "holdout": {"n": len(holdout), "judged": len(deltas(holdout)),
+                        "mean_delta": holdout_mean},
+            "trace": _trace(agent)}

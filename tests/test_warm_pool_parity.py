@@ -34,7 +34,8 @@ pytestmark = pytest.mark.needs_socket
 
 REPO = Path(__file__).resolve().parents[1]
 MIGRATIONS = [REPO / "supabase/migrations/20261006040000_warm_pool_rpc.sql",
-              REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"]
+              REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql",
+              REPO / "supabase/migrations/20261030020000_warm_pool_title_holds.sql"]
 
 SCHEMA = """
 create role service_role;
@@ -270,11 +271,13 @@ def _cooldown_and_experiment_world() -> dict[str, list[dict]]:
              "impressions": 1000 + i, "ctr": 0.05} for i, v in enumerate(ids, 1)],
         "interventions": [
             {"id": i, **row} for i, row in enumerate([
-                intervention("declined_recent", status="declined", age_days=1),
+                intervention("declined_recent", lever="backlinks", arm="n/a", status="declined",
+                             age_days=1),
                 intervention("holdout_recent", lever="title", arm="holdout", status="holdout",
                              age_days=1),
                 intervention("planned_recent", status="planned", age_days=1),
-                intervention("declined_old", status="declined", age_days=8),
+                intervention("declined_old", lever="backlinks", arm="n/a", status="declined",
+                             age_days=8),
                 intervention("backlinks_treated_old", lever="backlinks", status="judged",
                              age_days=400, applied=True),
                 intervention("backlinks_never_sent_old", lever="backlinks", status="cancelled",
@@ -305,3 +308,37 @@ def test_the_old_four_argument_function_is_gone(pg):
     assert [r[0] for r in cur.fetchall()] == [
         "p_channel_id text, p_min_impressions bigint, p_window_days integer, "
         "p_measurement_window_days integer, p_cooldown_days integer"]
+
+
+def _title_world() -> dict[str, list[dict]]:
+    rows = {
+        "title_judged_old": dict(status="judged", applied=True),
+        "title_reverted_old": dict(status="cancelled", applied=True),
+        "title_holdout_old": dict(arm="holdout", status="judged"),
+        "title_declined_old": dict(status="declined"),
+        "title_decline_judged_old": dict(status="judged"),
+        "title_never_sent_old": dict(status="cancelled"),
+        "title_human_old": dict(origin="human", arm="n/a", status="applied"),
+    }
+    ids = list(rows) + ["free"]
+    return {
+        "videos": [{"id": v, "channel_id": "c1", "privacy_status": "public", "is_episode": None}
+                   for v in ids],
+        "reporting_reports_ingested": [
+            {"report_id": f"r{n}", "channel_id": "c1", "data_date": day(n),
+             "report_type": "channel_reach_basic_a1"} for n in range(28)],
+        "video_reach_daily": [
+            {"id": i, "video_id": v, "channel_id": "c1", "date": day(0),
+             "impressions": 1000 + i, "ctr": 0.05} for i, v in enumerate(ids, 1)],
+        "interventions": [{"id": i, **intervention(v, lever="title", age_days=30, **kw)}
+                          for i, (v, kw) in enumerate(rows.items(), 1)],
+    }
+
+
+def test_sql_and_python_agree_a_video_is_in_the_title_experiment_once(pg):
+    """Part 6 S3.5: a judged, reverted, held-out or declined title (a decline
+    still `declined`, or measured since) keeps its video out at any age; a
+    treated title cancelled before it reached YouTube, and a human row, don't."""
+    pools = _assert_parity(pg, _title_world(), channels=("c1",))
+    assert sorted(r["id"] for r in pools["c1"]) == [
+        "free", "title_human_old", "title_never_sent_old"]

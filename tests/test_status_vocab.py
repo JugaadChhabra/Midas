@@ -35,6 +35,7 @@ STATUS_JS = REPO / "app/static/status.js"
 INTERVENTIONS_SQL = REPO / "supabase/migrations/20261006020000_interventions.sql"
 WARM_POOL_SQL = REPO / "supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql"
 LEVER_VERDICTS_SQL = REPO / "supabase/migrations/20261023010000_lever_verdicts.sql"
+TITLE_SCOPES_SQL = REPO / "supabase/migrations/20261030010000_lever_verdicts_title_scopes.sql"
 PLAYLIST_ARMS_SQL = REPO / "supabase/migrations/20261027000000_playlist_arms.sql"
 SHORT_LINKS_SQL = REPO / "supabase/migrations/20261027010000_short_link_recommendations.sql"
 CHANNEL_HTML = REPO / "app/static/channel.html"
@@ -217,14 +218,19 @@ def test_re_exports_are_the_same_object_not_a_copy(module, attr):
 
 
 def test_lever_verdict_values_are_the_persisted_strings():
-    """lever_verdicts.arm_scope and .verdict (S1.6b), as the migration's comments list them."""
-    assert sv.ALL_LEVER_VERDICT_SCOPES == {"treated_vs_holdout", "human"}
+    """lever_verdicts.arm_scope and .verdict (S1.6b), as the migration's comments list them;
+    S3.5's title scopes, as its `comment on column` lists every arm_scope."""
+    assert sv.ALL_LEVER_VERDICT_SCOPES == {"treated_vs_holdout", "human",
+                                           "pipeline_vs_holdout", "agent_vs_holdout"}
     assert sv.ALL_LEVER_VERDICTS == {"helped", "no_change", "worse"}
     ddl = LEVER_VERDICTS_SQL.read_text()
-    for column, values in (("arm_scope", sv.ALL_LEVER_VERDICT_SCOPES),
+    for column, values in (("arm_scope", {"treated_vs_holdout", "human"}),
                            ("verdict", sv.ALL_LEVER_VERDICTS)):
         [line] = [l for l in ddl.splitlines() if l.strip().startswith(column + " ")]
         assert set(line.split("--")[1].strip().split("|")) == values
+    [comment] = re.findall(r"comment on column lever_verdicts\.arm_scope is '([^']*)'",
+                           TITLE_SCOPES_SQL.read_text())
+    assert set(comment.split("|")) == sv.ALL_LEVER_VERDICT_SCOPES
 
 
 def test_playlist_arm_values_are_the_persisted_strings():

@@ -132,3 +132,42 @@ def test_a_suggest_only_audit_is_not_guarded():
         r = _client().post("/videos/vid1/audit")
     assert r.status_code == 200, r.text
     audit.assert_called_once_with("vid1")
+
+
+# ── POST /audits/{id}/revert ────────────────────────────────────────────────
+
+REVERT_REFUSED = ("agent channel: an audit revert replaces the description and its "
+                  "backlink block; pass force=true")
+
+
+def _applied(sb):
+    sb._tables["audits"][0].update({"status": "applied", "title_before": "older",
+                                    "description_before": "older desc", "tags_before": []})
+    return sb
+
+
+def test_an_audit_revert_on_an_agent_channel_is_409_and_sends_nothing():
+    sb = _applied(_db(agent_enabled=True))
+    with _edges(sb) as p:
+        r = _client().post("/audits/7/revert")
+    assert r.status_code == 409
+    assert r.json()["detail"] == REVERT_REFUSED
+    p["update"].assert_not_called()
+    assert _status(sb) == "applied"
+
+
+def test_an_audit_revert_on_an_agent_channel_goes_through_with_force():
+    sb = _applied(_db(agent_enabled=True))
+    with _edges(sb) as p:
+        r = _client().post("/audits/7/revert?force=true")
+    assert r.status_code == 200, r.text
+    p["update"].assert_called_once()
+    assert _status(sb) == "reverted"
+
+
+def test_an_audit_revert_on_another_channel_is_unchanged():
+    sb = _applied(_db(agent_enabled=False))
+    with _edges(sb) as p:
+        r = _client().post("/audits/7/revert")
+    assert r.status_code == 200, r.text
+    p["update"].assert_called_once()

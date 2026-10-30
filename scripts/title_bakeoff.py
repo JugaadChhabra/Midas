@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> None:
     channel, videos = titles.title_answers(args.channel, args.n, pick=False)
     rows = []
     for video in videos:
-        ctx = titles.context(video, channel=channel, cache_only=True)
+        ctx = titles.context(video, channel=channel)
         subject = {**video, "default_language": ctx["default_language"]}
         for model in models:
             candidate, checks = _top(ctx, subject, model)

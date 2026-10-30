@@ -74,14 +74,12 @@ def tools_called(trajectory: dict) -> list[str]:
             for c in m.get("tool_calls") or ()]
 
 
-def run_title_agent(video: dict, *, channel: titles.ChannelContext | None = None,
-                    cache_only: bool = False) -> AgentResult:
+def run_title_agent(video: dict, *, channel: titles.ChannelContext | None = None
+                    ) -> AgentResult:
     """Run the title agent on `video` (a `videos` row). `channel` is its
-    channel's `titles.channel_context`, read when not passed; `cache_only`
-    reads transcripts from the cache alone (the preview). Writes nothing."""
+    channel's `titles.channel_context`, read when not passed. Writes nothing."""
     channel = channel or titles.channel_context(video["channel_id"])
-    subject = tools.Subject({**video, "default_language": channel.language}, channel,
-                            cache_only)
+    subject = tools.Subject({**video, "default_language": channel.language}, channel)
     model = settings.AUDIT_MODEL
     messages = [{"role": "system", "content": titles.agent_system_prompt()},
                 {"role": "user", "content": _first_message(subject)}]

@@ -315,6 +315,25 @@ class Settings:
     # turns (chat_tools calls) an agent run gets before it ends `failed`,
     # `turn_cap` (app/agent/loop.py run_title_agent).
     AGENT_MAX_TURNS = int(os.getenv("AGENT_MAX_TURNS") or "12")
+    # Slice 3 · S3.5 (spec Part 6 Config, F6): a title row's post window in
+    # traffic data-days (the pre is 14), and the floor on its browse +
+    # suggested views in the pre window, else `insufficient_data`
+    # (app/title_measurement.py).
+    TITLE_WINDOW_DAYS = int(os.getenv("TITLE_WINDOW_DAYS") or "14")
+    TITLE_MIN_PRE_VIEWS = int(os.getenv("TITLE_MIN_PRE_VIEWS") or "100")
+    # Slice 3 · S3.5 (spec Part 6 Config, F7): the log-ratio verdict band and
+    # stop bar per path, the windows before the stop rule, and the harm guard:
+    # a cumulative lift ≤ −TITLE_HARM_LIFT after TITLE_HARM_WINDOWS stops a
+    # path early (app/lever_verdicts.py).
+    TITLE_MIN_LIFT = float(os.getenv("TITLE_MIN_LIFT") or "0.05")
+    TITLE_EXPERIMENT_WINDOWS = int(os.getenv("TITLE_EXPERIMENT_WINDOWS") or "4")
+    TITLE_HARM_WINDOWS = int(os.getenv("TITLE_HARM_WINDOWS") or "2")
+    TITLE_HARM_LIFT = float(os.getenv("TITLE_HARM_LIFT") or "0.10")
+    # Slice 3 · S3.5 (spec Part 6 Config, F8): a judged title whose delta minus
+    # the holdout mean is ≤ −TITLE_REVERT_LIFT is put back, at most
+    # TITLE_REVERTS_PER_DAY per channel per run (app/lever_verdicts.py auto_revert).
+    TITLE_REVERT_LIFT = float(os.getenv("TITLE_REVERT_LIFT") or "0.30")
+    TITLE_REVERTS_PER_DAY = int(os.getenv("TITLE_REVERTS_PER_DAY") or "10")
     # Slice 1 · S1.6 (spec Part 4 Config, Part 2 §1.7): the floor on the SOURCE
     # video's total views in a backlinks intervention's post window. Under it
     # the window is extended once to 14 days, then `insufficient_data`

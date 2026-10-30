@@ -44,9 +44,10 @@ def ago(days: float) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
-def intervention(video_id, origin="midas", status="applied", *, lever="title", arm=None,
+def intervention(video_id, origin="midas", status="applied", *, lever="playlist", arm=None,
                  age_days=365, applied=None):
-    """Old and off the backlinks experiment by default, so only `status` matters."""
+    """Old and on a lever with no once-per-experiment hold (not backlinks or
+    title) by default, so only `status` matters."""
     return {"video_id": video_id, "channel_id": CH, "lever": lever,
             "origin": origin, "arm": arm or ("treated" if origin == "midas" else "n/a"),
             "status": status, "created_at": ago(age_days),
@@ -108,6 +109,26 @@ def test_closed_midas_and_any_human_intervention_do_not_exclude():
     assert sorted(pool_ids(sb)) == ["declined", "human", "judged"]
 
 
+def test_a_video_is_in_the_title_experiment_once():
+    """S3.5: a judged, reverted, held-out or declined title (a decline still
+    `declined`, or measured since) holds its video at any age; a treated title
+    cancelled before it reached YouTube holds it for the cooldown only."""
+    held = {"judged": dict(status="judged", applied=True),
+            "reverted": dict(status="cancelled", applied=True),
+            "holdout": dict(arm="holdout", status="judged"),
+            "declined": dict(status="declined"),
+            "decline_judged": dict(status="insufficient_data")}
+    ids = [*held, "never_sent", "human"]
+    sb = sb_for(
+        reach_rows=[reach(v, 1000) for v in ids],
+        videos=[video(v) for v in ids],
+        interventions=[*(intervention(v, lever="title", age_days=60, **kw) for v, kw in held.items()),
+                       intervention("never_sent", lever="title", status="cancelled", age_days=60),
+                       intervention("human", lever="title", origin="human", age_days=60)],
+    )
+    assert sorted(pool_ids(sb)) == ["human", "never_sent"]
+
+
 # ── S1.4a: the agent's exclusions (Part 4 S1.4 "Pick", finding 2) ────────
 
 def test_the_cooldown_excludes_any_recent_midas_row_and_keeps_an_older_one():
@@ -120,7 +141,7 @@ def test_the_cooldown_excludes_any_recent_midas_row_and_keeps_an_older_one():
         reach_rows=[reach(v, 1000) for v in [*recent, "declined_long_ago", "fresh"]],
         videos=[video(v) for v in [*recent, "declined_long_ago", "fresh"]],
         interventions=[
-            *(intervention(v, status=s, lever="title", age_days=1) for v, s in recent.items()),
+            *(intervention(v, status=s, age_days=1) for v, s in recent.items()),
             # The video's last Midas row is older than the cooldown.
             intervention("declined_long_ago", status="declined", age_days=cooldown + 1),
             intervention("declined_long_ago", status="judged", age_days=cooldown + 30),

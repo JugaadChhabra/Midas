@@ -15,7 +15,10 @@ Held (S1.4a, spec Part 4 S1.4 "Pick", finding 2), by any Midas row that is:
   - created within TRIAGE_COOLDOWN_DAYS, whatever its lever or status: a
     `no_change` is `declined`, not active, and would be offered again next tick;
   - a `backlinks` row of either arm (treated or holdout), at any age: each video
-    is in the backlinks experiment once.
+    is in the backlinks experiment once;
+  - a `title` row (S3.5) of the holdout arm, or of the treated arm unless it was
+    cancelled before reaching YouTube, at any age: a judged, reverted or
+    declined title never re-enters the title experiment.
 
 Ingested, not calendar: the window is the latest WARM_WINDOW_DAYS days the
 reach ledger has a report for (`reach.coverage`), so a gap in ingestion
@@ -26,7 +29,7 @@ A `human` row records an edit and never closes, so counting it would bar every
 video the team has ever touched.
 
 The ranking runs in-app or in Postgres (`warm_pool()`, migration
-20261023000000) behind WARM_POOL_USE_RPC, as next_audit_candidate does; the
+20261030020000) behind WARM_POOL_USE_RPC, as next_audit_candidate does; the
 two are held together by tests/test_warm_pool_parity.py. The explore share is
 drawn here, over either, with an injectable `random.Random`.
 
@@ -54,6 +57,7 @@ from app.status_vocab import (
     InterventionArm,
     InterventionLever,
     InterventionOrigin,
+    InterventionStatus,
 )
 
 log = logging.getLogger("midas.warm")
@@ -82,6 +86,14 @@ def _holds(row: dict, cooldown_start: datetime) -> bool:
     if row["lever"] == InterventionLever.BACKLINKS and (
             row["arm"] == InterventionArm.HOLDOUT
             or (row["arm"] == InterventionArm.TREATED and row.get("applied_at"))):
+        return True
+    # Titles (S3.5): the same, and a treated row that never reached YouTube
+    # but wasn't cancelled either (an agent decline, measured in the agent's
+    # arm), so a judged, reverted or declined title never comes back.
+    if row["lever"] == InterventionLever.TITLE and (
+            row["arm"] == InterventionArm.HOLDOUT
+            or (row["arm"] == InterventionArm.TREATED
+                and (row.get("applied_at") or row["status"] != InterventionStatus.CANCELLED))):
         return True
     created = row.get("created_at")
     return created is not None and (

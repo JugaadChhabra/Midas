@@ -1716,7 +1716,7 @@ or a Short's link.
 S3.1 → S3.2 → S3.3 → S3.4 → S3.5 → S3.6
 ```
 
-S3.4 adds the only migration (`interventions.trajectory`). S3.7 (deploy, office) and S3.8 (docs) are the owner's.
+Three migrations: S3.4's `20261030000000` (`interventions.trajectory`), S3.5's `20261030010000` (a comment on `lever_verdicts.arm_scope` naming the title scopes) and `20261030020000` (`warm_pool()` with the title hold). S3.7 (deploy, office) and S3.8 (docs) are the owner's.
 
 ### S3.1 — The title write and its revert (Part 2 §2.5, F1)
 
@@ -1894,7 +1894,7 @@ works with `force=true` and on other channels.
 
 ### S3.7 — Deploy, bake-off, preview, go (owner, office machine)
 
-1. Deploy S3.1–S3.6; apply the migration, `docker compose restart postgrest rest`, restart; NAS snapshot.
+1. Deploy S3.1–S3.6; apply the migrations, `docker compose restart postgrest rest`, restart; NAS snapshot.
 2. `scripts/title_bakeoff.py` on Marathi and Hindi, 20 videos, 3 model families; the SEO team scores blind; drop any
    model above 5% broken script; set `WRITER_MODEL` to the best mean score **(F9)**.
 3. Per channel: `scripts/preview_titles.py --n 20 --csv` (pipeline) and `--path agent` (agent); one SEO sign-off

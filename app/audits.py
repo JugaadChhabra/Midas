@@ -477,12 +477,21 @@ AGENT_CHANNEL_REFUSED = (
 )
 
 
-def _refuse_on_agent_channel(channel: dict | None, *, force: bool) -> None:
+#: 409 detail of a manual audit revert on an agent channel: it restates the
+#: whole snippet from the audit's before-state, so it drops a backlink block too.
+AGENT_CHANNEL_REVERT_REFUSED = (
+    "agent channel: an audit revert replaces the description and its "
+    "backlink block; pass force=true"
+)
+
+
+def _refuse_on_agent_channel(channel: dict | None, *, force: bool,
+                             detail: str = AGENT_CHANNEL_REFUSED) -> None:
     """The house-format apply sends the whole snippet, so on a channel with
     `agent_enabled` it replaces the description and any backlink block in it
     (spec Part 6 S3.6, F13). Refused there with 409 unless the caller forces it."""
     if (channel or {}).get("agent_enabled") and not force:
-        raise HTTPException(409, AGENT_CHANNEL_REFUSED)
+        raise HTTPException(409, detail)
 
 
 def apply_audit_internal(audit_id: int, body: ApplyIn | None = None, *, force: bool = False) -> dict:
@@ -802,11 +811,13 @@ def run_bulk_audit(channel_id: str, body: BulkAuditIn):
 
 
 @router.post("/audits/{audit_id}/revert")
-def revert_audit(audit_id: int):
+def revert_audit(audit_id: int, force: bool = False):
     """Restore a video's title/description/tags from the audit's *_before snapshot.
 
     Only valid for audits with status='applied' and stored before-state. Marks
     the audit as 'reverted' and pushes the prior metadata back to YouTube.
+    Refused (409) on an agent channel unless `?force=true`: the restated
+    description would drop a backlink block (final review of Slice 3).
     """
     audit = supabase().table("audits").select("*").eq("id", audit_id).single().execute().data
     if not audit:
@@ -820,9 +831,10 @@ def revert_audit(audit_id: int):
     if not video:
         raise HTTPException(404, "Video not found")
 
-    channel = supabase().table("channels").select("default_language").eq(
+    channel = supabase().table("channels").select("default_language,agent_enabled").eq(
         "id", video["channel_id"]
     ).single().execute().data or {}
+    _refuse_on_agent_channel(channel, force=force, detail=AGENT_CHANNEL_REVERT_REFUSED)
     lang = channel.get("default_language") or None
 
     # Same contract as apply, built through the one owner. A revert restates the
