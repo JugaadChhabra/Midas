@@ -77,9 +77,9 @@ SCRIPTS: dict[str, tuple[str, str]] = {
 }
 _URL_RE = re.compile(r"https?://|www\.|youtu\.be/|youtube\.com/", re.IGNORECASE)
 
-#: The writer's system prompt; `{title_max}` and `{candidates}` are filled in
-#: by `system_prompt()`.
-TITLE_PROMPT = """\
+#: The objective and the rules, shared by the writer's prompt and the agent's
+#: (S3.4); `{title_max}` is filled in.
+TITLE_BRIEF = """\
 You write the title of one YouTube video on a kids' nursery-rhyme channel.
 Only the title changes: the thumbnail, description and tags stay as they are.
 
@@ -95,7 +95,11 @@ Rules:
 - Add no hashtags: no more "#" than the current title has.
 - No links.
 - At most {title_max} characters.
-- Each candidate must differ from the current title.
+- Each candidate must differ from the current title."""
+
+#: The writer's system prompt; `{title_max}` and `{candidates}` are filled in
+#: by `system_prompt()`.
+TITLE_PROMPT = TITLE_BRIEF + """
 
 You are told the current title, the start of the description, the transcript
 when there is one, the channel's language, the video's click-through rate
@@ -170,7 +174,11 @@ def _ceiling(impressions: dict[str, int]) -> frozenset[str]:
     return frozenset(top) | frozenset(over)
 
 
-def _top_performers(channel_id: str, impressions: dict[str, int], n: int) -> list[dict]:
+def _top_performers(channel_id: str, impressions: dict[str, int], n: int, *,
+                    worst: bool = False) -> list[dict]:
+    """The `n` warm long videos with the most (or, `worst`, the fewest)
+    browse + suggested views per impression, with their titles; `worst` counts
+    a video with no such views as 0."""
     window = _window(channel_id, agent_tick.CONTEXT_DAYS, TRAFFIC_REPORT_TYPE_ID)
     if not window or not impressions:
         return []
@@ -184,10 +192,12 @@ def _top_performers(channel_id: str, impressions: dict[str, int], n: int) -> lis
     ):
         if r["date"] in window:
             views[r["video_id"]] += r["views"]
-    rate = {v: views[v] / impressions[v] for v in views if impressions.get(v)}
+    rate = {v: views.get(v, 0) / impressions[v] for v in (impressions if worst else views)
+            if impressions.get(v)}
     titles = {v["id"]: v.get("title") for v in rows_for_ids(
         lambda c: supabase().table("videos").select("id,title").in_("id", c), list(rate))}
-    best = sorted((v for v in rate if titles.get(v)), key=lambda v: (-rate[v], v))[:n]
+    best = sorted((v for v in rate if titles.get(v)),
+                  key=lambda v: (rate[v] if worst else -rate[v], v))[:n]
     return [{"video_id": v, "title": titles[v], "views_per_impression": round(rate[v], 4)}
             for v in best]
 
@@ -208,8 +218,8 @@ def channel_context(channel_id: str) -> ChannelContext:
     )
 
 
-def _search_terms(video: dict) -> list[dict]:
-    """The video's top SEARCH_TERMS type-5 terms by views over the channel's
+def _search_terms(video: dict, n: int = SEARCH_TERMS) -> list[dict]:
+    """The video's top `n` type-5 terms by views over the channel's
     latest CONTEXT_DAYS ingested traffic data-days."""
     window = _window(video["channel_id"], agent_tick.CONTEXT_DAYS, TRAFFIC_REPORT_TYPE_ID)
     if not window:
@@ -223,7 +233,7 @@ def _search_terms(video: dict) -> list[dict]:
     ):
         if r["date"] in window and r.get("source_detail"):
             views[r["source_detail"]] += r["views"]
-    best = sorted(views, key=lambda t: (-views[t], t))[:SEARCH_TERMS]
+    best = sorted(views, key=lambda t: (-views[t], t))[:n]
     return [{"term": t, "views": views[t]} for t in best]
 
 
