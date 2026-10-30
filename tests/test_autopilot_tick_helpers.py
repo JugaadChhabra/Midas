@@ -173,7 +173,7 @@ def _tick_on(channel, can_afford):
          patch("app.autopilot.supabase", return_value=sb), \
          patch("app.autopilot.eligibility.can_run_agent", return_value=True), \
          patch.object(ap.settings, "BACKLINK_APPLY_ENABLED", True), \
-         patch.dict(ap.backlinks.HEADINGS, {"hi": "Watch more"}, clear=True), \
+         patch.dict(ap.agent_tick.backlinks.HEADINGS, {"hi": "Watch more"}, clear=True), \
          patch("app.autopilot.quota.can_afford", side_effect=can_afford) as afford, \
          patch("app.autopilot.quota.units_remaining", return_value=12), \
          patch("app.autopilot._applies_today", return_value=0), \

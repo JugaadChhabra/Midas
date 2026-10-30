@@ -36,7 +36,7 @@ from app.status_vocab import DecisionUsed
 
 log = logging.getLogger(__name__)
 
-QUESTION_SET_VERSION = "2026.10-s1-v2"
+QUESTION_SET_VERSION = "2026.11-s3-v1"
 
 
 @dataclass(frozen=True)
@@ -69,14 +69,28 @@ class NotConfigured(Exception):
 
 
 def _triage_rules(context: dict) -> str:
-    """Spec Part 2 §2.2: backlinks if the description has no related block and
-    at least BACKLINK_MIN_CANDIDATES candidates exist; otherwise no_change.
-    Never backlinks once the lever has stopped for the channel (Part 4 S1.4,
-    the S1.6 stop rule: `backlinks_stopped`)."""
-    if (not context.get("backlinks_stopped")
+    """Spec Part 6 S3.3 (Part 2 §2.2), in order:
+
+    1. backlinks, if the lever can run on the channel (`backlinks_enabled`:
+       BACKLINK_APPLY_ENABLED and a heading), hasn't stopped (`backlinks_stopped`,
+       the S1.6 stop rule), the description has no related block and at least
+       BACKLINK_MIN_CANDIDATES candidates exist;
+    2. title, if the lever is open for the video (`title_enabled`), it isn't a
+       Short, isn't excluded (`title_excluded`: the ceiling or
+       TITLE_EXCLUDE_VIDEOS), and its CTR is below the channel median;
+    3. otherwise no_change.
+    """
+    if (context.get("backlinks_enabled")
+            and not context.get("backlinks_stopped")
             and not context.get("has_related_block")
             and (context.get("backlink_candidates") or 0) >= settings.BACKLINK_MIN_CANDIDATES):
         return "backlinks"
+    ctr, median = context.get("ctr"), context.get("channel_median_ctr")
+    if (context.get("title_enabled")
+            and not context.get("is_short")
+            and not context.get("title_excluded")
+            and ctr is not None and median is not None and ctr < median):
+        return "title"
     return "no_change"
 
 
@@ -88,8 +102,8 @@ TRIAGE = QuestionSet(
         "description. `playlist`: add it to a playlist. `short_link`: link a "
         "Short to it. `title`: rewrite its title. `no_change`: leave it alone."
     ),
-    # Spec Part 2 §2.2's options. The rules choose only backlinks or no_change
-    # (Slice 1); the backend may choose any.
+    # Spec Part 2 §2.2's options. The rules choose backlinks, title or
+    # no_change (Slice 3); the backend may choose any.
     answers=("no_change", "backlinks", "playlist", "short_link", "title"),
     rules=_triage_rules,
 )

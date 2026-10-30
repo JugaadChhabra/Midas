@@ -9,8 +9,10 @@
     pipeline(video)                  -- the pipeline path: the first passing
                                         candidate, one retry with the failures
     title_path(video_id)             -- pipeline or agent, by hash
+    route(channel_id, video_id)      -- the path, handed over when one has stopped
+                                        (path_stopped: S3.5 fills it)
     strategy_version(path)           -- the A6 stamp for a title, registered
-    title_answers(channel_id, n)     -- the pool's first n videos triage would
+    title_answers(channel_id, n)     -- the pool's first n videos TRIAGE's rules
                                         send to titles (the preview, the bake-off)
     preview(channel_id, n, path=)    -- arm, path and the pipeline's candidates
                                         for them, recording nothing
@@ -429,24 +431,53 @@ def strategy_version(path: str) -> str:
     return version
 
 
+def path_stopped(channel_id: str, path: str) -> bool:
+    """Whether `path`'s stop rule has fired on the channel (Part 6 S3.5, F7).
+    Always False until #120 (S3.5) fills it from the title verdicts."""
+    return False
+
+
+def stopped(channel_id: str) -> bool:
+    """Whether the title lever has stopped on the channel: both paths have."""
+    return all(path_stopped(channel_id, p) for p in PATHS)
+
+
+def route(channel_id: str, video_id: str) -> str:
+    """The path a treated title on the channel takes (Part 6 S3.3): `title_path`,
+    handed to the other path when that one has stopped."""
+    path = title_path(video_id)
+    if path_stopped(channel_id, path):
+        return AGENT if path == PIPELINE else PIPELINE
+    return path
+
+
 def would_title(video_id: str, channel: ChannelContext) -> bool:
-    """Whether triage would answer `title` for the video, until S3.3's rule
-    exists: a warm long video (no Short), CTR below the channel median, not
-    over the ceiling."""
+    """Whether TRIAGE's rules answer `title` for a warm long video of the
+    channel, on its title keys alone (no backlinks, the lever taken as open):
+    CTR below the channel median, not over the ceiling or excluded."""
     impressions_ctr = channel.reach.get(video_id)
-    return (impressions_ctr is not None and impressions_ctr[1] is not None
-            and channel.median_ctr is not None and impressions_ctr[1] < channel.median_ctr
-            and video_id not in channel.ceiling)
+    return decide.TRIAGE.rules({
+        "backlinks_enabled": False,
+        "title_enabled": True,
+        "is_short": False,
+        "title_excluded": (video_id in channel.ceiling
+                           or video_id in settings.TITLE_EXCLUDE_VIDEOS),
+        "ctr": impressions_ctr[1] if impressions_ctr else None,
+        "channel_median_ctr": channel.median_ctr,
+    }) == "title"
 
 
 def title_answers(channel_id: str, n: int, *,
                   pick: bool = True) -> tuple[ChannelContext, list[dict]]:
     """The channel context and the first `n` videos triage would send to
     titles. With `pick`, in the tick's pick order (`warm.warm_pool`, with its
-    explore share and its exclusions, as `agent_tick.preview`); without, every
-    warm long video by impressions, the pick's exclusions (a backlinks
-    experiment, the cooldown) ignored: the bake-off's sample. Reads only."""
-    channel = channel_context(channel_id)
+    explore share and its exclusions, as `agent_tick.preview`), each asked
+    TRIAGE's rules on the tick's context with the title lever taken as open
+    (backlinks first, as the tick); without, every warm long video by
+    impressions, the pick's exclusions (a backlinks experiment, the cooldown)
+    ignored, asked `would_title`: the bake-off's sample. Reads only."""
+    channel = agent_tick.title_channel(channel_id)
+    language = channel.language
     order = (warm.warm_pool(channel_id) if pick else
              [{"id": v} for v in sorted(channel.reach,
                                         key=lambda v: (-channel.reach[v][0], v))])
@@ -454,11 +485,16 @@ def title_answers(channel_id: str, n: int, *,
     for picked in order:
         if len(out) >= n:
             break
-        if not would_title(picked["id"], channel):
+        if not pick and not would_title(picked["id"], channel):
             continue
         video = agent_tick._video(picked["id"])
-        if video is not None:
-            out.append(video)
+        if video is None:
+            continue
+        if pick:
+            _, ctx = agent_tick._assess(video, language, titles_on=True)
+            if decide.TRIAGE.rules(ctx) != "title":
+                continue
+        out.append(video)
     return channel, out
 
 
@@ -473,14 +509,14 @@ def preview(channel_id: str, n: int, *, path: str = PIPELINE) -> list[dict]:
     channel, videos = title_answers(channel_id, n)
     out = []
     for video in videos:
-        impressions, ctr = channel.reach[video["id"]]
+        impressions, ctr = channel.reach.get(video["id"]) or agent_tick._reach(video)
         item = {"video_id": video["id"], "title": video.get("title"), "answer": "title",
                 "impressions": impressions, "ctr": ctr,
                 "channel_median_ctr": channel.median_ctr,
                 "arm": interventions.assign_arm(video["id"], InterventionLever.TITLE),
                 "path": None, "written": None, "note": None, "error": None}
         if item["arm"] == InterventionArm.TREATED:
-            item["path"] = title_path(video["id"])
+            item["path"] = route(channel_id, video["id"])
             if item["path"] != path:
                 item["note"] = f"on the {item['path']} path"
             elif path == AGENT:

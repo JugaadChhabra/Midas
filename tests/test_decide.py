@@ -12,7 +12,8 @@ from app import audits, decide
 from app.config import settings
 from tests.fakes import FakeSupabase
 
-WARM = {"has_related_block": False, "backlink_candidates": 3}    # rules: backlinks
+WARM = {"backlinks_enabled": True, "has_related_block": False,
+        "backlink_candidates": 3}                                 # rules: backlinks
 COLD = {"has_related_block": False, "backlink_candidates": 0}    # rules: no_change
 
 
@@ -61,6 +62,30 @@ def test_triage_rules():
     assert rules({**WARM, "backlinks_stopped": True}) == "no_change"     # S1.4: lever stopped
     with patch.object(settings, "BACKLINK_MIN_CANDIDATES", 4):
         assert rules(WARM) == "no_change"
+    assert rules({**WARM, "backlinks_enabled": False}) == "no_change"   # S3.3: off or no heading
+
+
+#: S3.3: a video the title rule takes (CTR under the channel median).
+TITLE = {"title_enabled": True, "is_short": False, "title_excluded": False,
+         "ctr": 0.01, "channel_median_ctr": 0.05}
+
+
+def test_triage_rules_answer_title_after_backlinks():
+    rules = decide.TRIAGE.rules
+    assert rules(TITLE) == "title"
+    assert rules({**TITLE, **WARM}) == "backlinks"                      # backlinks first
+    assert rules({**TITLE, **WARM, "backlinks_stopped": True}) == "title"
+    assert rules({**TITLE, **WARM, "has_related_block": True}) == "title"
+    assert rules({**TITLE, **WARM, "backlinks_enabled": False}) == "title"
+
+
+@pytest.mark.parametrize("change", [
+    {"title_enabled": False}, {"title_enabled": None}, {"is_short": True},
+    {"title_excluded": True}, {"ctr": 0.05}, {"ctr": 0.06}, {"ctr": None},
+    {"channel_median_ctr": None},
+])
+def test_triage_rules_never_answer_title_for(change):
+    assert decide.TRIAGE.rules({**TITLE, **change}) == "no_change"
 
 
 # ── both backends return the same typed shape ────────────────────────────
@@ -291,12 +316,12 @@ def test_llm_backend_asks_next_watch_with_its_question_and_label():
     assert seen["label"] == "decide.next_watch"
 
 
-def test_the_s1_5_bump_reaches_the_strategy_stamp():
-    """S1.5 added a question set, so the version moved past S1.4b's, and the
-    audit stamp hashes the new one."""
-    assert decide.QUESTION_SET_VERSION not in ("2026.10-b5-v1", "2026.10-s1-v1")
+def test_the_s3_3_bump_reaches_the_strategy_stamp():
+    """S3.3 changed TRIAGE's rules (title after backlinks), so the version moved
+    past S1.5's, and the audit stamp hashes the new one."""
+    assert decide.QUESTION_SET_VERSION == "2026.11-s3-v1"
     current, inputs = audits.strategy_version(audits.DEFAULT_PROMPT, audits.PROMPT_SOURCE_DEFAULT)
     assert inputs["decision_question_set_version"] == decide.QUESTION_SET_VERSION
-    with patch.object(decide, "QUESTION_SET_VERSION", "2026.10-s1-v1"):
+    with patch.object(decide, "QUESTION_SET_VERSION", "2026.10-s1-v2"):
         previous, _ = audits.strategy_version(audits.DEFAULT_PROMPT, audits.PROMPT_SOURCE_DEFAULT)
     assert current != previous

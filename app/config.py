@@ -289,11 +289,28 @@ class Settings:
     TITLE_CANDIDATES = int(os.getenv("TITLE_CANDIDATES") or "3")
     # Slice 3 (spec Part 6 Config, F2): warm-window impressions above which a
     # video is never retitled, on top of the channel's top 1% (the ceiling,
-    # app/titles.py channel_context). Read by the preview since S3.2.
+    # app/titles.py channel_context). Read by triage since S3.3.
     TITLE_MAX_IMPRESSIONS = int(os.getenv("TITLE_MAX_IMPRESSIONS") or "5000000")
     # Slice 3 (spec Part 6 Config, F5): the share of treated title videos the
     # agent writes, by hash (app/titles.py title_path); 0 = pipeline only.
     TITLE_AGENT_PCT = float(os.getenv("TITLE_AGENT_PCT") or "0.5")
+    # Slice 3 · S3.3 (spec Part 6 Config, F3): the channels where triage may
+    # answer `title` (app/agent_tick.py titles_open). Comma list.
+    TITLE_CHANNELS = {
+        c.strip()
+        for c in (os.getenv("TITLE_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",")
+        if c.strip()
+    }
+    # Slice 3 · S3.3 (spec Part 6 Config, F4, F14): treated title rows per
+    # channel per day (inside `autopilot_daily_cap`), and agent runs per channel
+    # per day, declines included (app/agent_tick.py _title_enabled).
+    TITLE_DAILY_CAP = int(os.getenv("TITLE_DAILY_CAP") or "10")
+    TITLE_AGENT_DAILY_RUNS = int(os.getenv("TITLE_AGENT_DAILY_RUNS") or "20")
+    # Slice 3 · S3.3 (spec Part 6 Config, F12): video ids the SEO team protects;
+    # triage never answers `title` for them. Comma list, empty by default.
+    TITLE_EXCLUDE_VIDEOS = {
+        v.strip() for v in (os.getenv("TITLE_EXCLUDE_VIDEOS") or "").split(",") if v.strip()
+    }
     # Slice 1 · S1.6 (spec Part 4 Config, Part 2 §1.7): the floor on the SOURCE
     # video's total views in a backlinks intervention's post window. Under it
     # the window is extended once to 14 days, then `insufficient_data`

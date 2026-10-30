@@ -369,7 +369,7 @@ def test_triage_is_deterministic_for_a_given_context():
     sb = world()
     with wired(sb):
         video = agent_tick._video(SRC)
-        (found1, ctx1), (found2, ctx2) = agent_tick._assess(video), agent_tick._assess(video)
+        (found1, ctx1), (found2, ctx2) = agent_tick._assess(video, "mr"), agent_tick._assess(video, "mr")
         assert ctx1 == ctx2 and found1 == found2
         answers = {decide.decide(decide.TRIAGE, SRC, ctx1).answer for _ in range(3)}
     assert answers == {"backlinks"}                 # the shadow said no_change every time
@@ -393,11 +393,11 @@ def test_the_tick_reads_a_channels_target_pool_once_an_hour():
 
     with wired(sb), patch.object(agent_tick.backlinks, "target_pool", counting):
         video = agent_tick._video(SRC)
-        first, _ = agent_tick._assess(video)
-        again, _ = agent_tick._assess(video)
+        first, _ = agent_tick._assess(video, "mr")
+        again, _ = agent_tick._assess(video, "mr")
         assert reads == [CH] and again == first
         with patch.object(agent_tick, "POOL_TTL_SECONDS", 0):
-            stale, _ = agent_tick._assess(video)
+            stale, _ = agent_tick._assess(video, "mr")
         assert reads == [CH, CH] and stale == first
     assert first.rows
     assert all(type(v).__name__ == "array" for v in agent_tick._pools[CH][1].vectors.values())
@@ -433,7 +433,7 @@ def test_d5_a_description_that_links_to_our_video_gets_no_change():
 def test_a_link_to_a_video_that_isnt_ours_is_no_related_block():
     sb = world(description=f"{SRC_DESCRIPTION}\nhttps://youtu.be/notOurVideo")
     with wired(sb):
-        _, context = agent_tick._assess(agent_tick._video(SRC))
+        _, context = agent_tick._assess(agent_tick._video(SRC), "mr")
     assert context["has_related_block"] is False
 
 

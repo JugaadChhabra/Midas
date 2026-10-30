@@ -1,9 +1,9 @@
 """Slice 1 · S1.4b — the agent tick's video work (spec Part 4 S1.4, Part 2 §2.1, §2.2, §1.3, §6.1; #65).
 
 On a channel with `agent_enabled`, `autopilot.tick` runs its gates (eligibility,
-resync, daily cap, quota) and then hands the video work here instead of the
-audit path. Nothing here calls `audit_video`: the title lever is off until
-Slice 3.
+resync, daily cap, quota) and then hands the video work here. Nothing here
+calls `audit_video`: since Slice 3 S3.3 (#118) a title goes through
+app/titles.py's writer and app/titles_apply.py's title-only write.
 
     run(channel)            -- one video: pick → triage → record → (treated) apply
     preview(channel_id, n)  -- the same up to the render, recording nothing
@@ -22,7 +22,11 @@ pair, in shadow (S1.5), stored as `triage_json.next_watch`. Record, through
     success makes it `measuring` (S1.3 does that); a refusal or failure makes
     it `cancelled` with `payload.error = {reason, detail}`, `reason` being the
     ApplyOutcome (`apply_disabled` while BACKLINK_APPLY_ENABLED is false), and
-    the ApplyError goes on to the tick, which reacts as for an audit apply.
+    the ApplyError goes on to the tick, which reacts as for an audit apply;
+  - `title` (S3.3, after backlinks in the rules, on TITLE_CHANNELS only),
+    holdout -> `holdout` with `{title_before}`, no writer call;
+  - `title`, treated -> the path's writer, then `planned` and
+    `titles_apply.apply_title` as backlinks (`_run_title`).
 
 The decisions and the intervention point at each other: `triage_json` holds the
 `decision_log_id` (and each pair's, under `next_watch`), and `decide.link` sets
@@ -38,7 +42,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from app import backlinks, backlinks_apply, decide, human_edits, interventions, reach, warm
-from app import lever_verdicts
+from app import lever_verdicts, titles, titles_apply
 from app.apply_outcome import ApplyError
 from app.config import settings
 from app.db import supabase
@@ -67,14 +71,69 @@ ACTIVE_INTERVENTION = "active_intervention"
 DRY_RUN = "dry_run"
 #: `payload.error.reason` when apply_backlinks raised something unclassified.
 APPLY_EXCEPTION = "apply_exception"
+#: `payload.error.reason` when the title writer gave no candidate passing the
+#: checks (Part 6 S3.3).
+CHECKS_FAILED = "checks_failed"
+#: `payload.error.reason` when the title writer raised (OpenRouter down, …).
+WRITER_EXCEPTION = "writer_exception"
 
-_VIDEO_COLUMNS = "id,channel_id,title,description"
+_VIDEO_COLUMNS = "id,channel_id,title,description,is_short"
 
 
 def backlinks_stopped(channel_id: str) -> bool:
     """Whether the backlinks lever has stopped for the channel (the P1 stop
     rule, spec Part 4 S1.6): `lever_verdicts.stopped`. Once stopped, it stays so."""
     return lever_verdicts.stopped(channel_id)
+
+
+def backlinks_enabled(language: str | None) -> bool:
+    """Whether the backlinks lever can run on a channel in `language`: its
+    writes are on and the language has a heading (S1.2)."""
+    return settings.BACKLINK_APPLY_ENABLED and language in backlinks.HEADINGS
+
+
+def titles_open(channel_id: str) -> bool:
+    """`title_enabled`'s channel-level parts (Part 6 S3.3): the channel is in
+    TITLE_CHANNELS, TITLE_APPLY_ENABLED is on, and the title lever hasn't
+    stopped (`titles.stopped`)."""
+    return (channel_id in settings.TITLE_CHANNELS and settings.TITLE_APPLY_ENABLED
+            and not titles.stopped(channel_id))
+
+
+def _today_start_iso() -> str:
+    return datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+def _titles_today(channel_id: str) -> tuple[int, int]:
+    """(today's treated title rows that aren't declined, today's agent runs)
+    on the channel, UTC day. One query: a day's title rows are bounded by the
+    limits, far under the 1000-row page."""
+    rows = (
+        supabase().table("interventions").select("arm,status,payload")
+        .eq("channel_id", channel_id)
+        .eq("origin", InterventionOrigin.MIDAS)
+        .eq("lever", InterventionLever.TITLE)
+        .gte("created_at", _today_start_iso())
+        .limit(1000)
+        .execute()
+    ).data or []
+    treated = sum(1 for r in rows if r["arm"] == InterventionArm.TREATED
+                  and r["status"] != InterventionStatus.DECLINED)
+    agent = sum(1 for r in rows if (r.get("payload") or {}).get("path") == titles.AGENT)
+    return treated, agent
+
+
+def _title_enabled(channel_id: str, video_id: str) -> bool:
+    """Part 6 S3.3: the lever is open on the channel, today's treated title
+    rows are below TITLE_DAILY_CAP, and, for a video on the agent path, today's
+    agent runs are below TITLE_AGENT_DAILY_RUNS."""
+    if not titles_open(channel_id):
+        return False
+    treated, agent_runs = _titles_today(channel_id)
+    return (treated < settings.TITLE_DAILY_CAP
+            and (titles.route(channel_id, video_id) != titles.AGENT
+                 or agent_runs < settings.TITLE_AGENT_DAILY_RUNS))
 
 
 def _video(video_id: str) -> dict | None:
@@ -152,8 +211,10 @@ def _has_related_block(video: dict) -> bool:
 #: many siblings; warmth and vectors change daily at most.
 POOL_TTL_SECONDS = 3600
 
-#: channel id -> (monotonic time read, pool or None, refusal reason).
-_pools: dict[str, tuple[float, backlinks.Pool | None, str | None]] = {}
+#: channel id -> (monotonic time read, pool or None, refusal reason, the
+#: channel's `titles.ChannelContext` or None until a title triage asks for it).
+_pools: dict[str, tuple[float, backlinks.Pool | None, str | None,
+                        titles.ChannelContext | None]] = {}
 
 
 def _pool(channel_id: str) -> tuple[backlinks.Pool | None, str | None]:
@@ -166,43 +227,84 @@ def _pool(channel_id: str) -> tuple[backlinks.Pool | None, str | None]:
     hit = _pools.get(channel_id)
     if hit is not None and now - hit[0] < POOL_TTL_SECONDS:
         return hit[1], hit[2]
-    known = {vid: vec for _, p, _ in _pools.values() if p is not None
+    known = {vid: vec for _, p, *_ in _pools.values() if p is not None
              for vid, vec in p.vectors.items()}
     pool, reason = backlinks.target_pool(channel_id, known_vectors=known)
     if pool is not None:
         pool = pool._replace(vectors={
             vid: vec if isinstance(vec, array) else array("d", vec)
             for vid, vec in pool.vectors.items()})
-    _pools[channel_id] = (now, pool, reason)
+    _pools[channel_id] = (now, pool, reason, None)
     return pool, reason
 
 
-def _assess(video: dict) -> tuple[backlinks.Candidates, dict]:
-    """The candidates and the triage context for `video`. Reads only."""
-    pool, reason = _pool(video["channel_id"])
+def title_channel(channel_id: str) -> titles.ChannelContext:
+    """The channel's title context (`titles.channel_context`: its warm long
+    videos' impressions and CTR, their median CTR, the ceiling, the top
+    performers), kept with the target pool and read again with it."""
+    _pool(channel_id)
+    read_at, pool, reason, channel = _pools[channel_id]
+    if channel is None:
+        channel = titles.channel_context(channel_id)
+        _pools[channel_id] = (read_at, pool, reason, channel)
+    return channel
+
+
+def _assess(video: dict, language: str | None, *, backlinks_on: bool | None = None,
+            titles_on: bool | None = None) -> tuple[backlinks.Candidates, dict]:
+    """The candidates and the triage context for `video`, on a channel in
+    `language`. `backlinks_enabled` is `backlinks_enabled(language)` unless
+    `backlinks_on` says, and `title_enabled` `_title_enabled` unless
+    `titles_on` says: each preview takes its own lever as open. Reads only."""
+    channel_id = video["channel_id"]
+    pool, reason = _pool(channel_id)
     found = (backlinks.candidates(video, pool=pool) if pool is not None
              else backlinks.Candidates([], reason=reason))
     impressions, ctr = _reach(video)
+    title_on = _title_enabled(channel_id, video["id"]) if titles_on is None else titles_on
+    channel = title_channel(channel_id) if title_on else None
     context = {
         "has_related_block": _has_related_block(video),
         "backlink_candidates": len(found.rows),
-        "backlinks_stopped": backlinks_stopped(video["channel_id"]),
+        "backlinks_enabled": (backlinks_enabled(language) if backlinks_on is None
+                              else backlinks_on),
+        "backlinks_stopped": backlinks_stopped(channel_id),
         "traffic_mix_28d": _traffic_mix(video),
         "impressions": impressions,
         "ctr": ctr,
         "recent_interventions": _recent_interventions(video["id"]),
+        "title_enabled": title_on,
+        "title_excluded": (video["id"] in settings.TITLE_EXCLUDE_VIDEOS
+                           or (channel is not None and video["id"] in channel.ceiling)),
+        "channel_median_ctr": channel.median_ctr if channel is not None else None,
+        "is_short": video.get("is_short"),
     }
     return found, context
 
 
 def _rationale(context: dict) -> str:
-    """Why the rules said no_change, in their order."""
-    if context["backlinks_stopped"]:
-        return "the backlinks lever has stopped for this channel"
-    if context["has_related_block"]:
-        return "the description already links to one of our videos (D5)"
-    return (f"{context['backlink_candidates']} backlink candidates, fewer than "
-            f"BACKLINK_MIN_CANDIDATES = {settings.BACKLINK_MIN_CANDIDATES}")
+    """Why the rules said no_change, in their order: backlinks' reason, then,
+    when the title lever was open for the video, the title's."""
+    if not context.get("backlinks_enabled"):
+        why = "backlinks can't run on this channel (BACKLINK_APPLY_ENABLED off or no heading)"
+    elif context["backlinks_stopped"]:
+        why = "the backlinks lever has stopped for this channel"
+    elif context["has_related_block"]:
+        why = "the description already links to one of our videos (D5)"
+    else:
+        why = (f"{context['backlink_candidates']} backlink candidates, fewer than "
+               f"BACKLINK_MIN_CANDIDATES = {settings.BACKLINK_MIN_CANDIDATES}")
+    if not context.get("title_enabled"):
+        return why
+    if context.get("is_short"):
+        title = "a Short"
+    elif context.get("title_excluded"):
+        title = "excluded (the channel's ceiling or TITLE_EXCLUDE_VIDEOS)"
+    elif context.get("ctr") is None or context.get("channel_median_ctr") is None:
+        title = "no CTR to compare with the channel median"
+    else:
+        title = "CTR at or above the channel median"
+    return f"{why}; title: {title}"
 
 
 def _language(channel_id: str) -> str | None:
@@ -269,7 +371,7 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
         log.info("agent %s: warm pool has nothing to pick", channel_id)
         return NO_VIDEO
 
-    found, context = _assess(video)
+    found, context = _assess(video, channel.get("default_language"))
     decision = decide.decide(decide.TRIAGE, video["id"], context)
     triage = {
         "decision_log_id": decision.log_id,
@@ -281,6 +383,9 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
         "candidates_reason": found.reason,
         "skipped_unembedded": found.skipped_unembedded,
     }
+
+    if decision.answer == InterventionLever.TITLE:
+        return _run_title(video, triage, decision)
 
     common = dict(video_id=video["id"], channel_id=channel_id,
                   lever=InterventionLever.BACKLINKS, origin=InterventionOrigin.MIDAS,
@@ -314,9 +419,15 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
              row["status"], row["id"], row["arm"])
     if row["status"] != InterventionStatus.PLANNED:
         return row["status"]                     # declined, or holdout: no YouTube call
+    return _apply(row, backlinks_apply.apply_backlinks, "description")
 
+
+def _apply(row: dict, apply, dry_run_key: str) -> str:
+    """Send a planned treated row with `apply`; a refusal or failure cancels it
+    with `payload.error` and re-raises for the tick; DRY_RUN cancels it with
+    the rehearsal's `dry_run_key` kept on the payload."""
     try:
-        result = backlinks_apply.apply_backlinks(row)
+        result = apply(row)
     except ApplyError as e:
         _cancel(row, e.outcome.value, e.detail)
         raise
@@ -325,9 +436,64 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
         raise
     if result.get("status") == DRY_RUN:
         _cancel(row, DRY_RUN, "DRY_RUN: nothing sent to YouTube",
-                description=result.get("description"))
+                **{dry_run_key: result.get(dry_run_key)})
         return DRY_RUN
     return result.get("status") or InterventionStatus.MEASURING
+
+
+def _run_title(video: dict, triage: dict, decision: decide.Decision) -> str:
+    """Record and apply a video triage sent to titles (Part 6 S3.3).
+
+    Holdout -> `holdout` with `{title_before}`, no writer call. Treated -> the
+    path's writer (both paths use the pipeline until S3.4) -> `planned` with
+    `{title_before, title, candidates, reason, path}` and the path's
+    `strategy_version` -> `titles_apply.apply_title`: `measuring`, or
+    `cancelled` with `payload.error` as backlinks. No passing candidate ->
+    `cancelled`, reason `checks_failed`; a writer that raises -> `cancelled`,
+    reason `writer_exception`, re-raised for the tick.
+    """
+    channel_id = video["channel_id"]
+    title_before = video.get("title") or ""
+    common = dict(video_id=video["id"], channel_id=channel_id,
+                  lever=InterventionLever.TITLE, origin=InterventionOrigin.MIDAS,
+                  triage_json=triage)
+    arm = interventions.assign_arm(video["id"], InterventionLever.TITLE)
+    try:
+        if arm == InterventionArm.HOLDOUT:
+            row = interventions.record(**common, arm=arm, status=InterventionStatus.HOLDOUT,
+                                       payload={"title_before": title_before})
+        else:
+            path = titles.route(channel_id, video["id"])
+            base = {"title_before": title_before, "path": path}
+            try:
+                written = titles.pipeline(video, channel=title_channel(channel_id))
+            except Exception as e:
+                row = interventions.record(
+                    **common, arm=arm, status=InterventionStatus.CANCELLED,
+                    payload={**base, "error": {"reason": WRITER_EXCEPTION,
+                                               "detail": f"{type(e).__name__}: {e}"}})
+                decide.link(decision.log_id, row["id"])
+                raise
+            payload = {**base, "title": written.title, "candidates": written.candidates,
+                       "reason": written.reason}
+            if written.title is None:
+                row = interventions.record(
+                    **common, arm=arm, status=InterventionStatus.CANCELLED,
+                    payload={**payload, "error": {"reason": CHECKS_FAILED,
+                                                  "detail": "; ".join(written.failures)}})
+            else:
+                row = interventions.record(
+                    **common, arm=arm, status=InterventionStatus.PLANNED, payload=payload,
+                    strategy_version=titles.strategy_version(path))
+    except interventions.ActiveInterventionExists as e:
+        log.info("agent %s: %s", channel_id, e)
+        return ACTIVE_INTERVENTION
+    decide.link(decision.log_id, row["id"])
+    log.info("agent %s: %s title %s (intervention %s, arm %s)", channel_id, video["id"],
+             row["status"], row["id"], row["arm"])
+    if row["status"] != InterventionStatus.PLANNED:
+        return row["status"]          # holdout, or cancelled (checks_failed): no YouTube call
+    return _apply(row, titles_apply.apply_title, "title")
 
 
 def preview(channel_id: str, n: int) -> list[dict]:
@@ -347,13 +513,17 @@ def preview(channel_id: str, n: int) -> list[dict]:
         video = _video(picked["id"])
         if video is None:
             continue
-        found, context = _assess(video)
+        # Taken as open, so the preview shows the targets before the switch is
+        # on, and a missing heading as the render's refusal.
+        found, context = _assess(video, language, backlinks_on=True)
         answer = decide.TRIAGE.rules(context)
         item = {"video_id": video["id"], "title": video.get("title"),
                 "explore": picked.get("explore"), "answer": answer, "arm": None,
                 "rationale": None, "targets": [], "before": video.get("description") or "",
                 "after": None, "refused": None, "context": context}
-        if answer != InterventionLever.BACKLINKS:
+        if answer == InterventionLever.TITLE:    # scripts/preview_titles.py shows the writer
+            item["arm"] = interventions.assign_arm(video["id"], InterventionLever.TITLE)
+        elif answer != InterventionLever.BACKLINKS:
             item["rationale"] = _rationale(context)
         elif refused := _unrenderable(video, _targets(found), language):
             # As run: declined before the arm is drawn.
