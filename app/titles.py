@@ -10,7 +10,7 @@
                                         candidate, one retry with the failures
     title_path(video_id)             -- pipeline or agent, by hash
     route(channel_id, video_id)      -- the path, handed over when one has stopped
-                                        (path_stopped: S3.5 fills it)
+                                        (path_stopped: the title verdicts, S3.5)
     strategy_version(path)           -- the A6 stamp for a title, registered
     title_answers(channel_id, n)     -- the pool's first n videos TRIAGE's rules
                                         send to titles (the preview, the bake-off)
@@ -36,7 +36,7 @@ import statistics
 from collections import defaultdict
 from typing import NamedTuple
 
-from app import agent_tick, decide, interventions, reach, warm
+from app import agent_tick, decide, interventions, lever_verdicts, reach, warm
 from app.audit_suggestion import TITLE_MAX
 from app.audits import _strategy_hash
 from app.config import settings
@@ -472,9 +472,10 @@ def strategy_version(path: str) -> str:
 
 
 def path_stopped(channel_id: str, path: str) -> bool:
-    """Whether `path`'s stop rule has fired on the channel (Part 6 S3.5, F7).
-    Always False until #120 (S3.5) fills it from the title verdicts."""
-    return False
+    """Whether `path`'s stop rule has fired on the channel (Part 6 S3.5, F7):
+    any of its weekly title verdicts has `stop_rule_triggered`."""
+    return lever_verdicts.stopped(channel_id, InterventionLever.TITLE,
+                                  lever_verdicts.TITLE_SCOPES[path])
 
 
 def stopped(channel_id: str) -> bool:

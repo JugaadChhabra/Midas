@@ -11,12 +11,13 @@ from unittest.mock import patch
 
 import pytest
 
-from app import agent_tick, autopilot as ap, decide, titles
+from app import agent_tick, autopilot as ap, decide, lever_verdicts, titles
 from tests.test_agent_tick import (
     CH, NOW, SRC, SRC_DESCRIPTION, T1, T2, T3, T4, _channel, _video, day, midas_rows, outcome,
     wired, world,
 )
 from app.agent import loop
+from tests.fakes import FakeSupabase
 from tests.test_agent_loop import Model, call
 from tests.test_backlinks_apply import FakeYouTube
 
@@ -445,6 +446,12 @@ def test_titles_count_toward_the_shared_daily_cap():
 
 # ── the path split ────────────────────────────────────────────────────────
 
+def no_verdicts():
+    """No title verdict yet: path_stopped (S3.5) reads an empty lever_verdicts."""
+    return patch.object(lever_verdicts, "supabase",
+                        return_value=FakeSupabase({"lever_verdicts": []}))
+
+
 def test_a_stopped_path_hands_its_videos_to_the_other():
     ids = [f"vid{i:08d}" for i in range(400)]
     with patch.object(titles.settings, "TITLE_AGENT_PCT", 0.5):
@@ -454,7 +461,8 @@ def test_a_stopped_path_hands_its_videos_to_the_other():
             assert not titles.stopped(CH)
         with patch.object(titles, "path_stopped", lambda ch, path: path == titles.AGENT):
             assert {titles.route(CH, v) for v in ids} == {titles.PIPELINE}
-        assert {v: titles.route(CH, v) for v in ids} == hashed
+        with no_verdicts():
+            assert {v: titles.route(CH, v) for v in ids} == hashed
     with patch.object(titles, "path_stopped", lambda ch, path: True):
         assert titles.stopped(CH)
 
@@ -463,7 +471,7 @@ def test_both_paths_stopped_closes_the_title_lever():
     with patch.object(titles, "path_stopped", lambda ch, path: True), \
          patch.multiple(ap.settings, TITLE_CHANNELS={CH}, TITLE_APPLY_ENABLED=True):
         assert agent_tick.titles_open(CH) is False
-    with patch.multiple(ap.settings, TITLE_CHANNELS={CH}, TITLE_APPLY_ENABLED=True):
+    with no_verdicts(), patch.multiple(ap.settings, TITLE_CHANNELS={CH}, TITLE_APPLY_ENABLED=True):
         assert agent_tick.titles_open(CH) is True
 
 
