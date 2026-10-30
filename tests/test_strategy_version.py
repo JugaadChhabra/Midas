@@ -129,14 +129,15 @@ def test_different_question_set_version_gives_different_version():
     assert inputs["decision_question_set_version"] == "2099.01-test"
 
 
-def test_writer_model_is_hashed_only_when_it_exists():
-    assert not hasattr(settings, "WRITER_MODEL")
+def test_writer_model_never_enters_the_audit_stamp():
+    """WRITER_MODEL is the title lever's writer (Slice 3 S3.2, app/titles.py),
+    hashed into the title stamp; the audit stamp's inputs stay as they were."""
     base, inputs = audits.strategy_version(*DEFAULT)
     assert "writer_model" not in inputs
     with patch.object(settings, "WRITER_MODEL", "anthropic/claude-sonnet-5", create=True):
         with_writer, inputs = audits.strategy_version(*DEFAULT)
-    assert inputs["writer_model"] == "anthropic/claude-sonnet-5"
-    assert with_writer != base
+    assert "writer_model" not in inputs
+    assert with_writer == base
 
 
 def test_new_audit_model_upserts_a_new_row_with_that_model():

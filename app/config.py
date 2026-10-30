@@ -287,6 +287,19 @@ class Settings:
     # turning the agent off on Marathi would start title rewrites at its daily cap
     # (Slice 1 review, 2026-10-23). Manual audit routes are not affected.
     TITLE_AUTOPILOT_ENABLED = os.getenv("TITLE_AUTOPILOT_ENABLED", "false").lower() == "true"
+    # Slice 3 · S3.2 (spec Part 6 Config, F9): the model the title writer asks
+    # (app/titles.py write_candidates), and the candidates per call. The
+    # writer starts as AUDIT_MODEL and is set from the offline bake-off
+    # (scripts/title_bakeoff.py).
+    WRITER_MODEL = os.getenv("WRITER_MODEL") or AUDIT_MODEL
+    TITLE_CANDIDATES = int(os.getenv("TITLE_CANDIDATES") or "3")
+    # Slice 3 (spec Part 6 Config, F2): warm-window impressions above which a
+    # video is never retitled, on top of the channel's top 1% (the ceiling,
+    # app/titles.py channel_context). Read by the preview since S3.2.
+    TITLE_MAX_IMPRESSIONS = int(os.getenv("TITLE_MAX_IMPRESSIONS") or "5000000")
+    # Slice 3 (spec Part 6 Config, F5): the share of treated title videos the
+    # agent writes, by hash (app/titles.py title_path); 0 = pipeline only.
+    TITLE_AGENT_PCT = float(os.getenv("TITLE_AGENT_PCT") or "0.5")
     # Slice 1 · S1.6 (spec Part 4 Config, Part 2 §1.7): the floor on the SOURCE
     # video's total views in a backlinks intervention's post window. Under it
     # the window is extended once to 14 days, then `insufficient_data`

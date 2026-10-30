@@ -371,6 +371,11 @@ def test_no_module_computes_its_own_win_rate(path):
 
 @pytest.mark.parametrize("path", list(_app_sources()), ids=lambda p: p.name)
 def test_no_module_takes_its_own_median(path):
+    if path.name == "titles.py":
+        # Slice 3 S3.2: the median of the channel's warm long videos' CTRs, the
+        # title triage threshold (spec Part 6 F2), not a median of CTR deltas.
+        assert len(_OWN_MEDIAN.findall(path.read_text())) == 1
+        return
     assert not _OWN_MEDIAN.search(path.read_text()), (
         f"{path.name} takes its own median of CTR deltas — use "
         "app.verdicts.median_ctr_delta_pct, which aggregates raw and rounds once"
