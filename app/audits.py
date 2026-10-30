@@ -470,8 +470,24 @@ class ApplyIn(BaseModel):
     tags: list[str] | None = None
 
 
-def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
-    """Core apply logic, callable from HTTP handler and from autopilot."""
+#: 409 detail of a manual house-format apply on an agent channel (S3.6, F13).
+AGENT_CHANNEL_REFUSED = (
+    "agent channel: a house-format apply replaces the description and its "
+    "backlink block; pass force=true"
+)
+
+
+def _refuse_on_agent_channel(channel: dict | None, *, force: bool) -> None:
+    """The house-format apply sends the whole snippet, so on a channel with
+    `agent_enabled` it replaces the description and any backlink block in it
+    (spec Part 6 S3.6, F13). Refused there with 409 unless the caller forces it."""
+    if (channel or {}).get("agent_enabled") and not force:
+        raise HTTPException(409, AGENT_CHANNEL_REFUSED)
+
+
+def apply_audit_internal(audit_id: int, body: ApplyIn | None = None, *, force: bool = False) -> dict:
+    """Core apply logic, callable from the HTTP handlers. Refuses on an agent
+    channel unless `force` (`_refuse_on_agent_channel`)."""
     audit = supabase().table("audits").select("*").eq("id", audit_id).single().execute().data
     if not audit:
         raise HTTPException(404, "Audit not found")
@@ -483,6 +499,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
         raise HTTPException(404, "Video not found")
 
     channel = supabase().table("channels").select("*").eq("id", video["channel_id"]).single().execute().data
+    _refuse_on_agent_channel(channel, force=force)
     lang = (channel or {}).get("default_language") or None
 
     # Capture before-state from the local row before we overwrite it.
@@ -589,9 +606,10 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None) -> dict:
 
 
 @router.post("/audits/{audit_id}/apply")
-def apply_audit(audit_id: int, body: ApplyIn | None = None):
-    """Push the audit's suggested metadata to YouTube. Respects DRY_RUN."""
-    return apply_audit_internal(audit_id, body)
+def apply_audit(audit_id: int, body: ApplyIn | None = None, force: bool = False):
+    """Push the audit's suggested metadata to YouTube. Respects DRY_RUN. 409 on
+    an agent channel unless `?force=true`."""
+    return apply_audit_internal(audit_id, body, force=force)
 
 
 class ApplyPendingIn(BaseModel):
@@ -603,8 +621,9 @@ class ApplyPendingIn(BaseModel):
 
 
 @router.post("/channels/{channel_id}/audits/apply-pending")
-def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
-    """Bulk-apply pending audits for this channel.
+def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None, force: bool = False):
+    """Bulk-apply pending audits for this channel. 409 on an agent channel unless
+    `?force=true`, checked once before any apply.
 
     For each video in the channel (optionally narrowed to body.video_ids), finds
     the latest audit. If status='pending' AND validate_audit passes, applies it.
@@ -616,6 +635,9 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
     from app import quota
 
     APPLY_COST = quota.cost_of(*quota.APPLY)
+
+    channel = supabase().table("channels").select("agent_enabled").eq("id", channel_id).single().execute().data
+    _refuse_on_agent_channel(channel, force=force)
 
     # Latest audit per video for this channel (join-scoped — no 1000-row
     # truncation); only 'pending' ones are applied below.
@@ -662,7 +684,7 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None):
             continue
 
         try:
-            res = apply_audit_internal(a["id"])
+            res = apply_audit_internal(a["id"], force=force)
             results.append({
                 "audit_id": a["id"], "video_id": a["video_id"],
                 "outcome": res.get("status", "applied"),

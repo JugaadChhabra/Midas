@@ -130,7 +130,7 @@ def wired(sb, *, yt=None, enabled=True, dry_run=False, holdout_pct=0.0, heading=
         stack.enter_context(patch("app.decide.openrouter.chat_json", _shadow_says_no_change))
         stack.enter_context(patch.dict(backlinks.HEADINGS, {"mr": HEADING} if heading else {},
                                        clear=True))
-        audit = stack.enter_context(patch("app.autopilot.audit_video"))
+        audit = stack.enter_context(patch("app.audits.audit_video"))
         span = stack.enter_context(patch("app.autopilot.tracing.span"))
         rec = MagicMock()
         span.return_value.__enter__.return_value = rec
@@ -152,21 +152,27 @@ def midas_rows(sb):
 
 # ── routing ───────────────────────────────────────────────────────────────
 
-def test_turning_the_agent_off_never_starts_title_rewrites_by_default():
-    """Slice 1 review (2026-10-23): with agent_enabled off and autopilot_enabled
-    on, the tick used to fall back to the title path. TITLE_AUTOPILOT_ENABLED
-    (default false) keeps it shut until Slice 3."""
-    sb = world(channel=_channel(agent_enabled=False))
-    with wired(sb) as p, \
-         patch("app.autopilot.agent_tick.run") as agent_run, \
-         patch("app.autopilot._next_video_for_channel", return_value={"id": SRC}) as pick:
-        assert ap.settings.TITLE_AUTOPILOT_ENABLED is False
-        ap.tick()
-    assert outcome(p) == "title_autopilot_disabled"
-    agent_run.assert_not_called()
-    pick.assert_not_called()
-    p["audit"].assert_not_called()
-    p["youtube_for_channel"].assert_not_called()
+def test_with_agent_enabled_off_the_tick_does_the_shorts_action_only():
+    """S3.6 (F13): the house-format title path is gone from the tick. A channel
+    with autopilot_enabled on and agent_enabled off (or unset) gets the Shorts
+    action and nothing else: no pick, no audit, no agent, no YouTube call."""
+    for channel in (_channel(agent_enabled=False, autopilot_shorts_enabled=True),
+                    {k: v for k, v in _channel(autopilot_shorts_enabled=True).items()
+                     if k != "agent_enabled"}):
+        sb = world(channel=channel)
+        with wired(sb) as p, \
+             patch("app.autopilot._run_shorts_action") as shorts, \
+             patch("app.autopilot.agent_tick.run") as agent_run, \
+             patch("app.autopilot._next_video_for_channel") as pick:
+            ap.tick()
+        shorts.assert_called_once()
+        assert outcome(p) == "shorts_only"
+        agent_run.assert_not_called()
+        pick.assert_not_called()
+        p["audit"].assert_not_called()
+        p["youtube_for_channel"].assert_not_called()
+        assert sb.rows("interventions") == [] and sb.rows("decision_log") == []
+        assert sb.rows("channels")[0]["autopilot_last_tick_at"] is not None
 
 
 def test_an_agent_tick_applies_backlinks_and_never_calls_audit_video():
@@ -182,25 +188,6 @@ def test_an_agent_tick_applies_backlinks_and_never_calls_audit_video():
     assert row["applied_at"] is not None
     [(part, body)] = p["yt"].updates
     assert part == "snippet" and HEADING in body["snippet"]["description"]
-
-
-def test_with_agent_enabled_off_the_tick_takes_the_audit_path_unchanged():
-    for channel in (_channel(agent_enabled=False),
-                    {k: v for k, v in _channel().items() if k != "agent_enabled"}):
-        sb = world(channel=channel)
-        with wired(sb) as p, \
-             patch.object(ap.settings, "TITLE_AUTOPILOT_ENABLED", True), \
-             patch("app.autopilot.agent_tick.run") as agent_run, \
-             patch("app.autopilot._next_video_for_channel", return_value={"id": SRC}), \
-             patch("app.autopilot.validate_audit", return_value=(True, "")), \
-             patch("app.autopilot.apply_audit_internal", return_value={"status": "applied"}), \
-             patch("app.autopilot.embed_video"):
-            p["audit"].return_value = {"id": 7}
-            ap.tick()
-        agent_run.assert_not_called()
-        p["audit"].assert_called_once_with(SRC)
-        assert outcome(p) == "applied"
-        assert sb.rows("interventions") == [] and sb.rows("decision_log") == []
 
 
 def test_an_agent_channel_whose_agent_path_is_closed_does_nothing():

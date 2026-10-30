@@ -281,12 +281,6 @@ class Settings:
     # to YouTube. While false, app/titles_apply.py's apply and revert refuse
     # (`apply_disabled`) and send nothing. DRY_RUN is honoured on top of it.
     TITLE_APPLY_ENABLED = os.getenv("TITLE_APPLY_ENABLED", "false").lower() == "true"
-    # The autopilot's title path (audit_video → apply: title, tags, description)
-    # is off until Slice 3 (spec Part 2 §6). Without this switch, a channel with
-    # autopilot_enabled and agent_enabled = false would fall back to it, e.g.
-    # turning the agent off on Marathi would start title rewrites at its daily cap
-    # (Slice 1 review, 2026-10-23). Manual audit routes are not affected.
-    TITLE_AUTOPILOT_ENABLED = os.getenv("TITLE_AUTOPILOT_ENABLED", "false").lower() == "true"
     # Slice 3 · S3.2 (spec Part 6 Config, F9): the model the title writer asks
     # (app/titles.py write_candidates), and the candidates per call. The
     # writer starts as AUDIT_MODEL and is set from the offline bake-off
