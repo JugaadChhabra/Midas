@@ -323,6 +323,7 @@ def test_a_dry_run_revert_sends_nothing(edges):
     _intervention(),                                               # never applied
     _applied(status="cancelled"),
     _applied(origin="human", arm="n/a"),
+    _applied(before_state=None),
 ])
 def test_only_an_applied_midas_title_intervention_can_be_reverted(edges, row):
     sb, yt = edges(_db(interventions=[row]), FakeYouTube({VID: SNIPPET}))
@@ -330,3 +331,17 @@ def test_only_an_applied_midas_title_intervention_can_be_reverted(edges, row):
     with pytest.raises(ValueError):
         ta.revert_title(row, auto=False)
     assert yt.updates == []
+
+
+def test_a_backlinks_revert_does_not_need_the_title_switch(edges):
+    """The backlinks revert is unchanged: it reads BACKLINK_APPLY_ENABLED only."""
+    from tests.test_backlinks_apply import _intervention as backlinks_row
+    row = backlinks_row(status="measuring", applied_at="2026-10-30T01:00:00+00:00")
+    with patch.dict(backlinks.HEADINGS, {"mr": "आणखी गाणी पहा:"}):
+        stripped = backlinks.strip(DESCRIPTION)
+    sb, yt = edges(_db(interventions=[row]), FakeYouTube({row["video_id"]: SNIPPET}),
+                   enabled=False, backlinks_enabled=True)
+    r = _client().post(f"/interventions/{row['id']}/revert")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"status": "cancelled", "description": stripped}
+    assert yt.snippets[row["video_id"]]["title"] == OLD

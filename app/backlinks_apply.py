@@ -198,15 +198,17 @@ def revert_intervention(intervention_id: int):
         "id", intervention_id).single().execute().data
     if not row:
         raise HTTPException(404, "Intervention not found")
+    if row.get("lever") == InterventionLever.TITLE:
+        from app import titles_apply        # it imports this module's helpers
+        try:
+            return titles_apply.revert_title(row, auto=False)
+        except ValueError:
+            raise HTTPException(400, "Only an applied Midas title intervention can be reverted")
     if (row.get("origin") != InterventionOrigin.MIDAS
-            or row.get("lever") not in (InterventionLever.BACKLINKS, InterventionLever.TITLE)
+            or row.get("lever") != InterventionLever.BACKLINKS
             or not row.get("applied_at")
             or row.get("status") == InterventionStatus.CANCELLED):
-        raise HTTPException(
-            400, "Only an applied Midas backlinks or title intervention can be reverted")
-    if row["lever"] == InterventionLever.TITLE:
-        from app import titles_apply        # it imports this module's helpers
-        return titles_apply.revert_title(row, auto=False)
+        raise HTTPException(400, "Only an applied Midas backlinks intervention can be reverted")
     video_id, channel_id = row["video_id"], row["channel_id"]
 
     if not settings.BACKLINK_APPLY_ENABLED:
