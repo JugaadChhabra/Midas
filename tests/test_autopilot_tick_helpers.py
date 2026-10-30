@@ -16,15 +16,6 @@ import app.autopilot as ap
 from app.apply_outcome import ApplyError, ApplyOutcome
 
 
-
-@pytest.fixture(autouse=True)
-def _title_autopilot_on():
-    """These tests drive the title path, which TITLE_AUTOPILOT_ENABLED (default
-    false since the Slice 1 review) otherwise shuts."""
-    import app.autopilot as _ap
-    with patch.object(_ap.settings, "TITLE_AUTOPILOT_ENABLED", True):
-        yield
-
 def test_record_failure_pauses_only_at_threshold():
     with patch("app.autopilot._pause") as pause:
         ap._failure_counts.clear()
@@ -108,58 +99,48 @@ def test_resync_stops_tick_on_token_expiry():
         pause.assert_called_once_with("UC1", "token_expired")
 
 
-# ── _apply_audit_and_handle: react to the TYPED outcome (was a string switch) ──
+# ── _react_to_apply_error: react to the TYPED outcome (was a string switch) ──
+#
+# The agent path's reaction to a failed write. It returned the house-format
+# path's reaction too until that path left the tick (S3.6).
 
-def test_apply_handle_quota_sets_dormant_window():
+def test_apply_error_quota_sets_dormant_window():
     ap._yt_quota_exhausted_until = None
-    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.QUOTA_EXCEEDED)):
-        ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": False}, "UC1")
+    ap._react_to_apply_error(ApplyError(ApplyOutcome.QUOTA_EXCEEDED), "UC1")
     assert ap._yt_quota_exhausted_until is not None        # autopilot goes dormant
     ap._yt_quota_exhausted_until = None
 
 
-def test_apply_handle_token_expired_pauses_channel():
-    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.TOKEN_EXPIRED)), \
-         patch("app.autopilot._pause") as pause:
-        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+def test_apply_error_token_expired_pauses_channel():
+    with patch("app.autopilot._pause") as pause:
+        ap._react_to_apply_error(ApplyError(ApplyOutcome.TOKEN_EXPIRED), "UC1")
     pause.assert_called_once_with("UC1", "token_expired")
 
 
-def test_apply_handle_failed_records_failure():
-    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.FAILED)), \
-         patch("app.autopilot._record_failure") as rec:
-        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+def test_apply_error_failed_records_failure():
+    with patch("app.autopilot._record_failure") as rec:
+        ap._react_to_apply_error(ApplyError(ApplyOutcome.FAILED), "UC1")
     rec.assert_called_once_with("UC1")
 
 
-def test_apply_handle_test_and_compare_has_no_side_effects():
+@pytest.mark.parametrize("outcome", [ApplyOutcome.TEST_AND_COMPARE,
+                                     ApplyOutcome.QUOTA_INSUFFICIENT,
+                                     ApplyOutcome.APPLY_DISABLED])
+def test_a_refusal_before_anything_was_sent_has_no_side_effects(outcome):
     ap._yt_quota_exhausted_until = None
-    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.TEST_AND_COMPARE)), \
-         patch("app.autopilot._pause") as pause, \
+    with patch("app.autopilot._pause") as pause, \
          patch("app.autopilot._record_failure") as rec:
-        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+        ap._react_to_apply_error(ApplyError(outcome), "UC1")
     pause.assert_not_called()
     rec.assert_not_called()
     assert ap._yt_quota_exhausted_until is None            # not treated as quota/failure
 
 
-def test_apply_handle_success_resets_failures_and_embeds():
-    ap._failure_counts["UC1"] = 2
-    with patch("app.autopilot.apply_audit_internal", return_value={"status": "applied"}), \
-         patch("app.autopilot.embed_video") as embed:
-        ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": False}, "UC1")
-    assert ap._failure_counts["UC1"] == 0
-    # force=True: the apply just rewrote the title, so the stored vector is
-    # stale by construction and the default short-circuit would keep it.
-    embed.assert_called_once_with("v", force=True)
-    ap._failure_counts.clear()
-
-
 # ── the outcome it returns is what tick() reports as tick.outcome ──────────────
 #
-# This function absorbs four ApplyErrors and returns normally from every one, so
-# "did not raise" is not the same question as "applied". A caller that conflated
-# them reported a quota exhaustion, a channel pause and a YouTube rejection as
+# It absorbs four ApplyErrors and returns normally from every one, so "did not
+# raise" is not the same question as "applied". A caller that conflated them
+# reported a quota exhaustion, a channel pause and a YouTube rejection as
 # successful applies.
 
 @pytest.mark.parametrize("outcome,expected", [
@@ -168,69 +149,44 @@ def test_apply_handle_success_resets_failures_and_embeds():
     (ApplyOutcome.TOKEN_EXPIRED, "token_expired"),
     (ApplyOutcome.FAILED, "failed"),
 ])
-def test_apply_handle_returns_the_absorbed_outcome(outcome, expected):
+def test_apply_error_returns_the_absorbed_outcome(outcome, expected):
     ap._yt_quota_exhausted_until = None
-    with patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(outcome)), \
-         patch("app.autopilot._pause"), \
+    with patch("app.autopilot._pause"), \
          patch("app.autopilot._record_failure"):
-        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1") == expected
+        assert ap._react_to_apply_error(ApplyError(outcome), "UC1") == expected
     ap._yt_quota_exhausted_until = None
-
-
-def test_apply_handle_returns_applied_on_success():
-    with patch("app.autopilot.apply_audit_internal", return_value={"status": "applied"}), \
-         patch("app.autopilot.embed_video"):
-        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": True}, "UC1") == "applied"
-    ap._failure_counts.clear()
-
-
-def test_apply_handle_distinguishes_a_dry_run_from_a_real_write():
-    """A DRY_RUN deploy writes nothing to YouTube; reporting it as `applied`
-    makes a rehearsal indistinguishable from a month of live changes."""
-    with patch("app.autopilot.apply_audit_internal", return_value={"status": "dry_run"}), \
-         patch("app.autopilot.embed_video"):
-        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v", "is_short": True}, "UC1") == "dry_run"
-    ap._failure_counts.clear()
-
-
-def test_apply_handle_separates_an_unclassified_crash_from_a_youtube_failure():
-    with patch("app.autopilot.apply_audit_internal", side_effect=RuntimeError("db write blew up")), \
-         patch("app.autopilot._record_failure") as rec:
-        assert ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1") == ap.APPLY_UNCLASSIFIED
-    rec.assert_called_once_with("UC1")
-    assert ap.APPLY_UNCLASSIFIED != ApplyOutcome.FAILED.value
 
 
 # ── A10: pre-write quota gate ──────────────────────────────────────────────────
 #
 # The ledger already knows when a write can't be afforded. Autopilot used to find
 # out only from YouTube's quotaExceeded, which puts the whole fleet dormant; a
-# gate that trips on the ledger must skip the tick and nothing more.
+# gate that trips on the ledger must skip the tick and nothing more. Since S3.6
+# the agent path is the tick's only write path, so the gate is driven through it.
 
 @contextmanager
 def _tick_on(channel, can_afford):
-    """Run one tick against a single ready channel with the ledger answering
-    `can_afford`. Yields (store, patches) so tests can assert on both."""
+    """Run one tick against a single ready agent channel with the ledger
+    answering `can_afford`. Yields (store, patches) so tests can assert on both."""
     sb = FakeSupabase({"channels": [channel]})
-    video = {"id": "v1", "is_short": False}
     with patch("app.eligibility.supabase", return_value=sb), \
          patch("app.autopilot.supabase", return_value=sb), \
+         patch("app.autopilot.eligibility.can_run_agent", return_value=True), \
+         patch.object(ap.settings, "BACKLINK_APPLY_ENABLED", True), \
+         patch.dict(ap.backlinks.HEADINGS, {"hi": "Watch more"}, clear=True), \
          patch("app.autopilot.quota.can_afford", side_effect=can_afford) as afford, \
          patch("app.autopilot.quota.units_remaining", return_value=12), \
          patch("app.autopilot._applies_today", return_value=0), \
-         patch("app.autopilot._next_video_for_channel", return_value=video), \
-         patch("app.autopilot.audit_video", return_value={"id": 7}) as audit, \
-         patch("app.autopilot.validate_audit", return_value=(True, "")), \
-         patch("app.autopilot.apply_audit_internal") as apply_, \
-         patch("app.autopilot.embed_video"), \
+         patch("app.autopilot.agent_tick.run", return_value="measuring") as run, \
          patch("app.autopilot.tracing.span") as span:
         rec = MagicMock()
         span.return_value.__enter__.return_value = rec
-        yield sb, {"afford": afford, "audit": audit, "apply": apply_, "rec": rec}
+        yield sb, {"afford": afford, "run": run, "rec": rec}
 
 
 def _ready_channel():
-    return {"id": "UC1", "autopilot_enabled": True, "default_language": "hi",
+    return {"id": "UC1", "autopilot_enabled": True, "agent_enabled": True,
+            "default_language": "hi",
             "autopilot_paused_reason": None, "autopilot_last_tick_at": None,
             "last_synced_at": datetime.now(timezone.utc).isoformat()}
 
@@ -241,8 +197,7 @@ def test_tick_that_cannot_afford_the_apply_makes_no_youtube_call_and_pauses_noth
     with caplog.at_level("INFO", logger="midas.autopilot"), \
          _tick_on(_ready_channel(), can_afford=lambda *a, **k: False) as (sb, p):
         ap.tick()
-    p["apply"].assert_not_called()                          # no videos.update
-    p["audit"].assert_not_called()                          # no LLM spend on a write we can't make
+    p["run"].assert_not_called()                            # no pick, no LLM, no write
     p["afford"].assert_any_call(ap.quota.cost_of(*ap.quota.APPLY),
                                 reserve=ap.settings.YT_QUOTA_COLLECTION_RESERVE)
     p["rec"].set.assert_any_call(**{"tick.outcome": "quota_insufficient"})
@@ -254,35 +209,20 @@ def test_tick_that_cannot_afford_the_apply_makes_no_youtube_call_and_pauses_noth
     assert "quota_insufficient" in caplog.text
 
 
-def test_tick_rechecks_quota_after_the_audit_spent_some():
-    """The audit itself can spend quota (the captions fallback is 250u), so the
-    gate runs again immediately before the write."""
-    answers = iter([True, False])
-    ap._yt_quota_exhausted_until = None
-    with _tick_on(_ready_channel(), can_afford=lambda *a, **k: next(answers)) as (sb, p):
-        ap.tick()
-    p["audit"].assert_called_once()
-    p["apply"].assert_not_called()
-    p["rec"].set.assert_any_call(**{"tick.outcome": "quota_insufficient"})
-    assert sb.rows("channels")[0]["autopilot_paused_reason"] is None
-    assert ap._yt_quota_exhausted_until is None
-
-
 def test_tick_that_can_afford_the_apply_applies():
     ap._yt_quota_exhausted_until = None
     ap._failure_counts.clear()
     with _tick_on(_ready_channel(), can_afford=lambda *a, **k: True) as (_, p):
-        p["apply"].return_value = {"status": "applied"}
         ap.tick()
-    p["apply"].assert_called_once_with(7)
+    p["run"].assert_called_once()
+    p["rec"].set.assert_any_call(**{"tick.outcome": "measuring"})
     ap._failure_counts.clear()
 
 
 def test_quota_exceeded_log_says_it_is_fleet_wide(caplog):
     ap._yt_quota_exhausted_until = None
-    with caplog.at_level("WARNING", logger="midas.autopilot"), \
-         patch("app.autopilot.apply_audit_internal", side_effect=ApplyError(ApplyOutcome.QUOTA_EXCEEDED)):
-        ap._apply_audit_and_handle({"id": 1}, {"id": "v"}, "UC1")
+    with caplog.at_level("WARNING", logger="midas.autopilot"):
+        ap._react_to_apply_error(ApplyError(ApplyOutcome.QUOTA_EXCEEDED), "UC1")
     assert "project-wide" in caplog.text and "fleet-wide" in caplog.text
     ap._yt_quota_exhausted_until = None
 

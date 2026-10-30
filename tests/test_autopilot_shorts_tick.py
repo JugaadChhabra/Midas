@@ -1,20 +1,11 @@
-import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 
 
-@pytest.fixture(autouse=True)
-def _title_autopilot_on():
-    """These tests drive the title path, which TITLE_AUTOPILOT_ENABLED (default
-    false since the Slice 1 review) otherwise shuts."""
-    import app.autopilot as _ap
-    with patch.object(_ap.settings, "TITLE_AUTOPILOT_ENABLED", True):
-        yield
-
-
 def _run_tick_with_channel(channel_row):
     """Run tick() with the channel query returning one channel, sync/audit stubbed.
-    Returns (shorts_called: bool, audit_called: bool)."""
+    Returns (shorts_called: bool, audit_called: bool): the old house-format
+    path counts as entered if it picked a video or ran an audit (S3.6: never)."""
     import app.autopilot as ap
 
     sb = MagicMock()
@@ -37,12 +28,12 @@ def _run_tick_with_channel(channel_row):
          patch("app.autopilot._needs_full_sync", return_value=False), \
          patch("app.autopilot.sync_channel"), patch("app.autopilot.refresh_stats"), \
          patch("app.autopilot._applies_today", return_value=0), \
-         patch("app.autopilot._next_video_for_channel", return_value=None) as nextvid:
+         patch("app.autopilot._next_video_for_channel", return_value=None) as nextvid, \
+         patch("app.audits.audit_video") as audit:
         # last_synced_at recent so needs_sync is False and we skip the sync branch
         channel_row.setdefault("last_synced_at", datetime.now(timezone.utc).isoformat())
         ap.tick()
-        # audit path "entered" == _next_video_for_channel was consulted
-        return shorts.called, nextvid.called
+        return shorts.called, nextvid.called or audit.called
 
 
 def test_shorts_only_channel_runs_shorts_not_audit():
@@ -52,20 +43,22 @@ def test_shorts_only_channel_runs_shorts_not_audit():
     assert audit_called is False   # audit path skipped for shorts-only channel
 
 
-def test_audit_only_channel_runs_audit_not_shorts():
+def test_an_autopilot_channel_without_the_agent_runs_no_audit():
+    """S3.6 (F13): the house-format path is gone from the tick, so
+    autopilot_enabled without agent_enabled no longer reaches an audit."""
     shorts_called, audit_called = _run_tick_with_channel(
         {"id": "UC1", "autopilot_enabled": True, "autopilot_shorts_enabled": False,
          "default_language": "hi"})
     assert shorts_called is False
-    assert audit_called is True
+    assert audit_called is False
 
 
-def test_both_enabled_runs_both():
+def test_both_enabled_runs_shorts_only():
     shorts_called, audit_called = _run_tick_with_channel(
         {"id": "UC1", "autopilot_enabled": True, "autopilot_shorts_enabled": True,
          "default_language": "hi"})
     assert shorts_called is True
-    assert audit_called is True
+    assert audit_called is False
 
 
 def test_audit_pause_does_not_silence_shorts():
@@ -76,7 +69,7 @@ def test_audit_pause_does_not_silence_shorts():
         "autopilot_paused_reason": "repeated_failures",
     })
     assert shorts_called is True     # shorts run despite the pause
-    assert audit_called is False     # audit path stays gated by the pause
+    assert audit_called is False     # no audit path at all
 
 
 def test_shorts_only_channel_runs_even_when_paused():

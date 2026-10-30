@@ -23,11 +23,12 @@ test. Everything else uses `span()` and `Recorder.set()`.
 ## Every `tick.outcome`
 
 One autopilot tick sets exactly one of these on its `tick` span, and returns.
-Seventeen values, derived from `app/autopilot.py` — the apply leg is not a
-single `applied`, it is whatever `_apply_audit_and_handle` decided, which is
-`ApplyOutcome`'s four members plus `applied`, `dry_run` and `apply_exception`.
-Build dashboards off this list, not off the plan's (which predates the apply
-leg expanding).
+Derived from `app/autopilot.py` (`tick`, `_agent_tick`) and `app/agent_tick.py`
+(`run`). Since S3.6 (spec Part 6, F13) the house-format title path is gone from
+the tick, and with it `audit_paused`, `title_autopilot_disabled`, `no_video` of
+the audit picker, `unsafe_model`, `audit_timeout`, `audit_failed`, `quarantined`,
+`applied` and `apply_exception` of the audit apply. Build dashboards off this
+list, not off the plan's.
 
 Gates before any work happens:
 
@@ -35,31 +36,28 @@ Gates before any work happens:
 | --- | --- |
 | `quota_dormant` | YouTube quota exhausted; the fleet is waiting for reset |
 | `no_channel` | nothing eligible to pick |
-| `audit_paused` | channel picked (possibly for shorts), audit path closed |
+| `shorts_only` | channel with `agent_enabled` off: the Shorts action is all the tick does |
+| `agent_ineligible` | agent channel whose agent path is closed (`eligibility.can_run_agent`) |
+| `apply_disabled` | `BACKLINK_APPLY_ENABLED=false`; the agent does nothing |
+| `no_heading` | the channel's language has no heading in `backlinks.HEADINGS` |
 | `stale_sync` | resync was needed and did not succeed |
 | `daily_cap` | channel already at `autopilot_daily_cap` applies today |
-| `no_video` | no remaining unaudited video on that channel |
-| `unsafe_model` | `AUDIT_MODEL` failed the safety gate; channel paused |
+| `quota_insufficient` | the ledger says the write can't be afforded; a skip, nothing paused |
 
-Audit leg:
-
-| value | meaning |
-| --- | --- |
-| `token_expired` | OAuth token expired/revoked (also raised by the apply leg) |
-| `audit_timeout` | OpenRouter read timeout; no failure charged to the channel |
-| `audit_failed` | audit raised; counts toward `_record_failure` |
-| `quarantined` | audit produced, `validate_audit` rejected it |
-
-Apply leg (the return of `_apply_audit_and_handle`):
+Agent leg (the return of `agent_tick.run`, or `_react_to_apply_error` on an `ApplyError`):
 
 | value | meaning |
 | --- | --- |
-| `applied` | the YouTube write happened |
-| `dry_run` | `DRY_RUN=true`; payload built, nothing written |
-| `blocked_test_and_compare` | an active Test & Compare experiment on YouTube |
+| `no_video` | the warm pool has nothing to pick |
+| `active_intervention` | the pick already has an active Midas intervention |
+| `declined` | triage said `no_change` (or the block can't be rendered) |
+| `holdout` | held out; would-be targets recorded, no YouTube call |
+| `measuring` | the backlinks write happened |
+| `dry_run` | `DRY_RUN=true`; rendered, nothing written, row cancelled |
 | `youtube_quota_exceeded` | quota hit at apply; fleet goes dormant |
+| `token_expired` | OAuth token expired/revoked; channel paused |
 | `failed` | classified apply failure; counts toward `_record_failure` |
-| `apply_exception` | unclassified raise; counts toward `_record_failure` |
+| `agent_failed` | unclassified raise; counts toward `_record_failure` |
 
 A tick that raises outright sets no outcome and carries ERROR on the span
 instead — absence of `tick.outcome` is itself the signal.
