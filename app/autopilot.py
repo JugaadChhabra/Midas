@@ -9,7 +9,7 @@ from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
 from app.channel_audits import audits_for_channel
-from app import agent_tick, backlinks, eligibility, quota, tracing
+from app import agent_tick, eligibility, quota, tracing
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.sync import sync_channel, refresh_stats
 from app import sync as _sync
@@ -468,9 +468,11 @@ def _can_afford_apply(channel_id: str) -> bool:
 AGENT_INELIGIBLE = "agent_ineligible"
 #: tick.outcome when the agent path raised something unclassified.
 AGENT_FAILED = "agent_failed"
-#: tick.outcome when BACKLINK_APPLY_ENABLED is off: the agent does nothing at all.
+#: tick.outcome when BACKLINK_APPLY_ENABLED is off and the title lever is closed
+#: (S3.3): the agent does nothing at all.
 AGENT_APPLY_DISABLED = ApplyOutcome.APPLY_DISABLED.value
-#: tick.outcome when the channel's language has no backlink heading yet (S1.2, D3).
+#: tick.outcome when the channel's language has no backlink heading yet (S1.2, D3)
+#: and the title lever is closed (S3.3).
 AGENT_NO_HEADING = "no_heading"
 #: tick.outcome for a channel with agent_enabled off: the Shorts action is all
 #: the tick does for it (S3.6, F13: the house-format title path is gone).
@@ -488,13 +490,14 @@ def _agent_tick(ch: dict) -> str:
     # With writes off, or no heading to render, a tick could only record rows
     # that never reach YouTube: picks, LLM calls and holdout rows with no treated
     # counterpart (Slice 1 review, 2026-10-23). So the agent does nothing until
-    # it can write; scripts/preview_backlinks.py is how to look before that.
-    if not settings.BACKLINK_APPLY_ENABLED:
+    # a lever can write: backlinks (its switch and a heading) or titles (S3.3,
+    # `agent_tick.titles_open`). scripts/preview_backlinks.py and
+    # scripts/preview_titles.py are how to look before that.
+    if (not agent_tick.backlinks_enabled(ch.get("default_language"))
+            and not agent_tick.titles_open(channel_id)):
         _touch_tick(channel_id)
-        return AGENT_APPLY_DISABLED
-    if ch.get("default_language") not in backlinks.HEADINGS:
-        _touch_tick(channel_id)
-        return AGENT_NO_HEADING
+        return (AGENT_NO_HEADING if settings.BACKLINK_APPLY_ENABLED
+                else AGENT_APPLY_DISABLED)
     if not _resync_if_stale(ch):
         return "stale_sync"
 

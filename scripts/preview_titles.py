@@ -8,10 +8,11 @@ once per channel on it (spec Part 6 S3.7, F12).
     PYTHONPATH=. python scripts/preview_titles.py --channel UCr5-YUqBiW7PUmeAtxUWuRg --n 20
     PYTHONPATH=. python scripts/preview_titles.py --channel ... --csv   # logs/preview_titles_<channel>.csv
 
-Writes nothing: no interventions, no decision_log rows (until S3.3 the title
-answer is a local rule: a warm long video, CTR below the channel median, not
-over the ceiling), no transcript cache rows (cache reads only), no YouTube
-call. It does call the writer model (OpenRouter). `--path agent` prints
+Writes nothing: no interventions, no decision_log rows (the title answer is
+TRIAGE's rules, `decide.TRIAGE.rules`, asked directly on the tick's context with
+the title lever taken as open, so it lists videos before TITLE_APPLY_ENABLED or
+TITLE_CHANNELS let the tick title them), no transcript cache rows (cache reads
+only), no YouTube call. It does call the writer model (OpenRouter). `--path agent` prints
 "agent not built" until S3.4.
 """
 

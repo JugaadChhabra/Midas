@@ -5,6 +5,7 @@ The real context, warm pool, reach and stamp code runs against FakeSupabase;
 OpenRouter (`titles.chat_json`) is faked at the edge.
 """
 import csv
+import dataclasses
 from contextlib import ExitStack, contextmanager
 from datetime import date, timedelta
 from unittest.mock import patch
@@ -65,6 +66,7 @@ def world():
                                "lang": "en", "available": True, "fetched_at": None}],
         "interventions": [],
         "audit_strategies": [],
+        "lever_verdicts": [],
     }
     for name, rows in tables.items():
         for i, r in enumerate(rows, 1):
@@ -75,7 +77,8 @@ def world():
 @contextmanager
 def wired(sb, *, chat=None):
     with ExitStack() as stack:
-        for mod in ("titles", "agent_tick", "warm", "reach", "db"):
+        for mod in ("titles", "agent_tick", "warm", "reach", "db", "backlinks", "human_edits",
+                    "lever_verdicts"):
             stack.enter_context(patch(f"app.{mod}.supabase", return_value=sb))
         stack.enter_context(patch.multiple(
             titles.settings, HOLDOUT_PCT=0.0, TITLE_AGENT_PCT=0.0, WARM_POOL_USE_RPC=False, WARM_EXPLORE_PCT=0.0,
@@ -282,6 +285,19 @@ def test_the_preview_lists_title_answers_and_writes_nothing(capsys, tmp_path):
     assert items[1]["written"].title == "ट्विंकल 2"
     assert "-> 'ट्विंकल 3'" in capsys.readouterr().out
     assert [r["video_id"] for r in csv.DictReader(out.open(encoding="utf-8"))] == [A]
+
+
+def test_the_preview_asks_triages_rules():
+    """S3.3: the preview's title answer is TRIAGE.rules on the tick's context,
+    so an id the SEO team excludes, and a video backlinks would take, drop out."""
+    sb = world()
+    with wired(sb, chat=replies(["ट्विंकल 1"])), \
+         patch.object(titles.settings, "TITLE_EXCLUDE_VIDEOS", {A}):
+        assert [i["video_id"] for i in titles.preview(CH, 20)] == [E]
+    with wired(sb, chat=replies(["ट्विंकल 1"], ["ट्विंकल 2"])), \
+         patch.object(titles.decide, "TRIAGE", dataclasses.replace(
+             decide.TRIAGE, rules=lambda ctx: "backlinks" if ctx["ctr"] == 0.02 else "title")):
+        assert [i["video_id"] for i in titles.preview(CH, 2)] == [BIG, B]
 
 
 def test_the_agent_preview_says_not_built_and_calls_no_writer():
