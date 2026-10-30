@@ -176,6 +176,24 @@ def test_a_stopped_path_hands_its_videos_to_the_other_and_both_stop_the_lever():
         assert not titles.path_stopped("UCother", "pipeline")
 
 
+def test_a_path_with_no_share_is_closed_so_a_pipeline_stop_closes_the_lever():
+    """F5/F7: with TITLE_AGENT_PCT = 0 the agent was never switched on, so a
+    pipeline stop must close the lever, not hand titles to the agent."""
+    stop = {"channel_id": CH, "lever": "title", "arm_scope": "pipeline_vs_holdout",
+            "week_start": W4.isoformat(), "stop_rule_triggered": True}
+    ids = [f"vid{i:08d}" for i in range(200)]
+    with db(verdicts=[]) as sb, patch.object(settings, "TITLE_AGENT_PCT", 0.0):
+        assert titles.path_closed(CH, "agent") and not titles.path_closed(CH, "pipeline")
+        assert {titles.route(CH, v) for v in ids} == {"pipeline"}
+        assert not titles.stopped(CH)
+        sb._tables["lever_verdicts"].append(stop)
+        assert titles.stopped(CH)
+        assert "agent" not in {titles.route(CH, v) for v in ids}
+    with db(verdicts=[{**stop, "arm_scope": "agent_vs_holdout"}]), \
+         patch.object(settings, "TITLE_AGENT_PCT", 1.0):
+        assert titles.stopped(CH)   # the pipeline has no share, the agent stopped
+
+
 def test_every_title_path_has_a_scope():
     assert set(lv.TITLE_SCOPES) == set(titles.PATHS)
 

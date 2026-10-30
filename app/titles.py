@@ -478,17 +478,35 @@ def path_stopped(channel_id: str, path: str) -> bool:
                                   lever_verdicts.TITLE_SCOPES[path])
 
 
+def _share(path: str) -> float:
+    """The share of treated titles `path` gets by hash (TITLE_AGENT_PCT)."""
+    return settings.TITLE_AGENT_PCT if path == AGENT else 1 - settings.TITLE_AGENT_PCT
+
+
+def path_closed(channel_id: str, path: str) -> bool:
+    """Whether `path` takes no titles on the channel: its stop rule has fired,
+    or it has no share (TITLE_AGENT_PCT = 0 shuts the agent, F5; 1 the
+    pipeline). A path with no share never gets verdicts, so it never stops on
+    its own; counting it as closed lets the other path's stop close the lever
+    (F7) instead of handing titles to a path nobody switched on."""
+    return _share(path) <= 0 or path_stopped(channel_id, path)
+
+
 def stopped(channel_id: str) -> bool:
-    """Whether the title lever has stopped on the channel: both paths have."""
-    return all(path_stopped(channel_id, p) for p in PATHS)
+    """Whether the title lever has stopped on the channel: both paths are
+    closed (`path_closed`)."""
+    return all(path_closed(channel_id, p) for p in PATHS)
 
 
 def route(channel_id: str, video_id: str) -> str:
     """The path a treated title on the channel takes (Part 6 S3.3): `title_path`,
-    handed to the other path when that one has stopped."""
+    handed to the other path when that one is closed (`path_closed`) and the
+    other isn't. When both are closed the lever is stopped and no title is
+    picked (`stopped`), so the hash's path is returned unchanged."""
     path = title_path(video_id)
-    if path_stopped(channel_id, path):
-        return AGENT if path == PIPELINE else PIPELINE
+    other = AGENT if path == PIPELINE else PIPELINE
+    if path_closed(channel_id, path) and not path_closed(channel_id, other):
+        return other
     return path
 
 
