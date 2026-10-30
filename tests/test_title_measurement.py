@@ -88,10 +88,11 @@ def test_a_row_waits_until_the_channel_frontier_reaches_the_post_window():
     assert row["measurement_result"] is None
 
 
-def test_the_log_ratio_of_browse_plus_suggested_views():
-    rows = (daily(5, range(-14, 0)) + daily(5, range(-14, 0), source_type=7)    # pre 140
+def test_the_log_ratio_of_browse_search_and_suggested_views():
+    rows = (daily(3, range(-14, 0)) + daily(5, range(-14, 0), source_type=7)    # pre 140
+            + daily(2, range(-14, 0), source_type=5)
             + daily(10, range(1, 15)) + daily(10, range(1, 15), source_type=7)  # post 280
-            + daily(1000, range(-14, 15), source_type=5)                          # search: not read
+            + daily(1000, range(-14, 15), source_type=14)                         # playlists: not read
             + [traffic(0, 999), traffic(-15, 999), traffic(15, 999)])             # outside both
     reach_rows = [{"video_id": VID, "channel_id": CH, "date": day(n), "impressions": 100,
                    "ctr": 0.05 if n < 0 else 0.04} for n in range(-14, 15) if n]

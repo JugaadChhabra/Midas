@@ -79,29 +79,49 @@ SCRIPTS: dict[str, tuple[str, str]] = {
 }
 _URL_RE = re.compile(r"https?://|www\.|youtu\.be/|youtube\.com/", re.IGNORECASE)
 
-#: The objective, shared by the writer's prompt and the agent's (S3.4).
+#: The objective, shared by the writer's prompt and the agent's (S3.4). Since
+#: 2026-10-31 search results are a place the title is read (and measured,
+#: app/title_measurement.py SOURCE_TYPES).
 TITLE_GOAL = """\
 You write the title of one YouTube video on a kids' nursery-rhyme channel.
 Only the title changes: the thumbnail, description and tags stay as they are.
 
-Where the title is read: on the YouTube home page, and in the list of videos
-next to another video, beside the thumbnail. A parent scrolling past decides
-in a glance whether to tap. It is not read in a list of search results"""
+Where the title is read: on the YouTube home page, in the list of videos next
+to another video, and in search results. A parent decides in a glance whether
+to tap."""
 
-#: The writer's brief: the goal, a style, and the limits; `{title_max}` is
-#: filled in. The style lines (the series name, plain words, not keywords) are
-#: the pipeline's alone: the agent gets the goal and the limits only, so
-#: pipeline vs agent compares a prompt-written style with the agent's own.
-TITLE_BRIEF = TITLE_GOAL + """, so
-write for that glance, not for search keywords.
-
-Rules:
+#: The limits both paths keep; `{title_max}` is filled in. The series name is a
+#: brand (e.g. TMKOC), so it is a limit, not a style.
+TITLE_LIMITS = """\
 - Keep the rhyme's name, in the channel's language and in its script.
-- If the current title has a series name, keep it.
-- Use plain words a parent recognises, not a list of keywords.
+- If the current title has a series or brand name, keep it as it is written.
 - Add no hashtags: no more "#" than the current title has.
 - No links.
-- At most {title_max} characters.
+- At most {title_max} characters."""
+
+#: The SEO team's title structure (owner, 2026-10-31), the pipeline's alone:
+#: the agent gets the goal and the limits only, so pipeline vs agent compares
+#: this structure with the agent's own.
+TITLE_STRUCTURE = """\
+Structure, in this order:
+  <rhyme names, in the channel's script> <the channel language's word for
+  kids' rhymes, in its script> | <the same rhyme names, romanised> <the
+  language and that word, romanised> <series name> <that word, in its script>
+- Several rhymes: join their names with " & " before the "|" and " + " after it.
+- <series name> only when the current title has one.
+- Example (Hindi, two rhymes, series TMKOC), as the SEO team wrote it:
+  आम चोरी पत्ता जोड़ा & हरे नीम की डाल हिंदी बालगीत | Aam Chori + Hare Neem Ki Dal Hindi Baalgeet TMKOC बालगीत
+- That example is over {title_max} characters. When a title is, drop in this
+  order until it fits: the last word for kids' rhymes, then the romanised
+  language and word. Never drop a rhyme's name or the series name."""
+
+#: The writer's brief: the goal, the structure and the limits.
+TITLE_BRIEF = TITLE_GOAL + """
+
+""" + TITLE_STRUCTURE + """
+
+Rules:
+""" + TITLE_LIMITS + """
 - Each candidate must differ from the current title."""
 
 #: The writer's system prompt; `{title_max}` and `{candidates}` are filled in
@@ -119,27 +139,25 @@ Return only JSON: {{"candidates": [{{"title": "...", "reason": "..."}}, ...]}}""
 
 
 #: The agent's system prompt (S3.4, app/agent/loop.py): the goal and the
-#: limits the code checks, no style; then its tools and its two ways to end,
+#: limits, no structure; then its tools and its two ways to end,
 #: one of them declining. `{title_max}` is filled in by `agent_system_prompt()`.
-AGENT_PROMPT = TITLE_GOAL + """.
+AGENT_PROMPT = TITLE_GOAL + """
 
 How the title should read, its structure, its words and its length within
 the limits, is yours to decide from the evidence: what this video is, where
 its views come from, and which of the channel's titles do best and worst.
 
 Limits:
-- Keep the rhyme's name, in the channel's language and in its script.
-- Add no hashtags: no more "#" than the current title has.
-- No links.
-- At most {title_max} characters.
+""" + TITLE_LIMITS + """
 - It must differ from the current title; to keep the current title, decline.
 
 You decide this video's title with tools. Find out first what the video is
 and how it is doing: where its views come from, the search terms that bring
 viewers to it, the channel's titles that do best and worst on browse and
 suggested views per impression, and what was tried on this title before.
-write_candidates asks a writer model for candidates in a house style; you
-are not bound by that style, and may submit one, change one, or write your own.
+write_candidates asks a writer model for candidates in the SEO team's
+structure; you are not bound by it, and may submit one, change one, or write
+your own.
 
 End with one call:
 - submit_title(title, reasoning): the new title. Code checks it; a title that

@@ -88,16 +88,13 @@ def test_the_first_messages_are_the_agent_prompt_and_the_video_id_and_language_o
     assert user == {"role": "user", "content": f"Video: {A}\nChannel language: mr"}
 
 
-def test_the_agent_prompt_has_the_goal_and_the_limits_but_not_the_writers_style():
+def test_the_agent_prompt_has_the_goal_and_the_limits_but_not_the_writers_structure():
     prompt = titles.agent_system_prompt()
-    for limit in ("Keep the rhyme's name, in the channel's language and in its script.",
-                  'Add no hashtags: no more "#" than the current title has.',
-                  "No links.", "At most 100 characters."):
-        assert limit in prompt
-    for style in ("series name", "plain words", "not a list of keywords",
-                  "not for search keywords"):
-        assert style not in prompt
-    assert "not bound by that style" in prompt
+    assert titles.TITLE_LIMITS.format(title_max=100) in prompt
+    assert "If the current title has a series or brand name, keep it" in prompt
+    for structure in ("Structure, in this order", "Baalgeet", " & ", "drop in this"):
+        assert structure not in prompt
+    assert "you are not bound by it" in prompt
 
 
 def test_decline_ends_the_run_with_its_reason():
