@@ -183,11 +183,11 @@ def _top_performers(channel_id: str, impressions: dict[str, int], n: int) -> lis
         if r["date"] in window:
             views[r["video_id"]] += r["views"]
     rate = {v: views[v] / impressions[v] for v in views if impressions.get(v)}
-    best = sorted(rate, key=lambda v: (-rate[v], v))[:n]
     titles = {v["id"]: v.get("title") for v in rows_for_ids(
-        lambda c: supabase().table("videos").select("id,title").in_("id", c), best)}
-    return [{"video_id": v, "title": titles.get(v), "views_per_impression": round(rate[v], 4)}
-            for v in best if titles.get(v)]
+        lambda c: supabase().table("videos").select("id,title").in_("id", c), list(rate))}
+    best = sorted((v for v in rate if titles.get(v)), key=lambda v: (-rate[v], v))[:n]
+    return [{"video_id": v, "title": titles[v], "views_per_impression": round(rate[v], 4)}
+            for v in best]
 
 
 def channel_context(channel_id: str) -> ChannelContext:
@@ -289,8 +289,8 @@ def _user_block(ctx: dict, failures: list[dict] | None = None) -> str:
 
 
 def _candidates(reply) -> list[dict]:
-    """The reply's candidates as `{title, reason}`, in its order; [] when the
-    reply isn't `{"candidates": [{"title": str, ...}, ...]}`."""
+    """The reply's candidates as `{title, reason}`, in its order, titles
+    stripped; [] when the reply isn't `{"candidates": [{"title": str, ...}, ...]}`."""
     items = reply.get("candidates") if isinstance(reply, dict) else None
     if not isinstance(items, list):
         return []
@@ -298,7 +298,7 @@ def _candidates(reply) -> list[dict]:
     for c in items[:settings.TITLE_CANDIDATES]:
         if isinstance(c, dict) and isinstance(c.get("title"), str):
             reason = c.get("reason")
-            out.append({"title": c["title"], "reason": reason if isinstance(reason, str) else ""})
+            out.append({"title": c["title"].strip(), "reason": reason if isinstance(reason, str) else ""})
     return out
 
 
@@ -322,6 +322,8 @@ def check(title: str, video: dict) -> str | None:
     current = video.get("title") or ""
     if not title.strip() or len(title) > TITLE_MAX:
         return f"length: {len(title)} characters, not 1-{TITLE_MAX}"
+    if re.search(r"[<>\n\r]", title):
+        return "characters: '<', '>' or a line break (YouTube refuses them)"
     if _fold(title) == _fold(current):
         return "unchanged: the same as the current title"
     language = video.get("default_language")
@@ -336,6 +338,9 @@ def check(title: str, video: dict) -> str | None:
     if _URL_RE.search(title):
         return "url: contains a link"
     return None
+
+
+MALFORMED = "malformed reply: no candidates"
 
 
 class Written(NamedTuple):
@@ -356,6 +361,7 @@ def pipeline(video: dict, *, channel: ChannelContext | None = None, model: str |
     ctx = context(video, channel=channel, cache_only=cache_only)
     subject = {**video, "default_language": ctx["default_language"]}
     asked: list[dict] = []
+    reasons: list[str] = []
     failures: list[dict] | None = None
     for attempt in (1, 2):
         found = write_candidates(ctx, model=model, failures=failures)
@@ -366,10 +372,11 @@ def pipeline(video: dict, *, channel: ChannelContext | None = None, model: str |
             if failure is None:
                 return Written(c["title"], c["reason"], asked, [])
             failures.append({"title": c["title"], "failure": failure})
+            reasons.append(f"attempt {attempt}: {c['title']!r}: {failure}")
         if not found:
-            failures.append({"title": "", "failure": "malformed reply: no candidates"})
-    reasons = [f"attempt {c['attempt']}: {c['title']!r}: {c['check']}" for c in asked]
-    return Written(None, None, asked, reasons or ["malformed reply: no candidates"])
+            failures.append({"title": "", "failure": MALFORMED})
+            reasons.append(f"attempt {attempt}: {MALFORMED}")
+    return Written(None, None, asked, reasons)
 
 
 def title_path(video_id: str) -> str:
@@ -432,13 +439,19 @@ def would_title(video_id: str, channel: ChannelContext) -> bool:
             and video_id not in channel.ceiling)
 
 
-def title_answers(channel_id: str, n: int) -> tuple[ChannelContext, list[dict]]:
-    """The channel context and the first `n` videos of the warm pool, in pick
-    order (`warm.warm_pool`, with its explore share, as `agent_tick.preview`),
-    that triage would send to titles. Reads only."""
+def title_answers(channel_id: str, n: int, *,
+                  pick: bool = True) -> tuple[ChannelContext, list[dict]]:
+    """The channel context and the first `n` videos triage would send to
+    titles. With `pick`, in the tick's pick order (`warm.warm_pool`, with its
+    explore share and its exclusions, as `agent_tick.preview`); without, every
+    warm long video by impressions, the pick's exclusions (a backlinks
+    experiment, the cooldown) ignored: the bake-off's sample. Reads only."""
     channel = channel_context(channel_id)
+    order = (warm.warm_pool(channel_id) if pick else
+             [{"id": v} for v in sorted(channel.reach,
+                                        key=lambda v: (-channel.reach[v][0], v))])
     out = []
-    for picked in warm.warm_pool(channel_id):
+    for picked in order:
         if len(out) >= n:
             break
         if not would_title(picked["id"], channel):

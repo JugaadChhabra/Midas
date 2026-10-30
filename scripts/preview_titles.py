@@ -22,6 +22,7 @@ import csv
 from pathlib import Path
 
 from app import titles
+from app.short_links import _cell
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -89,7 +90,7 @@ def main(argv: list[str] | None = None) -> None:
         with out.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=_COLUMNS)
             w.writeheader()
-            w.writerows(_row(item) for item in items)
+            w.writerows({k: _cell(v) for k, v in _row(item).items()} for item in items)
         print(f"wrote {out}")
 
 

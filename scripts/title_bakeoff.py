@@ -1,7 +1,8 @@
 """Bake-off (S3.2): the same N title answers through each writer model, blind.
 
-For the warm pool's first N videos triage would send to titles (as
-scripts/preview_titles.py), asks `titles.write_candidates` once per model and
+For the first N warm long videos by impressions that triage would send to
+titles (the pick's exclusions ignored: a video already in a backlinks
+experiment is still a fair sample of the channel's titles), asks `titles.write_candidates` once per model and
 writes one CSV row per (video, model): the current title, the model's top
 candidate passing the checks (or none, with the failures), shuffled, the
 model behind a code. The key file beside it maps codes to models. The SEO team
@@ -24,6 +25,7 @@ import random
 from pathlib import Path
 
 from app import titles
+from app.short_links import _cell
 
 COLUMNS = ["row", "code", "video_id", "current_title", "candidate", "checks",
            "score_1_3", "wrong_or_broken_script"]
@@ -51,7 +53,7 @@ def _top(ctx: dict, video: dict, model: str) -> tuple[str, str]:
         if failure is None:
             return c["title"], "pass" + (f" (after {len(failures)} failing)" if failures else "")
         failures.append(f"{c['title']!r}: {failure}")
-    return "", "; ".join(failures) or "malformed reply: no candidates"
+    return "", "; ".join(failures) or titles.MALFORMED
 
 
 def key_path(out: Path) -> Path:
@@ -66,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
     rng.shuffle(codes)
     code_of = dict(zip(models, codes))
 
-    channel, videos = titles.title_answers(args.channel, args.n)
+    channel, videos = titles.title_answers(args.channel, args.n, pick=False)
     rows = []
     for video in videos:
         ctx = titles.context(video, channel=channel, cache_only=True)
@@ -83,7 +85,8 @@ def main(argv: list[str] | None = None) -> None:
     with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)
         w.writeheader()
-        w.writerows({"row": i, **r} for i, r in enumerate(rows, 1))
+        w.writerows({"row": i, **{k: _cell(v) for k, v in r.items()}}
+                    for i, r in enumerate(rows, 1))
     with key_path(out).open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["code", "model"])

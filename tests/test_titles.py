@@ -325,3 +325,51 @@ def test_the_bakeoff_writes_no_row_and_its_csv_names_no_model(tmp_path):
     key = dict(csv.reader(title_bakeoff.key_path(out).open(encoding="utf-8")))
     assert key.pop("code") == "model" and sorted(key.values()) == models
     assert {r["code"] for r in rows} == set(key)
+
+
+# ── review follow-ups ─────────────────────────────────────────────────────
+
+def test_candidates_are_stripped_and_youtube_refused_characters_fail():
+    sb = world()
+    with wired(sb, chat=replies([f"  {MARATHI} \n"])):
+        assert titles.pipeline(_video(A), cache_only=True).title == MARATHI
+    for bad in ("ट्विंकल <3", "ट्विंकल > all", "ट्विंकल\nदुसरी ओळ"):
+        assert titles.check(bad, video()).startswith("characters:")
+
+
+def test_a_malformed_retry_still_gives_its_reason():
+    sb = world()
+    with wired(sb, chat=replies(["English only"], {})):
+        written = titles.pipeline(_video(A), cache_only=True)
+    assert written.title is None
+    assert written.failures[-1] == f"attempt 2: {titles.MALFORMED}"
+    assert [c["attempt"] for c in written.candidates] == [1]
+
+
+def test_the_bakeoff_samples_past_the_pick_exclusions():
+    """A video in a backlinks experiment never comes back to the pick, but is
+    still a fair sample of the channel's titles for the bake-off."""
+    sb = world()
+    sb._tables["interventions"].append({
+        "id": 1, "video_id": A, "channel_id": CH, "lever": "backlinks", "origin": "midas",
+        "arm": "treated", "status": "measuring", "created_at": "2026-10-01T00:00:00+00:00",
+        "applied_at": "2026-10-01T00:00:00+00:00"})
+    with wired(sb):
+        _, picked = titles.title_answers(CH, 20)
+        _, sampled = titles.title_answers(CH, 20, pick=False)
+    assert [v["id"] for v in picked] == [E]
+    assert [v["id"] for v in sampled] == [A, E]
+
+
+def test_the_csvs_escape_titles_a_spreadsheet_would_run(tmp_path):
+    sb = world()
+    for v in sb._tables["videos"]:
+        v["title"] = "=HYPERLINK(1)"
+    out = tmp_path / "bake.csv"
+    with wired(sb, chat=replies(["ट्विंकल"], ["ट्विंकल"], ["ट्विंकल"], ["ट्विंकल"])):
+        title_bakeoff.main(["--channel", CH, "--n", "2", "--models", "m/one",
+                            "--out", str(out), "--seed", "1"])
+        preview_titles.main(["--channel", CH, "--n", "2", "--csv", str(tmp_path / "p.csv")])
+    for path in (out, tmp_path / "p.csv"):
+        rows = list(csv.DictReader(path.open(encoding="utf-8")))
+        assert rows and {r["current_title"] for r in rows} == {"'=HYPERLINK(1)"}
