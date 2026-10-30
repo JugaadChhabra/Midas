@@ -2,7 +2,7 @@
 
 Evidence for Part 3 of `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md` (Phase B, B1–B10).
 Live figures were read on the office machine and are dated; nothing here was computed on a dev copy.
-The office runbook these came from is `docs/agents/b9b-office-steps.md`.
+The office runbook these came from was `docs/agents/b9b-office-steps.md` (deleted 2026-10-30).
 
 ## Status
 
