@@ -414,3 +414,13 @@ def test_the_csvs_escape_titles_a_spreadsheet_would_run(tmp_path):
     for path in (out, tmp_path / "p.csv"):
         rows = list(csv.DictReader(path.open(encoding="utf-8")))
         assert rows and {r["current_title"] for r in rows} == {"'=HYPERLINK(1)"}
+
+
+def test_the_pipeline_prompt_is_unchanged_by_the_agent_prompt_split():
+    """The writer's rendered prompt, so the pipeline's stamp, is what it was
+    before the agent's prompt lost the style lines."""
+    import hashlib
+    with patch.object(titles.settings, "TITLE_CANDIDATES", 3):
+        rendered = titles.system_prompt()
+    assert hashlib.sha256(rendered.encode()).hexdigest() == (
+        "9350a35bb48c5e0676ef2595773ecbe0df9d1b87e42fe71673a086232cb54771")
