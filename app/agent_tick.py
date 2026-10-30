@@ -25,8 +25,9 @@ pair, in shadow (S1.5), stored as `triage_json.next_watch`. Record, through
     the ApplyError goes on to the tick, which reacts as for an audit apply;
   - `title` (S3.3, after backlinks in the rules, on TITLE_CHANNELS only),
     holdout -> `holdout` with `{title_before}`, no writer call;
-  - `title`, treated -> the path's writer, then `planned` and
-    `titles_apply.apply_title` as backlinks (`_run_title`).
+  - `title`, treated -> the path's writer (the pipeline, or since S3.4 the
+    agent, which may decline), then `planned` and `titles_apply.apply_title`
+    as backlinks (`_run_title`).
 
 The decisions and the intervention point at each other: `triage_json` holds the
 `decision_log_id` (and each pair's, under `next_watch`), and `decide.link` sets
@@ -43,6 +44,7 @@ from datetime import datetime, timedelta, timezone
 
 from app import backlinks, backlinks_apply, decide, human_edits, interventions, reach, warm
 from app import lever_verdicts, titles, titles_apply
+from app.agent import loop as agent_loop
 from app.apply_outcome import ApplyError
 from app.config import settings
 from app.db import supabase
@@ -441,16 +443,34 @@ def _apply(row: dict, apply, dry_run_key: str) -> str:
     return result.get("status") or InterventionStatus.MEASURING
 
 
+def _agent_outcome(ran: agent_loop.AgentResult, base: dict) -> tuple[str, dict]:
+    """The status and payload of an agent run's treated row (Part 6 S3.3,
+    S3.4): a title -> `planned` as the pipeline's, `candidates` being its
+    submits with their checks; a decline -> `declined` with the rationale; a
+    failure -> `cancelled` with `payload.error` (`turn_cap`, `checks_failed`)."""
+    if ran.kind == agent_loop.DECLINE:
+        return InterventionStatus.DECLINED, {**base, "rationale": ran.reason}
+    payload = {**base, "title": ran.title, "candidates": ran.trajectory["submits"],
+               "reason": ran.reason if ran.kind == agent_loop.TITLE else None}
+    if ran.kind == agent_loop.TITLE:
+        return InterventionStatus.PLANNED, payload
+    payload["error"] = {"reason": ran.reason, "detail": ran.trajectory["end"]["detail"]}
+    return InterventionStatus.CANCELLED, payload
+
+
 def _run_title(video: dict, triage: dict, decision: decide.Decision) -> str:
     """Record and apply a video triage sent to titles (Part 6 S3.3).
 
     Holdout -> `holdout` with `{title_before}`, no writer call. Treated -> the
-    path's writer (both paths use the pipeline until S3.4) -> `planned` with
-    `{title_before, title, candidates, reason, path}` and the path's
-    `strategy_version` -> `titles_apply.apply_title`: `measuring`, or
-    `cancelled` with `payload.error` as backlinks. No passing candidate ->
-    `cancelled`, reason `checks_failed`; a writer that raises -> `cancelled`,
-    reason `writer_exception`, re-raised for the tick.
+    path's writer (`titles.pipeline`, or the agent, `run_title_agent`, S3.4)
+    -> `planned` with `{title_before, title, candidates, reason, path}` and
+    the path's `strategy_version` -> `titles_apply.apply_title`: `measuring`,
+    or `cancelled` with `payload.error` as backlinks. No passing candidate ->
+    `cancelled`, reason `checks_failed` (the agent's: `checks_failed` or
+    `turn_cap`); an agent decline -> `declined`, arm `treated`, `{path,
+    title_before, rationale}`; a writer that raises -> `cancelled`, reason
+    `writer_exception`, re-raised for the tick. Every agent row carries its
+    run's `trajectory`.
     """
     channel_id = video["channel_id"]
     title_before = video.get("title") or ""
@@ -466,25 +486,34 @@ def _run_title(video: dict, triage: dict, decision: decide.Decision) -> str:
             path = titles.route(channel_id, video["id"])
             base = {"title_before": title_before, "path": path}
             try:
-                written = titles.pipeline(video, channel=title_channel(channel_id))
+                if path == titles.AGENT:
+                    ran = agent_loop.run_title_agent(video, channel=title_channel(channel_id))
+                else:
+                    written = titles.pipeline(video, channel=title_channel(channel_id))
             except Exception as e:
                 row = interventions.record(
                     **common, arm=arm, status=InterventionStatus.CANCELLED,
                     payload={**base, "error": {"reason": WRITER_EXCEPTION,
-                                               "detail": f"{type(e).__name__}: {e}"}})
+                                               "detail": f"{type(e).__name__}: {e}"}},
+                    trajectory=getattr(e, "trajectory", None))
                 decide.link(decision.log_id, row["id"])
                 raise
-            payload = {**base, "title": written.title, "candidates": written.candidates,
-                       "reason": written.reason}
-            if written.title is None:
-                row = interventions.record(
-                    **common, arm=arm, status=InterventionStatus.CANCELLED,
-                    payload={**payload, "error": {"reason": CHECKS_FAILED,
-                                                  "detail": "; ".join(written.failures)}})
+            if path == titles.AGENT:
+                status, payload = _agent_outcome(ran, base)
+                trajectory = ran.trajectory
             else:
-                row = interventions.record(
-                    **common, arm=arm, status=InterventionStatus.PLANNED, payload=payload,
-                    strategy_version=titles.strategy_version(path))
+                trajectory = None
+                payload = {**base, "title": written.title, "candidates": written.candidates,
+                           "reason": written.reason}
+                status = (InterventionStatus.PLANNED if written.title is not None
+                          else InterventionStatus.CANCELLED)
+                if written.title is None:
+                    payload["error"] = {"reason": CHECKS_FAILED,
+                                        "detail": "; ".join(written.failures)}
+            row = interventions.record(
+                **common, arm=arm, status=status, payload=payload, trajectory=trajectory,
+                strategy_version=(titles.strategy_version(path)
+                                  if status == InterventionStatus.PLANNED else None))
     except interventions.ActiveInterventionExists as e:
         log.info("agent %s: %s", channel_id, e)
         return ACTIVE_INTERVENTION
@@ -492,7 +521,7 @@ def _run_title(video: dict, triage: dict, decision: decide.Decision) -> str:
     log.info("agent %s: %s title %s (intervention %s, arm %s)", channel_id, video["id"],
              row["status"], row["id"], row["arm"])
     if row["status"] != InterventionStatus.PLANNED:
-        return row["status"]          # holdout, or cancelled (checks_failed): no YouTube call
+        return row["status"]     # holdout, declined, or cancelled (checks_failed …): no YouTube call
     return _apply(row, titles_apply.apply_title, "title")
 
 

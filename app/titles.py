@@ -15,7 +15,8 @@
     title_answers(channel_id, n)     -- the pool's first n videos TRIAGE's rules
                                         send to titles (the preview, the bake-off)
     preview(channel_id, n, path=)    -- arm, path and the pipeline's candidates
-                                        for them, recording nothing
+                                        or the agent's run (S3.4), recording
+                                        nothing
 
 The title is aimed at browse and suggested views (P5): it is read beside a
 thumbnail on the home page or next to another video, not in a search list.
@@ -111,8 +112,31 @@ Write {candidates} candidates, best first, each with a one-line reason.
 Return only JSON: {{"candidates": [{{"title": "...", "reason": "..."}}, ...]}}"""
 
 
+#: The agent's system prompt (S3.4, app/agent/loop.py): the brief, then its
+#: tools and its two ways to end, one of them declining. `{title_max}` is
+#: filled in by `agent_system_prompt()`.
+AGENT_PROMPT = TITLE_BRIEF + """
+
+You decide this video's title with tools. Find out first what the video is
+and how it is doing: where its views come from, the search terms that bring
+viewers to it, the channel's titles that do best and worst on browse and
+suggested views per impression, and what was tried on this title before.
+write_candidates asks a writer model for candidates; you may submit one,
+change one, or write your own.
+
+End with one call:
+- submit_title(title, reasoning): the new title. Code checks it; a title that
+  fails gets the failure back once, and a second failure ends the run.
+- decline(reason): leave the title as it is. You may decline: a title that
+  already works is a valid outcome."""
+
+
 def system_prompt() -> str:
     return TITLE_PROMPT.format(title_max=TITLE_MAX, candidates=settings.TITLE_CANDIDATES)
+
+
+def agent_system_prompt() -> str:
+    return AGENT_PROMPT.format(title_max=TITLE_MAX)
 
 
 class ChannelContext(NamedTuple):
@@ -400,16 +424,21 @@ def title_path(video_id: str) -> str:
 
 
 def strategy_inputs(path: str) -> tuple[str, dict]:
-    """(`<STRATEGY_LABEL>-<short hash>`, inputs) for a title on `path`. Pure."""
+    """(`<STRATEGY_LABEL>-<short hash>`, inputs) for a title on `path`. Pure.
+    The prompt is the path's system prompt; the agent's also carries its
+    reasoning model (`agent_model`, AUDIT_MODEL)."""
     if path not in PATHS:
         raise ValueError(f"unknown title path {path!r}")
+    prompt = agent_system_prompt() if path == AGENT else system_prompt()
     inputs = {
         "lever": "title",
         "path": path,
-        "prompt_sha256": hashlib.sha256(system_prompt().encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "writer_model": settings.WRITER_MODEL,
         "decision_question_set_version": decide.QUESTION_SET_VERSION,
     }
+    if path == AGENT:
+        inputs["agent_model"] = settings.AUDIT_MODEL
     return f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}", inputs
 
 
@@ -426,7 +455,8 @@ def strategy_version(path: str) -> str:
         supabase().table("audit_strategies").upsert(
             {
                 "version": version,
-                "prompt_template": "code:app/titles.py TITLE_PROMPT",
+                "prompt_template": ("code:app/titles.py AGENT_PROMPT" if path == AGENT
+                                    else "code:app/titles.py TITLE_PROMPT"),
                 "model": settings.WRITER_MODEL,
                 "config": inputs,
                 "status": "champion",
@@ -510,10 +540,11 @@ def title_answers(channel_id: str, n: int, *,
 
 def preview(channel_id: str, n: int, *, path: str = PIPELINE) -> list[dict]:
     """The pool's first `n` title answers: each with its arm and path, and for
-    a treated video on `path` the pipeline's result (`written`), or
-    `agent not built` for the agent until S3.4. Writes nothing, calls no
-    YouTube and no decide() (no decision row), reads transcripts from the
-    cache only."""
+    a treated video on `path` the pipeline's result (`written`) or the agent's
+    run (`agent`, an `AgentResult`, S3.4). Writes nothing, calls no YouTube
+    and no decide() (no decision row), reads transcripts from the cache only."""
+    from app.agent import loop as agent_loop     # app.agent imports this module
+
     if path not in PATHS:
         raise ValueError(f"unknown title path {path!r}")
     channel, videos = title_answers(channel_id, n)
@@ -524,16 +555,18 @@ def preview(channel_id: str, n: int, *, path: str = PIPELINE) -> list[dict]:
                 "impressions": impressions, "ctr": ctr,
                 "channel_median_ctr": channel.median_ctr,
                 "arm": interventions.assign_arm(video["id"], InterventionLever.TITLE),
-                "path": None, "written": None, "note": None, "error": None}
+                "path": None, "written": None, "agent": None, "note": None, "error": None}
         if item["arm"] == InterventionArm.TREATED:
             item["path"] = route(channel_id, video["id"])
             if item["path"] != path:
                 item["note"] = f"on the {item['path']} path"
-            elif path == AGENT:
-                item["note"] = "agent not built"
             else:
                 try:
-                    item["written"] = pipeline(video, channel=channel, cache_only=True)
+                    if path == AGENT:
+                        item["agent"] = agent_loop.run_title_agent(
+                            video, channel=channel, cache_only=True)
+                    else:
+                        item["written"] = pipeline(video, channel=channel, cache_only=True)
                 except Exception as e:
                     item["error"] = f"{type(e).__name__}: {e}"
         out.append(item)

@@ -311,6 +311,10 @@ class Settings:
     TITLE_EXCLUDE_VIDEOS = {
         v.strip() for v in (os.getenv("TITLE_EXCLUDE_VIDEOS") or "").split(",") if v.strip()
     }
+    # Slice 3 · S3.4 (spec Part 6 Config, Part 2 §3.1, §8): the most model
+    # turns (chat_tools calls) an agent run gets before it ends `failed`,
+    # `turn_cap` (app/agent/loop.py run_title_agent).
+    AGENT_MAX_TURNS = int(os.getenv("AGENT_MAX_TURNS") or "12")
     # Slice 1 · S1.6 (spec Part 4 Config, Part 2 §1.7): the floor on the SOURCE
     # video's total views in a backlinks intervention's post window. Under it
     # the window is extended once to 14 days, then `insufficient_data`

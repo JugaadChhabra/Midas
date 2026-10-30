@@ -207,3 +207,55 @@ def chat_text(prompt: str, model: str | None = None, system: str | None = None,
         out = data["choices"][0]["message"]["content"].strip()
         rec.set(**{tracing.OUTPUT_VALUE: out[:4000]})
         return out
+
+
+def chat_tools(messages: list[dict], tools: list[dict], *, model: str | None = None,
+               label: str | None = None) -> dict:
+    """One tool-calling turn (Slice 3 S3.4, the agent loop, app/agent/loop.py):
+    `messages` and OpenAI-format `tools` to OpenRouter with `tool_choice:
+    "auto"`. Returns the assistant message as sent (`content`, `tool_calls`),
+    nothing parsed. Retried once on a timeout or a 5xx."""
+    model = model or settings.AUDIT_MODEL
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+
+    with tracing.span(_span_name(label, model), kind=tracing.LLM) as rec:
+        last = messages[-1].get("content") if messages else None
+        rec.set(**{
+            tracing.MODEL_NAME: model,
+            tracing.INPUT_VALUE: (last if isinstance(last, str) else "")[:4000],
+            "llm.message_count": len(messages),
+            "llm.tool_count": len(tools),
+        })
+        for attempt in (1, 2):
+            try:
+                r = httpx.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://localhost:8000",
+                        "X-Title": "Midas",
+                    },
+                    json={"model": model, "messages": messages, "tools": tools,
+                          "tool_choice": "auto"},
+                    timeout=120,
+                )
+            except httpx.TimeoutException:
+                if attempt == 2:
+                    raise
+                continue
+            if r.status_code < 500 or attempt == 2:
+                break
+        if r.status_code >= 400:
+            raise RuntimeError(f"OpenRouter {r.status_code} for model {model}: {r.text}")
+        data = r.json()
+        if "choices" not in data:
+            raise RuntimeError(f"OpenRouter unexpected response: {data}")
+        _record_usage(rec, data, model)
+        message = data["choices"][0]["message"]
+        rec.set(**{
+            tracing.OUTPUT_VALUE: (message.get("content") or "")[:4000],
+            "llm.tool_calls": len(message.get("tool_calls") or []),
+        })
+        return message
