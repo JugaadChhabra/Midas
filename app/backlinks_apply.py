@@ -66,11 +66,8 @@ def _classified(e: Exception) -> ApplyError:
     return ApplyError(ApplyOutcome.FAILED, f"YouTube update failed: {e}")
 
 
-def _write_description(channel_id: str, video_id: str, new_description) -> tuple[str, str]:
-    """Fetch the live snippet, replace only its description, send it back.
-
-    `new_description(live)` gives the text to write. Returns (live, written).
-    """
+def _live_snippet(channel_id: str, video_id: str):
+    """Fetch the video's live snippet (1u). Returns (client, snippet)."""
     try:
         yt = youtube_for_channel(channel_id)
         items = yt_videos_list_full(yt, channel_id, [video_id])
@@ -78,17 +75,29 @@ def _write_description(channel_id: str, video_id: str, new_description) -> tuple
         raise _classified(e)
     if not items:
         raise ApplyError(ApplyOutcome.FAILED, f"video {video_id} not found on YouTube")
-    snippet = items[0]["snippet"]
+    return yt, items[0]["snippet"]
+
+
+def _send_snippet(yt, channel_id: str, video_id: str, snippet: dict) -> None:
+    """Send `snippet` back with `part=snippet` (50u): no `status` part."""
+    try:
+        yt_videos_update(yt, channel_id, {"id": video_id, "snippet": snippet},
+                         parts=SNIPPET_PART)
+    except Exception as e:
+        raise _classified(e)
+
+
+def _write_description(channel_id: str, video_id: str, new_description) -> tuple[str, str]:
+    """Fetch the live snippet, replace only its description, send it back.
+
+    `new_description(live)` gives the text to write. Returns (live, written).
+    """
+    yt, snippet = _live_snippet(channel_id, video_id)
     live = snippet.get("description") or ""
     written = _rendered(new_description, live)
     if written == live:
         return live, written            # nothing to change (a revert with no block left)
-    try:
-        yt_videos_update(yt, channel_id,
-                         {"id": video_id, "snippet": {**snippet, "description": written}},
-                         parts=SNIPPET_PART)
-    except Exception as e:
-        raise _classified(e)
+    _send_snippet(yt, channel_id, video_id, {**snippet, "description": written})
     return live, written
 
 
