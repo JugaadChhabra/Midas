@@ -236,9 +236,7 @@ def _title_judged(channel_id: str) -> list[dict]:
         .eq("origin", InterventionOrigin.MIDAS)
         .in_("status", [InterventionStatus.JUDGED, InterventionStatus.CANCELLED])
     )
-    return [r for r in rows if r["status"] == InterventionStatus.JUDGED
-            or ((r.get("measurement_result") or {}).get("pre", -1)
-                >= settings.TITLE_MIN_PRE_VIEWS)]
+    return [r for r in rows if _counted(r)]
 
 
 def _without_shorts(rows: list[dict]) -> list[dict]:
@@ -646,7 +644,7 @@ def channel_title_test(channel_id: str):
                                 for r in mine),
             "stopped": stopped(channel_id, InterventionLever.TITLE, scope),
         }
-    agent = [r for r in rows if (r.get("payload") or {}).get("path") == "agent"]
+    agent = [r for r in rows if _title_arm(r) == "agent"]
     return {"paths": paths,
             "holdout": {"n": len(holdout), "judged": len(deltas(holdout)),
                         "mean_delta": holdout_mean},

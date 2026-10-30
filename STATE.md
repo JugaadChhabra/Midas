@@ -1212,6 +1212,9 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   `lever_measurement` job; no title row measured yet. Partial: Part 6 S3.5's "the video never re-enters the title
   experiment" isn't built: the pick (`warm.warm_pool`, `warm._holds`) holds a video forever only for a `backlinks`
   treated/holdout row, so a title row (reverted or not) holds its video only while active and for the cooldown.
+  An agent decline (`declined`, not active) holds its video for the cooldown only (7 days), so the video can be
+  picked again inside its own 14-day post window, which would blur the agent's mean; a fix is a title clause in
+  `warm_pool()` and `warm._holds` (a migration).
 - The agent loop, its tools and the trajectory (Part 6 S3.4, Part 2 §3.1, §3.2): built (#119; `app/agent/loop.py`,
   `app/agent/tools.py`, `openrouter.chat_tools`, `AGENT_MAX_TURNS`, `interventions.trajectory` in `20261030000000`,
   not applied), run by the tick for the agent path's treated titles and by `scripts/preview_titles.py --path agent`.
