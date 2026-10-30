@@ -16,6 +16,8 @@ from tests.test_agent_tick import (
     CH, NOW, SRC, SRC_DESCRIPTION, T1, T2, T3, T4, _channel, _video, day, midas_rows, outcome,
     wired, world,
 )
+from app.agent import loop
+from tests.test_agent_loop import Model, call
 from tests.test_backlinks_apply import FakeYouTube
 
 #: The channel's most-impressed warm video: the ceiling (the top 1% of six).
@@ -58,14 +60,15 @@ def _writes(*titles_):
 
 @contextmanager
 def titled(sb, *, backlinks=False, apply=True, channels=(CH,), agent_pct=0.0,
-           chat=None, yt=None, **kw):
-    """The agent-tick world wired, with the title lever's settings and its
-    writer faked. Backlinks off unless asked."""
+           chat=None, yt=None, agent=None, **kw):
+    """The agent-tick world wired, with the title lever's settings, its
+    writer and the agent's model (`agent`, a tests.test_agent_loop.Model)
+    faked. Backlinks off unless asked."""
     yt = yt or FakeYouTube({SRC: {"title": SRC_TITLE, "description": SRC_DESCRIPTION,
                                   "tags": ["a"], "categoryId": "27"}})
     with ExitStack() as stack:
         p = stack.enter_context(wired(sb, yt=yt, enabled=backlinks, **kw))
-        for mod in ("titles", "titles_apply"):
+        for mod in ("titles", "titles_apply", "agent.tools"):
             stack.enter_context(patch(f"app.{mod}.supabase", return_value=sb))
         stack.enter_context(patch.multiple(
             ap.settings, TITLE_CHANNELS=set(channels), TITLE_APPLY_ENABLED=apply,
@@ -75,9 +78,20 @@ def titled(sb, *, backlinks=False, apply=True, channels=(CH,), agent_pct=0.0,
         p["chat"] = stack.enter_context(
             patch("app.titles.chat_json", side_effect=chat or _writes(TITLE)))
         stack.enter_context(patch("app.titles.fetch_transcript", return_value=(None, None)))
+        p["agent"] = stack.enter_context(patch(
+            "app.agent.loop.chat_tools",
+            side_effect=agent or AssertionError("the agent ran on the pipeline path")))
         titles._strategy_rows_ensured.clear()
         yield p
         titles._strategy_rows_ensured.clear()
+
+
+def titles_today(sb):
+    """`_titles_today` once the rows just written have the `created_at` the
+    database would give them (FakeSupabase sets none)."""
+    for r in sb._tables["interventions"]:
+        r.setdefault("created_at", NOW.isoformat())
+    return agent_tick._titles_today(CH)
 
 
 def src_rows(sb):
@@ -315,14 +329,109 @@ def test_the_agent_run_limit_holds_for_agent_path_videos_only():
     assert row["payload"]["path"] == "pipeline"
 
 
-def test_an_agent_path_video_is_written_by_the_pipeline_until_s3_4():
+def test_an_agent_path_video_is_written_by_the_agent():
+    agent = Model([call("get_video"), call("write_candidates")],
+                  [call("submit_title", title=TITLE, reasoning="plain words")])
     sb = title_world(interventions=today_title_rows(19, status="declined", path="agent"))
-    with titled(sb, agent_pct=1.0):
+    with titled(sb, agent_pct=1.0, agent=agent) as p:
         ap.tick()
         stamp = titles.strategy_inputs("agent")[0]
+        today = titles_today(sb)
+    assert outcome(p) == "measuring"
     [row] = [r for r in title_rows(sb) if r["video_id"] == SRC]
-    assert (row["status"], row["payload"]["path"]) == ("measuring", "agent")
-    assert row["strategy_version"] == stamp
+    assert (row["arm"], row["status"], row["strategy_version"]) == (
+        "treated", "measuring", stamp)
+    payload = row["payload"]
+    assert (payload["path"], payload["title_before"], payload["title"], payload["reason"]) == (
+        "agent", SRC_TITLE, TITLE, "plain words")
+    assert payload["candidates"] == [{"title": TITLE, "check": None,
+                                      "reasoning": "plain words"}]
+    assert row["trajectory"]["turns"] == 2 and row["trajectory"]["end"]["kind"] == "title"
+    assert loop.tools_called(row["trajectory"]) == ["get_video", "write_candidates",
+                                                    "submit_title"]
+    [(part, body)] = p["yt"].updates
+    assert part == "snippet" and body["snippet"]["title"] == TITLE
+    assert body["snippet"]["description"] == SRC_DESCRIPTION
+    p["chat"].assert_called_once()                    # the writer tool, once
+    assert today == (1, 20)
+
+
+def test_an_agent_decline_is_a_treated_declined_row_with_no_youtube_call_or_quota():
+    agent = Model([call("get_title_history")], [call("decline", reason="it already works")])
+    sb = title_world()
+    with titled(sb, agent_pct=1.0, agent=agent) as p:
+        ap.tick()
+        today = titles_today(sb)
+    assert outcome(p) == "declined"
+    [row] = src_rows(sb)
+    assert (row["lever"], row["arm"], row["status"]) == ("title", "treated", "declined")
+    assert row["payload"] == {"path": "agent", "title_before": SRC_TITLE,
+                              "rationale": "it already works"}
+    assert row["strategy_version"] is None and row["applied_at"] is None
+    assert row["trajectory"]["end"]["kind"] == "decline"
+    assert p["yt"].lists == [] and p["yt"].updates == []
+    assert [r for r in sb.rows("quota_log") if r.get("units")] == []
+    p["chat"].assert_not_called()
+    # Counts as an agent run, not toward TITLE_DAILY_CAP nor autopilot_daily_cap (F14).
+    assert today == (0, 1)
+    with titled(sb):
+        assert ap._applies_today(CH) == 0
+    [log] = sb.rows("decision_log")
+    assert log["intervention_id"] == row["id"]
+
+
+def test_a_treated_agent_title_spends_quota_where_a_decline_spends_none():
+    agent = Model([call("submit_title", title=TITLE, reasoning="r")])
+    sb = title_world()
+    with titled(sb, agent_pct=1.0, agent=agent):
+        ap.tick()
+    assert sum(r.get("units") or 0 for r in sb.rows("quota_log")) == 51
+
+
+@pytest.mark.parametrize("turns,reason", [
+    ([[call("get_video")]] * 12, "turn_cap"),
+    ([[call("submit_title", title="English", reasoning="a")],
+      [call("submit_title", title="English too", reasoning="b")]], "checks_failed"),
+])
+def test_an_agent_run_without_a_title_or_decline_is_cancelled_with_its_reason(turns, reason):
+    sb = title_world()
+    with titled(sb, agent_pct=1.0, agent=Model(*turns)) as p, \
+         patch.object(ap.settings, "AGENT_MAX_TURNS", 12):
+        ap.tick()
+        today = titles_today(sb)
+    assert outcome(p) == "cancelled"
+    [row] = src_rows(sb)
+    assert (row["lever"], row["arm"], row["status"]) == ("title", "treated", "cancelled")
+    assert row["payload"]["error"]["reason"] == reason
+    assert row["payload"]["path"] == "agent" and row["payload"]["title"] is None
+    assert row["trajectory"]["end"] == {"kind": "failed", "reason": reason,
+                                        "detail": row["payload"]["error"]["detail"]}
+    assert p["yt"].lists == [] and p["yt"].updates == []
+    assert today == (1, 1)
+
+
+def test_an_agent_whose_model_fails_is_cancelled_with_its_trajectory_and_counts_a_failure():
+    def down(messages, tools_, **kw):
+        raise RuntimeError("OpenRouter 503")
+
+    sb = title_world()
+    with titled(sb, agent_pct=1.0, agent=down) as p:
+        ap.tick()
+        failures = ap._failure_counts.get(CH)
+    assert outcome(p) == "agent_failed" and failures == 1
+    [row] = src_rows(sb)
+    assert row["status"] == "cancelled" and row["payload"]["path"] == "agent"
+    assert row["payload"]["error"] == {"reason": "writer_exception",
+                                       "detail": "RuntimeError: OpenRouter 503"}
+    assert row["trajectory"]["turns"] == 1
+
+
+def test_pipeline_rows_carry_no_trajectory():
+    sb = title_world()
+    with titled(sb):
+        ap.tick()
+    [row] = src_rows(sb)
+    assert row["payload"]["path"] == "pipeline" and "trajectory" not in row
 
 
 def test_titles_count_toward_the_shared_daily_cap():

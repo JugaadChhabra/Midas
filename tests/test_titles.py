@@ -78,7 +78,7 @@ def world():
 def wired(sb, *, chat=None):
     with ExitStack() as stack:
         for mod in ("titles", "agent_tick", "warm", "reach", "db", "backlinks", "human_edits",
-                    "lever_verdicts"):
+                    "lever_verdicts", "agent.tools"):
             stack.enter_context(patch(f"app.{mod}.supabase", return_value=sb))
         stack.enter_context(patch.multiple(
             titles.settings, HOLDOUT_PCT=0.0, TITLE_AGENT_PCT=0.0, WARM_POOL_USE_RPC=False, WARM_EXPLORE_PCT=0.0,
@@ -300,13 +300,39 @@ def test_the_preview_asks_triages_rules():
         assert [i["video_id"] for i in titles.preview(CH, 2)] == [BIG, B]
 
 
-def test_the_agent_preview_says_not_built_and_calls_no_writer():
+def test_the_agent_preview_runs_the_agent_and_writes_no_row(capsys, tmp_path):
+    from tests.test_agent_loop import Model, call
+    agent = Model([call("get_video"), call("get_title_history"), call("write_candidates")],
+                  [call("submit_title", title=MARATHI, reasoning="plain")],
+                  [call("get_traffic_mix")], [call("decline", reason="works already")])
     sb = world()
-    with wired(sb) as chat, patch.object(titles.settings, "TITLE_AGENT_PCT", 1.0):
+    with wired(sb, chat=replies([MARATHI])) as writer, \
+         patch("app.agent.loop.chat_tools", side_effect=agent), \
+         patch.object(titles.settings, "TITLE_AGENT_PCT", 1.0):
         items = titles.preview(CH, 20, path=titles.AGENT)
-    assert {i["note"] for i in items} == {"agent not built"}
-    chat.assert_not_called()
+        assert [(i["agent"].kind, i["agent"].title) for i in items] == [
+            ("title", MARATHI), ("decline", None)]
+        assert items[0]["agent"].trajectory["turns"] == 2 and items[0]["written"] is None
+        agent.turns = [[call("get_video")], [call("decline", reason="works already")]]
+        out = tmp_path / "agent.csv"
+        preview_titles.main(["--channel", CH, "--n", "1", "--path", "agent", "--csv", str(out)])
     assert sb.writes == []
+    assert writer.call_count == 1                   # the write_candidates tool
+    printed = capsys.readouterr().out
+    assert "tools (2 turns): get_video, decline" in printed
+    assert "-> decline: works already" in printed
+    [row] = csv.DictReader(out.open(encoding="utf-8"))
+    assert (row["agent_end"], row["tools"], row["turns"], row["reason"]) == (
+        "decline", "get_video decline", "2", "works already")
+
+
+def test_the_pipeline_preview_doesnt_run_the_agent():
+    sb = world()
+    with wired(sb, chat=replies([MARATHI], [MARATHI])), \
+         patch("app.agent.loop.chat_tools", side_effect=AssertionError("agent ran")):
+        items = titles.preview(CH, 20)
+    assert {i["path"] for i in items} == {"pipeline"} and not any(i["agent"] for i in items)
+    assert all(i["error"] is None for i in items)
 
 
 def test_the_preview_holdout_gets_no_writer_call():

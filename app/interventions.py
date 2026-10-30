@@ -78,7 +78,8 @@ def record(*, video_id: str, channel_id: str, lever: str, origin: str, arm: str,
            status: str, payload: dict | None = None, before_state: dict | None = None,
            audit_id: int | None = None, strategy_version: str | None = None,
            triage_json: dict | None = None, applied_at: str | None = None,
-           detected_at: str | None = None, ledger_key: str | None = None) -> dict | None:
+           detected_at: str | None = None, ledger_key: str | None = None,
+           trajectory: dict | None = None) -> dict | None:
     """Insert one intervention and return the stored row.
 
     Raises ActiveInterventionExists when this would be a second open Midas
@@ -88,6 +89,9 @@ def record(*, video_id: str, channel_id: str, lever: str, origin: str, arm: str,
     With a `ledger_key` (the human-edit ledger, B3) the insert is idempotent:
     a row with the same key already stored means this one is skipped and None
     is returned (migration 20261006030000).
+
+    `trajectory` (an agent run, Slice 3 S3.4, migration 20261030000000) is
+    sent only when given, so no other writer needs that migration applied.
     """
     _require(lever, ALL_INTERVENTION_LEVERS, "lever")
     _require(origin, ALL_INTERVENTION_ORIGINS, "origin")
@@ -120,6 +124,8 @@ def record(*, video_id: str, channel_id: str, lever: str, origin: str, arm: str,
         "applied_at": applied_at,
         "detected_at": detected_at,
     }
+    if trajectory is not None:
+        row["trajectory"] = trajectory
     if ledger_key is not None:
         row["ledger_key"] = ledger_key
         stored = (
