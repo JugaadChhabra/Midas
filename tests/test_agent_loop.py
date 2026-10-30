@@ -84,8 +84,17 @@ def test_the_first_messages_are_the_agent_prompt_and_the_video_id_and_language_o
     system, user = model.sent[0]
     assert system == {"role": "system", "content": titles.agent_system_prompt()}
     assert "a title that\n  already works is a valid outcome" in system["content"]
-    assert titles.TITLE_BRIEF.format(title_max=100) in system["content"]
+    assert system["content"].startswith(titles.TITLE_GOAL)
     assert user == {"role": "user", "content": f"Video: {A}\nChannel language: mr"}
+
+
+def test_the_agent_prompt_has_the_goal_and_the_limits_but_not_the_writers_structure():
+    prompt = titles.agent_system_prompt()
+    assert titles.TITLE_LIMITS.format(title_max=100) in prompt
+    assert "If the current title has a series or brand name, keep it" in prompt
+    for structure in ("Structure, in this order", "Baalgeet", " & ", "drop in this"):
+        assert structure not in prompt
+    assert "you are not bound by it" in prompt
 
 
 def test_decline_ends_the_run_with_its_reason():

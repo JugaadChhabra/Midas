@@ -1,9 +1,11 @@
 """Slice 3 · S3.5 — title measurement per video (spec Part 6 S3.5, Part 2 §1.2,
 §1.7, F6, F14; #120).
 
-A title is shown on the home page and beside other videos, so its indicator is
-the video's own browse (3) + suggested (7) views in its channel's traffic
-report (Part 6 finding 3), not a pair as backlinks' (app/lever_measurement.py):
+A title is shown on the home page, beside other videos and in search results,
+so its indicator is the video's own browse (3) + search (5) + suggested (7)
+views in its channel's traffic report (Part 6 finding 3; search added by the
+owner 2026-10-31, when the pipeline took the SEO team's search-shaped title
+structure), not a pair as backlinks' (app/lever_measurement.py):
 
     windows(d0)                -- (pre, post) around the as-of date
     evaluate(row, ...)         -- one row's progress, outcome and numbers
@@ -56,8 +58,9 @@ log = logging.getLogger("midas.title_measurement")
 
 #: The pre window (Part 6 S3.5, F6); the post is TITLE_WINDOW_DAYS.
 PRE_DAYS = 14
-#: Browse features and suggested videos: where a title is read (finding 3).
-SOURCE_TYPES = (3, 7)
+#: Browse features, YouTube search and suggested videos: where a title is read
+#: (finding 3; search since 2026-10-31).
+SOURCE_TYPES = (3, 5, 7)
 #: The job's item category for title rows (app/lever_verdicts.py run_weekly).
 ROWS = "title interventions"
 
@@ -80,7 +83,7 @@ def windows(d0: date) -> tuple[Window, Window]:
 
 
 def views(video_id: str, pre: Window, post: Window) -> tuple[int, int]:
-    """The video's browse + suggested views over (pre, post)."""
+    """The video's browse + search + suggested views over (pre, post)."""
     rows = all_rows(
         supabase().table("video_traffic_source_daily")
         .select("date,source_type,views")

@@ -317,7 +317,7 @@ class Settings:
     AGENT_MAX_TURNS = int(os.getenv("AGENT_MAX_TURNS") or "12")
     # Slice 3 · S3.5 (spec Part 6 Config, F6): a title row's post window in
     # traffic data-days (the pre is 14), and the floor on its browse +
-    # suggested views in the pre window, else `insufficient_data`
+    # search + suggested views in the pre window, else `insufficient_data`
     # (app/title_measurement.py).
     TITLE_WINDOW_DAYS = int(os.getenv("TITLE_WINDOW_DAYS") or "14")
     TITLE_MIN_PRE_VIEWS = int(os.getenv("TITLE_MIN_PRE_VIEWS") or "100")
