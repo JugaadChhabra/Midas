@@ -271,7 +271,8 @@ def _cooldown_and_experiment_world() -> dict[str, list[dict]]:
              "impressions": 1000 + i, "ctr": 0.05} for i, v in enumerate(ids, 1)],
         "interventions": [
             {"id": i, **row} for i, row in enumerate([
-                intervention("declined_recent", status="declined", age_days=1),
+                intervention("declined_recent", lever="backlinks", arm="n/a", status="declined",
+                             age_days=1),
                 intervention("holdout_recent", lever="title", arm="holdout", status="holdout",
                              age_days=1),
                 intervention("planned_recent", status="planned", age_days=1),

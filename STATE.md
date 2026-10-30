@@ -345,6 +345,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   four-argument B4 function is dropped, not overloaded (S1.4a; `20261030020000` keeps the five-argument signature,
   `create or replace`):
   ```sql
+  -- 20261023000000 only (20261030020000 has no drop):
   drop function if exists warm_pool(text, bigint, int, int);
 
   create or replace function warm_pool(
