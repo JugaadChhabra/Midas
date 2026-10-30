@@ -115,6 +115,7 @@ def _titles_today(channel_id: str) -> tuple[int, int]:
         .eq("origin", InterventionOrigin.MIDAS)
         .eq("lever", InterventionLever.TITLE)
         .gte("created_at", _today_start_iso())
+        .limit(1000)
         .execute()
     ).data or []
     treated = sum(1 for r in rows if r["arm"] == InterventionArm.TREATED
@@ -418,9 +419,15 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
              row["status"], row["id"], row["arm"])
     if row["status"] != InterventionStatus.PLANNED:
         return row["status"]                     # declined, or holdout: no YouTube call
+    return _apply(row, backlinks_apply.apply_backlinks, "description")
 
+
+def _apply(row: dict, apply, dry_run_key: str) -> str:
+    """Send a planned treated row with `apply`; a refusal or failure cancels it
+    with `payload.error` and re-raises for the tick; DRY_RUN cancels it with
+    the rehearsal's `dry_run_key` kept on the payload."""
     try:
-        result = backlinks_apply.apply_backlinks(row)
+        result = apply(row)
     except ApplyError as e:
         _cancel(row, e.outcome.value, e.detail)
         raise
@@ -429,7 +436,7 @@ def run(channel: dict, *, rng: random.Random | None = None) -> str:
         raise
     if result.get("status") == DRY_RUN:
         _cancel(row, DRY_RUN, "DRY_RUN: nothing sent to YouTube",
-                description=result.get("description"))
+                **{dry_run_key: result.get(dry_run_key)})
         return DRY_RUN
     return result.get("status") or InterventionStatus.MEASURING
 
@@ -486,19 +493,7 @@ def _run_title(video: dict, triage: dict, decision: decide.Decision) -> str:
              row["status"], row["id"], row["arm"])
     if row["status"] != InterventionStatus.PLANNED:
         return row["status"]          # holdout, or cancelled (checks_failed): no YouTube call
-
-    try:
-        result = titles_apply.apply_title(row)
-    except ApplyError as e:
-        _cancel(row, e.outcome.value, e.detail)
-        raise
-    except Exception as e:
-        _cancel(row, APPLY_EXCEPTION, f"{type(e).__name__}: {e}")
-        raise
-    if result.get("status") == DRY_RUN:
-        _cancel(row, DRY_RUN, "DRY_RUN: nothing sent to YouTube")
-        return DRY_RUN
-    return result.get("status") or InterventionStatus.MEASURING
+    return _apply(row, titles_apply.apply_title, "title")
 
 
 def preview(channel_id: str, n: int) -> list[dict]:
