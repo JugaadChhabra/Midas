@@ -206,10 +206,9 @@ def test_the_trajectory_cuts_each_text_to_2000_characters_but_the_model_gets_it_
 
 # ── the tools ─────────────────────────────────────────────────────────────
 
-def _subject(sb, vid=A, cache_only=True):
+def _subject(sb, vid=A):
     channel = titles.channel_context(CH)
-    return tools.Subject({**_video(vid), "default_language": channel.language}, channel,
-                         cache_only)
+    return tools.Subject({**_video(vid), "default_language": channel.language}, channel)
 
 
 def test_get_video_get_transcript_get_traffic_mix():

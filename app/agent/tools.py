@@ -39,10 +39,9 @@ DECLINE = "decline"
 
 class Subject(NamedTuple):
     """The run's video (a `videos` row with `default_language` added), its
-    channel's title context, and `cache_only` for transcripts."""
+    channel's title context."""
     video: dict
     channel: titles.ChannelContext
-    cache_only: bool = False
 
 
 def _schema(name: str, description: str, properties: dict | None = None,
@@ -74,7 +73,7 @@ GET_VIDEO = _schema(
 
 
 def get_transcript(s: Subject) -> dict:
-    text = titles._transcript(s.video, s.cache_only)
+    text = titles._transcript(s.video)
     if not text:
         return {"available": False}
     return {"available": True, "text": text[:settings.TRANSCRIPT_MAX_CHARS]}
@@ -144,7 +143,7 @@ GET_TITLE_HISTORY = _schema(
 
 
 def write_candidates(s: Subject) -> dict:
-    ctx = titles.context(s.video, channel=s.channel, cache_only=s.cache_only)
+    ctx = titles.context(s.video, channel=s.channel)
     return {"candidates": titles.write_candidates(ctx)}
 
 

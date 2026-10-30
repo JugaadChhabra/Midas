@@ -85,7 +85,7 @@ def wired(sb, *, chat=None):
             WARM_MIN_IMPRESSIONS=500, TITLE_CANDIDATES=3, WRITER_MODEL="writer/model",
             TITLE_MAX_IMPRESSIONS=5_000_000))
         fake = stack.enter_context(patch("app.titles.chat_json", side_effect=chat))
-        stack.enter_context(patch("app.titles.fetch_transcript",
+        stack.enter_context(patch("app.transcripts.fetch_transcript",
                                   side_effect=AssertionError("live transcript fetch")))
         titles._strategy_rows_ensured.clear()
         yield fake
@@ -153,7 +153,7 @@ def test_all_failing_candidates_give_none_with_reasons_and_the_retry_carries_the
     sb = world()
     with wired(sb, chat=replies(["Rhyme aVideo00001", "English only"],
                                 ["English again", "x" * 200])) as chat:
-        written = titles.pipeline(_video(A), cache_only=True)
+        written = titles.pipeline(_video(A))
     assert written.title is None and written.reason is None
     assert len(written.failures) == 4
     assert "unchanged" in written.failures[0] and "Devanagari" in written.failures[1]
@@ -168,7 +168,7 @@ def test_all_failing_candidates_give_none_with_reasons_and_the_retry_carries_the
 def test_the_first_passing_candidate_wins_with_no_retry():
     sb = world()
     with wired(sb, chat=replies(["English only", MARATHI, "ट्विंकल 2"])) as chat:
-        written = titles.pipeline(_video(A), cache_only=True)
+        written = titles.pipeline(_video(A))
     assert (written.title, written.reason) == (MARATHI, f"why {MARATHI}")
     assert chat.call_count == 1
     assert [c["check"] is None for c in written.candidates] == [False, True]
@@ -177,7 +177,7 @@ def test_the_first_passing_candidate_wins_with_no_retry():
 def test_the_retry_can_pass():
     sb = world()
     with wired(sb, chat=replies(["English only"], [MARATHI])) as chat:
-        written = titles.pipeline(_video(A), cache_only=True)
+        written = titles.pipeline(_video(A))
     assert written.title == MARATHI and chat.call_count == 2
 
 
@@ -185,14 +185,14 @@ def test_the_retry_can_pass():
 def test_a_malformed_reply_counts_as_no_passing_candidate(reply):
     sb = world()
     with wired(sb, chat=replies(reply, reply)):
-        written = titles.pipeline(_video(A), cache_only=True)
+        written = titles.pipeline(_video(A))
     assert written.title is None and written.failures
 
 
 def test_write_candidates_asks_the_writer_model_with_the_title_prompt():
     sb = world()
     with wired(sb, chat=replies(["a", "b", "c", "d"], ["a"])) as chat:
-        ctx = titles.context(_video(A), cache_only=True)
+        ctx = titles.context(_video(A))
         assert len(titles.write_candidates(ctx)) == 3                 # TITLE_CANDIDATES
         titles.write_candidates(ctx, model="other/model")
     first, second = chat.call_args_list
@@ -213,8 +213,7 @@ def test_the_context():
     sb = world()
     with wired(sb):
         channel = titles.channel_context(CH)
-        ctx = titles.context(_video(A, description="d" * 2000), channel=channel,
-                             cache_only=True)
+        ctx = titles.context(_video(A, description="d" * 2000), channel=channel)
     assert set(channel.reach) == {BIG, A, B, C, D, E}                 # no Short
     assert channel.median_ctr == pytest.approx(0.0275)
     assert channel.ceiling == {BIG}                                   # top 1% (1 of 6), > 5M
@@ -374,7 +373,7 @@ def test_the_bakeoff_writes_no_row_and_its_csv_names_no_model(tmp_path):
 def test_candidates_are_stripped_and_youtube_refused_characters_fail():
     sb = world()
     with wired(sb, chat=replies([f"  {MARATHI} \n"])):
-        assert titles.pipeline(_video(A), cache_only=True).title == MARATHI
+        assert titles.pipeline(_video(A)).title == MARATHI
     for bad in ("ट्विंकल <3", "ट्विंकल > all", "ट्विंकल\nदुसरी ओळ"):
         assert titles.check(bad, video()).startswith("characters:")
 
@@ -382,7 +381,7 @@ def test_candidates_are_stripped_and_youtube_refused_characters_fail():
 def test_a_malformed_retry_still_gives_its_reason():
     sb = world()
     with wired(sb, chat=replies(["English only"], {})):
-        written = titles.pipeline(_video(A), cache_only=True)
+        written = titles.pipeline(_video(A))
     assert written.title is None
     assert written.failures[-1] == f"attempt 2: {titles.MALFORMED}"
     assert [c["attempt"] for c in written.candidates] == [1]

@@ -78,7 +78,7 @@ def titled(sb, *, backlinks=False, apply=True, channels=(CH,), agent_pct=0.0,
             TITLE_CANDIDATES=3, WRITER_MODEL="writer/model"))
         p["chat"] = stack.enter_context(
             patch("app.titles.chat_json", side_effect=chat or _writes(TITLE)))
-        stack.enter_context(patch("app.titles.fetch_transcript", return_value=(None, None)))
+        stack.enter_context(patch("app.titles._cache_read", return_value=None))
         p["agent"] = stack.enter_context(patch(
             "app.agent.loop.chat_tools",
             side_effect=agent or AssertionError("the agent ran on the pipeline path")))
