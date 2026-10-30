@@ -223,9 +223,9 @@ def strategy_version(
     The hash covers what actually produced the audit: the sha256 of the system
     prompt text sent to the model and which source it came from (a
     PROMPT_SOURCE_* value), the audit's prompt_versions id when it has one,
-    AUDIT_MODEL, WRITER_MODEL when that setting exists (Phase B), and the
-    decision question-set version (app/decide.py QUESTION_SET_VERSION). The
-    prompt is known only at audit time, so the version is derived per audit
+    AUDIT_MODEL, and the decision question-set version (app/decide.py
+    QUESTION_SET_VERSION). Not WRITER_MODEL: that is the title lever's writer,
+    stamped by app/titles.py. The prompt is known only at audit time, so the version is derived per audit
     rather than once at startup. The inputs carry the prompt's hash, never its
     text. Pure: same inputs, same version.
     """
@@ -239,9 +239,6 @@ def strategy_version(
         "decision_question_set_version": decide.QUESTION_SET_VERSION,
         "prompt_version_id": prompt_version_id,
     }
-    writer_model = getattr(settings, "WRITER_MODEL", None)
-    if writer_model:
-        inputs["writer_model"] = writer_model
     return f"{settings.STRATEGY_LABEL}-{_strategy_hash(inputs)}", inputs
 
 
