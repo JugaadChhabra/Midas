@@ -277,6 +277,10 @@ class Settings:
     # YouTube. While false, app/backlinks_apply.py's apply and revert refuse
     # (`apply_disabled`) and send nothing. DRY_RUN is honoured on top of it.
     BACKLINK_APPLY_ENABLED = os.getenv("BACKLINK_APPLY_ENABLED", "false").lower() == "true"
+    # Slice 3 · S3.1 (spec Part 6 Config, F1): the kill switch for title writes
+    # to YouTube. While false, app/titles_apply.py's apply and revert refuse
+    # (`apply_disabled`) and send nothing. DRY_RUN is honoured on top of it.
+    TITLE_APPLY_ENABLED = os.getenv("TITLE_APPLY_ENABLED", "false").lower() == "true"
     # The autopilot's title path (audit_video → apply: title, tags, description)
     # is off until Slice 3 (spec Part 2 §6). Without this switch, a channel with
     # autopilot_enabled and agent_enabled = false would fall back to it, e.g.
