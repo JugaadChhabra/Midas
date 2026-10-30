@@ -35,7 +35,6 @@ HISTORY = 10
 
 SUBMIT_TITLE = "submit_title"
 DECLINE = "decline"
-TERMINAL = (SUBMIT_TITLE, DECLINE)
 
 
 class Subject(NamedTuple):

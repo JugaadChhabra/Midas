@@ -457,7 +457,7 @@ def strategy_version(path: str) -> str:
                 "version": version,
                 "prompt_template": ("code:app/titles.py AGENT_PROMPT" if path == AGENT
                                     else "code:app/titles.py TITLE_PROMPT"),
-                "model": settings.WRITER_MODEL,
+                "model": settings.AUDIT_MODEL if path == AGENT else settings.WRITER_MODEL,
                 "config": inputs,
                 "status": "champion",
                 "notes": "auto-registered by titles.strategy_version (derived from config)",

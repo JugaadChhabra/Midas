@@ -85,7 +85,7 @@ def test_the_first_messages_are_the_agent_prompt_and_the_video_id_and_language_o
     assert system == {"role": "system", "content": titles.agent_system_prompt()}
     assert "a title that\n  already works is a valid outcome" in system["content"]
     assert titles.TITLE_BRIEF.format(title_max=100) in system["content"]
-    assert user == {"role": "user", "content": f"Video: {A}\nChannel language: mr (Marathi)"}
+    assert user == {"role": "user", "content": f"Video: {A}\nChannel language: mr"}
 
 
 def test_decline_ends_the_run_with_its_reason():
@@ -154,6 +154,18 @@ def test_tool_errors_come_back_to_the_model_as_text():
     assert [m["tool_call_id"] for m in tool_messages] == [
         "call_get_channel_top_performers", "call_no_such_tool", "c9", "call_get_video",
         "call_get_search_terms"]
+    assert result.kind == "decline"
+
+
+def test_arguments_sent_as_an_object_are_taken_and_others_come_back_as_errors():
+    as_dict = {"id": "d1", "type": "function",
+               "function": {"name": "get_channel_top_performers", "arguments": {"order": "x"}}}
+    as_number = {"id": "d2", "type": "function", "function": {"name": "get_video", "arguments": 5}}
+    model = Model([as_dict, as_number], [call("decline", reason="r")])
+    result, _, _ = run(model)
+    errors = [r["error"] for r in model.tool_results(2)]
+    assert errors[0] == "order must be 'best' or 'worst', not 'x'"
+    assert errors[1].startswith("arguments are not a JSON object")
     assert result.kind == "decline"
 
 
@@ -288,5 +300,11 @@ def test_the_agent_stamp_hashes_its_own_prompt_and_reasoning_model():
         b, _ = titles.strategy_inputs(titles.AGENT)
         assert titles.strategy_inputs(titles.PIPELINE)[0] == pipeline
     assert inputs["agent_model"] == "reasoning/a"
+    sb = world()
+    with wired(sb), patch.object(titles.settings, "AUDIT_MODEL", "reasoning/a"):
+        titles.strategy_version(titles.AGENT)
+    [(_, _, row)] = sb.writes
+    assert row["model"] == "reasoning/a"
+    assert row["prompt_template"] == "code:app/titles.py AGENT_PROMPT"
     assert inputs["prompt_sha256"] != titles.strategy_inputs(titles.PIPELINE)[1]["prompt_sha256"]
     assert len({a, b, pipeline}) == 3

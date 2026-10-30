@@ -372,8 +372,10 @@ def test_an_agent_decline_is_a_treated_declined_row_with_no_youtube_call_or_quot
     assert p["yt"].lists == [] and p["yt"].updates == []
     assert [r for r in sb.rows("quota_log") if r.get("units")] == []
     p["chat"].assert_not_called()
-    # Counts as an agent run, not toward TITLE_DAILY_CAP.
+    # Counts as an agent run, not toward TITLE_DAILY_CAP nor autopilot_daily_cap (F14).
     assert today == (0, 1)
+    with titled(sb):
+        assert ap._applies_today(CH) == 0
     [log] = sb.rows("decision_log")
     assert log["intervention_id"] == row["id"]
 

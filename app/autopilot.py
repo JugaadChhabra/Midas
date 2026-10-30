@@ -86,13 +86,15 @@ def _applies_today(channel_id: str) -> int:
     # Plus today's treated attempts that never reached YouTube (DRY_RUN, a
     # refused render, a YouTube error): each cost a pick and LLM calls, so a
     # systematic failure is bounded by the cap too, not just by the tick rate
-    # (Slice 1 review, 2026-10-23).
+    # (Slice 1 review, 2026-10-23). An agent's treated decline (Slice 3 S3.4)
+    # isn't an attempt: F14 keeps it out of the cap.
     unsent = (
         supabase().table("interventions")
         .select("id")
         .eq("channel_id", channel_id)
         .eq("origin", InterventionOrigin.MIDAS)
         .eq("arm", InterventionArm.TREATED)
+        .neq("status", InterventionStatus.DECLINED)
         .is_("applied_at", "null")
         .gte("created_at", _today_start_iso())
         .execute()

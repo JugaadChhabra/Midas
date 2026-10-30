@@ -32,7 +32,6 @@ from app import titles
 from app.agent import tools
 from app.config import settings
 from app.openrouter import chat_tools
-from app.transcripts import lang_display_name
 
 log = logging.getLogger("midas.agent")
 
@@ -66,9 +65,7 @@ def _cut(text) -> str | None:
 
 
 def _first_message(subject: tools.Subject) -> str:
-    language = subject.channel.language
-    return (f"Video: {subject.video['id']}\n"
-            f"Channel language: {language} ({lang_display_name(language)})")
+    return f"Video: {subject.video['id']}\nChannel language: {subject.channel.language}"
 
 
 def tools_called(trajectory: dict) -> list[str]:
@@ -127,11 +124,12 @@ def run_title_agent(video: dict, *, channel: titles.ChannelContext | None = None
             continue
         for c in calls:
             name = (c.get("function") or {}).get("name")
+            raw = (c.get("function") or {}).get("arguments") or "{}"
             try:
-                args = json.loads((c.get("function") or {}).get("arguments") or "{}")
+                args = raw if isinstance(raw, dict) else json.loads(raw)
                 if not isinstance(args, dict):
                     raise ValueError("not an object")
-            except ValueError as e:
+            except (TypeError, ValueError) as e:
                 args, result = None, {"error": f"arguments are not a JSON object: {e}"}
             if args is not None and name == tools.DECLINE:
                 return end(DECLINE, None, str(args.get("reason") or ""))
