@@ -111,6 +111,25 @@ def directional(lift: float, min_lift: float) -> str:
     return LeverVerdict.NO_CHANGE
 
 
+def _versus(this_week: dict[str, list[float]], so_far: dict[str, list[float]], arm: str,
+            windows_judged: int, *, min_lift: float, windows: int) -> dict | None:
+    """The verdict row's numbers for `arm`'s deltas against the holdout's, or
+    None when either has no judged row this week. `this_week` and `so_far` map
+    an arm to its deltas judged this week and up to it."""
+    treated, held = this_week.get(arm), this_week.get(InterventionArm.HOLDOUT)
+    if not (treated and held):
+        return None
+    lift = _mean(treated) - _mean(held)
+    cumulative = _mean(so_far[arm]) - _mean(so_far[InterventionArm.HOLDOUT])
+    return {
+        "n_treated": len(treated), "n_holdout": len(held),
+        "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
+        "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows_judged,
+        "verdict": directional(lift, min_lift),
+        "stop_rule_triggered": windows_judged >= windows and cumulative < min_lift,
+    }
+
+
 def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
              min_lift: float, windows: int) -> dict[str, dict]:
     """{arm_scope: the verdict row's numbers} for `week`, from judged rows.
@@ -133,19 +152,11 @@ def verdicts(rows: list[dict], week: date, windows_before: dict[str, int], *,
             this_week.setdefault(scope, []).append(delta)
 
     out: dict[str, dict] = {}
-    treated, held = this_week.get(InterventionArm.TREATED), this_week.get(InterventionArm.HOLDOUT)
-    if treated and held:
-        lift = _mean(treated) - _mean(held)
-        cumulative = (_mean(so_far[InterventionArm.TREATED])
-                      - _mean(so_far[InterventionArm.HOLDOUT]))
-        windows_judged = windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1
-        out[LeverVerdictScope.TREATED_VS_HOLDOUT] = {
-            "n_treated": len(treated), "n_holdout": len(held),
-            "treated_mean_delta": _mean(treated), "holdout_mean_delta": _mean(held),
-            "lift": lift, "cumulative_lift": cumulative, "windows_judged": windows_judged,
-            "verdict": directional(lift, min_lift),
-            "stop_rule_triggered": windows_judged >= windows and cumulative < min_lift,
-        }
+    versus = _versus(this_week, so_far, InterventionArm.TREATED,
+                     windows_before.get(LeverVerdictScope.TREATED_VS_HOLDOUT, 0) + 1,
+                     min_lift=min_lift, windows=windows)
+    if versus:
+        out[LeverVerdictScope.TREATED_VS_HOLDOUT] = versus
     human = this_week.get(LeverVerdictScope.HUMAN)
     if human:
         out[LeverVerdictScope.HUMAN] = {
