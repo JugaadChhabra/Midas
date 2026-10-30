@@ -185,6 +185,9 @@ def apply_backlinks(intervention: dict) -> dict:
 def revert_intervention(intervention_id: int):
     """Remove an applied Midas backlinks block from the video's live description.
 
+    An applied Midas title row goes to `titles_apply.revert_title` (S3.1), with
+    its own gates.
+
     Strips every canonical block (`backlinks.strip`), so anything else the team
     changed since the apply stays. The intervention becomes `cancelled`, with
     the revert in `payload.revert`. 409 `quota_insufficient` when the ledger
@@ -196,10 +199,14 @@ def revert_intervention(intervention_id: int):
     if not row:
         raise HTTPException(404, "Intervention not found")
     if (row.get("origin") != InterventionOrigin.MIDAS
-            or row.get("lever") != InterventionLever.BACKLINKS
+            or row.get("lever") not in (InterventionLever.BACKLINKS, InterventionLever.TITLE)
             or not row.get("applied_at")
             or row.get("status") == InterventionStatus.CANCELLED):
-        raise HTTPException(400, "Only an applied Midas backlinks intervention can be reverted")
+        raise HTTPException(
+            400, "Only an applied Midas backlinks or title intervention can be reverted")
+    if row["lever"] == InterventionLever.TITLE:
+        from app import titles_apply        # it imports this module's helpers
+        return titles_apply.revert_title(row, auto=False)
     video_id, channel_id = row["video_id"], row["channel_id"]
 
     if not settings.BACKLINK_APPLY_ENABLED:
