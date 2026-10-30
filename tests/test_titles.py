@@ -78,7 +78,7 @@ def wired(sb, *, chat=None):
         for mod in ("titles", "agent_tick", "warm", "reach", "db"):
             stack.enter_context(patch(f"app.{mod}.supabase", return_value=sb))
         stack.enter_context(patch.multiple(
-            titles.settings, HOLDOUT_PCT=0.0, TITLE_AGENT_PCT=0.0, WARM_POOL_USE_RPC=False,
+            titles.settings, HOLDOUT_PCT=0.0, TITLE_AGENT_PCT=0.0, WARM_POOL_USE_RPC=False, WARM_EXPLORE_PCT=0.0,
             WARM_MIN_IMPRESSIONS=500, TITLE_CANDIDATES=3, WRITER_MODEL="writer/model",
             TITLE_MAX_IMPRESSIONS=5_000_000))
         fake = stack.enter_context(patch("app.titles.chat_json", side_effect=chat))

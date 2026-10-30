@@ -63,15 +63,15 @@ SEARCH = 5
 #: A character of the channel language's script, per language in
 #: backlinks.HEADINGS other than `en` (which has no script check).
 SCRIPTS: dict[str, tuple[str, str]] = {
-    "mr": ("Devanagari", "ऀ-ॿ"),
-    "hi": ("Devanagari", "ऀ-ॿ"),
-    "bgc": ("Devanagari", "ऀ-ॿ"),
-    "gu": ("Gujarati", "઀-૿"),
-    "pa": ("Gurmukhi", "਀-੿"),
-    "ta": ("Tamil", "஀-௿"),
-    "ml": ("Malayalam", "ഀ-ൿ"),
-    "kn": ("Kannada", "ಀ-೿"),
-    "te": ("Telugu", "ఀ-౿"),
+    "mr": ("Devanagari", "\u0900-\u097F"),
+    "hi": ("Devanagari", "\u0900-\u097F"),
+    "bgc": ("Devanagari", "\u0900-\u097F"),
+    "gu": ("Gujarati", "\u0A80-\u0AFF"),
+    "pa": ("Gurmukhi", "\u0A00-\u0A7F"),
+    "ta": ("Tamil", "\u0B80-\u0BFF"),
+    "ml": ("Malayalam", "\u0D00-\u0D7F"),
+    "kn": ("Kannada", "\u0C80-\u0CFF"),
+    "te": ("Telugu", "\u0C00-\u0C7F"),
 }
 _URL_RE = re.compile(r"https?://|www\.|youtu\.be/|youtube\.com/", re.IGNORECASE)
 
@@ -434,10 +434,11 @@ def would_title(video_id: str, channel: ChannelContext) -> bool:
 
 def title_answers(channel_id: str, n: int) -> tuple[ChannelContext, list[dict]]:
     """The channel context and the first `n` videos of the warm pool, in pick
-    order (no explore), that triage would send to titles. Reads only."""
+    order (`warm.warm_pool`, with its explore share, as `agent_tick.preview`),
+    that triage would send to titles. Reads only."""
     channel = channel_context(channel_id)
     out = []
-    for picked in warm.ranked_pool(channel_id):
+    for picked in warm.warm_pool(channel_id):
         if len(out) >= n:
             break
         if not would_title(picked["id"], channel):
