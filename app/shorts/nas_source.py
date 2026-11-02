@@ -56,6 +56,25 @@ def list_source_languages() -> list[str]:
     return sorted([e.name for e in smbclient.scandir(base) if e.is_dir()])
 
 
+def _folder_key(name: str) -> str:
+    return " ".join((name or "").split()).casefold()
+
+
+def resolve_folder(name: str, folders: list[str] | None = None) -> str | None:
+    """The NAS folder's real name for `name`, matched ignoring case and spacing.
+
+    Callers used to uppercase the name and compare it exactly, so a folder
+    named "3D Series Hindi" (or with a stray double space) could be picked in
+    the dropdown yet never matched: "Unknown NAS language folder". The real
+    name is what goes into job paths, so it must come from the listing."""
+    key = _folder_key(name)
+    if not key:
+        return None
+    if folders is None:
+        folders = list_source_languages()
+    return next((f for f in folders if _folder_key(f) == key), None)
+
+
 def uncut_source_paths(language: str) -> list[str]:
     """`<LANG>/<file>` paths with no in-flight job and under the FAILED cap."""
     files = nas_service.list_video_files(f"{settings.NAS_SOURCE_ROOT_PATH}/{language}")
@@ -90,8 +109,12 @@ def enqueue_language_jobs(language: str, *, channel_id: str | None = None,
                           autopilot: bool = False, limit: int | None = None,
                           cut_mode: str = "highlights",
                           camera_motion: str = "calm") -> int:
-    if language not in list_source_languages():
-        raise ValueError(f"Unknown NAS language folder: {language!r}")
+    folders = list_source_languages()
+    resolved = resolve_folder(language, folders)
+    if resolved is None:
+        raise ValueError(f"Unknown NAS language folder: {language!r} "
+                         f"(folders on the NAS: {', '.join(map(repr, folders)) or 'none'})")
+    language = resolved
     todo = uncut_source_paths(language)
     if limit is not None:
         todo = todo[:limit]

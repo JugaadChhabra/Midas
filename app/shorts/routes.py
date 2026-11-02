@@ -9,7 +9,7 @@ from app.config import settings
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
 from app.shorts.nas_source import (
-    enqueue_language_jobs, list_source_languages, uncut_count,
+    enqueue_language_jobs, list_source_languages, resolve_folder, uncut_count,
 )
 from app.shorts.status import (
     CLIP_FAILED, CLIP_PENDING, CLIP_UPLOADED, CLIP_UPLOADING, CREATED, FAILED,
@@ -79,7 +79,11 @@ class CutLanguage(BaseModel):
 @router.post("/cut")
 def cut_language(body: CutLanguage):
     """Enqueue a shorts job for every uncut video in a NAS language folder."""
-    language = body.language.strip().upper()
+    folders = list_source_languages()
+    language = resolve_folder(body.language, folders)
+    if language is None:
+        raise HTTPException(400, f"Unknown NAS language folder: {body.language!r} "
+                                 f"(folders on the NAS: {', '.join(map(repr, folders)) or 'none'})")
     try:
         enqueued = enqueue_language_jobs(language)
     except ValueError as exc:

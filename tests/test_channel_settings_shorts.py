@@ -52,7 +52,16 @@ def test_patch_sets_valid_nas_folder():
          patch("app.auth.list_source_languages", return_value=["HINDI", "TAMIL"]):
         r = _client().patch("/auth/channels/UC1", json={"nas_folder": "hindi"})
     assert r.status_code == 200
-    assert rec[0]["nas_folder"] == "HINDI"          # uppercased
+    assert rec[0]["nas_folder"] == "HINDI"          # the folder's real name
+
+
+def test_patch_stores_a_mixed_case_folders_real_name():
+    rec = []
+    with patch("app.auth.supabase", return_value=_sb(rec)), \
+         patch("app.auth.list_source_languages", return_value=["HINDI", "3D Series Hindi"]):
+        r = _client().patch("/auth/channels/UC1", json={"nas_folder": "3D SERIES HINDI"})
+    assert r.status_code == 200
+    assert rec[0]["nas_folder"] == "3D Series Hindi"
 
 
 def test_patch_rejects_unknown_nas_folder():

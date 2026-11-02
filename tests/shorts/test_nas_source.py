@@ -27,6 +27,30 @@ def test_enqueue_rejects_unknown_language():
             nas_source.enqueue_language_jobs("KLINGON")
 
 
+def test_resolve_folder_ignores_case_and_spacing():
+    from app.shorts.nas_source import resolve_folder
+    folders = ["HINDI", "3D Series Hindi"]
+    assert resolve_folder("3D SERIES HINDI", folders) == "3D Series Hindi"
+    assert resolve_folder(" 3d  series\u00a0hindi ", folders) == "3D Series Hindi"
+    assert resolve_folder("hindi", folders) == "HINDI"
+    assert resolve_folder("3D HINDI", folders) is None
+    assert resolve_folder("  ", folders) is None
+
+
+def test_enqueue_resolves_a_stored_uppercase_folder_to_its_real_name():
+    # Autopilot passes channels.nas_folder as stored ('3D SERIES HINDI').
+    from app.shorts import nas_source
+    inserted = []
+    with patch.object(nas_source, "list_source_languages", return_value=["3D Series Hindi"]), \
+         patch.object(nas_source.nas_service, "list_video_files", return_value=["ep1.mp4"]) as lv, \
+         patch.object(nas_source, "supabase", return_value=_sb_with_jobs([], inserted)):
+        n = nas_source.enqueue_language_jobs("3D SERIES HINDI")
+    assert n == 1
+    lv.assert_called_once_with(f"{nas_source.settings.NAS_SOURCE_ROOT_PATH}/3D Series Hindi")
+    assert inserted[0]["language"] == "3D Series Hindi"
+    assert inserted[0]["source_nas_path"] == "3D Series Hindi/ep1.mp4"
+
+
 def test_enqueue_skips_in_flight_and_capped_files():
     from app.shorts import nas_source
     files = ["a.mp4", "b.mp4", "c.mp4", "d.mp4"]
