@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.auth import router as auth_router
 from app.sync import router as sync_router
 from app.audits import router as audits_router
-from app import eligibility, job_status, measurement, quota, sync, tracing
+from app import catch_up, eligibility, job_status, measurement, quota, sync, tracing
 from app.quota import router as quota_router, JobBudget
 from app.rows import all_rows
 from app.youtube_client import TokenExpiredError
@@ -566,6 +566,9 @@ async def lifespan(app: FastAPI):
     ensure_database_populated()
 
     _register_jobs(scheduler)
+    # Last runs survive a restart, so the catch-up below can tell a missed
+    # run from one that happened before it.
+    job_status.registry.persist_to(Path(settings.LOG_DIR) / "job_status.json")
     # After every add_job: each registered job shows as never_run until it
     # fires, and every run (success or failure) lands in the registry.
     job_status.registry.watch(scheduler)
@@ -578,6 +581,10 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     log.info("Autopilot scheduler started (every %ds, DRY_RUN=%s)",
              settings.AUTOPILOT_TICK_SECONDS, settings.DRY_RUN)
+    # The daily jobs whose time passed while the app was down, once, in order
+    # (app/catch_up.py). A date trigger with no run_date runs it now.
+    scheduler.add_job(catch_up.run, "date", args=[scheduler, job_status.registry],
+                      id=catch_up.JOB_ID, misfire_grace_time=None)
     try:
         yield
     finally:

@@ -9,10 +9,18 @@ and the listener here records it. The jobs that loop on their own
 (`poll_metrics`, `poll_reporting`, `main._daily_measurement_eval`) raise the
 same exception after their pass.
 
-In-memory only: a restart clears it. Persisting it is Phase B work.
+In memory, and, once `persist_to` names a file (main.lifespan: `job_status.json`
+under LOG_DIR, bind-mounted on the host), kept across restarts: the startup
+catch-up (app/catch_up.py) reads a job's last run from it to tell a missed run
+from one that already happened before the restart.
 """
+import json
 import logging
+import os
 import threading
+import time
+from datetime import datetime
+from pathlib import Path
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
@@ -24,6 +32,9 @@ FAILED = "failed"
 # Ran to completion, but some items inside a channel errored (not all of them).
 # A job reports this by returning {"partial_errors": {channel_id: detail}}.
 DEGRADED = "degraded"
+
+# The shortest gap between two saves of one job's unchanged status.
+SAVE_EVERY_SECONDS = 60
 
 
 class JobRunFailed(Exception):
@@ -72,6 +83,28 @@ class JobStatusRegistry:
     def __init__(self):
         self._lock = threading.Lock()
         self._jobs: dict[str, dict] = {}
+        self._path: Path | None = None
+        self._saved_at: dict[str, float] = {}
+
+    def persist_to(self, path) -> None:
+        """Load the entries saved in `path`, and rewrite it after every run.
+
+        A missing file starts empty; an unreadable one is logged and ignored,
+        so a bad file never keeps the app from starting.
+        """
+        path = Path(path)
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            saved = {}
+        except (OSError, ValueError) as e:
+            log.warning("job status: %s unreadable; starting empty: %s", path, e)
+            saved = {}
+        with self._lock:
+            self._path = path
+            for job_id, entry in (saved.items() if isinstance(saved, dict) else ()):
+                if isinstance(entry, dict):
+                    self._jobs[job_id] = {**_blank(), **entry}
 
     def register(self, job_id: str) -> None:
         """Show a job before its first run, so a missing job is distinguishable
@@ -80,9 +113,17 @@ class JobStatusRegistry:
             self._jobs.setdefault(job_id, _blank())
 
     def watch(self, scheduler) -> None:
-        """Register every job already added to ``scheduler`` and listen for runs."""
-        for job in scheduler.get_jobs():
-            self.register(job.id)
+        """Register every job already added to ``scheduler`` and listen for runs.
+
+        Saved entries of jobs no longer registered (a flag turned one off) are
+        dropped, so /health/jobs lists only what can run.
+        """
+        ids = [job.id for job in scheduler.get_jobs()]
+        with self._lock:
+            for job_id in set(self._jobs) - set(ids):
+                del self._jobs[job_id]
+        for job_id in ids:
+            self.register(job_id)
         scheduler.add_listener(self.on_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     def on_event(self, event) -> None:
@@ -104,7 +145,34 @@ class JobStatusRegistry:
             else:
                 entry["status"] = SUCCESS
         with self._lock:
+            previous = self._jobs.get(event.job_id) or {}
             self._jobs[event.job_id] = entry
+            # The interval ticks (autopilot every 30 s, shorts_dispatch every
+            # 5 s) rewrite the file at most once a minute unless their status
+            # changes; a cron job runs far less often, so every run is saved.
+            now = time.monotonic()
+            if (entry["status"] != previous.get("status")
+                    or now - self._saved_at.get(event.job_id, float("-inf")) >= SAVE_EVERY_SECONDS):
+                self._saved_at[event.job_id] = now
+                self._save()
+
+    def last_run_at(self, job_id: str) -> datetime | None:
+        """When the job last ran (any outcome), or None if never."""
+        with self._lock:
+            at = (self._jobs.get(job_id) or {}).get("last_run_at")
+        return datetime.fromisoformat(at) if at else None
+
+    def _save(self) -> None:
+        """Write the registry to the persist file; the caller holds the lock.
+        A failed write is logged, never raised: it costs the record, not the run."""
+        if self._path is None:
+            return
+        tmp = self._path.with_name(self._path.name + ".tmp")
+        try:
+            tmp.write_text(json.dumps(self._jobs, indent=1, sort_keys=True), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError as e:
+            log.warning("job status: could not write %s: %s", self._path, e)
 
     def snapshot(self) -> dict[str, dict]:
         with self._lock:
