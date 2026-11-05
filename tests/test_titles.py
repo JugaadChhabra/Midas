@@ -147,6 +147,19 @@ def test_the_other_checks():
     assert titles.check("ट्विंकल www.example.com", v) == "url: contains a link"
 
 
+def test_no_title_gains_an_emoji_on_either_path():
+    v = video(title="ट्विंकल Twinkle")
+    assert titles.check("ट्विंकल ट्विंकल 🌟", v) == "emoji: 1, the current title has 0"
+    assert titles.check("ट्विंकल ⭐ गीत", v).startswith("emoji:")
+    assert titles.check("ट्विंकल ❤️ गीत", v).startswith("emoji:")        # with a variation selector
+    assert titles.check("आम चोरी हिंदी बालगीत | Aam Chori Hindi Baalgeet TMKOC बालगीत", v) is None
+    kept = video(title="ट्विंकल 🌟")
+    assert titles.check("ट्विंकल गीत 🌟", kept) is None                 # the one it had stays
+    assert titles.check("ट्विंकल गीत 🌟🎵", kept).startswith("emoji:")
+    assert "Add no emojis" in titles.system_prompt()
+    assert "Add no emojis" in titles.agent_system_prompt()
+
+
 # ── the writer and the pipeline ───────────────────────────────────────────
 
 def test_all_failing_candidates_give_none_with_reasons_and_the_retry_carries_them():
@@ -424,3 +437,13 @@ def test_the_pipeline_prompt_carries_the_seo_teams_structure_and_the_limits():
     assert "Hindi Baalgeet TMKOC" in prompt
     assert "drop in this\n  order until it fits" in prompt
     assert "and in search results" in prompt
+
+
+def test_every_pipeline_title_ends_with_tmkoc_and_a_single_rhyme_has_no_joiners():
+    """Owner, 2026-11-05: TMKOC always, not only where the current title has
+    it; one rhyme is just its name, a compilation joins with & and +."""
+    prompt = titles.system_prompt()
+    assert "Every title ends with TMKOC" in prompt
+    assert "only when the current title has one" not in prompt
+    assert "One rhyme: just that rhyme's name" in prompt
+    assert "Every title ends with TMKOC" not in titles.agent_system_prompt()

@@ -78,6 +78,13 @@ SCRIPTS: dict[str, tuple[str, str]] = {
     "te": ("Telugu", "\u0C00-\u0C7F"),
 }
 _URL_RE = re.compile(r"https?://|www\.|youtu\.be/|youtube\.com/", re.IGNORECASE)
+# Emoji and pictographic symbols, one match per code point (the joiners and
+# variation selectors of a sequence aren't counted). No Indic script is in these
+# ranges. Owner, 2026-11-05: no title gains an emoji, on either path; the only
+# data found (third-party, e.g. vidIQ) has emoji titles with less reach.
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF"
+    "\u3030\u303D\u3297\u3299]")
 
 #: The objective, shared by the writer's prompt and the agent's (S3.4). Since
 #: 2026-10-31 search results are a place the title is read (and measured,
@@ -96,24 +103,29 @@ TITLE_LIMITS = """\
 - Keep the rhyme's name, in the channel's language and in its script.
 - If the current title has a series or brand name, keep it as it is written.
 - Add no hashtags: no more "#" than the current title has.
+- Add no emojis: no more than the current title has.
 - No links.
 - At most {title_max} characters."""
 
 #: The SEO team's title structure (owner, 2026-10-31), the pipeline's alone:
 #: the agent gets the goal and the limits only, so pipeline vs agent compares
-#: this structure with the agent's own.
+#: this structure with the agent's own. Every title ends with TMKOC and the
+#: word for kids' rhymes, whatever the current title has (owner, 2026-11-05).
 TITLE_STRUCTURE = """\
 Structure, in this order:
   <rhyme names, in the channel's script> <the channel language's word for
   kids' rhymes, in its script> | <the same rhyme names, romanised> <the
-  language and that word, romanised> <series name> <that word, in its script>
-- Several rhymes: join their names with " & " before the "|" and " + " after it.
-- <series name> only when the current title has one.
-- Example (Hindi, two rhymes, series TMKOC), as the SEO team wrote it:
+  language and that word, romanised> TMKOC <that word, in its script>
+- Everything before the "|" is in the channel's language and script; after it,
+  the same words spelled out in Latin letters, then TMKOC and the word again.
+- One rhyme: just that rhyme's name. Several rhymes (a compilation): join
+  their names with " & " before the "|" and " + " after it.
+- Every title ends with TMKOC and that word, whatever the current title has.
+- Example (Hindi, a compilation of two rhymes), as the SEO team wrote it:
   आम चोरी पत्ता जोड़ा & हरे नीम की डाल हिंदी बालगीत | Aam Chori + Hare Neem Ki Dal Hindi Baalgeet TMKOC बालगीत
 - That example is over {title_max} characters. When a title is, drop in this
   order until it fits: the last word for kids' rhymes, then the romanised
-  language and word. Never drop a rhyme's name or the series name."""
+  language and word. Never drop a rhyme's name or TMKOC."""
 
 #: The writer's brief: the goal, the structure and the limits.
 TITLE_BRIEF = TITLE_GOAL + """
@@ -404,6 +416,9 @@ def check(title: str, video: dict) -> str | None:
         return f"hashtags: {title.count('#')} '#', the current title has {current.count('#')}"
     if _URL_RE.search(title):
         return "url: contains a link"
+    added, before = len(_EMOJI_RE.findall(title)), len(_EMOJI_RE.findall(current))
+    if added > before:
+        return f"emoji: {added}, the current title has {before}"
     return None
 
 
