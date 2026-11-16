@@ -360,7 +360,10 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
     `join_low` similar to it on B6 vectors. A NULL privacy or `is_short` is
     not yet known, and eligible (as warm_pool()). A target with the source's
     title (`title_key`), or with the title of a better target already kept,
-    is left out: a block of re-uploads of the same video helps no viewer.
+    is left out: a block of re-uploads of the same video helps no viewer. So
+    is a target at least BACKLINK_DUPLICATE_SIM similar to the source or to a
+    better target already kept: a re-upload under a slightly different title
+    ("| 4K", "LIVE"; owner, 2026-11-16).
     `pool` is the source
     channel's `target_pool`, for a caller asking for many sources; without it one is
     read for this call.
@@ -393,7 +396,7 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
             skipped += 1
             continue
         similarity = _cosine_sim(source_vector, vector)
-        if similarity >= pool.join_low:
+        if pool.join_low <= similarity < settings.BACKLINK_DUPLICATE_SIM:
             rows.append({"video_id": v["id"], "channel_id": v["channel_id"],
                          "title": v.get("title"), "similarity": similarity,
                          "impressions": pool.impressions[v["id"]]})
@@ -403,6 +406,10 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
     for r in rows:
         key = title_key(r["title"])
         if key and key in seen:
+            continue
+        vector = pool.vectors[r["video_id"]]
+        if any(_cosine_sim(vector, pool.vectors[k["video_id"]]) >= settings.BACKLINK_DUPLICATE_SIM
+               for k in kept):
             continue
         seen.add(key)
         kept.append(r)

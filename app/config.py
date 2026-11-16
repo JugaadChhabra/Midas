@@ -273,6 +273,11 @@ class Settings:
     # another language (a Punjabi rhyme linking its Gujarati and Marathi
     # versions). True brings sibling targets back (backlinks.target_pool).
     BACKLINK_SIBLINGS_ENABLED = os.getenv("BACKLINK_SIBLINGS_ENABLED", "false").lower() == "true"
+    # Owner, 2026-11-16: a backlink target this similar (B6 cosine) to the
+    # source, or to a target already in the block, is a re-upload of it under a
+    # slightly different title ("| 4K", "LIVE"), and is left out. The K2
+    # previews' re-uploads were 0.985-0.993; the closest different videos 0.972.
+    BACKLINK_DUPLICATE_SIM = float(os.getenv("BACKLINK_DUPLICATE_SIM") or "0.98")
     # Slice 1 · S1.4a (spec Part 4 Config, finding 2; Part 2 §2.1, §8): the warm
     # pool skips a video with any Midas intervention created this many days ago
     # or fewer, whatever its status, so a `no_change` (declined, not active)

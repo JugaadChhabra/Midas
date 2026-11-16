@@ -186,12 +186,21 @@ def test_siblings_reads_past_the_1000_row_cap():
 # ── candidates ────────────────────────────────────────────────────────────
 
 SOURCE = video("src", description="First line\nmore")
-NEAR = [1.0, 0.0]
+NEAR = [1.0] + [0.0] * 63
+
+
+DIMS = 64
+_axis = iter(range(10 ** 9))
 
 
 def at(sim: float) -> list[float]:
-    """A unit vector whose cosine with NEAR is `sim`."""
-    return [sim, (1 - sim * sim) ** 0.5]
+    """A unit vector whose cosine with NEAR is `sim`, off it in a direction of
+    its own (one of DIMS - 1, in turn), so two targets' cosine is about the
+    product of their sims: as far apart as different videos, not re-uploads
+    (BACKLINK_DUPLICATE_SIM)."""
+    v = [0.0] * DIMS
+    v[0], v[1 + next(_axis) % (DIMS - 1)] = sim, (1 - sim * sim) ** 0.5
+    return v
 
 
 def target(video_id, sim, imp=1000, channel=SRC_CH, **video_kw):
@@ -315,7 +324,7 @@ def test_a_target_in_an_intervention_or_an_episode_is_still_a_target():
 
 def test_ranked_by_similarity_then_impressions_and_capped_at_twice_backlink_max():
     sb = scene(
-        target("a", 0.99, imp=600), target("b", 0.97, imp=900), target("c", 0.97, imp=5000),
+        target("a", 0.975, imp=600), target("b", 0.97, imp=900), target("c", 0.97, imp=5000),
         target("d", 0.95), target("e", 0.93), target("f", 0.91), target("g", 0.90),
         target("h", 0.85),
     )
@@ -367,7 +376,7 @@ def test_the_source_channels_join_low_applies_to_sibling_targets():
 
 def test_candidates_read_past_the_1000_row_cap():
     # 1,200 warm, embedded targets; the only similar one sorts last by id.
-    many = [target(f"v{i:04d}", 0.5) for i in range(1199)] + [target("v9999", 0.99)]
+    many = [target(f"v{i:04d}", 0.5) for i in range(1199)] + [target("v9999", 0.97)]
     sb = scene(*many)
     with postgrest_cap():
         assert ids(candidates(sb)) == ["v9999"]
@@ -418,6 +427,27 @@ def test_reuploads_of_the_source_or_of_a_kept_target_are_left_out():
                target("a2", 0.94, title="song a!"),
                target("b", 0.90, title="Song B"), source=source)
     assert ids(candidates(sb, source=source)) == ["a", "b"]
+
+
+def copy_of(video_id, of, imp=1000, **video_kw):
+    """A target with the same vector as `of`'s (a re-upload under another title)."""
+    v, r, e = target(video_id, 0.0, imp, **video_kw)
+    return v, r, emb(video_id, list(of[2]["embedding"]))
+
+
+def test_a_target_at_least_duplicate_sim_like_the_source_is_a_reupload():
+    """Owner, 2026-11-16: "Meetho Aam & Chunnu Munnu" linked its own "| 4k"
+    upload at 0.993."""
+    sb = scene(target("reup", 0.985, title="Some other title | 4K"), target("a", 0.979))
+    assert ids(candidates(sb)) == ["a"]
+    assert ids(candidates(sb, BACKLINK_DUPLICATE_SIM=0.99)) == ["reup", "a"]
+
+
+def test_a_target_at_least_duplicate_sim_like_a_kept_target_is_left_out():
+    """The "Daya Special" video linked both uploads of one song."""
+    first = target("first", 0.90, title="Meetho Aam | 4K")
+    sb = scene(first, copy_of("second", first, title="Meetho Aam"), target("other", 0.85))
+    assert ids(candidates(sb)) == ["first", "other"]
 
 
 def test_title_key_ignores_hashtags_punctuation_case_and_spacing():

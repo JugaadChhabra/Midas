@@ -55,8 +55,13 @@ def _video(vid, channel=CH, description=""):
 
 #: Pool order: SRC first (most impressions), then the targets.
 IMPRESSIONS = {SRC: 9000, T1: 800, T2: 700, T3: 600, T4: 550}
-VECTORS = {SRC: [1.0, 0.0], T1: [1.0, 0.1], T2: [1.0, 0.2], T3: [1.0, 0.3],
-           T4: [0.0, 1.0]}                    # T4: warm but not similar
+# Each target off the source in its own direction, so the targets are as far
+# from one another as real videos (backlinks.BACKLINK_DUPLICATE_SIM drops a
+# target ≥ 0.98 like the source or another target): cosines 0.97, 0.95, 0.93.
+VECTORS = {SRC: [1.0, 0.0, 0.0, 0.0], T1: [0.97, (1 - 0.97 ** 2) ** 0.5, 0.0, 0.0],
+           T2: [0.95, 0.0, (1 - 0.95 ** 2) ** 0.5, 0.0],
+           T3: [0.93, 0.0, 0.0, (1 - 0.93 ** 2) ** 0.5],
+           T4: [0.0, 1.0, 0.0, 0.0]}          # T4: warm but not similar
 
 
 def world(*, channel=None, interventions=(), description=SRC_DESCRIPTION, audits=(),
@@ -526,7 +531,7 @@ def test_next_watch_is_asked_once_per_candidate_pair_and_stored_on_the_intervent
     assert [s["decision_log_id"] for s in stored] == [r["id"] for r in pairs]
     assert {s["answer"] for s in stored} == {"yes"}
     assert stored[0]["probs"] == {"yes": 1.0, "no": 0.0}
-    assert stored[0]["similarity"] == pytest.approx(1 / (1.01 ** 0.5))
+    assert stored[0]["similarity"] == pytest.approx(0.97)
 
 
 def test_next_watch_asks_every_pair_candidates_returns_not_only_the_targets():
