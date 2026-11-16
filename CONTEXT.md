@@ -12,7 +12,7 @@ Not to be confused with the **on-demand Analytics API**, which supplies views an
 retention into `video_metrics`. They are separate sensors with separate quota
 pools, separate freshness lags, and separate ingestion jobs. Reach is the only
 source of CTR: the impressions metrics do not exist on the Analytics query API at
-all (see `docs/PHASE_0_GAPS.md` Gap 1).
+all (Phase 0's CTR probe, 2026-06; its write-up is in git history).
 
 Owner: `app/reach.py` for the facts, `app/reporting_poll.py` for the ingestion.
 
