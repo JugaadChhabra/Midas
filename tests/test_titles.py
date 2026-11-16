@@ -447,3 +447,12 @@ def test_every_pipeline_title_ends_with_tmkoc_and_a_single_rhyme_has_no_joiners(
     assert "only when the current title has one" not in prompt
     assert "One rhyme: just that rhyme's name" in prompt
     assert "Every title ends with TMKOC" not in titles.agent_system_prompt()
+
+
+def test_an_episode_is_not_titled_as_rhymes_and_keeps_its_number():
+    """Owner, 2026-11-16: the P1 previews titled Marathi and Gujarati comedy
+    episodes "... Baalgeet TMKOC बालगीत"."""
+    prompt = titles.system_prompt()
+    assert "an episode or a show" in prompt
+    assert "it never says rhymes" in prompt
+    assert "Keep a season or\n  episode number exactly" in prompt
