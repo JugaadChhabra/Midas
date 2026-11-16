@@ -268,6 +268,11 @@ class Settings:
     # its trailing 28 ingested traffic data-days (app/backlinks.py siblings).
     # Inbound only, read from the channel's own report (Part 4 finding 1).
     SIBLING_MIN_VIEWS = int(os.getenv("SIBLING_MIN_VIEWS") or "100")
+    # Owner, 2026-11-16: backlinks link only to the source's own channel. Each
+    # channel is one language, so a sibling's video is the same song in
+    # another language (a Punjabi rhyme linking its Gujarati and Marathi
+    # versions). True brings sibling targets back (backlinks.target_pool).
+    BACKLINK_SIBLINGS_ENABLED = os.getenv("BACKLINK_SIBLINGS_ENABLED", "false").lower() == "true"
     # Slice 1 · S1.4a (spec Part 4 Config, finding 2; Part 2 §2.1, §8): the warm
     # pool skips a video with any Midas intervention created this many days ago
     # or fewer, whatever its status, so a `no_change` (declined, not active)

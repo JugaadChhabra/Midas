@@ -86,7 +86,7 @@ def fake(*, traffic_ledger=(), traffic=(), videos=(), reach_rows=(), embeddings=
 
 @contextmanager
 def wired(sb, ingest=(SRC_CH, SIB, OTHER), **settings):
-    settings = {"SIBLING_MIN_VIEWS": 100, "BACKLINK_MAX": 3, "WARM_MIN_IMPRESSIONS": 500,
+    settings = {"SIBLING_MIN_VIEWS": 100, "BACKLINK_SIBLINGS_ENABLED": True, "BACKLINK_MAX": 3, "WARM_MIN_IMPRESSIONS": 500,
                 "TRAFFIC_INGEST_CHANNELS": set(ingest), **settings}
     with patch.object(backlinks, "supabase", return_value=sb), \
          patch("app.reach.supabase", return_value=sb), \
@@ -236,6 +236,20 @@ def test_a_qualifying_target_comes_back_with_its_row():
 def test_a_sibling_channels_target_counts_and_a_non_siblings_does_not():
     sb = scene(target("sib", 0.95, channel=SIB), target("oth", 0.95, channel=OTHER))
     assert ids(candidates(sb)) == ["sib"]
+
+
+def test_with_siblings_off_only_the_source_channels_videos_are_targets():
+    """Owner, 2026-11-16: a sibling is another language's channel."""
+    sb = scene(target("own", 0.90), target("sib", 0.95, channel=SIB))
+    assert ids(candidates(sb, BACKLINK_SIBLINGS_ENABLED=False)) == ["own"]
+    with wired(sb, BACKLINK_SIBLINGS_ENABLED=False):
+        pool, _ = backlinks.target_pool(SRC_CH)
+    assert {v["channel_id"] for v in pool.eligible} == {SRC_CH}
+
+
+def test_siblings_are_off_by_default():
+    from app.config import Settings
+    assert Settings().BACKLINK_SIBLINGS_ENABLED is False
 
 
 def test_a_sibling_below_sibling_min_views_contributes_no_targets():
