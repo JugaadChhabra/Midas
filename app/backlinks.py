@@ -22,7 +22,8 @@ Which videos to link to is S1.1 (Part 2 §2.3, P2), and reads the database:
 
     siblings(channel_id)   -- our channels that already send it suggested views
     target_pool(channel_id) -- the targets a source on that channel can get, with vectors
-    candidates(video)      -- ranked link targets, on its channel or a sibling
+    candidates(video)      -- ranked link targets, on its channel (or a sibling,
+                              only with BACKLINK_SIBLINGS_ENABLED; off by default)
 
 Similarity is on B6's vectors only (`reembed.MODEL_VERSION`), against the
 source channel's calibrated `join_low`: no fallback to the production
@@ -298,7 +299,10 @@ def target_pool(channel_id: str, *, sibling_ids: Iterable[str] | None = None,
          known_vectors: Mapping | None = None) -> tuple[Pool | None, str | None]:
     """(the channel's target `Pool`, None), or (None, why its thresholds were
     refused). Siblings are `siblings(channel_id)` unless the caller passes
-    `sibling_ids`. A vector already in `known_vectors` (keyed by video id, B6
+    `sibling_ids`, and none while BACKLINK_SIBLINGS_ENABLED is off (the
+    default since 2026-11-16, owner: a sibling is another language's channel,
+    and its video in a block is the same song in a language the viewer didn't
+    choose). A vector already in `known_vectors` (keyed by video id, B6
     vectors only) isn't read again."""
     thresholds = _thresholds(channel_id)
     if thresholds.get("join_low") is None:
@@ -307,7 +311,8 @@ def target_pool(channel_id: str, *, sibling_ids: Iterable[str] | None = None,
         return None, THRESHOLDS_OTHER_MODEL
 
     if sibling_ids is None:
-        sibling_ids = [s["channel_id"] for s in siblings(channel_id)]
+        sibling_ids = ([s["channel_id"] for s in siblings(channel_id)]
+                       if settings.BACKLINK_SIBLINGS_ENABLED else [])
     # Keyed by video, so only these channels' videos are looked at.
     impressions: dict[str, int] = {}
     for ch in dict.fromkeys([channel_id, *sibling_ids]):
@@ -348,8 +353,8 @@ def candidates(video: Mapping, *, sibling_ids: Iterable[str] | None = None,
     """Link targets for the source `video` (a `videos` row with `id`,
     `channel_id`, `description`), ranked by similarity, ties by impressions.
 
-    A target is on the source's channel or a sibling (`siblings`, unless the
-    caller passes `sibling_ids`); public, not a Short, not the source, and not
+    A target is on the source's channel or, while BACKLINK_SIBLINGS_ENABLED
+    is on, a sibling (`siblings`, unless the caller passes `sibling_ids`); public, not a Short, not the source, and not
     already linked from its description; warm on its own channel (B4's
     measure, `warm.warm_impressions`); and at least the source channel's
     `join_low` similar to it on B6 vectors. A NULL privacy or `is_short` is
