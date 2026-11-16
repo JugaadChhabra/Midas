@@ -375,7 +375,8 @@ def test_the_bakeoff_writes_no_row_and_its_csv_names_no_model(tmp_path):
     assert len(rows) == 6 and {r["video_id"] for r in rows} == {A, E}
     assert {r["candidate"] for r in rows} == {"ट्विंकल ट्विंकल"}
     assert all(r["checks"].startswith("pass") for r in rows)
-    assert all(r["score_1_3"] == "" and r["wrong_or_broken_script"] == "" for r in rows)
+    assert all(r["score_1_3"] == r["wrong_or_broken_script"] == r["follows_structure"]
+               == r["notes"] == "" for r in rows)
     key = dict(csv.reader(title_bakeoff.key_path(out).open(encoding="utf-8")))
     assert key.pop("code") == "model" and sorted(key.values()) == models
     assert {r["code"] for r in rows} == set(key)

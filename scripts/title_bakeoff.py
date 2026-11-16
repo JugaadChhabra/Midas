@@ -6,8 +6,10 @@ experiment is still a fair sample of the channel's titles), asks `titles.write_c
 writes one CSV row per (video, model): the current title, the model's top
 candidate passing the checks (or none, with the failures), shuffled, the
 model behind a code. The key file beside it maps codes to models. The SEO team
-fills `score_1_3` ("would a parent tap this on the home page?") and
-`wrong_or_broken_script` (yes/no) (spec Part 6 S3.2, S3.7, F9).
+fills `score_1_3` ("would a parent tap this on the home page?"),
+`wrong_or_broken_script` (yes/no), `follows_structure` (yes/no: the team's
+title structure, `titles.TITLE_STRUCTURE`) and, where a row needs one, `notes`
+(spec Part 6 S3.2, S3.7, F9).
 
     PYTHONPATH=. python scripts/title_bakeoff.py --channel UCr5-YUqBiW7PUmeAtxUWuRg \\
         --n 20 --models anthropic/claude-haiku-4.5,google/gemini-3.7-flash,openai/gpt-5-mini
@@ -28,7 +30,7 @@ from app import titles
 from app.short_links import _cell
 
 COLUMNS = ["row", "code", "video_id", "current_title", "candidate", "checks",
-           "score_1_3", "wrong_or_broken_script"]
+           "score_1_3", "wrong_or_broken_script", "follows_structure", "notes"]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -77,7 +79,8 @@ def main(argv: list[str] | None = None) -> None:
             candidate, checks = _top(ctx, subject, model)
             rows.append({"code": code_of[model], "video_id": video["id"],
                          "current_title": video.get("title") or "", "candidate": candidate,
-                         "checks": checks, "score_1_3": "", "wrong_or_broken_script": ""})
+                         "checks": checks, "score_1_3": "", "wrong_or_broken_script": "",
+                         "follows_structure": "", "notes": ""})
     rng.shuffle(rows)
 
     out = Path(args.out or f"logs/title_bakeoff_{args.channel}.csv")
