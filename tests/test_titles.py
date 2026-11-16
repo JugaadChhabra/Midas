@@ -456,3 +456,16 @@ def test_an_episode_is_not_titled_as_rhymes_and_keeps_its_number():
     assert "an episode or a show" in prompt
     assert "it never says rhymes" in prompt
     assert "Keep a season or\n  episode number exactly" in prompt
+
+
+def test_english_has_one_half_names_then_the_brand():
+    """Owner, 2026-11-16: on the English channel the P3 preview's two halves
+    repeated each other ("Toys Special Nursery Rhymes | Toys Special English
+    Nursery Rhymes TMKOC Nursery Rhymes")."""
+    prompt = titles.system_prompt()
+    assert "English (channel language en) has no second half" in prompt
+    assert "<rhyme names> | TMKOC English Nursery Rhymes" in prompt
+    assert ("Wheels on the Bus, Old MacDonald & Giddy Up Horsey | TMKOC English Nursery Rhymes"
+            in prompt)
+    assert "{title_max}" not in prompt and "Over 100 characters" in prompt
+    assert "TMKOC English Nursery Rhymes" not in titles.agent_system_prompt()

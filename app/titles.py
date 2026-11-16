@@ -111,6 +111,8 @@ TITLE_LIMITS = """\
 #: the agent gets the goal and the limits only, so pipeline vs agent compares
 #: this structure with the agent's own. Every title ends with TMKOC and the
 #: word for kids' rhymes, whatever the current title has (owner, 2026-11-05).
+#: English has its own one-half structure (owner, 2026-11-16): the P3 preview's
+#: second half repeated the first word for word.
 TITLE_STRUCTURE = """\
 Structure, in this order:
   <rhyme names, in the channel's script> <the channel language's word for
@@ -130,7 +132,17 @@ Structure, in this order:
   आम चोरी पत्ता जोड़ा & हरे नीम की डाल हिंदी बालगीत | Aam Chori + Hare Neem Ki Dal Hindi Baalgeet TMKOC बालगीत
 - That example is over {title_max} characters. When a title is, drop in this
   order until it fits: the last word for kids' rhymes, then the romanised
-  language and word. Never drop a rhyme's name or TMKOC."""
+  language and word. Never drop a rhyme's name or TMKOC.
+- English (channel language en) has no second half, since it would only
+  repeat the first. Its structure, in place of all of the above:
+    <rhyme names> | TMKOC English Nursery Rhymes
+  As many of the video's rhyme names as fit, in the video's order, joined
+  with ", " and " & " before the last. A story, an episode or a show: its
+  name, with its season or episode number as the current title writes it,
+  then " | TMKOC English Episode" or " | TMKOC English Story": never rhymes.
+  Example (a compilation): Wheels on the Bus, Old MacDonald & Giddy Up Horsey | TMKOC English Nursery Rhymes
+  Over {title_max} characters: drop rhyme names from the end, keeping at
+  least one, and never TMKOC."""
 
 #: The writer's brief: the goal, the structure and the limits.
 TITLE_BRIEF = TITLE_GOAL + """
