@@ -121,6 +121,11 @@ Structure, in this order:
 - One rhyme: just that rhyme's name. Several rhymes (a compilation): join
   their names with " & " before the "|" and " + " after it.
 - Every title ends with TMKOC and that word, whatever the current title has.
+- A story, an episode or a show (the channel's cartoon series, not rhymes)
+  keeps the structure, with its name in place of the rhyme names and the
+  channel language's word for an episode or a story in place of the word for
+  kids' rhymes, here and after TMKOC: it never says rhymes. Keep a season or
+  episode number exactly as the current title writes it.
 - Example (Hindi, a compilation of two rhymes), as the SEO team wrote it:
   आम चोरी पत्ता जोड़ा & हरे नीम की डाल हिंदी बालगीत | Aam Chori + Hare Neem Ki Dal Hindi Baalgeet TMKOC बालगीत
 - That example is over {title_max} characters. When a title is, drop in this
