@@ -84,9 +84,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 
 ## 2. Schema — as applied
 
-**Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). All are applied at the office (`scripts/apply_migrations.py`); the latest is
-`20261030020000`.
+**Migrations** (`supabase/migrations/`, after `supabase/bootstrap/000_roles.sql`, `010_storage_shim.sql`):
 
 ```
 20260505092756_init.sql                          channels, videos, audit_configs, audits
@@ -145,17 +143,13 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261030020000_warm_pool_title_holds.sql        warm_pool() replaced: + title rows hold once per experiment (S3.5)
 ```
 
-These are the files. The live DB's migration ledger was not checked (unreachable).
-
 **Tables** (columns are the union across the migrations):
 
 - **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false, playlist_thresholds jsonb`.
-  `playlist_thresholds` (`20261006060000`, B6), verbatim: `alter table channels add column if not exists playlist_thresholds jsonb;`. NULL until `app/reembed.py` `calibrate_channel` writes `{model_version, join_high, join_low, leave, member_sims, playlists, method, computed_at}`. Read only by `app/backlinks.py` `candidates` (S1.1: the source channel's `join_low`, refused unless `model_version` is `reembed.MODEL_VERSION`), called by the agent tick (`app/agent_tick.py`).
+  `playlist_thresholds` = `{model_version, join_high, join_low, leave, member_sims, playlists, method, computed_at}` from `app/reembed.py` `calibrate_channel`; read by `app/backlinks.py` `candidates` (`join_low`, only for `reembed.MODEL_VERSION`).
 - **`videos`**: `id text pk, channel_id → channels on delete cascade, title, description, tags text[], thumbnail_url, category_id, view_count, like_count, comment_count bigint, published_at, last_fetched_at, privacy_status text, thumbnail_optimized_at, playlists_optimized_at timestamptz, duration_seconds int, is_short bool, is_episode bool (nullable; NULL = not episode)`.
 - **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int default 0, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
-  - Status vocab (`app/status_vocab.py:30-44`): `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected`. No code writes `approved` or `rejected`. `outcome_decision`: `none|kept|reverted|redo_queued`; `redo_queued` is "Reserved … nothing writes it yet" (`app/status_vocab.py:98-100`), and nothing writes `redo_of_audit_id`.
-  - Measurement vocab (`app/status_vocab.py:63-73`): `not_applicable|awaiting_window|measuring|win|neutral|regression`. Reason codes (`app/measurement.py:168-171`): `no_timestamp`, `coverage_lost`, `dormant`, `video_gone`, under key `reason_code` (`app/verdicts.py:47`).
-  - Partial index `audits_measurement_inflight_idx` on `('awaiting_window','measuring')`; `audits_video_created_idx (video_id, created_at desc)`.
+  Status `pending|applied|failed|quarantined|blocked_test_and_compare|shadow_pending|reverted|approved|rejected` (`approved`/`rejected` unused); `outcome_decision` `none|kept|reverted|redo_queued` (`redo_queued` unused); measurement `not_applicable|awaiting_window|measuring|win|neutral|regression`, `reason_code` `no_timestamp|coverage_lost|dormant|video_gone`.
 - **`video_metrics`** (`20260610134419`):
   ```sql
   id bigserial pk, video_id text not null → videos on delete cascade, channel_id text not null → channels,
@@ -165,9 +159,9 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   is_pre_change boolean default false, fetched_at timestamptz default now(),
   unique (video_id, window_start, window_end)
   ```
-- **`video_reach_daily`**: `video_id text not null (no FK), channel_id → channels, date date, impressions bigint not null, ctr double precision not null (fraction 0..1), report_id text, fetched_at, unique(video_id, date)`. Source: Reporting API `channel_reach_basic_a1` (`app/reporting_client.py:56`).
-- **`reporting_reports_ingested`**: `report_id text pk, job_id, channel_id, data_date date, row_count int, ingested_at, report_type text not null default 'channel_reach_basic_a1'` (`report_type` added by `20261006000000`). Shared by reach and both traffic report types; `reach.coverage` counts only `report_type = 'channel_reach_basic_a1'` (`app/reach.py:122-130`).
-- **`video_traffic_source_daily`** (`20261006000000`, B1):
+- **`video_reach_daily`**: `video_id text not null (no FK), channel_id → channels, date date, impressions bigint not null, ctr double precision not null (fraction 0..1), report_id text, fetched_at, unique(video_id, date)`. From `channel_reach_basic_a1`.
+- **`reporting_reports_ingested`**: `report_id text pk, job_id, channel_id, data_date date, row_count int, ingested_at, report_type text not null default 'channel_reach_basic_a1'`. Shared by reach and traffic reports.
+- **`video_traffic_source_daily`** (`20261006000000`):
   ```sql
   id bigserial primary key, video_id text not null (no FK), channel_id text not null references channels(id),
   date date not null, source_type smallint not null, source_detail text not null default '',
@@ -175,9 +169,8 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   report_id text not null, ingested_at timestamptz default now(),
   unique (video_id, date, source_type, source_detail)
   ```
-  Index `(channel_id, date desc)`. Source: Reporting API `channel_traffic_source_a3` (`app/reporting_client.py:73`), summed over `country_code`, `subscribed_status`, `live_or_on_demand` (`app/reporting_client.py:443` `parse_traffic_csv` → `:397` `_aggregate_traffic_csv`).
-  **Retention** (owner, 2026-10-13): `source_detail` is kept only where `app/traffic_poll.py` `keeps_detail` says so (type 7 from a video in `videos`, any channel; type 14 `PL…` or `RD<one of our video ids>`; every other type) and the rest is folded into the blank-detail row for (video, day, type) by `collapse_unread_detail`, so per-type totals are exact. Rows ingested before it are folded by the one-off `scripts/collapse_traffic_detail.sql`.
-- **`playlist_traffic_daily`** (`20261006010000`, B1b):
+  From `channel_traffic_source_a3`, summed over country, subscribed and live dimensions. `source_detail` kept only where `app/traffic_poll.py` `keeps_detail` says; the rest folded into the blank-detail row (per-type totals exact).
+- **`playlist_traffic_daily`** (`20261006010000`):
   ```sql
   id bigserial primary key, playlist_id text not null (no FK), video_id text not null (no FK),
   channel_id text not null references channels(id),
@@ -186,8 +179,8 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   report_id text not null, ingested_at timestamptz default now(),
   unique (playlist_id, video_id, date, source_type, source_detail)
   ```
-  Index `(channel_id, date desc)`. Source: Reporting API `playlist_traffic_source_a2` (`app/reporting_client.py:100`), summed over the same three dimensions (`app/reporting_client.py:460` `parse_playlist_traffic_csv`); `engaged_views`, `average_view_duration_seconds` and `playlist_saves_*` are not stored.
-- **`interventions`** (`20261006020000`, B2):
+  From `playlist_traffic_source_a2`.
+- **`interventions`** (`20261006020000`):
   ```sql
   create table if not exists interventions (
       id                  bigserial   primary key,
@@ -224,80 +217,47 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   -- Backs the on-delete-cascade from videos, and per-video reads of any origin.
   create index if not exists interventions_video_idx on interventions (video_id);
   ```
-  Added by `20261006030000` (B3a), verbatim:
+  Added by `20261006030000`, verbatim:
   ```sql
   alter table interventions add column if not exists ledger_key text;
 
   create unique index if not exists interventions_ledger_key_key
       on interventions (ledger_key);
   ```
-  Vocab (`app/status_vocab.py:143-220`): lever
-  `backlinks|playlist|short_link|title`; origin `midas|human`; arm `treated|holdout|n/a`; status
-  `planned|applied|measuring|judged|cancelled|declined|holdout|insufficient_data`, of which
-  `ACTIVE_INTERVENTION_STATUSES` = `planned|applied|measuring|holdout`. The partial unique index is the SQL mirror
-  of that set (`tests/test_status_vocab.py`). Row inserts come from four writers: the B3 human ledger (`app/human_edits.py`, two
-  `human` row kinds) and, the agent tick (`app/agent_tick.py`, `midas` `backlinks` rows: `declined`
-  arm `n/a` with `payload.rationale`; `holdout` with `payload.targets`; `planned` → `measuring` or `cancelled`
-  with `payload.error = {reason, detail}`; each with `triage_json`, §5), the Short-link tick
-  (`app/short_links.py` `set_short_link`, below), and the Short-link detection (`app/short_links.py` `detect`). Since S3.1
-  `app/titles_apply.py` updates a `midas` `title` row on its apply (`measuring`, `applied_at`, `before_state =
-  {title}`) and revert (`cancelled`, `payload.revert = {reverted_at, live_before, title, auto}`). The agent
-  tick writes `midas` `title` rows (`app/agent_tick.py` `_run_title`): `holdout` with `payload {title_before}`;
-  treated `planned` with `payload {title_before, title, candidates, reason, path}` and `strategy_version` (the title
-  stamp, §6), then `measuring` or `cancelled` with `payload.error = {reason, detail}` as backlinks; or, with no
-  `planned` step, treated `cancelled` with `payload {title_before, path, title: null, candidates, reason: null,
-  error}`, `error.reason` `checks_failed` (no candidate passed the checks), or `payload {title_before, path, error}`,
-  `error.reason` `writer_exception` (the writer raised). An agent-path run writes the same `planned` row
-  (`candidates` = its submitted titles with their checks), or treated `declined` with `payload {title_before, path:
-  "agent", rationale}` (no `strategy_version`, no YouTube call), or treated `cancelled` with `error.reason`
-  `turn_cap` or `checks_failed`; each with `trajectory` (below), `writer_exception` too when the model call raised. Updates: `app/lever_measurement.py`
-  `measure_channel` updates `backlinks` rows' `status`, `measurement_status` and `measurement_result` (below; run
-  weekly by the `lever_measurement` job); `app/title_measurement.py` `measure_channel` does the same for
-  `midas` `title` rows, and `lever_verdicts.auto_revert` reverts judged ones through `titles_apply.revert_title(auto=True)`. **B3a:** one
-  row per link to one of our videos that the team added to a description, `origin='human'`, `lever='backlinks'`,
-  `arm='n/a'`, `status='applied'`, `applied_at` NULL, `detected_at` = when the sync saw it, and `payload`
-  `{source_video_id, target_video_id, added_targets, removed_targets, timing}` (plus `removed_detected_at` once a
-  later sync sees the link gone). `ledger_key` = `backlinks:<source>:<target>:<first 16 hex of sha256 of the new
-  description, whitespace collapsed>`. **B3b:** one row per membership of one of the channel's videos in one of its
-  playlists that the membership walk sees for the first time, in a playlist it has walked before, and that Midas
-  didn't add: `lever='playlist'`, same `origin`/`arm`/`status`/`applied_at`/`detected_at` as B3a, `payload`
-  `{playlist_id, video_id, playlist_item_id, timing}`, `ledger_key` = `playlist:<playlist_id>:<video_id>:<playlist_item_id>`.
-  **S2.5:** one row per (Short, target) pair the team ticks as set in Studio (`POST /short-links/{id}/set`):
-  `lever='short_link'`, `origin='human'`, `arm='n/a'`, `status='applied'`, `video_id` = the target, `applied_at`
-  NULL, `detected_at` = the tick, `payload` `{short_id, target_video_id, recommendation_id, timing: "ticked"}`,
-  `ledger_key` = `short_link:<short_id>:<target_video_id>`. **S2.6:** one row per (Short, target) pair the
-  `lever_measurement` job sees in type-32 traffic with no row yet (`app/short_links.py` `detect`): the same columns,
-  `channel_id` = the Short's, `detected_at` = Pacific midnight of the first data-day with views in the window,
-  `payload` `{short_id, target_video_id, recommended, timing: "inferred_from_traffic"}` (`recommended` = a
-  `short_link_recommendations` row exists for the pair), the same `ledger_key`, so a later tick links it.
-  `ledger_key` is NULL on any other row.
-  Added by `20261030000000` (S3.4, #119), verbatim without its header comment:
+  Added by `20261030000000`, verbatim without its header comment:
   ```sql
   alter table interventions add column if not exists trajectory jsonb;
   ```
-  Written only by the agent tick, through `interventions.record(trajectory=)`, on every agent-path `title` row
-  (`planned`, `declined`, `cancelled`), whatever its end: `{model, writer_model, max_turns, turns, end: {kind,
+  Vocab (`app/status_vocab.py`): lever `backlinks|playlist|short_link|title`; origin `midas|human`; arm
+  `treated|holdout|n/a`; status `planned|applied|measuring|judged|cancelled|declined|holdout|insufficient_data`;
+  active = `planned|applied|measuring|holdout` (mirrored by the partial index). Writers, payloads:
+  - `app/agent_tick.py` `backlinks`: `declined` (arm `n/a`) `{rationale}`; `holdout` `{targets}`; treated `planned`
+    `{targets}` → `measuring` or `cancelled` + `error {reason, detail}`; all with `triage_json`.
+  - `app/agent_tick.py` `_run_title`: `holdout` `{title_before}`; treated `planned` `{title_before, title,
+    candidates, reason, path}` + `strategy_version` → `measuring`/`cancelled`; or `cancelled` `{title_before, path,
+    title: null, candidates, reason: null, error}` (`checks_failed`) / `{title_before, path, error}`
+    (`writer_exception`). Agent path adds treated `declined` `{title_before, path: "agent", rationale}` and
+    `cancelled` `turn_cap`; every agent row has `trajectory`.
+  - `app/titles_apply.py`: apply sets `measuring`, `applied_at`, `before_state {title}`; revert `cancelled`,
+    `payload.revert {reverted_at, live_before, title, auto}`.
+  - `human` rows (arm `n/a`, `applied`, `applied_at` NULL, `detected_at` = when seen), with `ledger_key`:
+    `app/human_edits.py` `backlinks` `{source_video_id, target_video_id, added_targets, removed_targets, timing}`
+    (+`removed_detected_at`), key `backlinks:<source>:<target>:<first 16 hex of sha256 of the new description,
+    whitespace collapsed>`; `playlist` `{playlist_id, video_id, playlist_item_id, timing}`, key
+    `playlist:<playlist_id>:<video_id>:<playlist_item_id>`; `app/short_links.py` `short_link` (`video_id` = target),
+    key `short_link:<short_id>:<target_video_id>`: `set_short_link` `{short_id, target_video_id, recommendation_id,
+    timing: "ticked"}`, `detect` (type-32 traffic) `{short_id, target_video_id, recommended, timing:
+    "inferred_from_traffic"}`.
+  `trajectory` (via `interventions.record(trajectory=)`): `{model, writer_model, max_turns, turns, end: {kind,
   reason, detail}, submits: [{title, check, reasoning}], messages: [{role, content, tool_calls: [{id, name,
-  arguments}], tool_call_id, name}]}`, every text cut to 2,000 characters (`app/agent/loop.py`
-  `TRAJECTORY_CHARS`). `record` sends the column only when given, so no other row needs the migration. NULL on
-  every other row.
-  **Measurement (S1.6a).** `status` is the lifecycle and carries the outcome: `measuring` (treated), `holdout`
-  and `applied` (human) → `judged` or `insufficient_data`. `measurement_status` only says how far the measurement
-  got (`InterventionMeasurement`, `app/status_vocab.py:223-244`): `awaiting_window|extended|done`, NULL until the
-  first run; every other row and lever leaves it NULL. `measure_channel` also measures `human`
-  `short_link` rows the same way (source `payload.short_id`, target `video_id`, type 32), with the same
-  `measurement_status` and `measurement_result`. `measurement_result` on a decided row:
-  `{pre, post, delta, source_views, missing_days, window: {d0, pre: [start, end], post: [start, end], post_days,
-  extended}, judged_at, computed_at}` (§5 `lever_measurement.py`).
-  **Title rows (S3.5).** `app/title_measurement.py` `measure_channel` (the `lever_measurement` job) measures
-  `midas` `title` rows: treated `measuring` (`applied_at` set), `holdout`, and treated `declined` (an agent
-  decline) → `judged` or `insufficient_data`, `measurement_status` `awaiting_window` → `done` (never `extended`);
-  `cancelled` and `planned` rows aren't measured. A judged treated row later put back keeps its numbers as
-  `cancelled` (`payload.revert`). `measurement_result` on a decided title row: `{pre, post, delta, impressions:
-  {pre, post}, ctr: {pre, post}, missing_days, window: {d0, pre: [start, end], post: [start, end]}, judged_at,
-  computed_at}` (`pre`/`post` browse + search + suggested views, `delta` the log ratio; §5 `title_measurement.py`).
-- **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`.
-  - Roles assigned: `series | funnel | inherited` (`app/playlists_sync.py:50-63`). `playlist_discovery` inserts rows without `origin` or `created_by_optimizer_at` (`app/playlist_discovery.py:198-205`), so discovery-created playlists land as `origin='inherited'`. Nothing writes `playlists.strategy_version`.
+  arguments}], tool_call_id, name}]}`, texts cut to 2,000 chars (`TRAJECTORY_CHARS`).
+  Measurement: `status` carries the outcome (`judged`/`insufficient_data`), `measurement_status` only progress
+  (`awaiting_window|extended|done`). `app/lever_measurement.py` (backlinks, human `short_link`): `{pre, post, delta,
+  source_views, missing_days, window: {d0, pre: [start, end], post: [start, end], post_days, extended}, judged_at,
+  computed_at}`. `app/title_measurement.py` (`title` `measuring`, `holdout`, `declined`): `{pre, post, delta,
+  impressions: {pre, post}, ctr: {pre, post}, missing_days, window: {d0, pre: [start, end], post: [start, end]},
+  judged_at, computed_at}`, `delta` a log ratio; `lever_verdicts.auto_revert` reverts losing titles.
+- **`playlists`**: `id text pk, channel_id → channels on delete cascade, title text not null, description default '', synced_at, role text, origin text default 'inherited', item_count int, last_synced_at, created_by_optimizer_at, strategy_version text, health_score float, health_recommendation text (revive|remove|keep|insufficient_data), health_computed_at, health_rationale_json jsonb, membership_walked_at timestamptz`. Roles `series|funnel|inherited`; discovery-created ones land `origin='inherited'`.
 - **`playlist_metrics`**:
   ```sql
   id bigserial pk, playlist_id text not null (no FK), channel_id → channels, window_start date, window_end date,
@@ -305,20 +265,12 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   playlist_views bigint, playlist_est_minutes_watched bigint, is_pre_change boolean default false,
   fetched_at, unique (playlist_id, window_start, window_end)
   ```
-- **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Nothing populates it (`TIER2_TRAFFIC_SOURCE_SUPPORTED = False`, `app/metrics_poll.py:85`).
-- **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed row `('2026.07-baseline-v1', 'code:app/audits.py DEFAULT_PROMPT + audit_configs.generated_prompt (per-channel)', 'anthropic/claude-haiku-4.5', 'champion', …)`; derived rows are upserted per audit (§6), and per title strategy by `app/titles.py` `strategy_version` (`prompt_template = 'code:app/titles.py TITLE_PROMPT'`, `model = WRITER_MODEL`), written by the agent tick's treated titles.
-- **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)` (`20260518000000_playlists.sql:10-12`). Production writes use `model_version = EMBED_MODEL` (`app/embeddings.py:133`), from two input recipes (§6). B6's one-off re-embed writes a second value, `app/reembed.py` `MODEL_VERSION` = `"google/gemini-embedding-2-preview|tdt-v1"` (`EMBED_MODEL` + `"|"` + `RECIPE`, `app/reembed.py:33-34`), one recipe for every video (§6); every production reader filters on `EMBED_MODEL`, and every caller of the `p_model_version` RPCs passes it, except `app/backlinks.py` `candidates` (S1.1), which reads only `MODEL_VERSION` and is called by the agent tick (`app/agent_tick.py`).
-- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals` (§2 `playlist_arms` for its S2.1 columns), `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()` (B4, replaced by S1.4a, below).
+- **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Never populated.
+- **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed `2026.07-baseline-v1`; rows upserted per audit and per title strategy (`app/titles.py` `strategy_version`, §6).
+- **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)`. Production uses `model_version = EMBED_MODEL`; `app/reembed.py` writes `MODEL_VERSION` = `"google/gemini-embedding-2-preview|tdt-v1"`, read by `app/backlinks.py` `candidates`.
+- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()`.
 
-- **`warm_pool()`** (`20261023000000`, S1.4a #63, replacing B4's `20261006040000`; replaced again by
-  `20261030020000`, S3.5 #120, which adds the `title` clause shown below), verbatim without its header
-  comment, as of `20261030020000`. Its in-app twin is `app/warm.py` `_ranked_pool_inapp`; the agent tick picks through `warm.warm_pool` (§5). On top of B4's
-  active-Midas exclusion it skips a video with any `midas` row created within `p_cooldown_days`
-  (`TRIAGE_COOLDOWN_DAYS`), whatever its lever or status, or any `midas` `backlinks` row of arm `holdout`, or
-  `treated` with `applied_at` set, at any age; also any `midas` `title` row of arm `holdout`, or `treated`
-  with `applied_at` set or a status other than `cancelled` (a decline, measured or not), at any age. The
-  four-argument B4 function is dropped, not overloaded (S1.4a; `20261030020000` keeps the five-argument signature,
-  `create or replace`):
+- **`warm_pool()`**, verbatim without its header comment, as of `20261030020000` (in-app twin `app/warm.py` `_ranked_pool_inapp`; the agent tick picks via `warm.warm_pool`). Excludes active Midas rows, any `midas` row within `p_cooldown_days`, and at any age backlinks holdout/applied rows and title holdout or non-`cancelled` treated rows:
   ```sql
   -- 20261023000000 only (20261030020000 has no drop):
   drop function if exists warm_pool(text, bigint, int, int);
@@ -388,11 +340,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   grant  execute on function warm_pool(text, bigint, int, int, int) to service_role;
   ```
 
-- **`decision_log`** (`20261006050000`, B5), verbatim without its header comment. Written only by
-  `app/decide.py` `decide()`, called by the agent tick (`app/agent_tick.py` `run`), which then sets `intervention_id`
-  through `decide.link` (§5), and by the Short-link refresh (`app/short_links.py` `_next_watch`, through
-  `refresh`), whose rows `short_link_recommendations.decision_log_id` points at. `subject` is the video id for `TRIAGE` rows and `<source id>-><target id>` for
-  `NEXT_WATCH` rows (S1.5):
+- **`decision_log`** (`20261006050000`), verbatim without its header comment. Written only by `app/decide.py` `decide()` (from `app/agent_tick.py`, `app/short_links.py`); `decide.link` sets `intervention_id`. `subject` = video id (`TRIAGE`) or `<source>-><target>` (`NEXT_WATCH`):
   ```sql
   create table if not exists decision_log (
       id                    bigserial   primary key,
@@ -406,14 +354,9 @@ These are the files. The live DB's migration ledger was not checked (unreachable
       intervention_id       bigint      references interventions(id) on delete set null
   );
   ```
-  `used` vocab (`app/status_vocab.py:370-377`, `DecisionUsed`): `rules|jev`; always `rules` in shadow. `jev_answer`
-  / `jev_probs` hold the configured backend's answer (`llm` by default), NULL when the backend failed.
+  `used` (`DecisionUsed`): always `rules` in shadow; `jev_answer`/`jev_probs` = the backend's answer (`llm`), NULL on failure.
 
-- **`lever_verdicts`** (`20261023010000`, S1.6b #68), verbatim without its header comment. Written by
-  `app/lever_verdicts.py` `write_verdicts` (`lever = 'backlinks'`, `'short_link'`, `'title'`) and, `app/playlist_test.py`
-  `measure_channel` (`lever = 'playlist'`, below), both from the weekly `lever_measurement` job; read by
-  `lever_verdicts.stopped` (the stop rule, through `agent_tick.backlinks_stopped` and, `titles.path_stopped`), `GET /channels/{id}/lever-verdicts`
-  and `GET /channels/{id}/playlist-test`. The `lever` column's comment still says `-- backlinks`:
+- **`lever_verdicts`** (`20261023010000`), verbatim without its header comment. Written weekly by `app/lever_verdicts.py` `write_verdicts` (`backlinks`, `short_link`, `title`) and `app/playlist_test.py` `measure_channel` (`playlist`); read by `lever_verdicts.stopped` (the stop rule), `GET /channels/{id}/lever-verdicts`, `/playlist-test`, `/title-test`:
   ```sql
   create table if not exists lever_verdicts (
       id                   bigserial        primary key,
@@ -434,55 +377,13 @@ These are the files. The live DB's migration ledger was not checked (unreachable
       unique (channel_id, lever, arm_scope, week_start)
   );
   ```
-  Vocab (`app/status_vocab.py`): `arm_scope` `treated_vs_holdout|human|pipeline_vs_holdout|agent_vs_holdout`
-  (`LeverVerdictScope`; the last two), `verdict` `helped|no_change|worse` (`LeverVerdict`), NULL on
-  `human` rows; `tests/test_status_vocab.py` checks the migration's column comments against them (the two title
-  scopes against `20261030010000`, which records the four, verbatim without its header comment:
-  `comment on column lever_verdicts.arm_scope is 'treated_vs_holdout|human|pipeline_vs_holdout|agent_vs_holdout';`). `week_start` is the Monday (UTC) of the week the rows were judged
-  in (`measurement_result.judged_at`). A `treated_vs_holdout` row: `n_treated`/`n_holdout` and the two means over
-  the `midas` rows judged that week, `lift` = treated mean delta − holdout mean delta, `cumulative_lift` the same
-  over every row judged up to that week, `windows_judged` = the channel's `treated_vs_holdout` weeks so far
-  (this one included), `verdict` = `helped` at `lift` ≥ `BACKLINK_MIN_LIFT`, `worse` at ≤ −it, else
-  `no_change`, `stop_rule_triggered` = `windows_judged` ≥ `BACKLINK_EXPERIMENT_WINDOWS` and `cumulative_lift` <
-  `BACKLINK_MIN_LIFT`. A `human` row: `n_treated` and `treated_mean_delta` of the `human` rows judged that week;
-  `n_holdout` 0, `holdout_mean_delta`, `lift`, `cumulative_lift` and `verdict` NULL, never stopped. A backlinks row whose video has `is_short` true enters neither scope (`_without_shorts`, since 2026-10-26: the pick took Shorts before #103); it is still measured. The DDL adds
-  `id` and the unique key to the ticket's column list; types and `not null`s are this build's.
-  **A `playlist` row (S2.3)**, always `treated_vs_holdout`: one per complete post week k of the channel's playlist
-  test, `week_start` = that week's first day (`test_end` + 1 + 7(k − 1), not a Monday), `n_treated`/`n_holdout` =
-  the dosed treated and holdout arms whose playlist is still in `playlists` (`no_dose` arms never count), the two
-  mean `delta`s of week k, `lift` = their difference, `cumulative_lift` = treated mean − holdout mean over every
-  arm's weeks 1 … k pooled, `windows_judged` = k, `verdict` = `directional(lift, PLAYLIST_MIN_LIFT)`,
-  `stop_rule_triggered` = k ≥ `PLAYLIST_EXPERIMENT_WINDOWS` and `cumulative_lift` < `PLAYLIST_MIN_LIFT` (the answer
-  "no"). Upserted on the same unique key, every week rewritten in place each run until the test is done.
-  **A `short_link` row (S2.6)**, always `human`: as backlinks' `human` row, over the `human` `short_link` rows
-  judged that week (`write_verdicts(lever='short_link')`): `n_treated`, `treated_mean_delta`, `windows_judged`;
-  no lift, no verdict, never stopped.
-  **A `title` row (S3.5)**, `arm_scope` `pipeline_vs_holdout` or `agent_vs_holdout`
-  (`write_verdicts(lever='title')`, `lever_verdicts.title_verdicts`): a path's rows against the one holdout, with
-  backlinks' `treated_vs_holdout` arithmetic over the `midas` `title` rows judged that week (`payload.path` picks
-  the path; an agent decline, arm `treated` without `applied_at`, is in the agent's mean, F14; a judged row put
-  back since, `cancelled` with `pre` ≥ `TITLE_MIN_PRE_VIEWS`, stays in), `windows_judged` = that scope's weeks so
-  far, `verdict` = `directional(lift, TITLE_MIN_LIFT)`, `stop_rule_triggered` = (`windows_judged` ≥
-  `TITLE_EXPERIMENT_WINDOWS` and `cumulative_lift` < `TITLE_MIN_LIFT`) or (`windows_judged` ≥ `TITLE_HARM_WINDOWS`
-  and `cumulative_lift` ≤ −`TITLE_HARM_LIFT`). Read by `titles.path_stopped` (`lever_verdicts.stopped(channel,
-  'title', scope)`) and `GET /channels/{id}/title-test`.
+  `arm_scope` `treated_vs_holdout|human|pipeline_vs_holdout|agent_vs_holdout` (`20261030010000`, verbatim without its header comment: `comment on column lever_verdicts.arm_scope is 'treated_vs_holdout|human|pipeline_vs_holdout|agent_vs_holdout';`); `verdict` `helped|no_change|worse`, NULL on `human`.
+  - backlinks `treated_vs_holdout`: per UTC week of `judged_at`; `lift` = treated − holdout mean delta, `cumulative_lift` over all weeks; verdict ±`BACKLINK_MIN_LIFT`; stop at `windows_judged` ≥ `BACKLINK_EXPERIMENT_WINDOWS` and `cumulative_lift` < `BACKLINK_MIN_LIFT`. Shorts excluded.
+  - `human` (backlinks, `short_link`): `n_treated`, `treated_mean_delta`, `windows_judged` only; never stops.
+  - `playlist`: per post week k of dosed vs holdout arms; verdict ±`PLAYLIST_MIN_LIFT`; stop at k ≥ `PLAYLIST_EXPERIMENT_WINDOWS` and `cumulative_lift` < `PLAYLIST_MIN_LIFT`.
+  - `title`: each path vs the shared holdout (declines in the agent mean); verdict ±`TITLE_MIN_LIFT`; stop at (≥ `TITLE_EXPERIMENT_WINDOWS` and `cumulative_lift` < `TITLE_MIN_LIFT`) or (≥ `TITLE_HARM_WINDOWS` and `cumulative_lift` ≤ −`TITLE_HARM_LIFT`).
 
-- **`playlist_arms`** (`20261027000000`, S2.1 #87), verbatim without its header comment, with the four columns it
-  adds to `playlist_proposals` (`20260519000000`: `id, video_id → videos, playlist_id → playlists, video_title,
-  playlist_title, action, similarity, decision_source, status default 'pending', proposed_at, decided_at`). Written
-  only by `app/playlist_test.py` `draw`, once per channel: one row per eligible playlist, and for a `planned` treated
-  arm its candidates as `playlist_proposals` rows `{video_id, playlist_id, video_title, playlist_title, action:
-  'add', similarity, decision_source: 'experiment', status: 'pending', arm_id}`, whose ids go on `proposal_ids` in
-  candidate rank. `eligible_members` = the playlist's current members with a `reembed.MODEL_VERSION` vector at the
-  draw. `app/playlist_test.py` `apply_channel` (the `playlist_test_apply` job) moves a treated arm
-  `planned` → `applying` → `dosed`/`no_dose` and writes `first_applied_at`/`last_applied_at`, and writes the
-  proposals' `applied_at`, `playlist_item_id` and `apply_error` (`{reason, detail, attempts}` on a failure,
-  `{reason: 'position_refused', detail}` on an add YouTube took only appended); `decide_proposals` writes their
-  `status`/`decided_at`. `app/playlist_test.py` `measure_channel` (the weekly `lever_measurement` job)
-  writes every arm's `measurement_status` (`awaiting_window` → `measuring` → `done`) and `measurement_result`
-  `{pre_weekly, weeks: [{k, start, end, starts, delta}], missing_days, added_video_views: [{k, views}],
-  computed_at}`, and at the last window moves `dosed`/`holdout` arms to `judged`, or `insufficient_data` when the
-  playlist is gone from `playlists` (`no_dose` stays):
+- **`playlist_arms`** (`20261027000000`), verbatim without its header comment, plus four `playlist_proposals` columns (that table: `id, video_id → videos, playlist_id → playlists, video_title, playlist_title, action, similarity, decision_source, status default 'pending', proposed_at, decided_at`). `app/playlist_test.py`: `draw` (once per channel) writes arms and `pending` `experiment` proposals; `apply_channel` moves treated arms `planned` → `applying` → `dosed`/`no_dose` and fills the proposals' apply columns (`apply_error {reason, detail, attempts}`); `measure_channel` writes `measurement_result {pre_weekly, weeks: [{k, start, end, starts, delta}], missing_days, added_video_views: [{k, views}], computed_at}` and ends arms `judged`/`insufficient_data`:
   ```sql
   create table if not exists playlist_arms (
       id                  bigserial    primary key,
@@ -507,22 +408,9 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   alter table playlist_proposals add column if not exists playlist_item_id text;
   alter table playlist_proposals add column if not exists apply_error      jsonb;
   ```
-  Vocab (`app/status_vocab.py`): `arm` `treated|holdout` (`PlaylistArm`); `status`
-  `planned|applying|dosed|no_dose|holdout|judged|insufficient_data` (`PlaylistArmStatus`; the draw writes only
-  `planned`, `no_dose` and `holdout`); `measurement_status` `awaiting_window|measuring|done`
-  (`PlaylistArmMeasurement`); `playlist_proposals.decision_source` `experiment` (`PlaylistProposalSource`, the only
-  value listed there; the older ones are literals in the frozen engine). `tests/test_status_vocab.py` checks the
-  migration's column comments against them, and `DECIDED_BY` in `app/static/channel.html` for `experiment`.
+  Vocab: `PlaylistArm`, `PlaylistArmStatus`, `PlaylistArmMeasurement`, `PlaylistProposalSource` (`experiment`).
 
-- **`short_link_recommendations`** (`20261027010000`, S2.4 #90), verbatim without its header comment. Written only by
-  `app/short_links.py` `refresh` (the weekly `short_link_refresh` job): per Short from `shorts` with no row yet, its
-  `targets` as `pending` rows (`rank` 1 … `SHORT_LINK_TARGETS`, in one insert, after asking each pair
-  `decide(NEXT_WATCH, "<short>-><target>", …)`), `similarity` the raw B6 cosine, `impressions` the target's warm
-  impressions, `feed_views` the Short's type-24 views at the refresh, `decision_log_id` the pair's log row (the log
-  row's `intervention_id` stays NULL). `app/short_links.py` `set_short_link` and `dismiss_short_link`
-  write `status` (`set`, `not_chosen`, `dismissed`), `decided_at` and, on a `set` row, `intervention_id` (§5
-  Routes). `app/short_links.py` `detect` writes `seen_at` (Pacific midnight of the first data-day the
-  pair had type-32 views in the window) when it is NULL. `channel_id` is nullable, as the spec's column list has it:
+- **`short_link_recommendations`** (`20261027010000`), verbatim without its header comment. Inserted only by `app/short_links.py` `refresh` (weekly): per new Short, `pending` target rows with B6 `similarity`, warm `impressions`, type-24 `feed_views`, and the pair's `NEXT_WATCH` `decision_log_id`. `set_short_link`/`dismiss_short_link` set `status`, `decided_at`, `intervention_id`; `detect` fills `seen_at`:
   ```sql
   create table if not exists short_link_recommendations (
       id                bigserial         primary key,
@@ -542,78 +430,75 @@ These are the files. The live DB's migration ledger was not checked (unreachable
       unique (short_id, target_video_id)
   );
   ```
-  Vocab (`app/status_vocab.py`, `ShortLinkStatus`): `pending|set|not_chosen|dismissed`; `refresh` writes only
-  `pending`, the S2.5 routes the other three. `tests/test_status_vocab.py` checks the migration's column comment and default against it.
+  Vocab `ShortLinkStatus`.
 
-Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_daily`, `interventions` and `decision_log` exist (plus `channels.agent_enabled`, and B6's `channels.playlist_thresholds`, which the spec doesn't name); the rest, and the Slice tables and columns, are listed in §7.1.
+Unbuilt spec tables: §7.1.
 
 ---
 
 ## 3. Config — verbatim
 
-Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.env` (not in git). The office
-`.env` is hand-carried and was not read; the office values on record are `AUTOPILOT_TICK_SECONDS=30`
-(`docs/PHASE_A_FINDINGS.md`) and the lever switches in §1 (`docs/PLAN_TO_2026-11-27.md`).
+Defaults from `app/config.py`. "Dev `.env`" = the local, untracked `.env`. Office `.env` not read; on record: `AUTOPILOT_TICK_SECONDS=30` (`docs/PHASE_A_FINDINGS.md`) and the lever switches in §1 (`docs/PLAN_TO_2026-11-27.md`).
 
 **Settings the spec names** (spec Part 1 A4/A6, Part 2 §8):
 
 | Setting | Code (`app/config.py`) | Spec | Differs? |
 |---|---|---|---|
-| `PLAYLIST_DISCOVERY_ENABLED` | `:121` `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | default false (Part 1 A4) | no |
+| `PLAYLIST_DISCOVERY_ENABLED` | `os.getenv("PLAYLIST_DISCOVERY_ENABLED", "false").lower() == "true"` | default false (Part 1 A4) | no |
 | `PLAYLIST_RECONCILE_WRITES_ENABLED` | `:122` same form, `"false"` | default false (A4) | no |
 | `PLAYLIST_TUNING_ENABLED` | `:123` same form, `"false"` | default false (A4) | no |
 | `REFLECTION_ENABLED` | `:34` same form, `"false"` | default false (A4) | no |
-| `STRATEGY_LABEL` | `:411` `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
-| `MIN_IMPRESSIONS` | `:191` `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | no (a separate setting, same default) |
-| `MEASUREMENT_WINDOW_DAYS` | `:190` `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
-| `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:126-128` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** in use: B6 calibrates per channel into `channels.playlist_thresholds` (`app/reembed.py` `calibrate_channel`, never writing `settings`), but the engine still reads these globals |
-| `TRAFFIC_INGEST_CHANNELS` | `:232-236` `{c.strip() for c in (os.getenv("TRAFFIC_INGEST_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | the rollout channel (Part 2 §8) | no |
-| `HOLDOUT_PCT` | `:240` `float(os.getenv("HOLDOUT_PCT") or "0.20")` | 0.20, per lever, stable hash (Part 2 §8) | no. Read only by `app/interventions.py` `assign_arm` |
-| `WARM_MIN_IMPRESSIONS` | `:245` `int(os.getenv("WARM_MIN_IMPRESSIONS") or "500")` | 500 (Part 2 §8) | no. Read only by `app/warm.py` |
-| `WARM_WINDOW_DAYS` | `:246` `int(os.getenv("WARM_WINDOW_DAYS")     or "28")` | 28 "Ingested data-days" (Part 2 §8) | no: the latest 28 reach data-days in the ledger (`app/warm.py`) |
-| `WARM_EXPLORE_PCT` | `:247` `float(os.getenv("WARM_EXPLORE_PCT")   or "0.10")` | 0.10 "Picks from the non-top warm pool" (Part 2 §8) | no. Read only by `app/warm.py` `warm_pool` |
-| `DECIDE_BACKEND` | `:258` `os.getenv("DECIDE_BACKEND") or "llm"` | `llm`; `jev` once access is set up (Part 2 §8) | no. Read only by `app/decide.py`; `jev` is a stub raising `NotConfigured`, an unknown value is a backend failure (rules answer stands) |
-| `BACKLINK_MIN_CANDIDATES` | `:261` `int(os.getenv("BACKLINK_MIN_CANDIDATES") or "2")` | 2 (Part 2 §8) | no. Read only by `app/decide.py` `TRIAGE` rules |
-| `BACKLINK_MAX` | `:265` `int(os.getenv("BACKLINK_MAX") or "3")` | 3 (Part 4 Config, Part 2 §8) | no. Read only by `app/backlinks.py` `render`, at call time, which refuses more targets rather than trimming |
-| `AUDIT_MODEL` | `:29` `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; dev `.env`: `google/gemini-3.7-flash` | reasoning model (Part 2 §3.1) | — |
-| `SIBLING_MIN_VIEWS` | `:270` `int(os.getenv("SIBLING_MIN_VIEWS") or "100")` | 100, inbound only (Part 4 Config, Part 2 §8) | no. Read only by `app/backlinks.py` `siblings`, over the source channel's latest 28 ingested traffic data-days (`SIBLING_WINDOW_DAYS`, a module constant) |
-| `BACKLINK_SIBLINGS_ENABLED` | `os.getenv("BACKLINK_SIBLINGS_ENABLED", "false").lower() == "true"` | not in the spec (P2 links to siblings) | **yes**: while false (the default, owner, 2026-11-16) `app/backlinks.py` `target_pool` reads no siblings, so every target is on the source's own channel (§7.3 item 35) |
-| `BACKLINK_DUPLICATE_SIM` | `float(os.getenv("BACKLINK_DUPLICATE_SIM") or "0.98")` | not in the spec | **yes**: `app/backlinks.py` `candidates` leaves out a target whose B6 cosine to the source, or to a better target already kept, is at or above it: a re-upload under another title (owner, 2026-11-16, §7.3 item 35) |
-| `TRIAGE_COOLDOWN_DAYS` | `:275` `int(os.getenv("TRIAGE_COOLDOWN_DAYS") or "7")` | 7 (Part 4 Config, finding 2; Part 2 §2.1, §8) | no. Read only by `app/warm.py` (in-app cooldown, and `p_cooldown_days` of the `warm_pool()` RPC) |
-| `BACKLINK_APPLY_ENABLED` | `:279` `os.getenv("BACKLINK_APPLY_ENABLED", "false").lower() == "true"` | false, the kill switch for YouTube writes (Part 4 Config) | **yes, stricter**: while false (and, the title lever is closed on the channel, `agent_tick.titles_open`) the agent tick does nothing at all (`app/autopilot.py` `_agent_tick` returns `apply_disabled` before any pick, triage or record), where the spec has treated rows cancelled with `apply_disabled`. With titles open it still ticks, and triage's `backlinks_enabled` (this switch and a heading for the language, `agent_tick.backlinks_enabled`) keeps backlinks out. `app/backlinks_apply.py` still refuses on its own (`apply_backlinks`, `POST /interventions/{id}/revert`, 409) |
-| `TITLE_APPLY_ENABLED` | `os.getenv("TITLE_APPLY_ENABLED", "false").lower() == "true"` | false, the kill switch for title writes (Part 6 Config, F1); "while false no title row is written" | read only by `app/titles_apply.py` (`apply_title`, `revert_title`): while false both refuse `apply_disabled` (409) and send nothing. Also by `app/agent_tick.py` `titles_open`: while false triage never answers `title`, so no title row is written |
-| `LEVER_MIN_SOURCE_VIEWS` | `:341` `int(os.getenv("LEVER_MIN_SOURCE_VIEWS") or "100")` | 100, §1.7 floor on the source's post-window views (Part 4 Config, Part 2 §1.7, §8) | no. Read only by `app/lever_measurement.py` `evaluate`: under it the post window is extended once to 14 days, then `insufficient_data` |
-| `BACKLINK_EXPERIMENT_WINDOWS` | `:346` `int(os.getenv("BACKLINK_EXPERIMENT_WINDOWS") or "3")` | 3, the P1 time box (Part 4 Config, Part 2 §8) | no. Read only by `app/lever_verdicts.py` `write_verdicts`, passed to `verdicts`: the stop rule needs `windows_judged` ≥ it |
-| `BACKLINK_MIN_LIFT` | `:350` `float(os.getenv("BACKLINK_MIN_LIFT") or "1.0")` | 1.0 attributable views per treated video per week (Part 4 Config, D6, Part 2 §8) | no. Read only by `app/lever_verdicts.py` `write_verdicts`, which passes it to `verdicts`/`directional`: the verdict band (±it) and the stop rule's bar on `cumulative_lift` |
-| `PLAYLIST_HOLDOUT_PCT` | `:354` `float(os.getenv("PLAYLIST_HOLDOUT_PCT") or "0.5")` | 0.5, per playlist, stable hash (Part 5 Config, E4) | no. Read only by `app/playlist_test.py` `assign_arm` |
-| `PLAYLIST_TEST_MAX_ADDS` | `:357` `int(os.getenv("PLAYLIST_TEST_MAX_ADDS") or "5")` | 5, per treated playlist (Part 5 Config, E5) | no. Read only by `app/playlist_test.py` (`candidates`, `draw`, `preview`) |
-| `PLAYLIST_APPLY_ENABLED` | `:361` `os.getenv("PLAYLIST_APPLY_ENABLED", "false").lower() == "true"` | false, the kill switch for the test's YouTube writes (Part 5 Config) | no. Read only by `app/playlist_test.py` `run_apply`: while false the job logs `"playlist_test_apply skipped: PLAYLIST_APPLY_ENABLED=false"` and does nothing |
-| `PLAYLIST_TEST_DAILY_UNITS` | `:364` `int(os.getenv("PLAYLIST_TEST_DAILY_UNITS") or "2000")` | 2000, `JobBudget` for `playlist_test_apply` (Part 5 Config, E5) | no. Read only by `app/playlist_test.py` `run_apply` |
-| `PLAYLIST_TEST_MAX_ATTEMPTS` | `:367` `int(os.getenv("PLAYLIST_TEST_MAX_ATTEMPTS") or "3")` | 3, runs a failing add is retried (Part 5 Config) | no. Read only by `app/playlist_test.py` (`_sendable`); only a `failed` error uses up an attempt (§7.3 item 22) |
-| `PLAYLIST_EXPERIMENT_WINDOWS` | `:370` `int(os.getenv("PLAYLIST_EXPERIMENT_WINDOWS") or "4")` | 4, weekly windows before the answer (Part 5 Config, E8) | no. Read only by `app/playlist_test.py` (`measure_channel`, `_answer`): the post weeks measured, and the window of the stop rule and the answer |
-| `PLAYLIST_MIN_LIFT` | `:374` `float(os.getenv("PLAYLIST_MIN_LIFT") or "1.0")` | 1.0 starts per playlist per week (Part 5 Config, E8) | no. Read only by `app/playlist_test.py` `measure_channel`: the verdict band (`lever_verdicts.directional`, ±it) and the stop rule's bar on `cumulative_lift` |
-| `SHORT_LINK_CHANNELS` | `:379-383` `{c.strip() for c in (os.getenv("SHORT_LINK_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | Marathi, comma list (Part 5 Config, E13) | no. Read only by `app/short_links.py` `run_weekly`, intersected with `TRAFFIC_INGEST_CHANNELS` |
-| `SHORT_LINK_TARGETS` | `:385` `int(os.getenv("SHORT_LINK_TARGETS") or "3")` | 3 (Part 5 Config, E10) | no. Read only by `app/short_links.py` `targets` |
-| `SHORT_LINK_MIN_FEED_VIEWS` | `:389` `int(os.getenv("SHORT_LINK_MIN_FEED_VIEWS") or "1")` | 1 type-24 view over 28 ingested data-days (Part 5 Config, E9) | no. Read only by `app/short_links.py` `shorts` |
-| `SHORT_LINK_MAX_PER_RUN` | `:392` `int(os.getenv("SHORT_LINK_MAX_PER_RUN") or "50")` | 50 Shorts per weekly run (Part 5 Config) | no. Read only by `app/short_links.py` `_plan`: Shorts written per run; Shorts skipped without a vector or a target don't count (§7.3 item 24) |
-| `SHORT_LINK_SEEN_MIN_VIEWS` | `:396` `int(os.getenv("SHORT_LINK_SEEN_MIN_VIEWS") or "1")` | 1 type-32 view for a pair to count as set (Part 5 Config, S2.6) | no. Read only by `app/short_links.py` `seen_pairs`, over the target channel's latest 28 ingested traffic data-days |
-| `WRITER_MODEL` | `os.getenv("WRITER_MODEL") or AUDIT_MODEL` | = `AUDIT_MODEL`, set from the bake-off (Part 6 Config, F9) | no. Read by `app/titles.py` (`write_candidates`' default model, the title stamp's `writer_model`) and `app/agent/loop.py` (the trajectory's `writer_model`); no longer by the audit stamp (§6) |
-| `TITLE_CANDIDATES` | `int(os.getenv("TITLE_CANDIDATES") or "3")` | 3 candidates per writer call (Part 6 Config) | no. Read by `app/titles.py` (`system_prompt`, `_candidates` keeps at most this many) and `app/agent/tools.py` (the `write_candidates` tool's description) |
-| `TITLE_MAX_IMPRESSIONS` | `int(os.getenv("TITLE_MAX_IMPRESSIONS") or "5000000")` | 5000000, plus the top 1% (Part 6 Config, F2) | no. Read by `app/titles.py` `_ceiling` (`channel_context.ceiling`), read through the cached `agent_tick.title_channel` by triage's `title_excluded` |
-| `TITLE_AGENT_PCT` | `float(os.getenv("TITLE_AGENT_PCT") or "0.5")` | 0.5, 0 = pipeline only (Part 6 Config, F5) | no. Read by `app/titles.py` `title_path`, routed by `titles.route` (S3.3; a closed path hands its videos to the other if that one is open) and, since `a1c3d3c`, by `titles._share` (`path_closed`: 0 closes the agent path, 1 the pipeline) for the tick and the preview |
-| `TITLE_CHANNELS` | `{c.strip() for c in (os.getenv("TITLE_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | Marathi, comma list (Part 6 Config, F3) | no. Read only by `app/agent_tick.py` `titles_open` |
-| `TITLE_DAILY_CAP` | `int(os.getenv("TITLE_DAILY_CAP") or "10")` | 10 treated title rows per channel per day, inside `autopilot_daily_cap` (Part 6 Config, F4) | no. Read only by `app/agent_tick.py` `_title_enabled`, over `_titles_today` (UTC day, arm `treated`, status not `declined`) |
-| `TITLE_AGENT_DAILY_RUNS` | `int(os.getenv("TITLE_AGENT_DAILY_RUNS") or "20")` | 20 agent runs per channel per day, declines included (Part 6 Config, F14) | no. Read only by `app/agent_tick.py` `_title_enabled`, for a video on the agent path: `title` rows with `payload.path = 'agent'` today, any status |
-| `TITLE_EXCLUDE_VIDEOS` | `{v.strip() for v in (os.getenv("TITLE_EXCLUDE_VIDEOS") or "").split(",") if v.strip()}` | empty, comma list (Part 6 Config, F12) | no. Read by `app/agent_tick.py` `_assess` (`title_excluded`) and `app/titles.py` `would_title` |
-| `AGENT_MAX_TURNS` | `int(os.getenv("AGENT_MAX_TURNS") or "12")` | 12 (Part 6 Config, Part 2 §8) | no. Read only by `app/agent/loop.py` `run_title_agent`: the `chat_tools` calls a run gets before it ends `failed`, `turn_cap` |
-| `TITLE_WINDOW_DAYS` | `int(os.getenv("TITLE_WINDOW_DAYS") or "14")` | 14, post window; pre is 14 (Part 6 Config, F6) | no. Read only by `app/title_measurement.py` (`windows`, the decided-row read); the pre is the module's `PRE_DAYS` (14) |
-| `TITLE_MIN_PRE_VIEWS` | `int(os.getenv("TITLE_MIN_PRE_VIEWS") or "100")` | 100 browse + suggested views in the pre window, else `insufficient_data` (Part 6 Config, F6); search counted too (§7.3 item 34) | no. Read by `app/title_measurement.py` `evaluate` and `app/lever_verdicts.py` (`_title_judged`, `_counted`: a `cancelled` row with `pre` at it or over was judged, then put back) |
-| `TITLE_MIN_LIFT` | `float(os.getenv("TITLE_MIN_LIFT") or "0.05")` | 0.05, log-ratio verdict band and stop bar (Part 6 Config, F7) | no. Read only by `app/lever_verdicts.py` `title_verdicts` |
-| `TITLE_EXPERIMENT_WINDOWS` | `int(os.getenv("TITLE_EXPERIMENT_WINDOWS") or "4")` | 4 (Part 6 Config, F7) | no. Read only by `app/lever_verdicts.py` `title_verdicts` |
-| `TITLE_HARM_WINDOWS` | `int(os.getenv("TITLE_HARM_WINDOWS") or "2")` | 2 (Part 6 Config, F7) | no. Read only by `app/lever_verdicts.py` `title_verdicts` |
-| `TITLE_HARM_LIFT` | `float(os.getenv("TITLE_HARM_LIFT") or "0.10")` | 0.10 (Part 6 Config, F7) | no. Read only by `app/lever_verdicts.py` `title_verdicts`: cumulative lift ≤ −it stops a path early |
-| `TITLE_REVERT_LIFT` | `float(os.getenv("TITLE_REVERT_LIFT") or "0.30")` | 0.30 (Part 6 Config, F8) | no. Read only by `app/lever_verdicts.py` `auto_revert` |
-| `TITLE_REVERTS_PER_DAY` | `int(os.getenv("TITLE_REVERTS_PER_DAY") or "10")` | 10 per channel per run (Part 6 Config, F8) | no. Read only by `app/lever_verdicts.py` `auto_revert`: reverts done (a skipped title doesn't count) |
+| `STRATEGY_LABEL` | `os.getenv("STRATEGY_LABEL") or "2026.07-baseline"` | prefix of a derived `strategy_version` (A6, Part 2 §8) | derived per audit, not at startup (§7.3) |
+| `MIN_IMPRESSIONS` | `int(os.getenv("MIN_IMPRESSIONS") or "500")` | `WARM_MIN_IMPRESSIONS` starts "Same as `MIN_IMPRESSIONS`" (Part 2 §8) | no (separate setting, same default) |
+| `MEASUREMENT_WINDOW_DAYS` | `or "21"` | measurement runs weekly (Part 2 §1.1); 14-day extension (§1.7) | **differs** (21-day window) |
+| `PLAYLIST_JOIN_HIGH` / `_LOW` / `PLAYLIST_LEAVE` | `:126-128` `or "0.72"` / `"0.55"` / `"0.60"`, process-global | per channel, recalibrated (Part 2 §4, Part 3 B6) | **differs** in use: B6 calibrates per channel into `channels.playlist_thresholds` (`app/reembed.py` `calibrate_channel`), but the engine still reads these globals |
+| `TRAFFIC_INGEST_CHANNELS` | `{c.strip() for c in (os.getenv("TRAFFIC_INGEST_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | the rollout channel (Part 2 §8) | no |
+| `HOLDOUT_PCT` | `float(os.getenv("HOLDOUT_PCT") or "0.20")` | 0.20, per lever, stable hash (Part 2 §8) | no; `interventions.assign_arm` |
+| `WARM_MIN_IMPRESSIONS` | `int(os.getenv("WARM_MIN_IMPRESSIONS") or "500")` | 500 (Part 2 §8) | no; `app/warm.py` |
+| `WARM_WINDOW_DAYS` | `int(os.getenv("WARM_WINDOW_DAYS")     or "28")` | 28 "Ingested data-days" (Part 2 §8) | no; `app/warm.py` |
+| `WARM_EXPLORE_PCT` | `float(os.getenv("WARM_EXPLORE_PCT")   or "0.10")` | 0.10 "Picks from the non-top warm pool" (Part 2 §8) | no; `warm.warm_pool` |
+| `DECIDE_BACKEND` | `os.getenv("DECIDE_BACKEND") or "llm"` | `llm`; `jev` once access is set up (Part 2 §8) | no; `app/decide.py` |
+| `BACKLINK_MIN_CANDIDATES` | `int(os.getenv("BACKLINK_MIN_CANDIDATES") or "2")` | 2 (Part 2 §8) | no; `decide.TRIAGE` rules |
+| `BACKLINK_MAX` | `int(os.getenv("BACKLINK_MAX") or "3")` | 3 (Part 4 Config, Part 2 §8) | no; `backlinks.render` |
+| `AUDIT_MODEL` | `os.getenv("AUDIT_MODEL") or "anthropic/claude-haiku-4.5"`; dev `.env`: `google/gemini-3.7-flash` | reasoning model (Part 2 §3.1) | — |
+| `SIBLING_MIN_VIEWS` | `int(os.getenv("SIBLING_MIN_VIEWS") or "100")` | 100, inbound only (Part 4 Config, Part 2 §8) | no; `backlinks.siblings` |
+| `BACKLINK_SIBLINGS_ENABLED` | `os.getenv("BACKLINK_SIBLINGS_ENABLED", "false").lower() == "true"` | not in the spec (P2 links to siblings) | **yes**: while false (default, owner 2026-11-16) `backlinks.target_pool` reads no siblings, so every target is on the source's own channel (§7.3 item 35) |
+| `BACKLINK_DUPLICATE_SIM` | `float(os.getenv("BACKLINK_DUPLICATE_SIM") or "0.98")` | not in the spec | **yes**: `backlinks.candidates` drops a target whose B6 cosine to the source or a better kept target is ≥ it (a re-upload; §7.3 item 35) |
+| `TRIAGE_COOLDOWN_DAYS` | `int(os.getenv("TRIAGE_COOLDOWN_DAYS") or "7")` | 7 (Part 4 Config, finding 2; Part 2 §2.1, §8) | no; `app/warm.py` |
+| `BACKLINK_APPLY_ENABLED` | `os.getenv("BACKLINK_APPLY_ENABLED", "false").lower() == "true"` | false, the kill switch for YouTube writes (Part 4 Config) | **yes, stricter**: while false and titles are closed, `_agent_tick` returns `apply_disabled` before any pick, where the spec cancels treated rows; with titles open, triage's `backlinks_enabled` keeps backlinks out |
+| `TITLE_APPLY_ENABLED` | `os.getenv("TITLE_APPLY_ENABLED", "false").lower() == "true"` | false, the kill switch for title writes (Part 6 Config, F1); "while false no title row is written" | no; `app/titles_apply.py`, `agent_tick.titles_open` |
+| `LEVER_MIN_SOURCE_VIEWS` | `int(os.getenv("LEVER_MIN_SOURCE_VIEWS") or "100")` | 100, §1.7 floor on the source's post-window views (Part 4 Config, Part 2 §1.7, §8) | no; `lever_measurement.evaluate` |
+| `BACKLINK_EXPERIMENT_WINDOWS` | `int(os.getenv("BACKLINK_EXPERIMENT_WINDOWS") or "3")` | 3, the P1 time box (Part 4 Config, Part 2 §8) | no; `lever_verdicts.write_verdicts` |
+| `BACKLINK_MIN_LIFT` | `float(os.getenv("BACKLINK_MIN_LIFT") or "1.0")` | 1.0 attributable views per treated video per week (Part 4 Config, D6, Part 2 §8) | no; `lever_verdicts.write_verdicts` |
+| `PLAYLIST_HOLDOUT_PCT` | `float(os.getenv("PLAYLIST_HOLDOUT_PCT") or "0.5")` | 0.5, per playlist, stable hash (Part 5 Config, E4) | no; `playlist_test.assign_arm` |
+| `PLAYLIST_TEST_MAX_ADDS` | `int(os.getenv("PLAYLIST_TEST_MAX_ADDS") or "5")` | 5, per treated playlist (Part 5 Config, E5) | no; `app/playlist_test.py` |
+| `PLAYLIST_APPLY_ENABLED` | `os.getenv("PLAYLIST_APPLY_ENABLED", "false").lower() == "true"` | false, the kill switch for the test's YouTube writes (Part 5 Config) | no; `playlist_test.run_apply` |
+| `PLAYLIST_TEST_DAILY_UNITS` | `int(os.getenv("PLAYLIST_TEST_DAILY_UNITS") or "2000")` | 2000, `JobBudget` for `playlist_test_apply` (Part 5 Config, E5) | no; `playlist_test.run_apply` |
+| `PLAYLIST_TEST_MAX_ATTEMPTS` | `int(os.getenv("PLAYLIST_TEST_MAX_ATTEMPTS") or "3")` | 3, runs a failing add is retried (Part 5 Config) | no; `playlist_test._sendable` |
+| `PLAYLIST_EXPERIMENT_WINDOWS` | `int(os.getenv("PLAYLIST_EXPERIMENT_WINDOWS") or "4")` | 4, weekly windows before the answer (Part 5 Config, E8) | no; `app/playlist_test.py` |
+| `PLAYLIST_MIN_LIFT` | `float(os.getenv("PLAYLIST_MIN_LIFT") or "1.0")` | 1.0 starts per playlist per week (Part 5 Config, E8) | no; `playlist_test.measure_channel` |
+| `SHORT_LINK_CHANNELS` | `{c.strip() for c in (os.getenv("SHORT_LINK_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | Marathi, comma list (Part 5 Config, E13) | no; `short_links.run_weekly`, ∩ `TRAFFIC_INGEST_CHANNELS` |
+| `SHORT_LINK_TARGETS` | `int(os.getenv("SHORT_LINK_TARGETS") or "3")` | 3 (Part 5 Config, E10) | no; `short_links.targets` |
+| `SHORT_LINK_MIN_FEED_VIEWS` | `int(os.getenv("SHORT_LINK_MIN_FEED_VIEWS") or "1")` | 1 type-24 view over 28 ingested data-days (Part 5 Config, E9) | no; `short_links.shorts` |
+| `SHORT_LINK_MAX_PER_RUN` | `int(os.getenv("SHORT_LINK_MAX_PER_RUN") or "50")` | 50 Shorts per weekly run (Part 5 Config) | no; `short_links._plan` |
+| `SHORT_LINK_SEEN_MIN_VIEWS` | `int(os.getenv("SHORT_LINK_SEEN_MIN_VIEWS") or "1")` | 1 type-32 view for a pair to count as set (Part 5 Config, S2.6) | no; `short_links.seen_pairs` |
+| `WRITER_MODEL` | `os.getenv("WRITER_MODEL") or AUDIT_MODEL` | = `AUDIT_MODEL`, set from the bake-off (Part 6 Config, F9) | no; `app/titles.py`, `app/agent/loop.py` |
+| `TITLE_CANDIDATES` | `int(os.getenv("TITLE_CANDIDATES") or "3")` | 3 candidates per writer call (Part 6 Config) | no; `app/titles.py`, `app/agent/tools.py` |
+| `TITLE_MAX_IMPRESSIONS` | `int(os.getenv("TITLE_MAX_IMPRESSIONS") or "5000000")` | 5000000, plus the top 1% (Part 6 Config, F2) | no; `titles._ceiling` |
+| `TITLE_AGENT_PCT` | `float(os.getenv("TITLE_AGENT_PCT") or "0.5")` | 0.5, 0 = pipeline only (Part 6 Config, F5) | no; `titles.title_path`, `titles.route`, `titles._share` |
+| `TITLE_CHANNELS` | `{c.strip() for c in (os.getenv("TITLE_CHANNELS") or "UCr5-YUqBiW7PUmeAtxUWuRg").split(",") if c.strip()}` | Marathi, comma list (Part 6 Config, F3) | no; `agent_tick.titles_open` |
+| `TITLE_DAILY_CAP` | `int(os.getenv("TITLE_DAILY_CAP") or "10")` | 10 treated title rows per channel per day, inside `autopilot_daily_cap` (Part 6 Config, F4) | no; `agent_tick._title_enabled` |
+| `TITLE_AGENT_DAILY_RUNS` | `int(os.getenv("TITLE_AGENT_DAILY_RUNS") or "20")` | 20 agent runs per channel per day, declines included (Part 6 Config, F14) | no; `agent_tick._title_enabled` |
+| `TITLE_EXCLUDE_VIDEOS` | `{v.strip() for v in (os.getenv("TITLE_EXCLUDE_VIDEOS") or "").split(",") if v.strip()}` | empty, comma list (Part 6 Config, F12) | no; `agent_tick._assess`, `titles.would_title` |
+| `AGENT_MAX_TURNS` | `int(os.getenv("AGENT_MAX_TURNS") or "12")` | 12 (Part 6 Config, Part 2 §8) | no; `agent.loop.run_title_agent` |
+| `TITLE_WINDOW_DAYS` | `int(os.getenv("TITLE_WINDOW_DAYS") or "14")` | 14, post window; pre is 14 (Part 6 Config, F6) | no; `app/title_measurement.py` |
+| `TITLE_MIN_PRE_VIEWS` | `int(os.getenv("TITLE_MIN_PRE_VIEWS") or "100")` | 100 browse + suggested views in the pre window, else `insufficient_data` (Part 6 Config, F6) | search counted too (§7.3 item 34); `title_measurement.evaluate`, `app/lever_verdicts.py` |
+| `TITLE_MIN_LIFT` | `float(os.getenv("TITLE_MIN_LIFT") or "0.05")` | 0.05, log-ratio verdict band and stop bar (Part 6 Config, F7) | no; `lever_verdicts.title_verdicts` |
+| `TITLE_EXPERIMENT_WINDOWS` | `int(os.getenv("TITLE_EXPERIMENT_WINDOWS") or "4")` | 4 (Part 6 Config, F7) | no; `lever_verdicts.title_verdicts` |
+| `TITLE_HARM_WINDOWS` | `int(os.getenv("TITLE_HARM_WINDOWS") or "2")` | 2 (Part 6 Config, F7) | no; `lever_verdicts.title_verdicts` |
+| `TITLE_HARM_LIFT` | `float(os.getenv("TITLE_HARM_LIFT") or "0.10")` | 0.10 (Part 6 Config, F7) | no; `lever_verdicts.title_verdicts` |
+| `TITLE_REVERT_LIFT` | `float(os.getenv("TITLE_REVERT_LIFT") or "0.30")` | 0.30 (Part 6 Config, F8) | no; `lever_verdicts.auto_revert` |
+| `TITLE_REVERTS_PER_DAY` | `int(os.getenv("TITLE_REVERTS_PER_DAY") or "10")` | 10 per channel per run (Part 6 Config, F8) | no; `lever_verdicts.auto_revert` |
 | `PLAYBOOK_MIN_VIDEOS_PER_PATTERN` (5), `NICHE_REFERENCE_REFRESH_DAYS` (90), `NICHE_REFERENCE_QUOTA_BUDGET` (500) | **absent** | Part 2 §8 start values | **absent** |
 
 **Every other setting, verbatim defaults** (`app/config.py`; dev `.env` overrides noted):
@@ -666,68 +551,50 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 
 ## 4. Scheduled jobs
 
-All registered in `app/main.py:304` `_register_jobs()`, called from `lifespan()` (`app/main.py:560-571`),
-`BackgroundScheduler`, each `max_instances=1, coalesce=True`.
+All registered in `app/main.py` `_register_jobs()`, called from `lifespan()`; `BackgroundScheduler`, each
+`max_instances=1, coalesce=True`.
 
-**Failure semantics.** `_run_per_channel` (`app/main.py:82-108`) runs every channel, logs each failure at ERROR
-with traceback as `"<label> (job <job_id>) failed for <id>: <err>"`, and after the last channel raises one
-`job_status.JobRunFailed` naming the failed channels, so APScheduler records the run as failed.
-`video_sync`, `playlist_reconcile`, `playlist_discovery`, `playlist_tuning`, `reflection` and
-`playlist_health_score` use it. `metrics_poll`, `reporting_poll` and `traffic_poll` collect channels that raised anything but the
-expected skips and raise `JobRunFailed("metrics_poll" | "reporting_poll" | "traffic_poll", …)` (`app/traffic_poll.py:207`, `app/metrics_poll.py:418`,
-`app/reporting_poll.py:358`). Per-item errors inside a channel's poll are judged by
-`job_status.item_error_verdict` (`app/job_status.py:50`) per category: all attempted items in a category failed →
-the channel fails as `"ItemsFailed: <category>: all <n> failed"`; some failed → the poll returns
-`{"partial_errors": {…}}` (`app/metrics_poll.py:421`, `app/reporting_poll.py:359`), recorded as `degraded`.
-`measurement_eval` raises `JobRunFailed("measurement_eval", failed)` when any audit errored
-(`app/main.py:282-291`). `job_status.registry.watch(scheduler)` (`app/main.py:571`) registers every job as
-`never_run` and records `status` (`never_run|success|degraded|failed`), `last_run_at`, `error`,
-`failed_channels`, `partial_errors`, logging `"JOB FAILED <job_id> at <time>: <error>"` /
-`"JOB DEGRADED <job_id> at <time>: …"` (`app/job_status.py`). Kept across restarts: `job_status.registry.persist_to` (`app/main.py`
-`lifespan`) loads and rewrites `job_status.json` under `LOG_DIR` (bind-mounted `./logs` at the office), every cron
-run saved, an interval job's unchanged status at most once a minute (`SAVE_EVERY_SECONDS` = 60); `watch` drops
-saved entries of jobs no longer registered. Served at `GET /health/jobs` (`app/main.py`).
+**Failure semantics.** `_run_per_channel` (`video_sync`, `playlist_reconcile`, `playlist_discovery`,
+`playlist_tuning`, `reflection`, `playlist_health_score`) runs every channel, then raises one `JobRunFailed`
+naming the failed ones. **Standard failure model** (the
+polls and the newer jobs): a channel that raises anything but an expected skip fails the run once every channel
+has run (`JobRunFailed("<job>", …)`); per-item errors go through `job_status.item_error_verdict` per category: all
+failed → the channel fails as `"ItemsFailed: <category>: all <n> failed"`, some → `partial_errors`, recorded
+`degraded`. `measurement_eval` raises `JobRunFailed` when any audit errored. `job_status.registry` records each job's `status`
+(`never_run|success|degraded|failed`) and errors, kept in `LOG_DIR/job_status.json`, served at `GET /health/jobs`.
 
 **Freeze flags (A4).** With its flag false a writer is not registered and startup logs
 `"<job_id> not registered: <FLAG>=false"`. `playlist_reconcile` always registers; with
 `PLAYLIST_RECONCILE_WRITES_ENABLED=false` it runs `sync_playlists` and skips `reconcile_channel`, logging
-`"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` per channel
-(`app/main.py:170-174`) and `"playlist_reconcile registered for sync only: add/remove skipped
-(PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` at startup (`app/main.py:335-337`). All four flags default false (§3);
-the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.md` A0).
+`"Daily reconcile <id>: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` per channel and
+`"playlist_reconcile registered for sync only: add/remove skipped (PLAYLIST_RECONCILE_WRITES_ENABLED=false)"` at
+startup. All four flags default false (§3); confirmed at the office 2026-09-29.
 
 | Job id | Trigger | Entry point | Status |
 |---|---|---|---|
-| `autopilot` | interval `AUTOPILOT_TICK_SECONDS` (`app/main.py:314`) | `app/autopilot.py:533` `tick`: quota-dormancy gate → pick channel (`Job.AUTOPILOT` = `can_audit or can_cut_shorts`) → Shorts action → **`agent_enabled` → the agent path** (`_agent_tick`: `can_run_agent` gate, else `agent_ineligible` → neither lever can run (backlinks: `BACKLINK_APPLY_ENABLED` and a heading for the channel's `default_language` in `backlinks.HEADINGS`, `agent_tick.backlinks_enabled`; titles, S3.3: the channel in `TITLE_CHANNELS`, `TITLE_APPLY_ENABLED`, the lever not stopped, `agent_tick.titles_open`) → `apply_disabled` while `BACKLINK_APPLY_ENABLED` is off, else `no_heading`, nothing else runs → `_resync_if_stale` → daily cap → ledger quota gate → `agent_tick.run`: warm pick → triage (backlinks, then `title`, S3.3) → record → treated apply (`apply_backlinks` or, for a title, the path's writer (the pipeline, or the agent, which may decline: no apply) then `apply_title`); never `audit_video`) → every other channel: nothing after the Shorts action (`shorts_only`, the channel touched so the round-robin moves on; the house-format branch, `can_audit` → `audit_video` → validate → apply, and its setting were deleted by S3.6, F13) | registered. On the agent channels (`agent_enabled = autopilot_enabled = t`) it runs the agent path; on every other channel only the Shorts action, whatever `autopilot_enabled` says. `_can_afford_apply` (`app/autopilot.py:450-466`) logs `quota_insufficient` and skips without pausing. The daily cap (`autopilot_daily_cap`, default 10) counts applied audits, `midas` interventions with `applied_at` today, and today's `midas` treated rows that never reached YouTube (`applied_at` NULL: DRY_RUN, a refused render, a YouTube error; for titles also `checks_failed` and `writer_exception`, and an agent run's `turn_cap`; an agent decline, treated `declined`, doesn't count: `_applies_today`'s unsent count leaves out `declined`, F14), so a systematic failure is bounded too (`_applies_today`, `app/autopilot.py`; applied audits count only through the manual routes); holdout and declined rows don't count. Titles count toward it like backlinks (S3.3), and also have their own `TITLE_DAILY_CAP`/`TITLE_AGENT_DAILY_RUNS` (§3), which turn triage away from `title` rather than stop the tick. Agent-path apply errors get `_react_to_apply_error` ( quotaExceeded → fleet dormancy, token expiry → pause, `failed` → failure count; `apply_disabled`, `quota_insufficient` → none); anything unclassified (including a title writer that raises) is `agent_failed` and a failure count |
-| `shorts_dispatch` | interval `SHORTS_DISPATCH_INTERVAL_SECONDS` (5 s) (`:322`) | `app/shorts/dispatcher.py:dispatch_tick` | registered |
-| `playlist_reconcile` | cron 02:00 server-local (`:331`) | `main._daily_reconcile` (`:136`) → `sync_playlists` (shared `JobBudget("playlist_sync", PLAYLIST_SYNC_QUOTA_BUDGET, reserve=YT_QUOTA_APPLY_RESERVE)`) + `reconcile_channel` | registered; channels = `PLAYLIST_RECONCILE_CHANNELS` allowlist (`app/eligibility.py:186-195`). **Add/remove frozen** by `PLAYLIST_RECONCILE_WRITES_ENABLED`; inventory sync and the budgeted membership walk still run. **Human-edit ledger (B3b):** for a playlist walked before (`membership_walked_at` not NULL at plan time), each page's memberships the walk has no `playlist_assignments` row for go to `human_edits.record_playlist_additions` before the walk seeds its `sync` rows (`app/playlists_sync.py:297-328`); a playlist's first walk is the baseline and records none. A ledger error is logged as `"sync_playlists <id>: human-edit ledger failed; walk continues: <err>"` and never fails the walk (`_record_human_memberships`, `app/playlists_sync.py:361-370`). The manual `POST /channels/{id}/playlists/bootstrap` runs the same walk (`app/playlists_router.py:192`) |
-| `playlist_discovery` | cron Sun 03:00 local (`:345`) | `main._weekly_discovery` → `app/playlist_discovery.py:152` `discover_playlists` | **frozen** (`PLAYLIST_DISCOVERY_ENABLED`). When on: every channel; **creates playlists** (≤2/run), skipped under `DRY_RUN` |
-| `reflection` | cron Mon 04:00 local (`:358`) | `app/reflection.py:702` `reflect` | **frozen** (`REFLECTION_ENABLED`). When on: every channel |
-| `playlist_tuning` | cron Mon 03:30 local (`:371`) | `app/playlists.py:463` `tune_thresholds` | **frozen** (`PLAYLIST_TUNING_ENABLED`). When on: writes `settings.PLAYLIST_JOIN_HIGH` process-globally (`app/playlists.py:518`) |
-| `video_sync` | cron 04:00 UTC (`:386`) | `main._daily_video_sync` (`:248`) → `app/sync.py:546` `routine_sync` per channel | registered, every channel. Read-only: `"fresh"` if synced within 6 h, else a full pass if the last full sync is >3 days old, else incremental + `refresh_stats`. An expired or revoked token is an expected skip, logged `"video_sync <id>: OAuth token expired; skipping until re-consent"`; since fleet readiness the run then returns `{"partial_errors": {<id>: "token_expired: re-consent needed"}}`, so it records `degraded` rather than `success`; any other error, including a YouTube 401 that isn't a token failure, fails the channel. The skip works because `sync_channel`, `refresh_stats` and `refresh_applied_stats` are wrapped by `_token_failure_as_401` (`app/sync.py:54`), which turns a `TokenExpiredError` from anywhere in the call (at `youtube_for_channel`, or mid-call from the `yt_*` helpers' `invalid_grant` check, `app/youtube_client.py:63-66`) into `TokenExpired` (`app/sync.py:41`): an `HTTPException(401, "token_expired")` that is also a `TokenExpiredError`. Before B8 these raised a plain `HTTPException(401)`, which failed the run (2026-10-06, Hindi, §8). The autopilot resync catches the same type (`app/autopilot.py:413`). **Human-edit ledger (B3a):** a full pass also reads the stored descriptions and, before the videos upsert, hands every re-read (id, stored, fetched) description to `human_edits.record_description_edits` (`app/sync.py:262-265,288-297`). A ledger error is logged as `"sync <id>: human-edit ledger failed; sync continues: <err>"` and never fails the sync; a per-video error is logged `"human_edits <channel>: ledger failed for <video>: <err>"` and the other videos still run. Incremental passes re-fetch no known video, so they record nothing |
-| `metrics_poll` | cron 05:00 UTC (`:407`) | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only if in a measurement window (`METRICS_POLL_MEASURED_ONLY`) |
-| `reporting_poll` | cron 06:00 UTC (`:426`) | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)` (`app/eligibility.py:154-168`). Ingests only `channel_reach_basic_a1` |
-| `traffic_poll` | cron 06:30 UTC (`:440`) | `app/traffic_poll.py:173` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Two feeds per channel (`_FEEDS`, `app/traffic_poll.py:74`): **video** ensures the `channel_traffic_source_a3` job (`midas-traffic-source`, Marathi `3647f5d8…`) → `video_traffic_source_daily`; **playlist** ensures the `playlist_traffic_source_a2` job (`midas-playlist-traffic-source`, Marathi `381cf084…`) → `playlist_traffic_daily`. Both Marathi jobs are found, not created. Each feed ingests each data-day's newest not-yet-ingested report, a restatement replacing the day (`app/traffic_poll.py:89` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with its own `report_type`. Logs `"traffic_poll <id> data-day <d>: <n> rows written to <table> (report <r>)"` (`app/traffic_poll.py:118`). Feeds are isolated (`_poll_channel`, `app/traffic_poll.py:155`): a feed crash is recorded as `"<feed>: <Type>: <msg>"` and fails the channel, but the other feed still runs; per-report errors are judged per feed (categories `video reports`, `playlist reports`). Independent of `reporting_poll` |
-| `playlist_health_score` | cron 07:00 UTC (`:459`) | `main._daily_playlist_health_score` (`:225`) → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
-| `measurement_eval` | cron 08:00 UTC (`:474`) | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
-| `lever_measurement` | cron Mon 09:00 UTC (`app/main.py` `_register_jobs`) | `app/lever_verdicts.py` `run_weekly` | registered (S1.6b). Every channel (`Job.EVERY`): `lever_measurement.measure_channel` (S1.6a), then `write_verdicts` for the current week. `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("lever_measurement", …)`); per-row errors go through `job_status.item_error_verdict` under the category `interventions` (all errored → the channel fails as `"ItemsFailed: interventions: all <n> failed"` and gets no verdicts that run, some → `degraded`). **S2.3:** then, for a channel with any `playlist_arms` row (read once per run), `playlist_test.measure_channel`, under its own category `playlist arms` (`"ItemsFailed: playlist arms: all <n> failed"`, `"playlist arms: <e>/<n> failed"`) and its own `try`: a crash or failure in either half doesn't stop the other on the same channel, and both halves' messages are joined with `; `. A failed `playlist_arms` read is logged `"lever_measurement: playlist_arms unreadable; playlist test skipped: <err>"` and skips only the playlist half that run. **S2.6:** on a channel in `TRAFFIC_INGEST_CHANNELS`, first `short_links.detect` (the Short links seen in its type-32 traffic, §5), under its own category `short-link pairs` (`"ItemsFailed: short-link pairs: all <n> failed"`, `"short-link pairs: <e>/<n> failed"`) and its own `try`, so the measurement still runs; the measurement then covers `short_link` rows too (same `interventions` category), and after backlinks' verdicts `write_verdicts(lever='short_link')`. **S3.5:** on a channel with any `midas` `title` row (`_has_titles`, a `limit(1)` read), after backlinks and before the playlist test, in its own `try`: `title_measurement.measure_channel` under the category `title interventions` (`"ItemsFailed: title interventions: all <n> failed"` and no title verdicts that run), then `write_verdicts(lever='title')`, then `auto_revert` under `title reverts` (`"ItemsFailed: title reverts: all <n> failed"`, `"title reverts: <e>/<n> failed"`); a crash in the title half is logged `"lever_measurement <id>: titles crashed: …"` and fails the channel without stopping its other halves. Nothing reaches YouTube except the auto-revert's title writes (`titles_apply.revert_title(auto=True)`, behind `TITLE_APPLY_ENABLED` and `DRY_RUN`) |
-| `channel_health` | cron 10:00 UTC (`app/main.py` `_register_jobs`) | `app/channel_health.py` `run_daily` | registered (fleet readiness, not in the spec). Read-only: `check()` over every channel, and `JobRunFailed("channel_health", {<id>: "<problems>"})` when any channel has one: `last_synced_at` older than `SYNC_STALE_HOURS` (30) or NULL, a reach frontier (`Job.REACH` channels) more than `REACH_STALE_DAYS` (7) behind or none, a `channel_traffic_source_a3` frontier (`Job.TRAFFIC` channels) more than `TRAFFIC_STALE_DAYS` (4) behind or none, or a non-NULL `autopilot_paused_reason`. A channel with no row in `videos` is listed with `no_videos: true` and no problems (Kannada and Telugu, no uploads on 2026-10-26). Exists because the 2026-10-16 sign-in outage left every job `success` for a week |
-| `playlist_test_apply` | cron 11:00 UTC (`app/main.py` `_register_jobs`) | `app/playlist_test.py` `run_apply` | registered (S2.2), always; does nothing while `PLAYLIST_APPLY_ENABLED` is false (default). Otherwise, per channel with a treated `playlist_arms` row `planned` or `applying` (`apply_channel`), a playlist at a time in arm id order: its approved, unsent adds with attempts left go together only if n × 50u fits both `JobBudget("playlist_test_apply", PLAYLIST_TEST_DAILY_UNITS)` and `quota.can_afford(…, reserve=YT_QUOTA_COLLECTION_RESERVE)`, else the job stops for the day. Each add is `yt_playlist_items_insert` at position = the number of the arm's adds ahead of it in rank (`proposal_ids` order) already in the playlist; a 400 naming the position or sort order is retried once appended, and from then on (this run and later ones, read off `apply_error.reason = 'position_refused'`) that playlist's adds go appended. Success → the proposal's `applied_at`, `playlist_item_id`, and a `playlist_assignments` `added` row with `decision_source = 'experiment'` (`playlists._record_assignment`). Errors classified as `backlinks_apply._classified`: `failed` uses up an attempt (at most `PLAYLIST_TEST_MAX_ATTEMPTS`); `youtube_quota_exceeded` stops the job and makes the channel `degraded` (`"youtube_quota_exceeded: stopped for the day"`), never counted as an errored add; `token_expired` stops the channel and fails it. Arm status settles after each arm (§2 `playlist_arms`). `DRY_RUN` logs `"[DRY_RUN] playlist_test_apply <id>: would add […] to the top of <playlist>"` and writes nothing. `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("playlist_test_apply", …)`); per-add errors through `job_status.item_error_verdict` under `playlist adds` |
-| `short_link_refresh` | cron Mon 10:30 UTC (`app/main.py` `_register_jobs`) | `app/short_links.py` `run_weekly` | registered (S2.4), always. `refresh` for every channel in `SHORT_LINK_CHANNELS` ∩ `TRAFFIC_INGEST_CHANNELS` (none: logs `"short_link_refresh: no channels (SHORT_LINK_CHANNELS ∩ TRAFFIC_INGEST_CHANNELS); nothing to do"`). `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("short_link_refresh", …)`); per-Short write errors through `job_status.item_error_verdict` under `shorts` (`"ItemsFailed: shorts: all <n> failed"`, `"shorts: <e>/<n> failed"`). A channel whose thresholds are refused writes nothing and is `degraded` (`"refused: no_thresholds"` or `"refused: thresholds_other_model_version"`). DB and OpenRouter (the shadow next-watch) only; nothing reaches YouTube. |
-| `nightly_db_backup` | cron `BACKUP_HOUR` local (`:541`) | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
-| `pot_provider_refresh` | interval 2 h (`:553`) | `main._refresh_pot_provider` | only if env `BGUTIL_POT_HTTP_BASE_URL` is set; absent on the office machine (`docs/PHASE_A_FINDINGS.md` A0 step 12) |
+| `autopilot` | interval `AUTOPILOT_TICK_SECONDS` | `app/autopilot.py` `tick`: pick channel (`Job.AUTOPILOT`) → Shorts action → if `agent_enabled`, `_agent_tick` (`can_run_agent`; no lever open → `apply_disabled`/`no_heading`) → daily cap → quota gate → `agent_tick.run`: warm pick → triage → record → treated apply (`apply_backlinks` or `apply_title`); else `shorts_only` | registered. `_can_afford_apply` skips with `quota_insufficient`, no pause. Daily cap (`autopilot_daily_cap`, default 10, `_applies_today`): applied audits and `midas` interventions applied today, plus today's unsent treated rows (not `declined`). Apply errors via `_react_to_apply_error` (quotaExceeded → fleet dormancy, token expiry → pause, `failed` → failure count); unclassified → `agent_failed` |
+| `shorts_dispatch` | interval `SHORTS_DISPATCH_INTERVAL_SECONDS` (5 s) | `app/shorts/dispatcher.py:dispatch_tick` | registered |
+| `playlist_reconcile` | cron 02:00 server-local | `main._daily_reconcile` → `sync_playlists` (shared `JobBudget("playlist_sync", PLAYLIST_SYNC_QUOTA_BUDGET, reserve=YT_QUOTA_APPLY_RESERVE)`) + `reconcile_channel` | registered; `PLAYLIST_RECONCILE_CHANNELS` allowlist. **Add/remove frozen**; inventory sync and the budgeted membership walk run. Walk feeds `human_edits.record_playlist_additions` |
+| `playlist_discovery` | cron Sun 03:00 local | `main._weekly_discovery` → `app/playlist_discovery.py` `discover_playlists` | **frozen** (`PLAYLIST_DISCOVERY_ENABLED`). When on: every channel; **creates playlists** (≤2/run), skipped under `DRY_RUN` |
+| `reflection` | cron Mon 04:00 local | `app/reflection.py` `reflect` | **frozen** (`REFLECTION_ENABLED`). When on: every channel |
+| `playlist_tuning` | cron Mon 03:30 local | `app/playlists.py` `tune_thresholds` | **frozen** (`PLAYLIST_TUNING_ENABLED`). When on: writes `settings.PLAYLIST_JOIN_HIGH` process-globally |
+| `video_sync` | cron 04:00 UTC | `main._daily_video_sync` → `app/sync.py` `routine_sync` per channel | registered, every channel. Read-only: full pass if last full sync >3 days, else incremental + `refresh_stats`. Expired/revoked token is a skip recorded `degraded`; any other error fails the channel. Full passes feed `human_edits.record_description_edits` |
+| `metrics_poll` | cron 05:00 UTC | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only in a measurement window (`METRICS_POLL_MEASURED_ONLY`). Standard failure model |
+| `reporting_poll` | cron 06:00 UTC | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)`. Ingests only `channel_reach_basic_a1`. Standard failure model |
+| `traffic_poll` | cron 06:30 UTC | `app/traffic_poll.py` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS`. Two isolated feeds: `channel_traffic_source_a3` → `video_traffic_source_daily`, `playlist_traffic_source_a2` → `playlist_traffic_daily`, restatements replace the day. Standard failure model; categories `video reports`, `playlist reports` |
+| `playlist_health_score` | cron 07:00 UTC | `main._daily_playlist_health_score` → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
+| `measurement_eval` | cron 08:00 UTC | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
+| `lever_measurement` | cron Mon 09:00 UTC | `app/lever_verdicts.py` `run_weekly` | registered; every channel (`Job.EVERY`). Halves, each in its own `try` (standard failure model, category in brackets): `short_links.detect` (`short-link pairs`); `lever_measurement.measure_channel` + `write_verdicts` for backlinks, `short_link` (`interventions`); titles: `title_measurement.measure_channel` (`title interventions`), `write_verdicts(lever='title')`, `auto_revert` (`title reverts`); `playlist_test.measure_channel` (`playlist arms`). Only YouTube write: `revert_title(auto=True)` |
+| `channel_health` | cron 10:00 UTC | `app/channel_health.py` `run_daily` | registered (not in the spec). Read-only `check()`; `JobRunFailed` if any channel has a problem: `last_synced_at` > `SYNC_STALE_HOURS` (30) or NULL, reach frontier > `REACH_STALE_DAYS` (7) behind, `channel_traffic_source_a3` frontier > `TRAFFIC_STALE_DAYS` (4) behind, or `autopilot_paused_reason` set. |
+| `playlist_test_apply` | cron 11:00 UTC | `app/playlist_test.py` `run_apply` | registered; nothing while `PLAYLIST_APPLY_ENABLED` false. Sends approved adds of treated arms within `JobBudget("playlist_test_apply", PLAYLIST_TEST_DAILY_UNITS)` and `YT_QUOTA_COLLECTION_RESERVE`, else stops for the day. `failed` uses an attempt (`PLAYLIST_TEST_MAX_ATTEMPTS`); `youtube_quota_exceeded` stops the job (`degraded`); `token_expired` fails the channel. Standard failure model; category `playlist adds` |
+| `short_link_refresh` | cron Mon 10:30 UTC | `app/short_links.py` `run_weekly` | registered; `refresh` per channel in `SHORT_LINK_CHANNELS` ∩ `TRAFFIC_INGEST_CHANNELS`. Refused thresholds → `degraded`. Standard failure model; category `shorts` |
+| `nightly_db_backup` | cron `BACKUP_HOUR` local | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
+| `pot_provider_refresh` | interval 2 h | `main._refresh_pot_provider` | only if env `BGUTIL_POT_HTTP_BASE_URL` is set; absent at the office |
 
-Startup side effects: `provision.ensure_database_populated()` (restore from NAS if the DB is empty,
-`app/main.py` `lifespan`), `shorts.runner.reap_stuck_jobs()`, `tracing.configure()`, and, once the scheduler has
-started, the one-off `startup_catch_up` job (`app/catch_up.py` `run`): it pauses the jobs in
-`CATCH_UP` (`video_sync`, `metrics_poll`, `reporting_poll`, `traffic_poll`, `playlist_health_score`,
-`measurement_eval`, `lever_measurement`, `channel_health`, `nightly_db_backup`), runs in that order each one whose
-latest fire time in the last `LOOKBACK` (24 h) has no run recorded at or after it in the registry, repeats until a
-pass finds none (each job once), then resumes them; each run is recorded under the job's own id. APScheduler drops
-a fire time that passes while the app is down, and since the 2026-10-29 move the office machine is often down
-until about 08:00 UTC, after the 04:00-07:00 UTC jobs: no reach or traffic report was ingested 2026-10-29 06:38
-to 2026-11-02 13:40 UTC (caught up by hand). Not caught up: `playlist_reconcile`, `playlist_test_apply`,
-`short_link_refresh`, which wait for their next fire.
+Startup side effects: `provision.ensure_database_populated()` (restore from NAS if empty),
+`shorts.runner.reap_stuck_jobs()`, `tracing.configure()`, then `startup_catch_up` (`app/catch_up.py`): runs each
+`CATCH_UP` daily job whose fire time in the last `LOOKBACK` (24 h) has no recorded run. Not caught
+up: `playlist_reconcile`, `playlist_test_apply`, `short_link_refresh`.
 
 Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playbook rebuild (Part 2 §1.1, §5).
 
@@ -737,19 +604,19 @@ Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playboo
 
 **Routes** (`app/main.py:596-613` mounts every router):
 
-- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`) → `{"checked_at", "with_problems", "channels": [{id, name, last_synced_at, reach_days_behind, traffic_days_behind, autopilot_paused_reason, no_videos, problems}]}`, channels with problems first, read from the DB; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
-- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels`, `PATCH /auth/channels/{id}` (enabling `measurement_enabled` returns 409 unless `reach.certify` passes, `app/auth.py:166-174`).
+- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
+- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels`, `PATCH /auth/channels/{id}` (enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
-- **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply?force=`, `POST /channels/{id}/audits/apply-pending?force=` (both answer 409 `"agent channel: a house-format apply replaces the description and its backlink block; pass force=true"` on a channel with `agent_enabled` unless `force=true`, before anything is sent or written: the single apply inside `apply_audit_internal`, after it reads the channel; apply-pending once, reading the channel before any apply, then passing `force` on to each `apply_audit_internal`; `audits._refuse_on_agent_channel`, `AGENT_CHANNEL_REFUSED`; a non-agent channel answers as before), `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk` (it and `reaudit-quarantined` only call `audit_video`, which writes a `pending` audit and nothing to YouTube, so neither is guarded), `POST /audits/{id}/revert` (409 `"agent channel: an audit revert replaces the description and its backlink block; pass force=true"` on an `agent_enabled` channel unless `?force=true`, `_refuse_on_agent_channel`, since it restates the whole snippet from the before-state (owner, 2026-10-30, Slice 3 final review); 409 `"quota_insufficient: revert needs <n> units, <m> remaining today"` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:847-852`), `GET /quota-cost-preview`.
+- **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply?force=`, `POST /channels/{id}/audits/apply-pending?force=` (both 409 `AGENT_CHANNEL_REFUSED`, "agent channel: a house-format apply replaces the description and its backlink block; pass force=true", on an `agent_enabled` channel unless `force=true`, before anything is sent or written; `audits._refuse_on_agent_channel`), `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk` (both only write `pending` audits, so unguarded), `POST /audits/{id}/revert` (409 "agent channel: an audit revert …; pass force=true" on an `agent_enabled` channel unless `?force=true`; 409 `quota_insufficient` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:847-852`), `GET /quota-cost-preview`.
 - **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes`, `POST /measurement/evaluate`.
-- **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`. Promote and trigger return 409 `"Reflection is frozen: REFLECTION_ENABLED=false"` while frozen (`_require_reflection_enabled`, `app/reflection.py:792`).
-- **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate`, `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile` (409 `"Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false"`, `:263-267`), `GET /channels/{id}/playlists/proposals` (every `pending` proposal of the channel's playlists, through `all_rows`/`rows_for_ids`, those with `arm_id` first, then by `proposed_at`, then `id`), `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube; not frozen; `rejected` relabels only `pending` proposals and returns their count, since the Slice 2 follow-ups; a proposal with `arm_id` set is only marked `approved`/`rejected` with `decided_at` and sends nothing, and the response gains `queued` (their count) only when there were any).
+- **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`. Promote and trigger 409 `"Reflection is frozen: REFLECTION_ENABLED=false"` (`app/reflection.py:792`).
+- **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate`, `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile` (409 `"Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false"`, `:263-267`), `GET /channels/{id}/playlists/proposals` (every `pending` proposal, `arm_id` ones first, then `proposed_at`, `id`), `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube, not frozen; `rejected` relabels only `pending` proposals; a proposal with `arm_id` is only marked `approved`/`rejected` and sends nothing, the response gaining `queued` when any).
 - **Autopilot** (`app/autopilot.py`): `POST /channels/{id}/autopilot/resume`, `GET /channels/{id}/autopilot/log`.
-- **Interventions** (`app/backlinks_apply.py`): `POST /interventions/{id}/revert`, for an applied (`applied_at` set, not `cancelled`) `midas` `backlinks` or `title` intervention only (else 400: `"Only an applied Midas title intervention can be reverted"` for a `title` row `revert_title` refuses (`ValueError`), `"Only an applied Midas backlinks intervention can be reverted"` for any other; 404 unknown). A `title` row goes to `titles_apply.revert_title(row, auto=False)` (§5 Modules `titles_apply.py`): 409 `"apply_disabled"` while `TITLE_APPLY_ENABLED` is false, 409 `"quota_insufficient: revert needs <n> units, <m> remaining today"`, under `DRY_RUN` `{"status": "dry_run", "title": <before_state.title>}`, 409 `"title_changed"` when the live title isn't `payload.title`, else `{"status": "cancelled", "title"}`. For a `backlinks` row: Fetches the live snippet, `backlinks.strip`s it and sends it back `part=snippet` with only `description` changed (no update if no block is left); 409 `"apply_disabled"` while `BACKLINK_APPLY_ENABLED` is false, 409 `"quota_insufficient: revert needs <n> units, <m> remaining today"` when `quota.can_afford(quota.cost_of(*quota.APPLY))` (51u) is false; under `DRY_RUN` it returns `{"status": "dry_run", "description": <stored, stripped>}` and writes nothing. Sets `status = 'cancelled'`, `payload.revert = {reverted_at, live_before, description}`, and `videos.description`.
-- **Interventions and verdicts** (`app/lever_verdicts.py`, S1.6b): `GET /channels/{id}/interventions?lever=&status=&limit=&offset=` → `{"interventions": [...], "limit", "offset", "next_offset"}`, newest first (`created_at` desc, then `id` desc), one page of `limit` rows (default 100, at most 1000 = `rows.PAGE_SIZE`; 422 above), `next_offset` set whenever a page comes back full (so an exactly full last page points at one more, empty page); an unknown `lever` or `status` (not in `status_vocab`) is 400. `GET /channels/{id}/lever-verdicts` → `{"verdicts": [...], "backlinks_stopped": bool}`, every `lever_verdicts` row of the channel (`all_rows`), newest week first, `playlist` rows included.
-- **Title test** (`app/lever_verdicts.py`, S3.5): `GET /channels/{id}/title-test` → `{"paths": {"pipeline"|"agent": {treated (arm `treated` with `applied_at`), declined (arm `treated`, no `applied_at`, not `cancelled`/`planned`), cancelled ({reason: n}: `payload.error.reason`, `reverted` for a title put back, `unknown` with neither, `app/lever_verdicts.py:629-630`), judged (rows in the path's mean), insufficient, mean_delta, cumulative_lift (path mean − holdout mean over every judged row), auto_reverts (`payload.revert.auto`), stopped}}, "holdout": {n, judged, mean_delta}, "trace": {runs, most_common, share_differing, share_calling: {tool: share}}}`: the channel's `midas` `title` rows through `all_rows` (with `trajectory`, so the read needs `20261030000000` applied); `trace` over the agent-path rows with a trajectory, the tools each called (`agent.loop.tools_called`) as a set: the most common set, the share of runs with another, the share calling each tool. Read-only, nothing judged.
-- **Playlist test** (`app/playlist_test.py` `router`, S2.3): `GET /channels/{id}/playlist-test` → `{"test_start", "test_end", "arms": [...], "verdicts": [...], "answer"}`: `test_dates` as ISO dates (None until dosed), every `playlist_arms` row of the channel, its `lever = 'playlist'` `lever_verdicts` rows oldest week first, and `answer` `pending` until a `treated_vs_holdout` row with `windows_judged` ≥ `PLAYLIST_EXPERIMENT_WINDOWS`, then `no` if it triggered the stop rule, else `yes`. Read-only.
-- **Short links** (`app/short_links.py` `router`, S2.5). Nothing here reaches YouTube. `GET /channels/{id}/short-links?status=&limit=&offset=&format=` → `{"shorts": [{short_id, title, youtube_url, studio_url, feed_views, recommendations: [{id, rank, target_video_id, title, youtube_url, similarity, impressions, feed_views, status, decided_at, intervention_id}]}], "limit", "offset", "next_offset"}`: one page of the channel's Shorts (not rows), those with a `pending` row first, then by feed views, then id, each with its rows in rank order; `youtube_url` is `https://www.youtube.com/shorts/<id>` (Short) or `https://www.youtube.com/watch?v=<id>` (target), `studio_url` `https://studio.youtube.com/video/<id>/edit`; titles from `videos`. `status` keeps only the rows in it and the Shorts that have one; unknown `status` 400; `limit` default 100, at most 1000 (422 above), `next_offset` as `GET /channels/{id}/interventions`. `format=csv` (`json` default; anything else 422) returns the same page as `short-links-<id>.csv`, one line per recommendation, titles starting with `=`, `+`, `-`, `@`, tab or CR prefixed with `'` (`_cell`, so a spreadsheet doesn't run them) (`short_id, short_title, short_url, studio_url, feed_views, recommendation_id, rank, target_video_id, target_title, target_url, similarity, impressions, status, decided_at`). `POST /short-links/{id}/set` (404 unknown): a row already `set` → no write, `recorded: false`; else `interventions.record` (the human row, §2 `interventions` S2.5) under `_episode_key` (the pair key, or `<pair key>:<n>` when another target of the Short was ticked after the pair's latest row), or, for a key already stored, that row's id; then the Short's other `pending`/`set` rows → `not_chosen` with `decided_at` (a `dismissed` one stays), then this row → `set` with `decided_at` and `intervention_id`; → `{"recommendation", "intervention_id", "recorded"}`. `POST /short-links/{id}/dismiss` (404 unknown; 409 `"set: tick another target to change the Short's link"` on a `set` row): → `dismissed` with `decided_at`, no intervention; an already `dismissed` row is returned unchanged; → `{"recommendation"}`.
+- **Interventions** (`app/backlinks_apply.py`): `POST /interventions/{id}/revert`, for an applied (`applied_at` set, not `cancelled`) `midas` `backlinks` or `title` row only (else 400 "Only an applied Midas title|backlinks intervention can be reverted"; 404 unknown). A `title` row → `titles_apply.revert_title(row, auto=False)`: 409 `apply_disabled` (`TITLE_APPLY_ENABLED` false), 409 `quota_insufficient`, `DRY_RUN` → `{"status": "dry_run", "title"}`, 409 `title_changed` (live title isn't `payload.title`), else `{"status": "cancelled", "title"}`. A `backlinks` row: fetches the live snippet, `backlinks.strip`s it, sends it back `part=snippet` with only `description` changed; 409 `apply_disabled` (`BACKLINK_APPLY_ENABLED` false), 409 `quota_insufficient` (51u, `quota.APPLY`); `DRY_RUN` → `{"status": "dry_run", "description"}`, no write. Sets `cancelled`, `payload.revert = {reverted_at, live_before, description}`, `videos.description`.
+- **Interventions and verdicts** (`app/lever_verdicts.py`): `GET /channels/{id}/interventions?lever=&status=&limit=&offset=` → `{"interventions", "limit", "offset", "next_offset"}`, newest first, `limit` default 100, max 1000 (422 above), `next_offset` set when a page is full; unknown `lever`/`status` 400. `GET /channels/{id}/lever-verdicts` → `{"verdicts", "backlinks_stopped"}`, every row of the channel, newest week first.
+- **Title test** (`app/lever_verdicts.py`): `GET /channels/{id}/title-test` → per path (`pipeline`|`agent`) `{treated, declined, cancelled {reason: n}, judged, insufficient, mean_delta, cumulative_lift, auto_reverts, stopped}`, `holdout {n, judged, mean_delta}`, and `trace` (tool-set stats over agent trajectories, `agent.loop.tools_called`). Read-only; reads `trajectory`, so needs `20261030000000`.
+- **Playlist test** (`app/playlist_test.py` `router`): `GET /channels/{id}/playlist-test` → `{"test_start", "test_end", "arms", "verdicts", "answer"}`; `answer` `pending` until a `treated_vs_holdout` row with `windows_judged` ≥ `PLAYLIST_EXPERIMENT_WINDOWS`, then `no` if it triggered the stop rule, else `yes`. Read-only.
+- **Short links** (`app/short_links.py` `router`; nothing reaches YouTube): `GET /channels/{id}/short-links?status=&limit=&offset=&format=` → one page of Shorts (not rows), those with a `pending` row first, then feed views, id, each with its recommendations in rank order plus YouTube/Studio URLs; unknown `status` 400, `limit` max 1000 (422 above); `format=csv` (else `json`; other 422) as `short-links-<id>.csv`, formula-leading cells prefixed `'` (`_cell`). `POST /short-links/{id}/set` (404 unknown): already `set` → `recorded: false`; else records the `human` `short_link` intervention (§2) under `_episode_key`, the Short's other `pending`/`set` rows → `not_chosen` (a `dismissed` stays), this row → `set`; → `{"recommendation", "intervention_id", "recorded"}`. `POST /short-links/{id}/dismiss` (404; 409 `"set: tick another target to change the Short's link"` on a `set` row) → `dismissed`, no intervention.
 - **Ops:** `GET /dashboard` (`app/dashboard.py:94`), `GET /quota` (`app/quota.py:295`), `GET /channels/{id}/performance`, `/performance/summary`, `/performance.csv` (`app/performance.py`).
 - **Shorts** (`app/shorts/routes.py`, prefix `/shorts`): `POST|GET /shorts/jobs`, `POST /shorts/cut`, `GET /shorts/languages`, `POST /shorts/jobs/clear-failed`, `GET /shorts/jobs/{id}`, `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`, `POST /videos/{id}/short`; `POST /autoshorts/jobs` (`app/shorts/autoshorts.py:49`).
 
@@ -758,70 +625,65 @@ Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playboo
 | File | Owns |
 |---|---|
 | `main.py` | FastAPI app, logging, job registration, per-channel fan-out, `video_sync` wrapper |
-| `job_status.py` | `JobRunFailed`, `item_error_verdict`, the registry behind `/health/jobs`, kept across restarts in `LOG_DIR/job_status.json` (`persist_to`, `last_run_at`) |
-| `catch_up.py` | the startup catch-up of missed daily jobs (`run`, `missed`, `due`, `CATCH_UP`, `LOOKBACK`; §4) |
-| `channel_health.py` | fleet readiness: per-channel freshness from the DB (`check`, `channel_status`, `run_daily`), `GET /health/channels`, the `channel_health` job (§4) |
+| `job_status.py` | `JobRunFailed`, `item_error_verdict`, the `/health/jobs` registry, persisted to `LOG_DIR/job_status.json` (`persist_to`) |
+| `catch_up.py` | startup catch-up of missed daily jobs (`run`, `CATCH_UP`, `LOOKBACK`; §4) |
+| `channel_health.py` | per-channel freshness (`check`, `run_daily`), `GET /health/channels`, the `channel_health` job (§4) |
 | `config.py` | `Settings` (env) |
-| `db.py` | thread-local PostgREST (`supabase-py`) client with retry. The app talks to Postgres only via PostgREST on `SUPABASE_URL` |
+| `db.py` | thread-local PostgREST (`supabase-py`) client with retry; the app reaches Postgres only via PostgREST on `SUPABASE_URL` |
 | `rows.py` | the 1000-row cap: `all_rows`, `all_rows_parallel`, `rows_for_ids` |
-| `channel_audits.py` | `audits_for_channel`; `fetch_all` is a deprecated alias of `rows.all_rows` |
-| `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`); `can_run_agent` (S1.4b: `can_audit` and `agent_enabled` and `reach.certify`, the last read last) |
-| `status_vocab.py` | persisted status strings and their mirrors (guarded by `tests/test_status_vocab.py`) |
+| `channel_audits.py` | `audits_for_channel`; `fetch_all` deprecated alias of `rows.all_rows` |
+| `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`); `can_run_agent` = `can_audit` and `agent_enabled` and `reach.certify` |
+| `status_vocab.py` | persisted status strings and their mirrors (`tests/test_status_vocab.py`) |
 | `auth.py` | OAuth + channel flag PATCH |
-| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`is_stale`, `needs_full_sync`, `routine_sync`); token failures in its routes → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger (`_record_human_edits`) |
+| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
 | `content_type.py` | `is_episode` classifier |
-| `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; no autopilot caller (only the routes call `audit_video` and `apply_audit_internal`), and `_refuse_on_agent_channel(channel, force=)`, the 409 guard of the house-format applies on an `agent_enabled` channel (§5 Routes) |
+| `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, `rejection()`, `house_format_spec()` |
-| `apply_outcome.py` | typed `ApplyError`/`ApplyOutcome`; S1.3 adds `QUOTA_INSUFFICIENT` (`quota_insufficient`) and `APPLY_DISABLED` (`apply_disabled`), both 409, the backlinks write's refusals before anything is sent |
-| `backlinks_apply.py` | Slice 1 S1.3: `apply_backlinks(intervention)` for a `planned`, `treated`, `midas` `backlinks` row with `payload.targets` (else `ValueError`). Refuses `apply_disabled` while `BACKLINK_APPLY_ENABLED` is false; under `DRY_RUN` renders onto the stored description and returns `{"status": "dry_run", "description"}` with no YouTube call and no write; then the ledger gate (`quota_insufficient` unless `quota.APPLY`, 51u, is affordable). Fetches the live snippet (`yt_videos_list_full`, 1u), renders the block onto the live description (`backlinks.render`, the channel's `default_language`), and sends `videos.update` `part=snippet` with the fetched snippet, only `description` replaced (`yt_videos_update`, 50u). A live description that differs from the stored one goes to `human_edits.record_description_edits` first, so a team edit since the last sync is still recorded. Success: the row becomes `measuring` with `applied_at`, `before_state = {description: <live>}`, `payload.description` = the rendered text; `videos.description` = the rendered text. YouTube failures are typed (`token_expired`, `youtube_quota_exceeded`, `failed`; a refused render or a video gone is `failed`) and change no row: recording the failure is the caller's (`app/agent_tick.py`, S1.4b, records it `cancelled`). Also the revert route (§5 Routes). Called by `agent_tick.run` for a treated row. `_live_snippet` (the 1u fetch, `failed` for a video gone) and `_send_snippet` (the `part=snippet` send) are shared with `titles_apply.py` (S3.1) |
-| `titles_apply.py` | Slice 3 S3.1, the title-only write and its revert (Part 6 S3.1, F1), the twin of `backlinks_apply.py` for `snippet.title`. `apply_title(intervention)` for a `planned`, `treated`, `midas` `title` row with `payload.title` and `payload.title_before` (else `ValueError`): refuses `apply_disabled` while `TITLE_APPLY_ENABLED` is false; under `DRY_RUN` returns `{"status": "dry_run", "title"}` with no YouTube call and no write; then the ledger gate (`quota_insufficient` unless `quota.APPLY`, 51u, is affordable: `"title apply needs <n> units"`); fetches the live snippet (`backlinks_apply._live_snippet`, 1u); a live title other than `payload.title_before` refuses `ApplyError(FAILED, "title_changed")` and sends nothing; else sends `videos.update` `part=snippet` with the fetched snippet, only `title` replaced (`_send_snippet`, 50u). Success: `measuring`, `applied_at`, `before_state = {title: <live>}`; `videos.title` = the new title; returns `{"status": "measuring", "title"}`. YouTube failures typed by `backlinks_apply._classified`; a failure changes no row. `revert_title(intervention, *, auto)` for an applied (not `cancelled`) `midas` `title` row with `before_state.title` (else `ValueError`): the same gates (kill switch, `DRY_RUN`, 51u), then the same write putting `before_state.title` back, only if the live title is still `payload.title` (else `HTTPException(409, "title_changed")`, nothing sent); `cancelled`, `payload.revert = {reverted_at, live_before, title, auto}`, `videos.title`. `apply_title` is called by the agent tick (`app/agent_tick.py:525`, S3.3); `revert_title` by `POST /interventions/{id}/revert` (`auto=False`, `app/backlinks_apply.py:204`) and `lever_verdicts.auto_revert` (`auto=True`, `app/lever_verdicts.py:378`, S3.5) |
-| `titles.py` | Slice 3 S3.2, the title lever's writer and its checks (Part 6 S3.2, Part 2 §2.4, §3.3, P5, F9, F12); S3.3 adds the routing (below), S3.4 the agent's prompt and its preview, S3.5 extends it. Reads only, except `strategy_version` (its `audit_strategies` row). `channel_context(channel_id)` → `ChannelContext(channel_id, language, reach, median_ctr, ceiling, top_performers)`: the warm long videos (`warm.warm_impressions` minus `is_short` true, `rows_for_ids`), each one's (impressions, CTR) over the latest `WARM_WINDOW_DAYS` reach data-days (`reach.weighted_ctr`), their median CTR, the ceiling (`ceil(0.01 × n)` most-impressed plus any over `TITLE_MAX_IMPRESSIONS`), and the `TOP_PERFORMERS` (5, plus one spare) with the most browse (3) + suggested (7) views over the latest 28 ingested `channel_traffic_source_a3` data-days per warm-window impression, among those with a title in `videos`. `context(video, *, channel=None)` → `{video_id, title, description (first 1,500 characters), transcript (the `video_transcripts` cache only, `_transcript`), default_language, impressions, ctr (agent_tick._reach), channel_median_ctr, traffic_mix_28d (agent_tick._traffic_mix), search_terms (the video's top 10 type-5 source_detail by views over the 28 traffic data-days, blank detail left out), top_performers (the video itself left out)}`. `system_prompt()` = `TITLE_PROMPT` with `TITLE_MAX` and `TITLE_CANDIDATES` filled in (§6). `write_candidates(ctx, *, model=None, failures=None)` → `chat_json(<user block>, model=model or WRITER_MODEL, system=system_prompt(), label="titles.write")`, the reply's first `TITLE_CANDIDATES` `{title, reason}`, titles stripped (a malformed reply → `[]`); `failures` (`{title, failure}`) add a block telling the model which candidates failed which check. `check(title, video)` → the first failure or None: `length` (empty after stripping, or over `TITLE_MAX` = 100), `characters` (`<`, `>` or a line break, which YouTube refuses in a title), `unchanged` (equal to the current title after whitespace collapse and casefold), `script` (not `en`: no character of `SCRIPTS[language]`, or no script known for the language), `hashtags` (more `#` than the current title), `url` (`https?://`, `www.`, `youtu.be/`, `youtube.com/`), `emoji` (more emoji or pictographic code points than the current title, `_EMOJI_RE`: U+1F000–U+1FAFF, U+2300–U+23FF, U+2600–U+27BF, U+2B00–U+2BFF, U+3030, U+303D, U+3297, U+3299; both paths: the agent's `submit_title` runs the same `check`). `SCRIPTS`: `mr`/`hi`/`bgc` Devanagari U+0900–U+097F, `gu` Gujarati U+0A80–U+0AFF, `pa` Gurmukhi U+0A00–U+0A7F, `ta` Tamil U+0B80–U+0BFF, `ml` Malayalam U+0D00–U+0D7F, `kn` Kannada U+0C80–U+0CFF, `te` Telugu U+0C00–U+0C7F (every `backlinks.HEADINGS` language but `en`). `pipeline(video, *, channel=None, model=None)` → `Written(title, reason, candidates, failures)`: the first candidate passing `check`, else one retry with the failures, else `title`/`reason` None and `failures` = `attempt <n>: '<title>': <failure>` per candidate, or `attempt <n>: malformed reply: no candidates` (`MALFORMED`) per empty attempt; `candidates` carries every candidate with its `check` and `attempt`. `title_path(video_id)`: sha256 of `video_id + "\|title-path"`, first 8 bytes as a point in [0, 1), `agent` below `TITLE_AGENT_PCT`, else `pipeline` (`PATHS`). `strategy_inputs(path)` → (`<STRATEGY_LABEL>-<audits._strategy_hash(inputs)>`, `{lever: "title", path, prompt_sha256 (of system_prompt(), or of agent_system_prompt() on the agent path), writer_model, decision_question_set_version}`, plus `agent_model` (`AUDIT_MODEL`) on the agent path), pure; `strategy_version(path)` upserts its `audit_strategies` row once per process (`status 'champion'`, `ignore_duplicates`, as `audits._stamp_strategy`; the agent path's row has `prompt_template` `code:app/titles.py AGENT_PROMPT` and `model` `AUDIT_MODEL`). **S3.3:** `path_stopped(channel_id, path)`: whether a path's stop rule has fired, `lever_verdicts.stopped(channel_id, 'title', TITLE_SCOPES[path])`; `path_closed(channel_id, path)` (`a1c3d3c`): `path_stopped`, or the path has no share (`_share`: `TITLE_AGENT_PCT` for the agent, 1 − it for the pipeline, ≤ 0), so a path nobody switched on, which never gets verdicts, can't keep the lever open; `stopped(channel_id)`: both paths closed; `route(channel_id, video_id)`: `title_path`, handed to the other path when that one is closed and the other isn't, else unchanged (the tick's and the preview's path). `would_title(video_id, channel)`: `decide.TRIAGE.rules` on the video's title keys alone (`backlinks_enabled` false, `title_enabled` true, `title_excluded` = the ceiling or `TITLE_EXCLUDE_VIDEOS`, its CTR and the median). `title_answers(channel_id, n, *, pick=True)`: the channel context (`agent_tick.title_channel`, the cached one) and the first `n` videos `TRIAGE.rules` sends to titles: with `pick`, in `warm.warm_pool` pick order, each on the tick's full context (`agent_tick._assess(…, titles_on=True)`: backlinks as the tick sees it, so backlinks still wins, and the title lever taken as open whatever `TITLE_APPLY_ENABLED`, `TITLE_CHANNELS` and the daily limits say); with `pick=False` every warm long video by impressions through `would_title` (the pick's exclusions ignored; the bake-off's sample). `preview(channel_id, n, *, path)`: per title answer `{video_id, title, answer, impressions, ctr, channel_median_ctr, arm (interventions.assign_arm(…, 'title')), path (treated only, `route`), written (the pipeline's Written, treated on the pipeline path), agent (the agent's `AgentResult`, treated on the agent path, `run_title_agent(…)`), note ("on the <path> path"), error}`; no decide(), no interventions, no YouTube |
-| `youtube_metadata.py` | `videos.update` payload; `_NON_ISO_639_1 = {"bgc": "hi", "bho": "hi", "raj": "hi"}` (`:58-64`; `bho`/`raj` unused for now, B7) |
-| `youtube_client.py` | Data API wrappers + quota charging; `yt_playlist_items_insert` takes an optional `position` (S2.2), sent as `snippet.position` only when given; `channel_credentials` (#56): a channel's stored creds with `expiry` from `channels.token_expiry` (NULL = expired), refreshed and saved when expired, shared with `analytics_client` |
+| `apply_outcome.py` | typed `ApplyError`/`ApplyOutcome`, incl. `QUOTA_INSUFFICIENT` (`quota_insufficient`) and `APPLY_DISABLED` (`apply_disabled`), both 409, refused before anything is sent |
+| `backlinks_apply.py` | `apply_backlinks(intervention)` for a `planned` treated `midas` `backlinks` row with `payload.targets`. Gates in order: `apply_disabled` (`BACKLINK_APPLY_ENABLED`), `DRY_RUN` (renders onto the stored description, no call, no write), `quota_insufficient` (51u). Fetches the live snippet (1u), records a live/stored description difference via `human_edits.record_description_edits`, renders the block (`backlinks.render`), sends `part=snippet` with only `description` replaced (50u). Success → `measuring`, `applied_at`, `before_state.description`, `videos.description`; failures typed (`token_expired`, `youtube_quota_exceeded`, `failed`) and change no row (the caller cancels). Also the revert route. `_live_snippet`, `_send_snippet`, `_classified` shared with `titles_apply.py` and `playlist_test` |
+| `titles_apply.py` | the title-only twin of `backlinks_apply.py`. `apply_title(intervention)` (`planned` treated `midas` `title` row with `payload.title`, `payload.title_before`): same gates (`TITLE_APPLY_ENABLED`, `DRY_RUN`, 51u), live title ≠ `title_before` → `ApplyError(FAILED, "title_changed")`, else sends only `title`; success → `measuring`, `before_state.title`, `videos.title`. `revert_title(intervention, *, auto)`: same gates, puts `before_state.title` back only if live is still `payload.title` (else 409 `title_changed`); → `cancelled`, `payload.revert {…, auto}`. Callers: agent tick (`apply_title`), revert route (`auto=False`), `lever_verdicts.auto_revert` (`auto=True`) |
+| `titles.py` | the title lever's writer, checks, routing and stamps; reads only, except `strategy_version`'s `audit_strategies` row. `channel_context` → `ChannelContext` (warm long videos' reach, `median_ctr`, `ceiling` = top 1% plus any over `TITLE_MAX_IMPRESSIONS`, `top_performers` by browse + suggested views per impression). `context(video)` (title, description start, cached transcript, CTR vs median, traffic mix, top 10 search terms, top performers). `system_prompt()` (`TITLE_PROMPT`, §6), `write_candidates` (`chat_json`, `WRITER_MODEL`, `label="titles.write"`, first `TITLE_CANDIDATES`). `check(title, video)` → first failure: `length` (`TITLE_MAX` = 100), `characters` (`<`, `>`, line break), `unchanged`, `script` (`SCRIPTS[language]`; every `HEADINGS` language but `en`), `hashtags`, `url`, `emoji` (`_EMOJI_RE`); same check on both paths. `pipeline(video)` → `Written`: first passing candidate, one retry with the failures, else `title` None. `title_path(video_id)`: sha256 hash vs `TITLE_AGENT_PCT`. `strategy_inputs`/`strategy_version(path)` (§6). `path_stopped` (`lever_verdicts.stopped(…, 'title', TITLE_SCOPES[path])`), `path_closed` (stopped or no share, §7.3 item 33), `stopped` (both closed), `route` (hands to the other path if its own is closed). `would_title`, `title_answers(…, pick=)` and `preview(…, path=)` for the scripts: no decide(), no interventions, no YouTube |
+| `youtube_metadata.py` | `videos.update` payload; `_NON_ISO_639_1 = {"bgc": "hi", "bho": "hi", "raj": "hi"}` (`:58-64`; `bho`/`raj` unused) |
+| `youtube_client.py` | Data API wrappers + quota charging; `yt_playlist_items_insert(position=)`; `channel_credentials` (expiry from `channels.token_expiry`, NULL = expired, refreshed and saved), shared with `analytics_client` |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
-| `analytics_client.py` | on-demand Analytics (views/retention, playlist session metrics); `analytics_creds_for_channel` = the `analytics_authorized` gate + `youtube_client.channel_credentials` (also used by the Reporting API) |
-| `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type; `ensure_reach_job`, `ensure_traffic_job`, `ensure_playlist_traffic_job`), CSV parsing (reach; video and playlist traffic with aggregation, `_aggregate_traffic_csv`, and the `TRAFFIC_SOURCE_TYPES` code→name table), reach ingestion → `video_reach_daily`, `video_metrics` backfill; the shared latest-wins day replace (`replace_data_day`, `superseded_reports`, `record_ingested`); `download_report_csv` retries a dropped connection (`_DOWNLOAD_TRANSIENT`, `DOWNLOAD_ATTEMPTS` = 3, pauses 1 s then 2 s; #57) and refreshes the token once on a 401 |
-| `human_edits.py` | B3a human-edit ledger, description links: `video_links` (11-character ids from `watch?v=`, `youtu.be/`, `shorts/`, `embed/`, `live/`, `v/` URLs), `made_by_midas` (the description equals an applied audit's `suggested_description` or a reverted one's `description_before`, whitespace collapsed; or, S1.3 `_midas_block`, its links to our videos, other than itself, are exactly the targets of a `treated` `midas` `backlinks` intervention with `applied_at` set, not `cancelled`), `record_description_edits` (diff, keep targets in `videos` on any channel, write `human` backlinks rows with a `ledger_key`, stamp removals on the earlier row). Called only from `sync_channel` on a full sync. B3b, playlist memberships: `added_by_midas` (a `playlist_assignments` `added` row whose `decision_source` isn't `sync`, i.e. `embedding`, `llm_confirmed`, `discovery` or, `experiment`, or an `approved` `add` `playlist_proposals` row; never `playlists.origin`), `record_playlist_additions` (write `human` playlist rows with a `ledger_key`). Called only from the membership walk (`app/playlists_sync.py`). Both write through `_record_human` |
-| `traffic_poll.py` | B1 daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily`; the video feed's retention rule (`keeps_detail`, `collapse_unread_detail`, reading every id in `videos` once per run) |
-| `interventions.py` | B2: `assign_arm` (sha256 of `video_id`, lever vs `HOLDOUT_PCT`), `active_for` (the video's open `midas` intervention), `record` (refuses a second open `midas` one with `ActiveInterventionExists`, and a `human` one with an arm other than `n/a`; a concurrent second insert is refused by the partial unique index as a PostgREST unique-violation error, not `ActiveInterventionExists`). With `ledger_key` it upserts `on_conflict="ledger_key", ignore_duplicates=True` and returns None for a key already stored. Callers: `app/human_edits.py` (`human` rows), `app/agent_tick.py` (`midas` rows, S1.4b), `app/short_links.py` `set_short_link` and `detect` (`human` `short_link` rows, S2.5, S2.6). `trajectory=` (the agent tick's agent rows) is sent only when given, so no other caller needs `20261030000000` |
-| `reach.py` | data-day windows, coverage, frontier, staleness, `certify` (`certify_covered` over a coverage set already read; `window_length` for SQL callers). `coverage(channel_id, report_type=…)` defaults to reach; S1.1's sibling window passes `channel_traffic_source_a3` |
-| `decide.py` | B5: `decide(question_set, subject, context, intervention_id=None) -> Decision` (`question_set`, `answer`, `probs`). Answers with the question set's rules (probability 1.0), asks the `DECIDE_BACKEND` backend in shadow (`llm` via `openrouter.chat_json`, validated against the allowed answers and probabilities in [0, 1]; `jev` raises `NotConfigured`), writes one `decision_log` row with `used = 'rules'` and `QUESTION_SET_VERSION`, and returns the rules answer. A backend failure is logged `"decide <set> <subject>: <backend> backend failed; rules answer stands: …"` and logged as a row with NULL `jev_answer`; a failed log write is logged and doesn't change the answer. Two question sets: `TRIAGE` (answers `no_change|backlinks|playlist|short_link|title`, Part 2 §2.2; the rules choose `backlinks`, then `title`, else `no_change`, §6) and, `NEXT_WATCH` (answers `yes|no`; the rules answer `yes` when the context's `similarity` ≥ its `join_low`, else `no`, including when either is missing). Every answer needs a probability; the rules answer is 1.0 on itself, 0.0 elsewhere. S1.4b: the rules also refuse `backlinks` when the context's `backlinks_stopped` is true (and, unless `backlinks_enabled`); the returned `Decision` carries the `decision_log` row's id as `log_id` (None if the write failed; not part of equality), and `link(log_id, intervention_id)` sets that row's `intervention_id` (failures logged, never raised). Callers: `app/agent_tick.py` `run` (both sets), `app/short_links.py` `_next_watch` (`NEXT_WATCH`, S2.4) |
-| `reembed.py` | B6, one-off: `recipe_text` (title, description, tags as `f"{title}\n\n{description}\n\n{', '.join(tags)}"`, title and description stripped; no transcript, no branch), `MODEL_VERSION`, `estimate_channel` (video count, videos still to embed, tokens ≈ UTF-8 bytes / 3, cost at a price passed in; reads the DB, calls no API), `reembed_channel` (every video of the channel in `videos` without a `MODEL_VERSION` vector, in batches of 50 upserted on `video_id,chunk_index,model_version`; a failed batch, or one answered with the wrong number of vectors, is retried one video at a time; a video that still fails is logged and counted, and a rerun retries it), `member_similarities` (`MemberSims`), `calibrate_channel` (thresholds from current playlist members' similarity, stored on `channels.playlist_thresholds`). Run only by `scripts/reembed.py` |
-| `backlinks.py` | Slice 1 S1.2, pure (no I/O): the canonical backlink block. `render(description, targets, language)` puts `HEADINGS[language]` then one `<title> https://youtu.be/<id>` line per target (dicts with `video_id`, `title`) directly after the description's first line (D2), then a blank line if text follows; any block already there is stripped first, so a re-render replaces it. Raises `RenderRefused` (a `ValueError`) for a language not in `HEADINGS` (no English fallback), no targets, more than `BACKLINK_MAX`, a duplicate or malformed target id, an empty title, a heading with `#`, or a result over `DESCRIPTION_MAX` characters. `#` is dropped from titles and whitespace collapsed, so the block adds no hashtag. `find` → `Block(language, video_ids, start, end)`: an exact heading line followed by at least one line matching `<title> https://youtu.be/<11-char id>` and nothing else; `strip` removes every such block and the blank line after it. `HEADINGS` (all "watch more songs"): `"mr": "आणखी गाणी पहा:"` (owner, 2026-10-23: D3 left it to the SEO team, who had no preference) and, written by Claude for a native reader to skim before each channel goes live (owner, 2026-10-25), `"hi": "और गाने देखें:"`, `"bgc": "और गाणे देखो:"`, `"pa": "ਹੋਰ ਗੀਤ ਵੇਖੋ:"`, `"gu": "વધુ ગીતો જુઓ:"`, `"en": "Watch more songs:"`, `"ta": "மேலும் பாடல்களைப் பாருங்கள்:"`, `"ml": "കൂടുതൽ പാട്ടുകൾ കാണൂ:"`, `"kn": "ಇನ್ನಷ್ಟು ಹಾಡುಗಳನ್ನು ನೋಡಿ:"`, `"te": "మరిన్ని పాటలు చూడండి:"`; one per channel `default_language` (Bhojpuri, Rajasthani, 3D Animated share `hi`), all distinct (`find` reads the language off the heading). It must stay fixed: `find`/`strip` match it exactly. **S1.1, reads the DB:** `siblings(channel_id)` → `[{channel_id, views}]`, most views first: the channels whose videos sent this channel's videos ≥ `SIBLING_MIN_VIEWS` type-7 views over its latest `SIBLING_WINDOW_DAYS` (28) ingested `channel_traffic_source_a3` data-days (`reach.coverage(report_type=)`), read from its own `video_traffic_source_daily`, mapped to channels through `videos`, excluding itself and any channel not in `TRAFFIC_INGEST_CHANNELS`. `target_pool(channel_id, *, sibling_ids=None, known_vectors=None)` → `(Pool, None)` or `(None, reason)` (the thresholds, the eligible targets below, their `MODEL_VERSION` vectors, skipping ids already in `known_vectors`, and warm impressions; most of the cost). `candidates(video, *, sibling_ids=None, pool=None)` (reads a pool when none is passed) → `Candidates(rows, skipped_unembedded, reason, join_low)` (`join_low`, S1.5: the threshold applied, None when the thresholds were missing or another model version's): targets on the source's channel or, only while `BACKLINK_SIBLINGS_ENABLED` is on (default off), a sibling, warm on their own channel (`warm.warm_impressions`), public (or NULL), not a Short (`is_short` true), not the source, not in `human_edits.video_links(source description)`, with a `reembed.MODEL_VERSION` vector, and cosine ≥ the source channel's `playlist_thresholds.join_low`; ranked by similarity, then impressions, then id, leaving out a target whose `title_key` is the source's or a better-ranked target's, or whose cosine to the source or a better-ranked kept target is ≥ `BACKLINK_DUPLICATE_SIM`; at most `2 × BACKLINK_MAX` rows `{video_id, channel_id, title, similarity, impressions}`. Reasons: `no_thresholds`, `thresholds_other_model_version`, `source_not_embedded`. `candidates` and `render` are called by `app/agent_tick.py` (S1.4b; `siblings` through `candidates`) |
-| `warm.py` | B4 warm filter: `ranked_pool` (`{id, impressions}`, most impressions first, id tie-break; `warm_pool()` RPC paged through `all_rows` when `WARM_POOL_USE_RPC`, else in-app, and in-app if the RPC errors), `explore_order` (each pick is the best left or, with probability `WARM_EXPLORE_PCT`, a random one from the rest, flagged `explore`; injectable `random.Random`), `warm_pool` (both, over the ranking minus Shorts: `_without_shorts` reads `videos.is_short` for the pool through `rows_for_ids` and drops `true`, keeping NULL, on either path, since a Short's description links aren't clickable); `_holds` (S1.4a: a `midas` row holds its video if active, created within `TRIAGE_COOLDOWN_DAYS` whatever its status, or a `backlinks` row of arm `treated`/`holdout` at any age, or, a `title` row of arm `holdout`, or `treated` unless `cancelled` without `applied_at`, at any age; the in-app pool reads every `midas` row of its warm videos through `rows_for_ids`); `warm_impressions` (the warmth measure alone, `{video_id: impressions}` ≥ `WARM_MIN_IMPRESSIONS`, `{}` if reach isn't certified; the in-app pool is built on it). `app/agent_tick.py` picks from `warm_pool` (S1.4b), and `app/backlinks.py` `candidates` reads `warm_impressions` (S1.1) |
+| `analytics_client.py` | on-demand Analytics; `analytics_creds_for_channel` = `analytics_authorized` gate + `channel_credentials` (also used by the Reporting API) |
+| `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type), CSV parsing (reach; video and playlist traffic aggregated, `TRAFFIC_SOURCE_TYPES`), reach → `video_reach_daily`, `video_metrics` backfill; latest-wins day replace (`replace_data_day`, `record_ingested`); `download_report_csv` retries a dropped connection (`DOWNLOAD_ATTEMPTS` = 3) and refreshes the token once on 401 |
+| `human_edits.py` | human-edit ledger. Descriptions: `video_links`, `made_by_midas` (matches an audit's applied/reverted text, or links exactly an applied treated `midas` backlinks row's targets, `_midas_block`), `record_description_edits` (writes `human` backlinks rows with `ledger_key`); called from `sync_channel` on full syncs. Playlists: `added_by_midas` (a non-`sync` `added` assignment or an `approved` `add` proposal), `record_playlist_additions`; called from the membership walk. Both via `_record_human`; details §7.3 items 10–11 |
+| `traffic_poll.py` | daily traffic-source ingestion → `video_traffic_source_daily`, `playlist_traffic_daily`; retention rule (`keeps_detail`, `collapse_unread_detail`, §2) |
+| `interventions.py` | `assign_arm` (sha256 of `video_id` vs `HOLDOUT_PCT`), `active_for`, `record` (refuses a second open `midas` row with `ActiveInterventionExists`, or a `human` arm other than `n/a`; the partial unique index backs it; with `ledger_key` upserts `ignore_duplicates`, None if stored; `trajectory=` sent only when given). Callers: `human_edits`, `agent_tick`, `short_links` |
+| `reach.py` | data-day windows, coverage, frontier, staleness, `certify` (`certify_covered`, `window_length`); `coverage(…, report_type=)` defaults to reach |
+| `decide.py` | `decide(question_set, subject, context, intervention_id=None) -> Decision`: answers by rules (prob 1.0), asks `DECIDE_BACKEND` in shadow (`llm` via `chat_json`, validated; `jev` raises `NotConfigured`), writes one `decision_log` row (`used = 'rules'`), returns the rules answer; backend or log failures logged, never change the answer. Sets `TRIAGE` (rules: `backlinks`, then `title`, else `no_change`, §6) and `NEXT_WATCH` (`yes` iff `similarity` ≥ `join_low`). `Decision.log_id`; `link(log_id, intervention_id)`. Callers: `agent_tick.run`, `short_links._next_watch` |
+| `reembed.py` | one-off B6 re-embed: `recipe_text`, `MODEL_VERSION`, `estimate_channel` (no API), `reembed_channel` (batches of 50, per-video retry), `member_similarities`, `calibrate_channel` → `channels.playlist_thresholds` (method §7.3 item 5). Run only by `scripts/reembed.py` |
+| `backlinks.py` | the canonical backlink block. Pure: `render(description, targets, language)` (`HEADINGS[language]` + `<title> https://youtu.be/<id>` lines after the first line; replaces an existing block; `RenderRefused` for no heading, no/too many (`BACKLINK_MAX`)/bad targets, or over `DESCRIPTION_MAX`; drops `#`), `find`, `strip`. `HEADINGS` ("watch more songs", must stay fixed, all distinct): `"mr": "आणखी गाणी पहा:"` (SEO team), `"hi": "और गाने देखें:"`, `"bgc": "और गाणे देखो:"`, `"pa": "ਹੋਰ ਗੀਤ ਵੇਖੋ:"`, `"gu": "વધુ ગીતો જુઓ:"`, `"en": "Watch more songs:"`, `"ta": "மேலும் பாடல்களைப் பாருங்கள்:"`, `"ml": "കൂടുതൽ പാട്ടുകൾ കാണൂ:"`, `"kn": "ಇನ್ನಷ್ಟು ಹಾಡುಗಳನ್ನು ನೋಡಿ:"`, `"te": "మరిన్ని పాటలు చూడండి:"` (non-`mr` written by Claude for native review). DB: `siblings` (≥ `SIBLING_MIN_VIEWS` type-7 inbound over 28 traffic data-days, within `TRAFFIC_INGEST_CHANNELS`), `target_pool`, `candidates(video, pool=)` → `Candidates(rows, skipped_unembedded, reason, join_low)`: warm, public, non-Short targets on the source's channel (siblings only with `BACKLINK_SIBLINGS_ENABLED`), not already linked, cosine ≥ `join_low`, minus same-`title_key` and ≥ `BACKLINK_DUPLICATE_SIM` duplicates, ≤ `2 × BACKLINK_MAX` rows; reasons `no_thresholds`, `thresholds_other_model_version`, `source_not_embedded`. Called by `agent_tick` |
+| `warm.py` | warm filter: `ranked_pool` (RPC when `WARM_POOL_USE_RPC`, else or on error in-app), `explore_order` (`WARM_EXPLORE_PCT`), `warm_pool` (minus Shorts, `_without_shorts`), `_holds` (mirrors `warm_pool()`'s exclusions, §2), `warm_impressions` (≥ `WARM_MIN_IMPRESSIONS`, `{}` if uncertified). Used by `agent_tick` and `backlinks.candidates` |
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
 | `performance.py` | per-channel performance table/CSV |
-| `dashboard.py` | `/dashboard`; `_aggregate_legacy` kept as fallback/oracle for the RPC |
-| `reflection.py` | weekly per-channel prompt rewrite (shadow/live/auto) + auto-revert; `derive_niche_queries`, `_sample_competitors` (frozen) |
-| `transcripts.py` | transcript fetch + `video_transcripts` cache; `lang_display_name` (`_LANG_NAMES`, `:25-36`, incl. `bgc` Haryanvi, `bho` Bhojpuri, `raj` Rajasthani); Data API captions fallback |
-| `embeddings.py` / `openrouter.py` | embeddings and `chat_json`/`chat_text` via OpenRouter; `chat_tools(messages, tools, *, model=None, label=None)`: OpenAI-format `tools` with `tool_choice: "auto"`, the assistant message returned as sent (`content`, `tool_calls`; nothing parsed), the same headers and LLM span as `chat_json` (plus `llm.message_count`, `llm.tool_count`, `llm.tool_calls`), retried once on an `httpx.TimeoutException` or a 5xx, a 4xx or a second failure raised. Called only by `app/agent/loop.py` |
-| `agent/loop.py` | Slice 3 S3.4, the title agent's hand-rolled loop (Part 6 S3.4, Part 2 §3.1, F5, F11, F14). `run_title_agent(video, *, channel=None)` → `AgentResult(kind, title, reason, trajectory)`: system `titles.agent_system_prompt()`, first user message the video id and the channel's `default_language` only; per turn `chat_tools(messages, tools.SCHEMAS, model=AUDIT_MODEL, label="agent.title")`, each tool call run (`tools.call`; arguments that aren't a JSON object, an unknown tool or a raising tool come back as `{"error": …}` text), a reply with no tool call answered with `NUDGE`. Ends: `submit_title` passing `titles.check` (on the stripped title, against the video with the channel's language) → `title`, `reason` its reasoning; a failing one gets the failure back once, a second → `failed`, `checks_failed`; `decline` → `decline`, `reason` its reason; `AGENT_MAX_TURNS` turns with neither → `failed`, `turn_cap`. A `chat_tools` exception is re-raised with the trajectory so far as its `trajectory` attribute (`end.reason` `exception`). The trajectory: §2 `interventions`. `tools_called(trajectory)`: the tool names in order. Writes nothing; called by `agent_tick._run_title` and `titles.preview` |
-| `agent/tools.py` | Slice 3 S3.4, the agent's tools (Part 6 S3.4, Part 2 §3.2), each about the run's video only (`Subject(video, channel)`, passed by the loop; the model passes only the schema's arguments), read-only, no YouTube: `get_video` (`{video_id, title, description (first 1,500), default_language, impressions_28d, ctr_28d, channel_median_ctr}`, from the channel context's reach or `agent_tick._reach`), `get_transcript` (`titles._transcript`, cut to `TRANSCRIPT_MAX_CHARS`; `{available: false}` when none), `get_traffic_mix` (`agent_tick._traffic_mix`), `get_search_terms` (`titles._search_terms`, top `SEARCH_TERMS` = 25), `get_channel_top_performers(order="best"\|"worst")` (`titles._top_performers(…, worst=)`, `TOP_PERFORMERS` = 10 of the channel context's warm long videos, the video left out; `worst` counts no browse or suggested views as 0), `get_title_history` (the video's `audits` `{created_at, title_before, title (suggested_title), status, measurement_status}` and `title` interventions `{created_at, origin, status, title (payload.title), delta (measurement_result.delta)}`, each read newest first with `limit(10)`, merged, newest first, at most `HISTORY` = 10), `write_candidates` (`titles.write_candidates(titles.context(video, channel=))`, `WRITER_MODEL`, unchecked); terminal `submit_title(title, reasoning)` and `decline(reason)`, schemas only (the loop runs them). `SCHEMAS` (the nine, §6), `TOOLS`, `call` |
+| `dashboard.py` | `/dashboard`; `_aggregate_legacy` fallback/oracle for the RPC |
+| `reflection.py` | weekly prompt rewrite (shadow/live/auto) + auto-revert; `derive_niche_queries`, `_sample_competitors` (frozen) |
+| `transcripts.py` | transcript fetch + `video_transcripts` cache; `lang_display_name` (`_LANG_NAMES`, `:25-36`, incl. `bgc`, `bho`, `raj`); Data API captions fallback |
+| `embeddings.py` / `openrouter.py` | embeddings and `chat_json`/`chat_text` via OpenRouter; `chat_tools(messages, tools, *, model=None, label=None)` (`tool_choice: "auto"`, returns the assistant message unparsed, retried once on timeout or 5xx), called only by `app/agent/loop.py` |
+| `agent/loop.py` | the title agent's hand-rolled loop. `run_title_agent(video, *, channel=None)` → `AgentResult(kind, title, reason, trajectory)`: system `titles.agent_system_prompt()`, first message video id + language; per turn `chat_tools(…, model=AUDIT_MODEL, label="agent.title")`, tool errors returned as `{"error": …}`, no-tool replies get `NUDGE`. Ends: `submit_title` passing `titles.check` → `title` (one failure returned, second → `failed`, `checks_failed`); `decline`; `AGENT_MAX_TURNS` → `failed`, `turn_cap`. A `chat_tools` exception re-raised carrying the trajectory. Trajectory shape §2. `tools_called`. Writes nothing; called by `agent_tick._run_title`, `titles.preview` |
+| `agent/tools.py` | the agent's tools, scoped to the run's video (`Subject`), read-only, no YouTube: `get_video`, `get_transcript`, `get_traffic_mix`, `get_search_terms` (`SEARCH_TERMS` = 25), `get_channel_top_performers(order="best"\|"worst")` (`TOP_PERFORMERS` = 10), `get_title_history` (`HISTORY` = 10), `write_candidates` (`WRITER_MODEL`, unchecked); terminal `submit_title`, `decline` (schemas only). `SCHEMAS` (§6), `TOOLS`, `call` |
 | `playlists.py` | similarity engine: `join_pass` (no caller), `reconcile_channel`, `tune_thresholds`, `_llm_judge` |
-| `playlists_sync.py` | playlist inventory sync, budgeted membership walk, role heuristic; hands memberships new since a playlist's previous walk to the human-edit ledger (`_record_human_memberships`) |
+| `playlists_sync.py` | playlist inventory sync, budgeted membership walk, role heuristic; feeds new memberships to the human-edit ledger |
 | `playlist_discovery.py` | weekly orphan clustering → creates playlists (frozen) |
 | `playlist_health.py` | playlist health scorer (recommend-only) |
 | `playlists_router.py` | playlist HTTP endpoints |
-| `autopilot.py` | the tick loop; the agent path's gates (`_agent_tick`, S1.4b; it returns `apply_disabled`/`no_heading` only when neither `agent_tick.backlinks_enabled` nor `agent_tick.titles_open` holds). The agent path is its only write path: a channel with `agent_enabled` off gets the Shorts action and `shorts_only`. `_next_video_for_channel` (the audit picker, in-app or the `next_audit_candidate()` RPC) is kept with no caller (§7.2) |
-| `agent_tick.py` | Slice 1 S1.4b, the agent tick's video work. `run(channel)`: the first of `warm.warm_pool` (with the explore share) → `_assess(video, language)` (S1.1 `backlinks.candidates` on the channel's pool, `_pool`: `backlinks.target_pool` read at most once per `POOL_TTL_SECONDS` per channel, kept in process with its vectors as `array('d')` shared across channels' pools, so a target that turns private or cold within the hour can still be picked; and the triage context: `has_related_block` = the description links to one of our videos other than itself, `human_edits.video_links` ∩ `human_edits.our_videos`, D5; `backlink_candidates` = the candidate count; `backlinks_stopped`; `traffic_mix_28d` = views by source-type name over the channel's latest 28 ingested `channel_traffic_source_a3` data-days; `impressions`, `ctr` = `reach.weighted_ctr` over the latest `WARM_WINDOW_DAYS` reach data-days; `recent_interventions` = the video's rows of any origin created in the last 28 days; `backlinks_enabled` = `backlinks_enabled(language)`, `title_enabled` = `_title_enabled`, `title_excluded` = in `TITLE_EXCLUDE_VIDEOS` or the channel's ceiling, `channel_median_ctr`, `is_short` = `videos.is_short`; the ceiling and median from `title_channel`, read only while `title_enabled`) → `decide(TRIAGE, video_id, context)` → `title` → `_run_title` (below); else `interventions.record` (lever `backlinks`, origin `midas`): `no_change` → `declined`, arm `n/a`, `payload.rationale`; `backlinks` → if `backlinks.render` refuses on the stored description (`_unrenderable`), `declined`, arm `n/a`, `payload.rationale` "the block can't be rendered: …", `triage_json.render_refused`; else `assign_arm`: holdout → `holdout` with `payload.targets` (top `BACKLINK_MAX` candidates), no YouTube call; treated → `planned` with `payload.targets`, then `backlinks_apply.apply_backlinks` (success → `measuring`; an ApplyError or other exception → `cancelled` with `payload.error = {reason, detail}`, re-raised for the tick; DRY_RUN → `cancelled` with reason `dry_run` and the rendered `payload.description`). `triage_json` = `{decision_log_id, question_set_version, answer, probs, context, explore, candidates_reason, skipped_unembedded}`, and `decide.link` points the log row back. S1.5: a video triaged to `backlinks` (either arm), before it is recorded, gets `_next_watch`: `decide(NEXT_WATCH, "<source>-><target>", context)` for every row `candidates` returned (up to `2 × BACKLINK_MAX`, not only the targets kept), context `{source_video_id, source_title, target_video_id, target_channel_id, target_title, similarity, join_low}`; the results go on `triage_json.next_watch` as `[{target_video_id, similarity, decision_log_id, answer, probs}]` (the rules answer; the backend's is on the log row), and `decide.link` points each pair's row at the intervention too. A declined row has no `next_watch` key. A pick that already has an active Midas intervention returns `active_intervention` (`ActiveInterventionExists`). `backlinks_stopped(channel_id)` (S1.6b): `lever_verdicts.stopped(channel_id)`, true once any `treated_vs_holdout` `lever_verdicts` row of the channel for `backlinks` has `stop_rule_triggered`; it stays true, since past weeks' rows aren't rewritten and a same-week rerun keeps a set flag. `preview(channel_id, n)`: the same up to the render for the pool's first `n`, asking `TRIAGE.rules` directly with backlinks taken as open (`backlinks_on=True`, so it shows targets before the switch is on and a missing heading as the render's refusal); a `title` answer shows its arm only (`scripts/preview_titles.py` shows the writer); writes nothing, calls no backend and no YouTube. **S3.3 (titles):** `backlinks_enabled(language)` = `BACKLINK_APPLY_ENABLED` and the language in `backlinks.HEADINGS`; `titles_open(channel_id)` = in `TITLE_CHANNELS`, `TITLE_APPLY_ENABLED`, not `titles.stopped`; `_titles_today(channel_id)` → (today's `midas` `title` rows of arm `treated` not `declined`, today's with `payload.path = 'agent'`), one bounded query, UTC day; `_title_enabled(channel_id, video_id)` = `titles_open`, the first below `TITLE_DAILY_CAP`, and for a video `titles.route`s to `agent` the second below `TITLE_AGENT_DAILY_RUNS`; `title_channel(channel_id)` = `titles.channel_context`, kept as the fourth field of the channel's `_pools` entry, read once per pool refresh (`POOL_TTL_SECONDS`) and only when asked. `_run_title(video, triage, decision)`: `assign_arm(video, 'title')`: holdout → `holdout`, `payload {title_before}`, no writer call; treated → `titles.route` → the path's writer (`titles.pipeline(video, channel=title_channel(…))`, or on the agent path `agent_loop.run_title_agent(video, channel=title_channel(…))`, mapped by `_agent_outcome`: a title → the same `planned` row with `candidates` = its submits, a decline → treated `declined` with `payload {title_before, path, rationale}` and no YouTube call, a failure → treated `cancelled` with `payload.error.reason` `turn_cap` or `checks_failed`; every agent row with `trajectory`, through `interventions.record`) → `planned` with `payload {title_before, title, candidates, reason, path}` and `strategy_version = titles.strategy_version(path)` → `titles_apply.apply_title` (`measuring`; an ApplyError or other exception → `cancelled` with `payload.error`, re-raised; DRY_RUN → `cancelled`, reason `dry_run`); no passing candidate → `cancelled`, reason `checks_failed` (`CHECKS_FAILED`), detail the failures; the writer raising → `cancelled`, reason `writer_exception` (`WRITER_EXCEPTION`), re-raised for the tick; `decide.link` points the triage row at it |
-| `lever_measurement.py` | Slice 1 S1.6a, pair measurement per `backlinks` intervention (Part 4 S1.6, Part 2 §1.2, §1.3, §1.7); also `short_link` (below). `measure_channel(channel_id, *, today=None)` → counts `{attempted, errored, judged, insufficient_data, awaiting_window, extended, changed}` (`attempted`/`errored` for `job_status.item_error_verdict`; a row that raises is logged and left as it was). Reads the channel's (the source's) `backlinks` rows through `all_rows`: treated (`midas`, arm `treated`, `measuring`, `applied_at` set), holdout (`midas`, `holdout`) and human (`human`, `applied`, only when the channel is in `TRAFFIC_INGEST_CHANNELS`), plus `judged`/`insufficient_data` ones whose post window ended within `RESTATEMENT_HORIZON_DAYS` (28), which are recomputed so a restated traffic day is re-read. `as_of`: d0 = the Pacific (YouTube data-day) date of `applied_at` (treated), `created_at` (holdout) or `detected_at` (human). `windows(d0, post_days)`: pre d0−7 … d0−1, post d0+1 … d0+7 (or +14). Targets: a Midas row's `payload.targets[].video_id` (channel from the payload), a human row's `payload.target_video_id` (channel from `videos`, `rows_for_ids`). Complete when every target's channel and the source's own have a `channel_traffic_source_a3` ledger frontier (`reach.coverage`, `reach.frontier`) ≥ the post window's last day; else `measurement_status = awaiting_window` (or `extended`). `pair_views` = Σ `views` in `video_traffic_source_daily` with `video_id` in the targets, `source_type = 7`, `source_detail` = the source (`rows_for_ids`); `source_views` = the source's own views, every type (`all_rows`). Source under `LEVER_MIN_SOURCE_VIEWS` at 7 days → wait for 14; still under → `insufficient_data`; else `judged`. `delta` = post − pre, in views per week (a 14-day post is scaled by 7/14); `missing_days` lists the windows' data-days some channel the row reads has no ingested report for (counted as zero, flagged). Writes only when something changed; `judged_at` is when the row got its current outcome (kept across recomputes that don't change it), `computed_at` is the last change; a decided row that can't be decided again yet keeps its verdict. **S2.6:** the row read takes `lever in (backlinks, short_link)`; a `short_link` row is measured only as `human` (`applied`, `TRAFFIC_INGEST_CHANNELS`), with `source(row)` = `payload.short_id`, `targets(row)` = [`video_id`], d0 = `detected_at`'s Pacific date, the pair views at `SOURCE_TYPES[lever]` (`backlinks` 7, `short_link` 32; `pair_views(…, source_type=7)`) and the floor on the Short's own views, every type (`source_views`, unchanged); everything else as human backlinks. `data_day_start(day)`: Pacific midnight of a data-day, which `as_of` reads back as that day (`short_links.detect`'s timestamps). Called by `app/lever_verdicts.py` `run_weekly` (the `lever_measurement` job) |
-| `title_measurement.py` | Slice 3 S3.5, title measurement per video (Part 6 S3.5, Part 2 §1.2, §1.7, F6, F14). `measure_channel(channel_id, *, today=None)` → counts `{attempted, errored, judged, insufficient_data, awaiting_window, changed}`, over the channel's `midas` `title` rows (`all_rows`): treated `measuring` with `applied_at`, `holdout`, treated `declined`, and `judged`/`insufficient_data` ones still within `lever_measurement.RESTATEMENT_HORIZON_DAYS` of their post window. `as_of`: the Pacific date of `applied_at`, else `created_at`. `windows(d0)`: pre d0−`PRE_DAYS` (14) … d0−1, post d0+1 … d0+`TITLE_WINDOW_DAYS`. Complete when the channel's `channel_traffic_source_a3` frontier reaches the post's last day (`reach.coverage`, `reach.frontier`, read once per channel). `views`: Σ `views` of `SOURCE_TYPES` (3, 5, 7) in `video_traffic_source_daily` for the video (`all_rows`); `delta` = ln((post + 1) / (pre + 1)); `missing_days` = `reach.missing_days`; impressions and CTR per window from `reach.aggregate` (`video_reach_daily`), recorded only. `pre` < `TITLE_MIN_PRE_VIEWS` → `insufficient_data`, else `judged`. Writes through `lever_measurement._update` (`judged_at` kept across recomputes). `ROWS` = `title interventions`, its job category. Called by `lever_verdicts.run_weekly` |
-| `lever_verdicts.py` | Slice 1 S1.6b, the weekly verdict (Part 4 S1.6, Part 2 §1.3–§1.5, P1, D6, D8). **S3.5:** `title_verdicts` (the per-path rows, §2 `lever_verdicts`), `write_verdicts(lever='title')` (reads `_title_judged`: judged `midas` `title` rows and those put back after judging), `stopped(channel_id, lever, scope)` (default `treated_vs_holdout`), `TITLE_SCOPES` (`payload.path` → scope), `auto_revert(channel_id)` → `{attempted, errored, reverted, skipped}` (a judged treated row with `applied_at` whose `delta` − the holdout mean Δ of its judged week, else the cumulative holdout mean, is ≤ −`TITLE_REVERT_LIFT`, worst first, at most `TITLE_REVERTS_PER_DAY` reverted, through `titles_apply.revert_title(auto=True)`; `title_changed` skipped and the next tried; `apply_disabled`/`quota_insufficient` skip and stop the run; any other error counted), the job's title half (§4) and `GET /channels/{id}/title-test` (§5 Routes). `verdicts(rows, week, windows_before, *, min_lift, windows)` (the arithmetic, §2 `lever_verdicts`; `write_verdicts` passes `BACKLINK_MIN_LIFT`, `BACKLINK_EXPERIMENT_WINDOWS`), `directional(lift, min_lift)`, `write_verdicts(channel_id, *, today=None, lever='backlinks')` (reads the channel's `judged` rows of that lever and its verdict weeks through `all_rows`; writes, oldest first, every earlier week with judged rows and no verdict row yet, then the current week, upserting on `channel_id,lever,arm_scope,week_start`; deletes the current week's row of a scope that has none now, unless it triggered the stop rule), `stopped(channel_id)` (any triggered `treated_vs_holdout` row; a bounded `limit(1)` read), `run_weekly(*, today=None)` (the job, §4; also `playlist_test.measure_channel` for drawn channels; `short_links.detect` first and `write_verdicts(lever='short_link')` last on `TRAFFIC_INGEST_CHANNELS` channels; `write_verdicts` takes `lever`, default `backlinks`), `ON_CONFLICT` (the table's unique key, shared with `playlist_test`), and the two read endpoints (§5 Routes). `insufficient_data` rows never enter a mean (§1.7); nor, for `backlinks`, do rows whose video is a Short (`_without_shorts`, `is_short` true, NULL stays in), read through `rows_for_ids` |
-| `playlist_test.py` | Slice 2 S2.1, the playlist test's draw (Part 5 S2.1, Part 2 §4, P3, E1, E4–E6); #88/#89 extend it. `survey(channel_id)` → `Survey(eligible, skipped)`: the channel's `playlists` rows (`all_rows`), eligible when `role` isn't `series` and at least `MIN_EMBEDDED_MEMBERS` (3) current members have a `reembed.MODEL_VERSION` vector; current members are `reembed._members` (the latest `playlist_assignments` action per pair is `added`, as `playlists._current_members`, read for the whole channel through `rows_for_ids`); skipped rows carry `reason` `series` or `too_few_embedded_members`. `eligible(channel_id)` → `[{playlist_id, title, eligible_members}]`. `assign_arm(playlist_id)`: sha256 of the playlist id, first 8 bytes as a point in [0, 1), `holdout` below `PLAYLIST_HOLDOUT_PCT`, else `treated` (`interventions.assign_arm` untouched). `candidates(channel_id, playlist_id)` → `Candidates(rows, skipped_unembedded, reason, join_high)`: videos of the channel warm by `warm.warm_impressions`, public (or NULL), `is_short` not true, `is_episode` not true, not a current member, with a `MODEL_VERSION` vector whose raw cosine to the members' centroid (the sum of their vectors, which cosine reads as the mean) is ≥ the channel's `playlist_thresholds.join_high`; ranked by impressions, then similarity, then id; at most `PLAYLIST_TEST_MAX_ADDS` rows `{video_id, title, similarity, impressions}`. Refused with `reason` `no_thresholds` or `thresholds_other_model_version` (`backlinks._thresholds` and its constants); a playlist `survey` wouldn't make eligible gets no rows. `draw(channel_id)`: raises `AlreadyDrawn` if the channel has any `playlist_arms` row; writes nothing and returns `refused` when the thresholds are refused; else per eligible playlist inserts its arm (treated with candidates `planned`, treated without `no_dose`, holdout `holdout`), then a treated arm's pending `experiment` `add` proposals with `arm_id`, then their ids onto `proposal_ids`; returns `{channel_id, refused, playlists, arms: {treated, holdout, no_dose}, proposals, skipped}`. `preview(channel_id)`: the same plan, writing nothing, plus `already_drawn` and `plan` (per eligible playlist its arm, status, `eligible_members` and the videos it would get; none for a holdout arm). Run only by `scripts/playlist_test.py`; nothing in the draw reaches YouTube. **S2.2:** `run_apply()` (the `playlist_test_apply` job, §4) and `apply_channel(channel_id, budget)` → `{attempted, errored, sent, stopped}` (`stopped`: `budget`, `youtube_quota_exceeded` or None), the test's only YouTube write; `test_dates(channel_id)` → `(test_start, test_end)`, the Pacific dates (`lever_measurement._day`) of the earliest `first_applied_at` and latest `last_applied_at` over the channel's treated arms, None while any treated arm is `planned` or `applying`, when none has a `first_applied_at`, or when the channel has none (read by #89). `test_dates.__test__ = False`, since pytest collects `app/playlist_test.py` by its name. **S2.3:** `measure_channel(channel_id)` → `{attempted, errored, weeks, changed}` (`attempted`/`errored` per arm, for `job_status.item_error_verdict` under `ARMS` = `playlist arms`): nothing until `test_dates` and once every arm's `measurement_status` is `done`; else `windows(test_start, test_end, PLAYLIST_EXPERIMENT_WINDOWS)` (pre = `PRE_DAYS` (28) data-days ending `test_start` − 1; week k = `test_end` + 1 + 7(k − 1) … `test_end` + 7k), keeping the weeks whose last day the channel's `playlist_traffic_source_a2` ledger frontier (`reach.coverage(report_type=)`, `reach.frontier`) has reached. The indicator, `daily_starts`: Σ `playlist_starts` in `playlist_traffic_daily` per `playlist_id` and day, every video and source type (`rows_for_ids` on the channel's arm playlist ids and the span). Per arm: `pre_weekly` = pre sum × 7 / 28, each week's `starts` and `delta` = starts − `pre_weekly`, `missing_days` = `reach.missing_days` over pre and the weeks (zero, listed), `added_video_views` = per week the arm's landed adds' (`playlist_proposals.applied_at`) `video_traffic_source_daily` views with `source_type` 14 and `source_detail` = its playlist (`[]` for an arm with none). Then the week rows (§2 `lever_verdicts`), unless an arm errored, and the arms' columns, written only when changed. At window `PLAYLIST_EXPERIMENT_WINDOWS` with no arm errored, every arm is `done` and the `dosed`/`holdout` ones `judged` (`insufficient_data` when its playlist is no longer in `playlists`). `channel_playlist_test` is the read endpoint (§5 Routes) |
-| `short_links.py` | Slice 2 S2.4, Short → video link recommendations (Part 5 S2.4, Part 2 §2.3, P4, E9, E10); #91/#92 extend it. Recommend-only: nothing here reaches YouTube. `shorts(channel_id)` → `[{id, channel_id, title, feed_views}]`, most views first, ties by id: the channel's videos with `is_short` true, public (or NULL), with ≥ `SHORT_LINK_MIN_FEED_VIEWS` type-24 views in `video_traffic_source_daily` over its latest `FEED_WINDOW_DAYS` (28) ingested `channel_traffic_source_a3` data-days (`reach.coverage(report_type=)`, as `backlinks.siblings`). `targets(short, *, pool=None)` → `Targets(rows, skipped_unembedded, reason, join_low)` (`backlinks.Candidates`' shape): long videos (`is_short` not true) on the Short's own channel only (Part 5 finding 6), public (or NULL), warm (`warm.warm_impressions`), not the Short, with a `reembed.MODEL_VERSION` vector whose cosine to the Short's is ≥ the channel's `playlist_thresholds.join_low`; ranked by similarity, then impressions, then id; at most `SHORT_LINK_TARGETS` rows `{video_id, channel_id, title, similarity, impressions}`. Refused as `backlinks.candidates` (`backlinks._thresholds` and its reasons `no_thresholds`, `thresholds_other_model_version`); a Short without a vector → `source_not_embedded`, `skipped_unembedded` 1; else `skipped_unembedded` counts the eligible targets without a vector. `pool` (`_pool`: the thresholds, the eligible targets and their vectors) is read once per channel by `refresh`. `refresh(channel_id)`: `_plan` (the listed Shorts with no `short_link_recommendations` row of any status, in `shorts` order, until `SHORT_LINK_MAX_PER_RUN` have targets; a Short without a vector or a target is counted and tried again next run), then per Short, per pair, `decide(NEXT_WATCH, "<short>-><target>", context)` with `agent_tick._next_watch`'s context (the Short as source), and its `pending` rows with each pair's `log_id` as `decision_log_id` in one insert; returns `{channel_id, refused, shorts, already, skipped_unembedded, no_targets, targets_unembedded, attempted, errored, recommended, rows}` (a Short whose write raises is logged, counted in `errored`, and the others run). `preview(channel_id)`: `_plan`, writing nothing and asking no backend. `run_weekly()`: the `short_link_refresh` job (§4). **S2.5:** `router`, the page's endpoints and the tick (§5 Routes): `channel_short_links` (`_page`, `_csv`), `set_short_link` (the human ledger through `interventions.record`, `_ledger_key`), `dismiss_short_link`. **S2.6:** `seen_pairs(channel_id)` → `[{short_id, short_channel_id, target_video_id, views, first_day}]`: type-32 rows of `video_traffic_source_daily` on the channel (`video_id` = the target, in `videos`; `source_detail` = a Short in `videos` with `is_short` true; B1 keeps type-32 detail, `app/traffic_poll.py` `keeps_detail`) summed over its latest `FEED_WINDOW_DAYS` (28) ingested `channel_traffic_source_a3` data-days, ≥ `SHORT_LINK_SEEN_MIN_VIEWS`; `detect(channel_id)` → `{pairs, attempted, errored, seen, inferred}`: per pair `seen_at` on a matching recommendation still without one, and an `interventions.record` (§2 `interventions` S2.6) unless the pair's `ledger_key` is stored; a pair that raises is logged and counted (`PAIRS` = `short-link pairs`; `INFERRED_TIMING` = `inferred_from_traffic`). Called by `app/lever_verdicts.py` `run_weekly` |
+| `autopilot.py` | the tick loop (§4); agent-path gates (`_agent_tick`: `apply_disabled`/`no_heading` only when neither `backlinks_enabled` nor `titles_open` holds); the agent path is its only write path, other channels get `shorts_only`. `_next_video_for_channel` kept with no caller (§7.2) |
+| `agent_tick.py` | the agent tick's video work. `run(channel)`: first of `warm.warm_pool` → `_assess` (candidates from the channel's cached pool, `_pool`, `POOL_TTL_SECONDS`; triage context keys §6) → `decide(TRIAGE)` → `title` → `_run_title`; else a `midas` `backlinks` row: `no_change` or unrenderable (`_unrenderable`) → `declined` arm `n/a`; holdout → `holdout` with `payload.targets`; treated → `planned` → `apply_backlinks` → `measuring`, or `cancelled` with `payload.error` (re-raised; `dry_run` under DRY_RUN). Backlinks picks also ask `NEXT_WATCH` per candidate pair in shadow (`_next_watch`, `triage_json.next_watch`). Rows shapes §2. `backlinks_stopped` (sticky `lever_verdicts.stopped`). `backlinks_enabled(language)`, `titles_open`, `_title_enabled` (`TITLE_DAILY_CAP`, `TITLE_AGENT_DAILY_RUNS` over `_titles_today`), `title_channel` (cached with the pool). `_run_title`: holdout → `holdout`; treated → `titles.route` → pipeline or `run_title_agent` (`_agent_outcome`: decline → treated `declined`; failure → `cancelled` `turn_cap`/`checks_failed`; agent rows carry `trajectory`) → `planned` with `strategy_version` → `apply_title`; no passing candidate → `cancelled` `checks_failed`; writer raising → `cancelled` `writer_exception`, re-raised. `preview(channel_id, n)`: read-only, backlinks taken as open. §7.3 items 17, 30 |
+| `lever_measurement.py` | pair measurement for `backlinks` and `human` `short_link` rows. `measure_channel(channel_id)` → counts: d0 = Pacific date of `applied_at`/`created_at`/`detected_at`; pre d0−7…d0−1, post d0+1…d0+7 (extended once to 14); waits for every involved channel's traffic frontier; `pair_views` at `SOURCE_TYPES[lever]` (`backlinks` 7, `short_link` 32), floor `LEVER_MIN_SOURCE_VIEWS` on the source's views → `judged`/`insufficient_data`; `delta` in views per week; recomputes within `RESTATEMENT_HORIZON_DAYS` (28). `data_day_start`. Result shape §2, decisions §7.3 item 19. Called by `lever_verdicts.run_weekly` |
+| `title_measurement.py` | per-video title measurement. `measure_channel` over `midas` `title` rows (treated `measuring`, `holdout`, treated `declined`, recent decided ones): pre `PRE_DAYS` (14), post `TITLE_WINDOW_DAYS`; views of `SOURCE_TYPES` (3, 5, 7); `delta` = ln((post + 1) / (pre + 1)); impressions/CTR recorded only; `pre` < `TITLE_MIN_PRE_VIEWS` → `insufficient_data`, else `judged`. `ROWS` = `title interventions`. Called by `lever_verdicts.run_weekly`; §7.3 item 32 |
+| `lever_verdicts.py` | the weekly verdict (arithmetic §2 `lever_verdicts`). `verdicts`, `directional`, `write_verdicts(channel_id, *, lever='backlinks')` (backfills missing earlier weeks, upserts the current one, never clears a triggered stop), `stopped(channel_id, lever, scope)`, `title_verdicts`, `TITLE_SCOPES`, `auto_revert` (judged treated titles ≤ −`TITLE_REVERT_LIFT` against the holdout, worst first, ≤ `TITLE_REVERTS_PER_DAY`, via `revert_title(auto=True)`; `title_changed` skipped, `apply_disabled`/`quota_insufficient` stop the run), `run_weekly` (the `lever_measurement` job, §4), `ON_CONFLICT`, the interventions, lever-verdicts and title-test endpoints. `insufficient_data` rows and backlinks rows on Shorts (`_without_shorts`) enter no mean |
+| `playlist_test.py` | the P3 playlist test. Draw: `survey`/`eligible` (non-`series`, ≥ `MIN_EMBEDDED_MEMBERS` (3) embedded members), `assign_arm` (hash vs `PLAYLIST_HOLDOUT_PCT`), `candidates` (warm, public, non-Short, non-episode non-members with cosine to the centroid ≥ `join_high`, by impressions, ≤ `PLAYLIST_TEST_MAX_ADDS`), `draw` (once; `AlreadyDrawn`; refused thresholds write nothing; arms + `experiment` proposals), `preview`; run only by `scripts/playlist_test.py`. Apply: `run_apply`/`apply_channel` (the `playlist_test_apply` job, §4; the test's only YouTube write), `test_dates`. Measure: `measure_channel` (weekly `playlist_starts` vs a 28-day pre, up to `PLAYLIST_EXPERIMENT_WINDOWS`, `ARMS` = `playlist arms`; writes week rows and arm columns, §2), `channel_playlist_test` endpoint. Decisions §7.3 items 21–23 |
+| `short_links.py` | Short → video link recommendations, recommend-only (nothing reaches YouTube). `shorts` (feed views ≥ `SHORT_LINK_MIN_FEED_VIEWS`), `targets` (same-channel warm long videos, cosine ≥ `join_low`, ≤ `SHORT_LINK_TARGETS`; refusals as `backlinks.candidates`), `refresh` (≤ `SHORT_LINK_MAX_PER_RUN` Shorts with targets, shadow `NEXT_WATCH` per pair, one insert of `pending` rows per Short), `preview`, `run_weekly` (the `short_link_refresh` job). `router` (Routes): `channel_short_links`, `set_short_link`, `dismiss_short_link`. `seen_pairs`/`detect` (type-32 pairs → `seen_at` and `human` `short_link` interventions, `PAIRS` = `short-link pairs`, `INFERRED_TIMING` = `inferred_from_traffic`), called by `lever_verdicts.run_weekly`. Decisions §7.3 items 24–26 |
 | `tracing.py` | OpenTelemetry → Phoenix spans (off by default) |
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
 | `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard. `channel.html`'s proposals card labels `decision_source` through `DECIDED_BY`, which has `experiment: 'Playlist test'` (the playlist test's proposals show up there unchanged otherwise). The Playlists tab has a "Short links" card (`#sl-card`, `loadShortLinks`, `renderShortLinks`, `decideShortLink`), loaded with the tab: `GET /channels/{id}/short-links?limit=1000` (from the SWR cache, as the other cards), per Short its title (YouTube link), feed views and an "Open in Studio" link, per target its rank, title, similarity, impressions and status pill, "Set in Studio" (`POST /short-links/{id}/set`, after a `confirmDialog`) on a target not `set` and "Dismiss" (`POST /short-links/{id}/dismiss`) on a `pending` one, and a "Download CSV" link (`?format=csv&limit=1000`) |
+| `static/*` | vanilla-JS dashboard. `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
 
-**Scripts:** `scripts/preview_titles.py` (S3.2: `--channel`, `--n` default 20, `--path pipeline|agent` default `pipeline`, `--csv [PATH]` default `logs/preview_titles_<channel>.csv`; prints `titles.preview` per title answer (the videos `TRIAGE.rules` sends to titles with the lever taken as open, §5 `titles.py`): arm, path, CTR beside the median, impressions, each candidate with its check, the chosen title or the failures; with `--path agent` the agent's run instead: the tools called and its turns, each submitted title with its check, and the title or `decline`/`failed` with its reason, the CSV gaining `agent_end`, `tools`, `turns`; CSV cells starting `= + - @`, tab or CR prefixed with `'` (`short_links._cell`); read-only, calls the writer model and, with `--path agent`, the reasoning model), `scripts/title_bakeoff.py` (S3.2, F9: `--channel`, `--n` default 20, `--models a,b,c`, `--out` default `logs/title_bakeoff_<channel>.csv`, `--seed`; `titles.title_answers(…, pick=False)`'s videos through `titles.write_candidates` once per model, no retry; one shuffled row per (video, model): `row, code, video_id, current_title, candidate` (the top candidate passing `check`, else blank), `checks` (`pass`, or each failure), blank `score_1_3`, `wrong_or_broken_script`, `follows_structure` and `notes`; the model is a code `W1…Wn` assigned in shuffled order, mapped in `<out stem>.key.csv` (`code, model`); cells escaped as the preview's; writes nothing to the DB, calls no YouTube), `scripts/short_links.py` (S2.4: `--channel` and `--preview` (required); prints per Short `refresh` would recommend its feed views and targets (rank, similarity, impressions), then the counts; exits 1 when the thresholds are refused; writes nothing, asks no backend), `scripts/playlist_test.py` (S2.1: `--channel` and one of `--preview` (prints per eligible playlist its arm, status and the videos it would get, the skipped playlists and the counts; writes nothing) or `--draw` (`playlist_test.draw`, no confirmation; exits 1 when refused or already drawn)), `scripts/preview_backlinks.py` (S1.4b: `--channel`, `--n` default 20; prints each video's rules answer, arm, targets, context and description before/after, or the render refusal; read-only), `scripts/reembed.py` (B6: `--channels` comma list, `--estimate` with `--usd-per-mtok`, `--skip-calibrate`;
-the real run re-embeds then calibrates each channel), `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`),
-`scripts/probe_reporting.py`, `scripts/probe_analytics.py`, `scripts/verify_reach_coverage.py`,
-`scripts/apply_migrations.py`, backfills, and the Phase A live probes in `scripts/probes/`
-(`probe_traffic_source_report.py` defaults to `channel_traffic_source_a3` since 2026-10-06,
-`scripts/probes/probe_traffic_source_report.py:61`).
+**Scripts:** `scripts/preview_titles.py` (`--channel`, `--n` 20, `--path pipeline|agent` default `pipeline`, `--csv [PATH]` default `logs/preview_titles_<channel>.csv`; prints `titles.preview` per title answer: arm, path, CTR vs median, candidates with checks, chosen title or failures; with `--path agent` the agent's tools, turns, submits and end; read-only, calls the writer and, for `agent`, the reasoning model), `scripts/title_bakeoff.py` (`--channel`, `--n` 20, `--models a,b,c`, `--out` default `logs/title_bakeoff_<channel>.csv`, `--seed`; each model once per video, one shuffled row per (video, model) with blank `score_1_3`, `wrong_or_broken_script`, `follows_structure`, `notes`; models hidden as `W1…Wn`, key in `<out stem>.key.csv`; no DB or YouTube writes), `scripts/short_links.py` (`--channel --preview`; prints what `refresh` would recommend; exits 1 when thresholds are refused; writes nothing), `scripts/playlist_test.py` (`--channel` and `--preview` (writes nothing) or `--draw` (no confirmation; exits 1 when refused or already drawn)), `scripts/preview_backlinks.py` (`--channel`, `--n` 20; rules answer, arm, targets, description before/after or the refusal; read-only), `scripts/reembed.py` (`--channels`, `--estimate` with `--usd-per-mtok`, `--skip-calibrate`; re-embeds then calibrates), `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`), `scripts/probe_reporting.py`, `scripts/probe_analytics.py`, `scripts/verify_reach_coverage.py`, `scripts/apply_migrations.py`, backfills, and the Phase A live probes in `scripts/probes/` (`probe_traffic_source_report.py` defaults to `channel_traffic_source_a3`, `:61`).
 
 ---
 
@@ -1111,21 +973,14 @@ the real run re-embeds then calibrates each channel), `scripts/create_reporting_
   (<views per impression>)` lines, `Transcript: …` (`not available` / `none` when empty). The retry adds a blank line,
   `Your previous candidates failed these checks; write new ones that pass:` and `- '<title>': <failure>` per failure (`- '': malformed reply: no candidates` for an empty attempt).
 
-  the part through the rules is `TITLE_BRIEF`, and `TITLE_PROMPT` is `TITLE_BRIEF` plus the rest. Since
-  2026-10-31 `TITLE_BRIEF` = `TITLE_GOAL` + `TITLE_STRUCTURE` (the SEO team's structure, owner, 2026-10-31: the team
-  rejected the structure of the 10-30 bake-off's candidates, written by the earlier "plain words, not keywords" brief)
-  + `TITLE_LIMITS` + the candidate rule. `TITLE_GOAL` counts search results as a place the title is read, and the
-  style lines (plain words, "not for search keywords") are gone. The rendered prompt changed, so the pipeline's
-  `prompt_sha256` and `strategy_version` did (no title row existed yet). Since 2026-11-05 every pipeline title ends with TMKOC and the
-  word, whatever the current title has (owner: the team wants it on every title); before, only where the current
-  title had a series name. The agent's `TITLE_LIMITS` are unchanged (keep a series or brand name the title has). Since 2026-11-16 a story, episode or show gets the language's word for an episode or a story instead of the word for rhymes, and keeps its season or episode number (owner: the P1 previews titled Marathi and Gujarati comedy episodes "… Baalgeet TMKOC बालगीत", and one dropped "S2 EP 30"); the pipeline's `prompt_sha256` and `strategy_version` moved again (no title row yet). Later the same day English got its own structure, one half, rhyme names then `| TMKOC English Nursery Rhymes` (or `Episode`/`Story`), since on English the romanised half only repeated the first (owner, after the P3 preview); the pipeline's `strategy_version` moved again, with title rows already written on Gujarati and Marathi under the earlier one (each row keeps its own stamp).
+  Composition: `TITLE_PROMPT` = `TITLE_BRIEF` + the rest; `TITLE_BRIEF` = `TITLE_GOAL` + `TITLE_STRUCTURE` (the SEO
+  team's structure, owner) + `TITLE_LIMITS` + the candidate rule. Each prompt change moves the pipeline's
+  `prompt_sha256` and `strategy_version`; each title row keeps the stamp it was written under.
 
 - **Title agent prompt** (S3.4, `app/titles.py` `AGENT_PROMPT`, the system message of `app/agent/loop.py`
-  `run_title_agent`; `agent_system_prompt()` fills `{title_max}` with `TITLE_MAX` (100)). Since 2026-10-31
-  `TITLE_GOAL`, then that the structure is the agent's to decide, then `TITLE_LIMITS` (the series or brand name, e.g.
-  TMKOC, is a limit for both paths), then the agent's part; no `TITLE_STRUCTURE`, so pipeline vs agent compares the
-  SEO team's structure with the agent's own (owner, 2026-10-31). It moved the agent's `prompt_sha256`, so its
-  `strategy_version` (no agent row existed yet). Verbatim:
+  `run_title_agent`; `agent_system_prompt()` fills `{title_max}` with `TITLE_MAX` (100)). `TITLE_GOAL`, then that
+  the structure is the agent's to decide, then `TITLE_LIMITS`, then the agent's part; no `TITLE_STRUCTURE`, so
+  pipeline vs agent compares the SEO team's structure with the agent's own (owner). Verbatim:
 
   ```
   You write the title of one YouTube video on a kids' nursery-rhyme channel.
@@ -1256,635 +1111,259 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 
 ### 7.3 Built differently from the spec
 
+Unless noted, each item's details are this build's own choices; the spec is silent on them.
+
 1. **Strategy stamp timing (Part 1 A6, Part 2 §8).** Spec: derive at startup from the `DEFAULT_PROMPT` hash and the
-   per-channel prompt-version id. Built: derived per audit, hashing the prompt text actually sent and its source
-   (`app/audits.py:218-243`), so shorts/override/generated audits stamp differently. Audits before A6 still carry
+   per-channel prompt-version id. Built: per audit, hashing the prompt text sent and its source
+   (`app/audits.py:218-243`), so shorts/override/generated audits stamp differently. Pre-A6 audits carry
    `2026.07-baseline-v1`.
 2. **Measurement cadence (Part 2 §1.1, §1.7).** Spec: weekly windows, extended once to 14 days. Built: symmetric
    21-day pre/post windows (`MEASUREMENT_WINDOW_DAYS`, `app/reach.py:60-82`) plus `ROLLOVER_SLOP_DAYS=1`, judged
    on CTR only.
-3. **Dormancy (Part 2 §2.1).** Spec: keep dormant videos out at selection. Built: dormancy is found only after the
-   window (`REASON_DORMANT`, `app/measurement.py:280`); the old audit picker is newest-first (7.1 B4), but since
-   S3.6 nothing calls it: the tick picks only through the warm filter (the agent path). A7 (2026-10-06):
-   4,254 applies landed on dormant videos.
-4. **Embedding input (Part 3 B6).** Spec: one recipe (title + description + tags) for every video. Built: B6's
-   recipe under its own `model_version` (`app/reembed.py`, §6), but production still writes and reads two recipes
-   under `EMBED_MODEL` (§6), so that value does not identify the input. B6 embeds **every** video of the named
-   channels (Shorts, private and episodes included), not only the warm ones the acceptance names: one recipe, and
-   the warm pool changes daily. The recipe has no length cap (title ≤100, description ≤5000, tags ≤500 chars,
-   `app/audit_suggestion.py`). The token estimate is UTF-8 bytes / 3, not a tokenizer, and the price is passed
-   in (`--usd-per-mtok`), not stored.
-5. **Playlist thresholds (Part 2 §4, B6).** Spec: per channel. Built: the engine still reads the process-global
-   values, and `tune_thresholds` overwrites the global from one channel (`app/playlists.py:518`), frozen. B6 stores
-   per-channel values on `channels.playlist_thresholds` that only S1.1's `backlinks.candidates` reads (`join_low`). The spec gives no method; built
-   (`app/reembed.py` `calibrate_channel`), on `MODEL_VERSION` vectors: `join_high` = p50 and `join_low` = p5 of each
-   current member's cosine to the centroid of its playlist's *other* members (how a candidate outside the playlist is
-   scored), and `leave` = p10 of each member's cosine to the centroid of *all* members, itself included (how
-   reconcile compares a member with `PLAYLIST_LEAVE`: `app/playlists.py` `_sims_matrix`, and the
-   `playlist_video_sims` RPC). Nothing is stored below 30 similarities. `join_low` ≤ `join_high` always; `leave`
-   comes from the other distribution, so its order against `join_high` isn't guaranteed. p50 lets a non-member
-   as close as the median member join without the judge: a starting value for the owner to review before
-   anything reads it. Members are the latest `playlist_assignments` action per
-   (playlist, video) being `added`, as `playlists._current_members`, over the playlists whose `playlists.channel_id`
-   is the channel (`playlist_assignments` has no `channel_id`, `20260518000000_playlists.sql:25-35`; the same join
-   as the `playlist_video_sims` RPC); a playlist needs 3 embedded members. The frozen `tune_thresholds` filters
-   `playlist_assignments` on `channel_id` (`app/playlists.py:470-474`), a column the table lacks, so it would fail
-   if unfrozen; B6 doesn't touch it. Stored as a
-   `channels` jsonb column rather than `threshold_history`, which `tune_thresholds` owns.
-6. **Discovery provenance.** Created playlists are stored as `origin='inherited'` (`app/playlist_discovery.py:200-205`),
-   so a human-edit ledger (B3) could not tell Midas-created playlists from human ones by `origin`. B3b reads
-   `playlist_assignments` (`decision_source='discovery'`) instead (`app/human_edits.py` `added_by_midas`).
-7. **Traffic ingestion details (Part 2 §7, Part 3 B1).** `video_traffic_source_daily` has an `id bigserial`
-   column the spec's list lacks (`app/rows.py` pages in `id` order). The shared ledger gained `report_type`
-   (not in the spec) so traffic reports don't count as reach coverage or as reach reissues (`app/reach.py:122-130`,
-   `app/reporting_poll.py:85`). Restatements: when a data-day's original and restated reports are both new, only
-   the newest by `createTime` (parsed, not compared as text, `app/traffic_poll.py:83` `_created`) is ingested
-   (`app/traffic_poll.py:89`); the spec says only that the newer replaces.
-   `playlist_traffic_daily` also has an `id bigserial`. The two report types are ingested as isolated feeds of one
-   job: a crash in one feed fails the channel's run but doesn't stop the other (`app/traffic_poll.py:155`); the spec
-   says only "same failure semantics as `reporting_poll`".
-8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats (`app/audits.py:546-556`):
-   the gates overestimate by 1u. Spec Part 1 A10 says note it only.
-9. **`interventions` DDL (Part 2 §7, Part 3 B2).** The spec lists columns only. Built with `not null` on
-   `video_id`, `channel_id`, `lever`, `origin`, `arm` and `status`, `video_id → videos on delete cascade` (as
-   `audits`), `created_at default now()`, and a partial unique index that makes §1.6 hold in the database as well
-   as in `record` (`supabase/migrations/20261006020000_interventions.sql`). Vocabularies are checked in Python
-   (`app/interventions.py` `_require`), not by SQL `check` constraints, as for `audits.status`.
-10. **Human-edit ledger details (Part 2 §1.4, Part 3 B3; B3a).** `interventions` gained `ledger_key text` with a
-   unique index (`20261006030000`), which Part 2 §7 doesn't list, so a rerun or a racing sync can't duplicate a row.
-   "Links to our videos" means any video in `videos`, on any channel, not only the source's channel
-   (`app/human_edits.py` `our_videos`), since sibling channels link into each other (P2), plus the videos fetched
-   in the same sync (`also_ours`: the ledger runs before the upsert). A target on a channel with no synced videos
-   (Kannada, Telugu, §1) is not ours to the ledger, and that link is not recorded. A link from a video to
-   itself is ignored. A removed link creates no row: it is listed in `removed_targets` of any addition seen in the
-   same edit, and stamped as `payload.removed_detected_at` on the link's earlier ledger row; a removal of a link
-   older than the ledger is not stored anywhere. "Midas made the change" is the new description equalling (with
-   whitespace collapsed) an applied audit's `suggested_description` or a reverted audit's `description_before`
-   (`made_by_midas`); on a match the whole description change is skipped, additions and removals alike. An apply
-   whose description was overridden in the request body isn't recognised, because the applied text isn't stored on
-   the audit (`app/audits.py:515-522`). Only full syncs re-read old videos, so incremental syncs record nothing, and a
-   video the team edits and Midas then rewrites within one full-sync interval is seen only as Midas's.
-11. **Human-edit ledger, playlist memberships (Part 3 B3, change 2; B3b).** "Newly added" is "the walk has no
-   `playlist_assignments` row of any action for the (video, playlist) pair", which is what the walk already used
-   to decide what to seed (`app/playlists_sync.py:297-307`); the walk has no removal detection, so a video the
-   team removes and re-adds, or that Midas once removed, is never seen as new. Baseline rule (the spec has none): a
-   playlist with `membership_walked_at` NULL at plan time, including one new to the DB, is walked as a baseline and
-   records nothing, so a human add made before a playlist's first walk is never recorded. Playlists the walk has
-   already stamped (`20260812000000`) are not re-baselined after deploy: their existing memberships already have
-   `sync` rows. Only the channel's own videos count (the walk's `known_videos`), and a membership of a video not yet
-   in `videos` is skipped; when that video is synced later the next walk of the playlist records it, even if the
-   add predates the previous walk (a false `human` row; `videos` has no first-seen time to rule it out). Marathi
-   was fully synced 2026-10-06, so its exposure at deploy was videos uploaded since. A ledger error doesn't
-   stop the walk seeding its `sync` rows, so the memberships of that page are never detected (as B3a's lost edits).
-   The manual `/playlists/bootstrap` walk detects for whichever channel it is run on, allowlisted or not. "Midas added it" counts every non-`sync` `added` assignment and every approved
-   `add` proposal, including those a person approved through `/playlists/proposals/decide`. Detection timing:
-   `detected_at` is the walk that saw it, which re-reads a playlist only when its item count changes or every
-   `PLAYLIST_FULL_WALK_DAYS` (30), within `PLAYLIST_SYNC_QUOTA_BUDGET`; an equal-count swap waits for rotation. The
-   payload's `timing` says so. A walk cut short by the budget mid-playlist has already recorded the pages it read
-   (the ledger runs per page).
-12. **Warm filter (Part 2 §2.1, Part 3 B4).** Part 2 §2.1 adds the filter *to* `next_audit_candidate`; built as
-   a separate function, `warm_pool()` (`20261006040000`), with `next_audit_candidate` unchanged, since B4 says not to
-   wire it into the tick. It returns the whole pool, not one pick. "Ingested data-days" = the latest
-   `WARM_WINDOW_DAYS` distinct `data_date`s with a reach report in `reporting_reports_ingested` (`reach.coverage`'s
-   days), so a day ingested with no rows counts and an ingestion gap reaches further back. "Certified reach" =
-   `reach.certify` for the channel, at query time; an uncertified channel's pool is empty. In SQL that is
-   `count(distinct day) = MEASUREMENT_WINDOW_DAYS` over the days ending at the frontier, passed in as
-   `p_measurement_window_days` (`reach.window_length`). "Public" counts a NULL `privacy_status` as public, and "not an
-   episode" is `is_episode is not true`, both as `next_audit_candidate`. Only *Midas* interventions in
-   `ACTIVE_INTERVENTION_STATUSES` exclude (as `interventions.active_for`): human rows are written `applied` and
-   never closed (B3), so counting them would bar every video the team ever edited. A video in `video_reach_daily`
-   but not in `videos` isn't in the pool. The explore share is applied in Python over the ranking
-   (`explore_order`), not in SQL: each successive pick is exploration with probability `WARM_EXPLORE_PCT`, drawn
-   uniformly from all but the best remaining video. Settings are function parameters (SQL can't read `settings`).
-   The `WARM_POOL_USE_RPC` switch (default false) isn't in the spec; it follows `AUTOPILOT_PICKER_USE_RPC`.
-   Parity is tested offline on a throwaway local Postgres (`tests/test_warm_pool_parity.py`), not only live.
-   **S1.4a (#63).** The two Slice 1 exclusions are in the same function, replaced by `20261023000000`, and its twin;
-   only `midas` rows count. "Created within `TRIAGE_COOLDOWN_DAYS`" = `created_at > now() - p_cooldown_days days`
-   (Python: `> now(UTC) - TRIAGE_COOLDOWN_DAYS`); a NULL `created_at` is outside it. "For the experiment's duration"
-   is built as *forever*: no experiment id or end exists yet, so a video with any `midas` `backlinks` row of arm
-   `treated` or `holdout` never re-enters the pool; a later experiment would need a boundary column. The cooldown
-   applies to every lever, not only backlinks. The signature gained `p_cooldown_days`, so the four-argument function
-   is dropped (PostgREST can't pick between overloads); its only caller, `app/warm.py` `_rpc_params`, passes it.
-   **Shorts (2026-10-26, not in the spec).** The pick (`warm.warm_pool`) drops videos with `is_short` true, after
-   either path, not in the SQL function or `ranked_pool`, so the parity tests still compare like with like and no
-   migration is needed. Part 2 §2.1 excludes Shorts only as link targets (§2.4); the pick needs it too once a
-   channel's Shorts are synced (Part 5 S2.7 turns `sync_shorts` on for Marathi), or a backlink block lands on a
-   Short, where description links aren't clickable.
-13. **`decide()` and `decision_log` (Part 3 B5).** The spec gives `decide(question_set, subject, context)` and no
-   question sets. Built: a `QuestionSet` (name, question, allowed answers, rules function) and one set, `TRIAGE`
-   (Part 2 §2.2's rules: `backlinks` with no related block and at least `BACKLINK_MIN_CANDIDATES` candidates, else
-   `no_change`; context keys `has_related_block`, `backlink_candidates`), so `BACKLINK_MIN_CANDIDATES` is added in
-   Phase B rather than Slice 1. One `QUESTION_SET_VERSION` covers every set in `app/decide.py` and replaces the A6
-   placeholder (`DECISION_QUESTION_SET_VERSION` is gone from `app/audits.py`), so after deploy every audit source stamps a new
-   `strategy_version` (and `_stamp_strategy` upserts a new `audit_strategies` row) though no prompt changed.
-   `TRIAGE` offers §2.2's five options; its rules chose only `backlinks` or `no_change` (the Slice 1 baseline; `title`
-   too item 30), so a backend's other choices are logged but can't agree with the rules. A backend answer must give a probability
-   for every option (§2.2), not necessarily summing to 1; anything else is a backend failure. `decide()` takes an optional
-   `intervention_id` for the log row. A failing backend still writes a row (NULL `jev_answer`/`jev_probs`), so the log
-   counts failures too; a failed `decision_log` write is logged, never raised. `intervention_id` is
-   `on delete set null` (an intervention cascades away with its video). Column types and `not null`s aren't in the
-   spec (Part 2 §7 lists names only).
-14. **Canonical backlink block (Part 2 §3.4, Part 4 S1.2).** Part 2 says "fixed marker lines"; built as Part 4
-   says, with no marker but the heading: a block is the exact heading line plus the `<title> https://youtu.be/<id>`
-   lines directly under it (`app/backlinks.py`). Not in the spec: a blank line after the block when text follows, so
-   that a human's own link line in that shape, sitting under the first line before the render, isn't absorbed into the
-   block by `strip`; more than `BACKLINK_MAX` targets is refused, not trimmed (S1.1's caller keeps the top
-   `BACKLINK_MAX`); `#` is removed from target titles, so the block never adds a hashtag; an empty description
-   becomes the block alone. A line in the block's shape that a human adds directly under the block is read as part
-   of it (`tests/test_backlinks.py`); S1.3 can tell by comparing `find`'s ids with the intervention's targets. The 5,000 limit is checked in characters (`len`, as `rejection()`, `app/audit_suggestion.py`), not UTF-8 bytes.
-15. **Siblings and candidates (Part 2 §2.3, Part 4 S1.1).** "Trailing 28 ingested data days" = the latest 28
-   distinct `data_date`s with a `channel_traffic_source_a3` report for the channel in `reporting_reports_ingested`
-   (`reach.coverage(report_type=)`, B4's notion), a module constant `SIBLING_WINDOW_DAYS`, not a setting. "Ours" for
-   a referring video = in `videos`; the referring channel is that row's `channel_id`. "Warm on its own channel" is
-   B4's impressions measure only (`warm.warm_impressions`): unlike the pick pool, a target may be in an active Midas
-   intervention or an episode, since treated and held-out videos stay active for their window while the pick takes
-   up to 40 a day (spec Part 4 D4), and the ticket lists no episode exclusion. A sibling whose reach isn't certified
-   (`reach.certify`) has no warm videos, so it adds no targets and nothing to the skip count, as in B4. A NULL
-   `is_short` is eligible (not yet probed), as NULL privacy is. The raw cosine is compared with `join_low` and
-   ranked (ties by impressions, then id); it is not rounded. The source channel's `join_low` applies to sibling targets too
-   (Part 4: "the source channel's calibrated `join_low`"). `candidates` returns a `Candidates` tuple with
-   `skipped_unembedded` (source or otherwise eligible targets without a `MODEL_VERSION` vector) and a `reason`; a
-   source without one counts 1. It takes optional `sibling_ids` so a caller can compute `siblings` once. All
-   similarity is in-app: one call reads the `vector(3072)` (`20260518000000_playlists.sql:10-12`) of every eligible
-   warm target on the source channel and its siblings; no RPC twin yet.
-16. **Description-only apply, revert, ledger (Part 2 §2.5, Part 4 S1.3).** Not in the spec: on success
-   `apply_backlinks` itself sets the row to `measuring` with `applied_at` (S1.4's success state), but leaves a
-   failure's row untouched for S1.4 to cancel. The revert is gated like the apply: `BACKLINK_APPLY_ENABLED` false
-   refuses it too ("every write path", ticket #64), so removing a block after the kill switch is off needs the
-   switch on again. Its quota gate is `quota.APPLY` (51u), not `POST /audits/{id}/revert`'s 50u, since it also
-   fetches the live snippet. DRY_RUN calls no YouTube at all (as the audit apply), so a dry run renders onto the
-   stored description, not the live one, and under DRY_RUN the revert records nothing (the audit revert marks
-   the audit reverted). The fetch is `yt_videos_list_full` (1u, all four parts) and only its `snippet` is sent
-   back, read-only fields (`publishedAt`, `channelId`, `thumbnails`, `localized` …) included, as YouTube returned
-   them. The apply hands a live description that differs from the stored one to the ledger before overwriting
-   `videos.description`, or a team edit made since the last full sync would never be seen. "Exactly the targets"
-   (finding 4) = the description's links to our videos, other than the video itself, equal the targets of a
-   `treated` `midas` `backlinks` row with `applied_at` set and status not `cancelled` (a reverted block is gone, so
-   the same links added later are the team's); a holdout row's would-have-got targets never count. The apply renders
-   onto the stored description before any YouTube call, so a refusal (no heading, too many targets) spends nothing.
-   The revert strips every canonical block (`backlinks.strip`), not only the intervention's targets. Links to videos that aren't ours are ignored, as the ledger ignores them.
+3. **Dormancy (Part 2 §2.1).** Spec: keep dormant videos out at selection. Built: found only after the window
+   (`REASON_DORMANT`, `app/measurement.py:280`); the old newest-first picker has no caller, and the tick picks only
+   through the warm filter. A7 (2026-10-06): 4,254 applies landed on dormant videos.
+4. **Embedding input (Part 3 B6).** Spec: one recipe (title + description + tags) for every video. Built: B6's recipe
+   under its own `model_version` (`app/reembed.py`), but production still writes and reads two recipes under
+   `EMBED_MODEL`, so that value doesn't identify the input. B6 embeds **every** video of the named channels (Shorts,
+   private, episodes). No length cap. Token estimate = UTF-8 bytes / 3; price passed in (`--usd-per-mtok`).
+5. **Playlist thresholds (Part 2 §4, B6).** Spec: per channel. Built: the engine reads process-global values; the
+   frozen `tune_thresholds` overwrites the global from one channel (`app/playlists.py:518`) and filters on a
+   `channel_id` column `playlist_assignments` lacks (`app/playlists.py:470-474`), so would fail if unfrozen.
+   Per-channel values on `channels.playlist_thresholds`, read only by `backlinks.candidates` (`join_low`). Method
+   (`app/reembed.py` `calibrate_channel`): `join_high` = p50, `join_low` = p5 of each member's cosine to the centroid
+   of its playlist's *other* members; `leave` = p10 of each member's cosine to the centroid of *all* members. Needs 30
+   similarities and 3 embedded members per playlist. `leave`'s order against `join_high` isn't guaranteed. p50 lets a
+   non-member as close as the median member join without the judge: a starting value for owner review.
+6. **Discovery provenance.** Created playlists are stored `origin='inherited'` (`app/playlist_discovery.py:200-205`);
+   B3b identifies them via `playlist_assignments` `decision_source='discovery'` (`app/human_edits.py`
+   `added_by_midas`).
+7. **Traffic ingestion details (Part 2 §7, Part 3 B1).** Both traffic tables have an `id bigserial` (`app/rows.py`
+   pages by `id`). The shared ledger has `report_type`, so traffic reports aren't reach coverage
+   (`app/reach.py:122-130`). When a day's original and restated reports are both new, only the newest by parsed
+   `createTime` is ingested (`app/traffic_poll.py:89`). The two feeds are isolated: one crashing fails the channel's
+   run but not the other (`app/traffic_poll.py:155`).
+8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats: gates overestimate by
+   1u. Spec Part 1 A10 says note it only.
+9. **`interventions` DDL (Part 2 §7, Part 3 B2).** Spec lists columns only. Built: `not null` on `video_id`,
+   `channel_id`, `lever`, `origin`, `arm`, `status`; `video_id → videos on delete cascade`; a partial unique index
+   enforcing §1.6 (`supabase/migrations/20261006020000_interventions.sql`). Vocab checked in Python
+   (`app/interventions.py` `_require`), not SQL `check`s.
+10. **Human-edit ledger details (Part 2 §1.4, Part 3 B3; B3a).** `ledger_key` (unique, not in Part 2 §7) prevents
+   duplicates. "Our videos" = any in `videos`, any channel (`app/human_edits.py` `our_videos`), plus the same sync's
+   fetch; links to channels with no synced videos aren't recorded; self-links ignored. A removed link makes no row:
+   it is noted in a same-edit addition's `removed_targets` and as `payload.removed_detected_at` on the earlier row.
+   "Midas made the change" = description equals (whitespace collapsed) an applied audit's `suggested_description` or
+   a reverted one's `description_before`; a match skips the whole change; a body-overridden apply isn't recognised.
+   Only full syncs re-read old videos; a team edit then a Midas rewrite within one interval reads as Midas's.
+11. **Human-edit ledger, playlist memberships (Part 3 B3, change 2; B3b).** "New" = no `playlist_assignments` row of
+   any action for the pair (`app/playlists_sync.py:297-307`); no removal detection, so re-adds are never new. A
+   playlist's first walk (`membership_walked_at` NULL) is a baseline that records nothing. Only the channel's own
+   videos count; a membership of a not-yet-synced video is recorded on a later walk even if old (a false `human`
+   row). A ledger error still seeds `sync` rows, losing that page. "Midas added it" = any non-`sync` `added`
+   assignment or approved `add` proposal, human-approved ones included. Detection waits for an item-count change or
+   `PLAYLIST_FULL_WALK_DAYS` (30) rotation, within `PLAYLIST_SYNC_QUOTA_BUDGET`.
+12. **Warm filter (Part 2 §2.1, Part 3 B4).** Spec adds it *to* `next_audit_candidate`; built as a separate
+   `warm_pool()` returning the whole pool. Window = latest `WARM_WINDOW_DAYS` distinct ingested reach `data_date`s
+   (zero-row days count; gaps reach further back). Uncertified reach → empty pool. NULL `privacy_status` = public;
+   `is_episode is not true`. Only *Midas* interventions in `ACTIVE_INTERVENTION_STATUSES` exclude (human rows never
+   close). Explore share in Python (`explore_order`): each pick with probability `WARM_EXPLORE_PCT` is uniform over
+   all but the best. `WARM_POOL_USE_RPC` (default false) isn't in the spec; parity tested offline
+   (`tests/test_warm_pool_parity.py`). Slice 1 exclusions (`midas` rows only): cooldown `created_at > now() -
+   p_cooldown_days days`, every lever; "for the experiment's duration" is *forever*: any `midas` `backlinks` row of
+   arm `treated` or `holdout` bars the video permanently (a later experiment needs a boundary column). Shorts (not in
+   the spec): `warm.warm_pool` drops `is_short` true after either path, since a Short's description links aren't
+   clickable.
+13. **`decide()` and `decision_log` (Part 3 B5).** Spec gives no question sets. Built: `QuestionSet` (name, question,
+   answers, rules function) and `TRIAGE` (`app/decide.py`). One `QUESTION_SET_VERSION` covers every set and feeds the
+   audit stamp, so any rules change moves every audit's `strategy_version`. `TRIAGE` offers five options but its
+   rules choose only `backlinks`, `title` (item 30) or `no_change`. A backend answer needs a probability for every
+   option (sum unchecked), else it's a failure; failures still log a row (NULL `jev_answer`/`jev_probs`); a failed
+   log write never raises. `intervention_id` is `on delete set null`.
+14. **Canonical backlink block (Part 2 §3.4, Part 4 S1.2).** Part 2 says "fixed marker lines"; built as Part 4: the
+   exact heading plus the `<title> https://youtu.be/<id>` lines under it (`app/backlinks.py`). A blank line follows
+   the block when text follows, so `strip` doesn't absorb a human link line. Over `BACKLINK_MAX` targets is refused;
+   `#` removed from titles. A block-shaped line a human adds directly under the block reads as part of it. The 5,000
+   limit is in characters.
+15. **Siblings and candidates (Part 2 §2.3, Part 4 S1.1).** Window = latest 28 distinct ingested
+   `channel_traffic_source_a3` data-days (`SIBLING_WINDOW_DAYS`). "Warm" = `warm.warm_impressions` only, so a target
+   may be in an active intervention or an episode. NULL `is_short` eligible. Raw cosine vs the source channel's
+   `join_low`, also for siblings; ranked by similarity, impressions, id. `skipped_unembedded` counts an unembedded
+   source as 1. Similarity in-app over every eligible target's `vector(3072)`; no RPC (`app/backlinks.py`). Siblings
+   off by default (item 35).
+16. **Description-only apply, revert, ledger (Part 2 §2.5, Part 4 S1.3).** `apply_backlinks` sets success to
+   `measuring` itself; the caller cancels failures. The revert also refuses while `BACKLINK_APPLY_ENABLED` is false,
+   gated at 51u (it fetches the snippet). DRY_RUN calls no YouTube (renders onto the stored description; the revert
+   records nothing). Only the fetched `snippet` is sent back, read-only fields as returned. A live description
+   differing from the stored one goes to the ledger first. "Exactly the targets" (finding 4) = links to our videos
+   equal the targets of a `treated` `midas` `backlinks` row with `applied_at`, not `cancelled`. Rendering precedes any
+   YouTube call. The revert strips every canonical block (`app/backlinks_apply.py`).
 17. **Tick routing, triage, holdout (Part 2 §2.1, §2.2, §1.3, §6.1, Part 4 S1.4; S1.4b).** The tick branches on
-   `agent_enabled` alone, right after the Shorts action (`app/autopilot.py` `tick`): an agent channel whose
-   `can_run_agent` is false does nothing (`agent_ineligible`) rather than falling back to the audit path. Because
-   `can_run_agent` includes `can_audit`, an agent channel also needs `autopilot_enabled = t`. The agent path keeps
-   the audit path's gates in the same order (resync, cap, ledger quota gate, before triage, so a tick that can't
-   afford the write records nothing) and its error reactions (`_react_to_apply_error`, factored out of
-   `_apply_audit_and_handle`, which S3.6 deleted with the audit path). A `declined` row is lever `backlinks`, arm `n/a` (Slice 1's only lever), so it
-   holds its video only for the cooldown. Every treated row that doesn't reach YouTube is `cancelled` with
-   `payload.error.reason` (`apply_disabled`, `quota_insufficient`, `failed`, …; `dry_run` under DRY_RUN, which
-   the spec doesn't mention): a treated row that never reached YouTube (`applied_at` NULL) holds its video only for the cooldown, not for
-   the experiment (review fix, 2026-10-23: `warm_pool()` and `warm._holds`), and the agent doesn't run at all while
-   the kill switch is off or the language has no heading, so no pick is spent before writes can happen. The stop rule enters triage as a context key, `backlinks_stopped`, read by the TRIAGE rules, so it is
-   logged with the decision; that rules change bumps `QUESTION_SET_VERSION` to `2026.10-s1-v1` and with it every
-   audit's `strategy_version`. "Recent interventions" and the traffic mix span 28 days (`CONTEXT_DAYS`), the
-   mix over ingested traffic data-days and keyed by source-type name; impressions and CTR over the warm window.
-   `has_related_block` (D5) counts a link to any of our videos on any channel, not to itself. `decide()` logs
-   before the row exists, so `decision_log.intervention_id` is set afterwards by `decide.link`. The preview asks
-   `TRIAGE.rules` directly (no backend call, no log row), and previews the pool's first `n` in order (no
-   cooldown between them).
-18. **Next-watch in shadow (Part 2 §2.3, Part 4 S1.5; #66).** Asked for every pair `candidates` returns (up to
-   `2 × BACKLINK_MAX`), not only the `BACKLINK_MAX` targets kept, as the spec says "each pair S1.1 returns". Since
-   `candidates` drops every pair below `join_low`, the rules answer is `yes` for every pair asked, so the log
-   measures only how often the backend agrees with pairs the rule already accepted, never pairs it rejected.
-   The results are stored on `triage_json.next_watch` (not `payload`: `payload` is the lever's change, which
-   the apply and the ledger read), with the rules answer and probabilities and each pair's `decision_log_id`;
-   the backend's answer is only on the log row, as for triage. The pairs are asked before the intervention is
-   recorded, so a pick refused as `active_intervention` leaves its pair rows unlinked (as its triage row). The
-   question set is new, so `QUESTION_SET_VERSION` goes to `2026.10-s1-v2` and, as with B5 and S1.4b, every audit's
-   `strategy_version` changes after deploy though no audit prompt did (`tests/test_decide.py`
-   `test_the_s1_5_bump_reaches_the_strategy_stamp`). The preview (`scripts/preview_backlinks.py`) doesn't ask it.
-   Part 2 §2.4's shadow checks are not built (D7). Cost: each pair is one sequential backend call inside the tick,
-   so a video triaged to `backlinks` makes up to `2 × BACKLINK_MAX` (6) `decide.next_watch` calls besides triage's.
-   Item 13's single `TRIAGE` set now has this second set beside it.
-19. **Pair measurement (Part 2 §1.2, §1.3, §1.7, Part 4 S1.6; S1.6a, #67).** Not in the spec, decided here:
-   *Completeness* reads "ingested data through d0+7" as each channel's ledger frontier ≥ that day (as
-   `reach.frontier`), so a missing day inside the window (a gap, or a channel whose ingestion began inside the
-   pre window, D1) counts as zero views rather than holding the row forever, and is listed in
-   `measurement_result.missing_days` for S1.6b to exclude or report; and the source's own channel must be complete too, since the floor reads the source's views from its
-   channel's report (usually a target's channel already). A target whose channel isn't ingested (or a human row's
-   target missing from `videos`) never completes, or errors, and waits. *The extension* lengthens only the post
-   window (the ticket: "extend the post window"); the pre stays 7 days, so `delta` is put in views per week
-   (post × 7/14 − pre) to stay comparable with unextended rows and with D6's per-week unit; `pre` and `post` are
-   the raw sums. `insufficient_data` rows carry the same numbers. *The floor* is the source's views over every
-   traffic source in the post window (`video_traffic_source_daily`), not Analytics `view_count`. *Restatements*:
-   the spec's "restatement horizon" has no value; built as `RESTATEMENT_HORIZON_DAYS = 28` after the post window
-   ends (four weekly runs), a module constant, and every decided row inside it is recomputed on each run.
-   `judged_at` is when the row got its current outcome (the week it was "judged" for S1.6b), kept across
-   recomputes that don't change the outcome and restamped when one does; `computed_at` moves.
-   A recompute that can't decide yet (a restated source day falls under the floor and the 14-day window isn't in)
-   keeps the old verdict rather than reopening the row. *Which rows*: a `cancelled` treated row (refused, failed,
-   DRY_RUN or reverted) isn't measured; a human row is measured even if `payload.removed_detected_at` says the
-   link was later removed. d0 is the Pacific date of the timestamp, because traffic data-days are YouTube's
-   (as reach's, `app/reach.py` `ROLLOVER_SLOP_DAYS`): a block applied at 02:00 UTC went live on the previous
-   data-day, which as a UTC date would have been in the pre window. No further slop: the ticket's windows already
-   exclude d0. A target whose channel is never ingested leaves its row `awaiting_window` indefinitely (not
-   counted as an error). *Status split* (§7.4): `status` holds the outcome, `measurement_status`
-   the progress (§2). Human rows go `applied` → `judged`/`insufficient_data`; nothing else reads a human row's
-   status (the warm pool and `active_for` count `midas` rows only).
-20. **Weekly verdict and stop rule (Part 2 §1.3–§1.5, P1, Part 4 S1.6; S1.6b, #68).** Not in the spec, decided
-   here: *"Judged that week"* = `measurement_result.judged_at` in the Monday-to-Sunday (UTC) week, so a missed
-   Monday run (the office machine is often off) puts that week's rows into the next run's week and costs no row,
-   and a missed week isn't a window. A run that measured but died before its verdicts leaves judged rows in a
-   week with no verdict row: the next run writes that week first, so they still get their weekly lift. *`cumulative_lift`* is pooled: the treated mean minus the holdout mean over
-   every row judged up to that week (with each row's current, possibly restated, `delta`), not a mean of the
-   weekly lifts, so a thin week weighs what its rows weigh. *The verdict band* is symmetric: `helped` at lift ≥
-   `BACKLINK_MIN_LIFT`, `worse` at ≤ −it. *No verdict* also when the week has no judged treated row (the lift is
-   undefined), as when it has no judged holdout row (the ticket). *Reruns*: past weeks' rows are never rewritten
-   (a restatement reaches the verdicts through the cumulative lift); a same-week rerun replaces that week's row,
-   and deletes it if the week no longer has a verdict, but never clears or deletes a triggered stop. *The stop is sticky*: `backlinks_stopped` is any triggered
-   row, so the lever stays off even if a later week's cumulative lift recovers (P1's time box: the result is
-   written up, not re-litigated by the job); an owner restart means deleting the row. *Human rows* get
-   `n_treated` and their mean delta only: no lift, no verdict (§1.4: no comparison group), and never stop the lever.
-   *Channels*: the job runs every channel (`Job.EVERY`), since Midas rows can outlive `agent_enabled` and human
-   rows are measured on `TRAFFIC_INGEST_CHANNELS` (measure_channel's own rule). *The interventions page*:
-   `limit`/`offset` (no paging convention existed), capped at PostgREST's 1000. *`missing_days`* (S1.6a's flag)
-   doesn't exclude a row from the means: the spec gives no rule, a gap is rare once a channel's ingestion is
-   steady, and the row still says so for anyone reading it through the interventions endpoint.
-   *Shorts* (2026-10-26, not in the spec): a backlinks row whose video is a Short enters no mean, in either arm
-   or the human row (`_without_shorts`). Before #103 the pick took Shorts, and on 2026-10-26 Marathi had 44
-   treated and 11 holdout rows on Shorts, where description links aren't clickable; the arm is a hash of the
-   video id, so dropping them from both arms keeps the comparison fair. The 44 blocks stay on YouTube (owner,
-   2026-10-26: not reverted) and the rows are still measured.
-21. **The playlist test's draw (Part 2 §4, P3, Part 5 S2.1; #87).** Not in the spec, decided here: *Members*
-   are read with `reembed._members` (the channel's playlists' `playlist_assignments` through `rows_for_ids`, the
-   latest action per pair by `decided_at` then `id`), the same rule as `playlists._current_members` and the reader
-   `calibrate_channel` used for `join_high`, in one channel-wide read rather than one per playlist.
-   *`eligible_members`* stores the members with a `MODEL_VERSION` vector (the ones the centroid is built from), not
-   every member. *The centroid* is the sum of the members' vectors (cosine ignores scale, so it is the mean's
-   cosine), as `reembed.member_similarities`; the cosine is compared raw. *Candidates* must be on the playlist's
-   channel by `videos.channel_id`, and a NULL `privacy_status`, `is_short` or `is_episode` is eligible (not yet
-   known), as `warm_pool()` and `backlinks.candidates`. A current member without a vector is still a member and
-   never proposed. *A refused threshold refuses the whole draw* (nothing written, `refused` = the reason) rather
-   than writing every treated arm `no_dose`, since that would spend the once-only draw on a configuration
-   problem. *A second draw* raises `AlreadyDrawn` (the script prints it and exits 1). *Holdout arms* get no
-   candidates computed, so the preview shows none for them. *The write is not atomic*: PostgREST takes one
-   statement at a time, so each arm is inserted, then its proposals, then its `proposal_ids`; a draw that dies
-   midway leaves a partial draw that a rerun refuses, and recovering means deleting the channel's `playlist_arms`
-   rows and their proposals by hand. *Vocab*: `PlaylistProposalSource` lists only `experiment`; the frozen
-   engine's `embedding`/`llm_confirmed`/`discovery` stay literals. The migration adds no index beyond the unique
-   key (the table holds one row per playlist).
-22. **The playlist test's apply (Part 2 §2.5, Part 5 S2.2; #88).** Not in the spec, decided here: *Attempts* are
-   counted in `apply_error.attempts`; only a `failed` error uses one up, since `youtube_quota_exceeded` and
-   `token_expired` aren't the add's fault (they still write `apply_error`). *Positions*: an add's position is the
-   number of the arm's adds ahead of it in rank already in the playlist, so a retry next run lands at its rank, not
-   at the top. *A refused position* is "a 400 whose text names the position or the sort order"; after one, every
-   later add to that playlist goes appended, in that run and later ones (the refusal is read back off
-   `apply_error`), still in rank: the playlist isn't sorted manually, and each refusal costs 50u. The playlist's
-   budget check is n × 50u, so the one refusal's extra call is over it by 50u. *Pending proposals*: as the spec
-   says, an arm is `dosed`/`no_dose` once no approved add is unsent or retryable, whatever is still pending, so an
-   undecided proposal never holds `test_dates` back; a proposal approved after its arm settled is never sent (E3 is
-   one review sitting). An arm with nothing approved stays open while any proposal is pending.
-   *The job's channels* are those with a treated arm `planned` or `applying`, so an all-rejected `planned` arm
-   becomes `no_dose` on the next enabled run; while the kill switch is off no arm settles. *`stopped`*: a budget
-   stop and YouTube's quotaExceeded end the run for every later channel; a token error raises out of the channel
-   (it fails the run, as a token failure fails `traffic_poll`) and the next channel runs. A quotaExceeded is not an
-   errored add (it is a stop): its channel is `degraded`, not failed. *DRY_RUN* checks no budget and settles
-   no arm. *The approve response* gains `queued` only when non-zero, so a batch with no test proposals answers as
-   before; the dashboard card is unchanged. *`_record_assignment`* is called from `app/playlists` (where the
-   router imports it from), and writes `model_version = EMBED_MODEL` as every assignment does.
-23. **The playlist test's measurement and verdict (Part 2 §1.2, §1.3, §1.5, P3, Part 5 S2.3; #89).** Not in the
-   spec, decided here: *Weeks measured* stop at `PLAYLIST_EXPERIMENT_WINDOWS`; a later week isn't measured or
-   given a row. *Rewrites*: unlike backlinks' weeks (never rewritten after their week), every complete week's
-   row and every arm's numbers are recomputed each run until the test is done, so a restated playlist report day
-   (the report restates, `docs/PHASE_A_FINDINGS.md` A1.1) reaches them; once every arm is `done` the test is
-   never measured again, so a restatement after the last window is not read. *A vanished playlist* (gone from
-   `playlists`, the inventory sync's view) leaves every week's means, not only the last, since a gone playlist
-   reads as zero starts; its arm is still measured, and becomes `insufficient_data` at the last window. *`no_dose`
-   arms* keep their status at the end (the spec says "arms become `judged`"; a `no_dose` arm never entered a
-   mean, and `judged` would hide why), and are `done` like the rest. *An errored arm* (any) holds back the whole
-   channel's verdicts and the arms' end, since a missing arm would change the means and, at the last window,
-   decide the answer without it; the next run retries. *No verdict* for a week without a dosed treated arm or a
-   holdout arm (as backlinks), so a test without both never gets an answer and stays `pending` (its arms still
-   end `done`). *`added_video_views`* is `[{k, views}]`, `[]` for an arm with no landed add, and counts only adds
-   with `applied_at`. *`pre_weekly`* is the pre's sum × 7 / 28, so an ingestion gap inside it lowers it (listed in
-   `missing_days`, as S1.6a). *The answer* reads the stored rows: `no` when the window-4 row triggered the stop
-   rule, `yes` when it didn't, `pending` otherwise; `lever_verdicts.stopped(channel, 'playlist')` gives the same
-   `no` and nothing reads it. *The job* finds the drawn channels with one `playlist_arms` read per run, and joins
-   a channel's backlinks and playlist messages with `; ` when both report; a crash in either half skips only that
-   half, and a failed `playlist_arms` read skips the playlist half for the run (logged at ERROR, not a job failure: the
-   next run recomputes every week, and the table is missing until the owner applies `20261027000000`). The backlinks half now runs its verdicts in an `else` rather than `continue`, so the playlist half still
-   runs after a backlinks failure; backlinks' own behaviour is unchanged. *The endpoint* lives on a small router in `app/playlist_test.py`, mounted in `app/main.py`.
-24. **Short-link recommendations (Part 2 §2.3, P4, Part 5 S2.4; #90).** Not in the spec, decided here: *The per-run
-   cap* counts Shorts that get rows (the ones that cost shadow calls, which the cap bounds); a Short skipped for no
-   vector or no target above `join_low` uses no slot, writes nothing and is tried again next run, so a Short embedded
-   later, or a target that warms up, still gets its rows. *Refused thresholds* (missing, or another model version's)
-   refuse the whole channel's run: nothing written, the job's channel `degraded` with `refused: <reason>`, not
-   failed, since it's a configuration step (S2.7) and not an outage. *The skip count*: `targets` counts the Short
-   (1, `source_not_embedded`) as `backlinks.candidates` counts its source, else the eligible targets with no
-   vector; `refresh` reports Shorts skipped (`skipped_unembedded`) and the channel's unembedded warm long videos
-   (`targets_unembedded`) apart. *The write order*: each pair's decision first, then the Short's rows with their log ids in
-   one insert, so a Short is written whole or not at all and one that raises is tried again next run (its log rows
-   stay, unlinked); `decide` never raises on a backend failure, and a failed log write leaves `decision_log_id` NULL.
-   *Refusals* are noticed only when there are new Shorts to recommend: a channel whose listed Shorts all have rows
-   reads no thresholds. The log row's `intervention_id` stays NULL (`decide.link`
-   unchanged). *Feed views* sum every type-24 row of the Short (any `source_detail`) on the window's days; a row on
-   a day with no ingested report doesn't count. *Targets* need no episode filter (none in the spec, as
-   `backlinks.candidates`) and a Short with `is_short` NULL is not listed (only `is_short` true is a Short), while a
-   target with `is_short` NULL is eligible. *The job's channels* are the setting intersection only: no
-   `analytics_authorized` check, since it reads the DB alone. *`channel_id`* is nullable, as the spec's column list
-   gives it. The migration adds no index beyond the unique key (`refresh` reads a channel's `short_id`s once a run).
-
-25. **The Short-links page and the tick (Part 2 §1.4, §2.5, P4, Part 5 S2.5; #91).** Not in the spec, decided here:
-   *The page is of Shorts*, not rows, so a Short's targets never split across pages: `limit`/`offset` count Shorts,
-   grouped in-app over every row of the channel (`all_rows`; at most `SHORT_LINK_MAX_PER_RUN` × `SHORT_LINK_TARGETS`
-   new rows a week), not one bounded DB page as `GET /channels/{id}/interventions`. "Pending first" = Shorts with any
-   `pending` row, then the rest, each by feed views (the largest of its rows'), then id. *`status`* filters rows: a
-   Short is listed with only its rows in that status. *The CSV* is the same page (the card links `limit=1000`), one
-   line per recommendation; `format` other than `json`/`csv` is 422 (FastAPI's validation), not 400. *The tick*
-   writes the ledger first, then the Short's other rows, then this row's `set` last, so a tick that dies partway is
-   redone whole by the next one; a pair whose key is already stored (a retry, or S2.6's inferred row once it exists)
-   gets that row's id rather than a second row. A tick of a row already `set` writes nothing. *Changing the target*
-   leaves the old pair's intervention `applied`, unchanged: the link was on the Short for a while, and S2.6 measures
-   per pair. *A dismissed sibling* stays `dismissed` when another target is set (the spec says "the Short's other
-   rows become `not_chosen`"; a dismissal is the stronger statement); only `pending` and `set` siblings become
-   `not_chosen`, with `decided_at`. *Dismissing a `set` row* is refused (409): the ledger says the link is on the
-   Short; the team changes it by setting another target. A `not_chosen` or `dismissed` row can still be set.
-   *Setting an earlier target back* (A, then B, then A) records a third row, under `short_link:<short>:<A>:2`
-   (`_episode_key`: the pair's rows are `key`, `key:2`, …; a new one when another target of the Short has a larger
-   intervention id than the pair's latest), so the second period of A is measured from its own tick. A pair seen
-   only by S2.6 and then ticked, with no other target ticked since, is still linked, not a new period. S2.6's
-   detection checks the plain pair key, so it never adds a row for a pair the team has ticked. Nothing records when
-   a changed-away link came off the Short (no `removed_detected_at`, unlike B3a). *The intervention's
-   `channel_id`* is the recommendation's, or the Short's in `videos` when it is NULL (`refresh` always writes it).
-   *The card's tick* asks for confirmation ("I set it") before it records, since there is no undo route. *The card* lives on the
-   Playlists tab, after the playlist proposals, since the channel page has no Shorts tab and the spec allows no other
-   page change; it reads one page of up to 1000 Shorts.
-26. **Short links seen in the traffic, their measurement and verdicts (Part 2 §1.2, §1.4, Part 5 S2.6; #92).** Not
-   in the spec, decided here: *The window* is the target channel's latest 28 ingested `channel_traffic_source_a3`
-   data-days (`short_links.FEED_WINDOW_DAYS`, as the feed views), since the type-32 rows are in the target's report.
-   *"A Short in `videos`"* is any channel's; the target must be in `videos` too (the intervention's FK). Rows with no
-   `source_detail` or with zero views never count, and a pair's first day is its first day with views > 0.
-   *`detected_at` and `seen_at`* are the first data-day as Pacific midnight (`2026-10-01T00:00:00-07:00`), so
-   `lever_measurement.as_of` reads it back as that day; a pair seen again later keeps its first `seen_at`, and only
-   a NULL one is written. *`seen_at` is written whatever the recommendation's status* (a dismissed row the team set
-   anyway is still seen). *The intervention's `channel_id`* is the Short's (as a tick's: the recommendation's is the
-   Short's channel), so the pair is measured with the Short's channel's rows. *The payload* has no
-   `recommendation_id` (the ticket lists `recommended` only). *Once inferred, never re-inferred*: the key is per pair,
-   so a link the team removed and set again isn't seen twice (as item 25). *A pre-window with no type-32 views*:
-   d0 is the first day with views, so an inferred row's pre is usually zero and its delta is the post's views per
-   week, for a link first seen inside the window. A link set before detection first ran is dated at the window's
-   first day with views, so its pre falls on days that already carried its views and its delta reads near zero, a
-   bias against the team's older links in the `short_link` verdicts; the spec's d0 rule, kept. *A tick after
-   detection* links the inferred row (S2.5's `_ledger_id`), which keeps `timing: "inferred_from_traffic"`. *The floor* is `source_views` (the Short's own views, every source type), unchanged:
-   "the pair-view and source-floor helpers take the source type" is read as the source (video) for the floor,
-   since the floor is on every view of the Short; only `pair_views` takes a `source_type` (default 7, so backlinks'
-   calls are unchanged). *Only `human` `short_link` rows* are measured (P4: Midas sets none); a `midas` one would be
-   skipped. *The job*: detection runs only on `TRAFFIC_INGEST_CHANNELS` channels (the report it reads), before the
-   measurement, in its own `try` and category, so a detection failure never blocks backlinks; `short_link` rows share
-   the measurement's `interventions` category, and `write_verdicts(lever='short_link')` runs only on those channels,
-   after backlinks' (a channel off the list has no measured human rows). The recommendations are read only when there
-   is a pair.
-27. **The title write and its revert (Part 2 §2.5, Part 6 S3.1, F1; #115).** Not in the spec, decided here:
-   *`title_changed`* on the apply is `ApplyError(FAILED, "title_changed")` (Part 6: "refuses as `failed`, reason
-   `title_changed`"), so a caller records `payload.error = {reason: "failed", detail: "title_changed"}` and the
-   tick's error reaction counts it as a failure; on the revert it is a plain `HTTPException(409, "title_changed")`,
-   not an `ApplyOutcome` (no new vocab), which `revert_title`'s callers (S3.5) catch by status. Both compare the live
-   title exactly, after one 1u fetch, so a refusal still costs that 1u. *The revert route* sends every `title` row to `revert_title`, whose
-   `ValueError` (not applied, cancelled, human, no `before_state.title`) is its own 400; every other row gets the
-   backlinks checks and messages as before, and a title row never reads
-   `BACKLINK_APPLY_ENABLED` (nor a backlinks row `TITLE_APPLY_ENABLED`). *The revert's order* is the backlinks
-   revert's: shape check, kill switch, DRY_RUN, ledger gate, fetch; under DRY_RUN it reads nothing from the DB and
-   returns `before_state.title`. *The titles compared are exact*, not whitespace-normalised: nothing in the spec says YouTube rewrites a title
-   it accepts, and a looser match could overwrite a team's edit. *`payload.title_before`* may be an empty string (a video with no title is still
-   compared), but must be present. *No human-edit ledger* for titles: nothing records a team's title edit, so a
-   stored title that differs from the live one is simply overwritten on success. The fetch and send are shared
-   with `backlinks_apply.py` (`_live_snippet`, `_send_snippet`, a no-behaviour-change split of
-   `_write_description`), and the revert route imports `titles_apply` inside the function, since `titles_apply`
-   imports those helpers. The daily cap needed no change: `autopilot._applies_today` already counts applied `midas`
-   interventions of any lever (`tests/test_titles_apply.py`
-   `test_an_applied_title_counts_toward_the_daily_cap`).
-
-28. **The title writer, its checks, the preview and the bake-off (Part 2 §2.4, §3.3, Part 6 S3.2, F9, F12; #116).**
-   Not in the spec, decided here: *The preview's title answer* was a local rule (`titles.would_title`) until S3.3's
-   TRIAGE rule existed; it is `TRIAGE.rules` (item 30). It needs the ceiling and the path split, so
-   `TITLE_MAX_IMPRESSIONS` and `TITLE_AGENT_PCT` (Part 6 Config) arrive with S3.2, and `title_path` is the hash
-   alone: S3.3 adds the hand-over when a path is stopped (`titles.route`). "The pool's first `n` title answers" walks `warm.warm_pool` (with its explore
-   share, as `agent_tick.preview`) until `n` videos pass, so the order can differ between runs, and it inherits the pick's exclusions: on a channel whose warm long videos are all in a backlinks experiment (Marathi, 2026-10-29) it lists none. The bake-off samples without them (`pick=False`, by impressions), since it judges the writer, not the pick. *Transcripts* come
-   from the `video_transcripts` cache only (`titles._transcript`), in the tick as in the preview and the bake-off,
-   since a live fetch may call the captions API (250u) outside the apply's quota gate (owner, 2026-10-30, Slice 3
-   final review; the `cache_only` switch is gone); a video with none is written for without one. *Median CTR* is
-   over the warm long videos with a CTR (impressions > 0), and the ceiling's 1% is of the warm long videos; the
-   `tests/test_verdicts.py` median guard (meant for CTR deltas) exempts `app/titles.py` for this one median.
-   *Top performers* are ranked by browse + suggested views over the 28 ingested traffic data-days divided by
-   impressions over the warm window (two ledgers, each the latest of its own report), a video without a row in
-   `videos` dropped, and the video itself left out of its own context. *Search terms* are the video's, not the
-   channel's (Part 6: "its top 10 search terms"). *The checks* compare length on the raw title but call an
-   all-whitespace title empty; a language not in `SCRIPTS` (other than `en`) fails the script check rather than
-   passing unchecked; a URL is `https?://`, `www.`, `youtu.be/` or `youtube.com/`; `<`, `>` and line breaks fail (YouTube's `invalidTitle`), so a refusal costs no 50u apply; candidates are stripped of surrounding whitespace before the checks. *A malformed reply* counts as a
-   failed attempt and still gets the retry; a model returning more than `TITLE_CANDIDATES` is cut to that many.
-   An exception from the model (network, HTTP) propagates out of `pipeline`; the preview and the bake-off catch it per
-   video and print it. *The stamp*: the inputs are the five the spec lists (no `label`, unlike the audit stamp, whose
-   label is only the version's prefix here too); `prompt_sha256` hashes `system_prompt()` as rendered, so
-   `TITLE_CANDIDATES` moves it; both paths hashed `TITLE_PROMPT` until S3.4 gave the agent its own prompt (item 31). The audit
-   stamp's old `getattr(settings, "WRITER_MODEL")` hook is gone, so adding the setting changed no audit's stamp.
-   *The CSVs* escape formula-leading cells with `short_links._cell`. *Top performers* read every type-3/7 row of the channel's warm long videos for 28 days (paged through `rows_for_ids`), once per preview or bake-off run; S3.3 caches it with the pool. *The bake-off* hides each model behind one code (`W1…Wn`, assigned in shuffled order) rather than a code per row,
-   so the SEO team's scores can be totalled per code; it asks each model once (no retry), the "top pick only" of F9.
-
-29. **The old title path's retirement (Part 6 S3.6, F13; #117).** Not in the spec, decided here: *A channel with
-   `agent_enabled` off* records `tick.outcome` `shorts_only` and is touched (`autopilot_last_tick_at`), as the
-   deleted `title_autopilot_disabled` branch was, so the round-robin moves on; `Job.AUTOPILOT` (`can_audit or
-   can_cut_shorts`) is unchanged, so such a channel with `autopilot_enabled` on is still picked and does only the
-   Shorts action (and nothing if it has none). *Helpers*: deleted with the branch, as nothing else calls them,
-   `_apply_audit_and_handle`, `APPLY_UNCLASSIFIED`, `_is_unsafe_model`/`UNSAFE_MODELS`, `_video_timeout_counts`, and
-   the after-apply `embed_video` (the manual routes never re-embedded); their tests went with them, and the
-   reaction tests now drive `_react_to_apply_error` and the A10 quota-gate tests the agent path. Kept:
-   `_next_video_for_channel` (no caller; it mirrors the `next_audit_candidate()` SQL function, which only a
-   migration can drop, and its parity tests guard that pair, §7.2), `_applies_today`'s applied-audit count (the
-   manual routes still apply audits, and those writes still spend the channel's day), `eligibility.can_audit`
-   (`can_run_agent` uses it), `PausedReason.UNSAFE_MODEL` (persisted vocab). *The guard* lives inside
-   `apply_audit_internal` (keyword `force`, default false), after it reads the channel and before the `DRY_RUN`
-   branch or any write, so a refused apply records nothing, not even the before-state a dry run stores; the
-   single-apply route passes its `force` query param; apply-pending reads `channels.agent_enabled` once and refuses
-   before any quota check or apply, then passes `force` on, so a channel that turns agent mid-run has its remaining
-   applies refused per audit (`failed` rows in the response). The read is `maybe_single`, so an unknown channel id answers as before (nothing pending), not 500. *`run-bulk` and `reaudit-quarantined`* never apply
-   (they only call `audit_video`, which writes a `pending` audit), so "when it applies" never holds and they are
-   unchanged. *A NULL or missing `agent_enabled`* is a non-agent channel. *`force`* is a FastAPI `bool` query
-   parameter (`?force=true`; `1`, `yes`, `on` also parse as true). The dashboard's apply buttons
-   (`app/static/channel.html`) send no `force`, so on an agent channel they show the 409.
-
-30. **Triage and routing for titles (Part 2 §2.1, §2.2, §1.3, Part 6 S3.3, F2–F5, F12; #118).** Not in the spec,
-   decided here: *`backlinks_enabled` is required* by the backlinks rule (a context without it never answers
-   `backlinks`); the tick always sets it. *The title keys* are read only while `title_enabled` holds: on a channel
-   whose title lever is closed the context carries `channel_median_ctr` None and `title_excluded` only from
-   `TITLE_EXCLUDE_VIDEOS`, so a backlinks-only channel reads no title context. *`is_short`* is `videos.is_short` as
-   stored; NULL (not probed) is not a Short, as the warm pool. *A NULL CTR* (no impressions) or no median never
-   answers `title`. *The title channel context* (`titles.channel_context`, with its top performers, so the writer's
-   context reuses it) is kept as a fourth field of the target pool's `_pools` entry and dropped with it, read
-   lazily: the TTL and the test fixture that clears `_pools` cover both. *`title_enabled`'s agent-run limit* applies
-   by the video's routed path, whatever its arm, as the spec words it; a video it turns away is declined (lever
-   `backlinks`, arm `n/a`, as every `no_change`), back after the cooldown. *Counting today*: one query on the
-   channel's `midas` `title` rows created since UTC midnight (`_titles_today`), no paging, since the limits bound a
-   day's rows far under 1,000. *No passing candidate* is recorded `cancelled` with no `planned` step (the spec's
-   "`None` → `cancelled`"); it is a treated row with `applied_at` NULL, so it counts toward `autopilot_daily_cap`
-   (`_applies_today`'s unsent attempts) and toward `TITLE_DAILY_CAP`, like a failed apply. *A writer that raises*
-   (OpenRouter down) is not in the spec: recorded `cancelled`, reason `writer_exception`, then re-raised, so the
-   tick counts a failure (`agent_failed`) and the video takes the cooldown rather than being picked again next
-   tick. *The rationale* of a `no_change` row names backlinks' reason first (now also "backlinks can't run on this
-   channel"), then, when the title lever was open for the video, `; title: <why>`; on a backlinks-only channel it
-   reads as before. *Both paths* wrote with the pipeline until S3.4 (item 31 swapped the agent in), but `payload.path` and the stamp
-   (`titles.strategy_version(path)`) record the routed path, so S3.4 only swaps the writer. *`path_stopped`* was a
-   stub here; S3.5 (#120) reads the stop rule into it, and `route` hands off by `path_closed` (item 33). *The gates*: `_agent_tick`'s
-   "neither lever can run" uses `titles_open` (channel, switch, not stopped), not the daily limits, so a channel at
-   its title cap with backlinks off still ticks and declines; its outcome is `apply_disabled` when
-   `BACKLINK_APPLY_ENABLED` is off, else `no_heading`. *The previews*: each takes its own lever as open
-   (`_assess(backlinks_on=True)` for `scripts/preview_backlinks.py`, `titles_on=True` for `scripts/preview_titles.py`,
-   which ignores `TITLE_APPLY_ENABLED`, `TITLE_CHANNELS` and the daily limits) and sees the other as the tick
-   does, so the title preview lists what the SEO team signs off on before the switch is on. The backlinks
-   preview shows a `title` answer with its arm only. *The bake-off* (`pick=False`) asks `TRIAGE.rules` on the title
-   keys alone (`would_title`), backlinks left out. *The transcript*: from the cache only, as everywhere in titles
-   (item 28).
-
-31. **The agent loop, its tools and the trajectory (Part 2 §3.1, §3.2, Part 6 S3.4, F5, F11, F14; #119).** Not in the
-   spec, decided here: *The tools are about the run's video only*: the loop passes each tool the `Subject` (the
-   video and its channel's title context), and the model passes only the schema's arguments (none, or
-   `order`), so a run can't wander to another video or channel and the traces stay comparable (§3.5 (a)). *The
-   agent's prompt* lives in `app/titles.py` beside the writer's (`AGENT_PROMPT`, `TITLE_BRIEF` shared, the rendered
-   writer prompt unchanged), since `app/agent` imports `titles`. *The agent's stamp* hashes its own prompt (Part 6
-   S3.2's note: "until S3.4 gives the agent its own prompt") and adds `agent_model` (`AUDIT_MODEL`) to the five
-   inputs, as the reasoning model shapes the agent's titles as much as the writer does; its `audit_strategies` row
-   says `code:app/titles.py AGENT_PROMPT` and `model` = `AUDIT_MODEL` (the pipeline's: `WRITER_MODEL`). Only a `planned` row is stamped, as the
-   pipeline's: a decline carries no `strategy_version`. *A turn* is one `chat_tools` call; a reply with no tool
-   call is told to call one (`NUDGE`) and uses up its turn. Several tool calls in one reply run in order, and a
-   terminal call ends the run there (later calls in the reply aren't run). *An invalid submit*: the first failing
-   `submit_title` gets `{"error": "check failed: …"}` back, the second ends `failed`, `checks_failed`, whatever came
-   between; a `title` that isn't a string counts as a failing submit; the check runs on the stripped title, against
-   the video with the channel's `default_language`. *A decline* needs no reason (an empty one is stored).
-   *`chat_tools` raising* (OpenRouter down after its retry) isn't in the spec: the loop re-raises with the trajectory
-   so far on the exception, and the tick records it as the pipeline's `writer_exception` (`cancelled`, with that
-   trajectory) and re-raises, so the video takes the cooldown and the tick counts a failure. *The planned row's
-   `candidates`* are the run's submitted titles with their checks and reasoning (the pipeline's are the writer's
-   candidates); the writer tool's candidates are in the trajectory. *The trajectory* also carries `writer_model`,
-   `max_turns`, `end {kind, reason, detail}` and `submits`; every text (message content, tool-call arguments, tool
-   result) is cut to 2,000 characters there, while the model is sent each result whole (a transcript is up to
-   `TRANSCRIPT_MAX_CHARS`); results are JSON with `ensure_ascii=False`, so Indic text isn't six times longer.
-   *The column is sent only when given* (`interventions.record(trajectory=)`), so no other row needs it.
-   *`chat_tools`' retry* is immediate (no pause): a timeout is `httpx.TimeoutException`, a
-   5xx a status ≥ 500; a 4xx or a body without `choices` isn't retried. *`get_title_history`* reads each table
-   newest first with `limit(10)` (bounded, under the 1,000-row page) and merges; audits of any status, and `title`
-   interventions of either origin. *`get_channel_top_performers`* is the channel context's warm long videos (≥
-   `WARM_MIN_IMPRESSIONS`, Part 2 §3.2's `MIN_IMPRESSIONS` filter) without the video itself; `worst` counts a
-   video with no browse or suggested views as 0, `best` still lists only videos with some (S3.2's context unchanged).
-   *`write_candidates`* is one writer call, no retry, its candidates unchecked (the agent's submit is checked).
-   *`get_video`'s reach* is the channel context's (the warm window), `agent_tick._reach` for a video outside it.
-   *The preview* runs the agent only for treated videos on the agent path (Part 6 S3.2: "for treated ones on the
-   path asked"), with transcripts from the cache: with `HOLDOUT_PCT` 0.2 and `TITLE_AGENT_PCT` 0.5 about 40% of
-   `--n`, so F12's 20 agent runs need about `--n 50`. *Arguments* may come as a JSON string or, from some
-   providers, an object; anything else is an error back to the model. *The daily cap*: an agent decline is treated
-   `declined` with no `applied_at`, so `autopilot._applies_today`'s unsent-attempts count now leaves out
-   `declined` (F14: declines don't count toward the cap); nothing else writes a treated `declined` row.
-
-32. **Title measurement, verdicts, auto-revert (Part 2 §1.2, §1.3, §1.5, §1.7, Part 6 S3.5, F6–F8, F14; #120).** Not
-   in the spec, decided here: *Its own module* (`app/title_measurement.py`), not the pair code: a title is per video,
-   and backlinks' and Short links' rows are read and measured exactly as before (`lever_measurement._rows` reads
-   only their levers). *d0* is the Pacific date of `applied_at`, else `created_at` (holdout, decline). *A measured
-   decline* goes `declined` → `judged`/`insufficient_data` like a holdout; it stays a decline by arm `treated`
-   with no `applied_at`. *Completeness* reads only the video's own channel's frontier (the views are its own). *No
-   extension*: under the floor is `insufficient_data` at once, with its numbers. *Impressions and CTR* are
-   `reach.aggregate` over the two windows, uncertified (a day without a reach row reads as zero), and judge nothing.
-   *A judged title put back* stays in its path's mean (`cancelled` with `pre` ≥ `TITLE_MIN_PRE_VIEWS`, which only a
-   judged row has): leaving the losers out would raise the path's lift after each revert (intention-to-treat, as
-   the declines); the revert changes its status only (`revert_title`), and a cancelled row isn't re-measured, so
-   its numbers stay. *The harm guard* is an extra condition on `stop_rule_triggered` for title rows only; both
-   rules and the stop are sticky as backlinks' (a triggered row is never cleared). *Auto-revert's holdout mean*:
-   the holdout rows judged in the row's judged week, else every holdout row judged so far (not only up to that
-   week, so a row isn't stuck when its week and the ones before had none). Worst gap first; the limit counts reverts
-   done (a dry run counts), so a skipped human-edited title doesn't use one; the kill switch or a short ledger
-   stops the channel's reverts for the run (every later one would refuse the same way); a YouTube error is counted
-   and the next row still runs. *The job's title half* runs only on a channel with a `midas` `title` row (one
-   `limit(1)` read), so a channel without titles reads nothing more; it has its own `try` and two categories
-   (`title interventions`, `title reverts`) and never stops backlinks', Short links' or the playlist test's.
-   *The vocab*: the applied `20261023010000`'s `arm_scope` comment can't change (`scripts/apply_migrations.py`
-   refuses an applied file whose content changed), so `20261030010000` records the four scopes as a `comment on
-   column`, which `tests/test_status_vocab.py` reads; `arm_scope` has no check constraint, so the app needs nothing
-   applied. *The endpoint* lives on `lever_verdicts`' router; "treated" counts rows that reached YouTube, "judged"
-   the rows in the path's mean.
-   *Once per experiment for titles* (Part 6 S3.5 "the video never re-enters the title experiment", Part 2 §2.1): a
-   `midas` `title` holdout row, or treated row unless `cancelled` without `applied_at`, holds its video at any age
-   (`warm._holds`, `warm_pool()` in `20261030020000`). A decline holds it too, though no title went up: it is in the
-   agent's mean over its own 14-day post window (F14), which a re-pick would muddy, and a measured decline is
-   `judged`/`insufficient_data` with no `applied_at`, so the rule reads "not cancelled" rather than a status list.
-   A treated row cancelled before its write (checks_failed, turn_cap, writer_exception, a refused apply) holds only
-   for the cooldown, as backlinks' unsent rows. `tests/test_warm.py`'s helper defaulted to `lever="title"` as "a
-   lever with no hold"; it now defaults to `playlist`, and the parity world's `declined_old` is a backlinks
-   `no_change` (arm `n/a`), what such a row is in practice.
-33. **A path with no share is closed (Part 6 F5, F7; `a1c3d3c`, final review).** Not in the spec, decided here:
-   `titles.path_closed` counts a path as closed when its stop rule has fired (`path_stopped`) or it has no share
-   (`TITLE_AGENT_PCT` 0 for the agent, 1 for the pipeline). `stopped` = both closed; `route` hands a video to the
-   other path only when its own is closed and the other isn't (`app/titles.py`). Before it, with
-   `TITLE_AGENT_PCT=0` (F5: the agent preview not signed off) a pipeline stop sent every treated title to the
-   unreviewed agent, and since the agent path then had no verdicts it never stopped, so the lever never closed
-   (F7). `tests/test_title_verdicts.py`
-   `test_a_path_with_no_share_is_closed_so_a_pipeline_stop_closes_the_lever`.
-
+   `agent_enabled` after the Shorts action (`app/autopilot.py` `tick`); failing `can_run_agent` does nothing
+   (`agent_ineligible`), no fallback; `can_run_agent` includes `can_audit`, so `autopilot_enabled = t` too. Gates
+   (resync, cap, quota) precede triage, so an unaffordable tick records nothing. A `declined` row (lever `backlinks`,
+   arm `n/a`) and a treated row that never reaches YouTube (`cancelled`, `payload.error.reason`, e.g. `dry_run`) hold
+   the video only for the cooldown. The agent doesn't run while the kill switch is off or the language has no
+   heading. `backlinks_stopped` is a triage context key, so it is logged. Context windows: 28 days (`CONTEXT_DAYS`)
+   for recent interventions and traffic mix; the warm window for impressions/CTR. `has_related_block` (D5) = a link
+   to any of our videos but itself. The preview asks `TRIAGE.rules` directly (no backend, no log).
+18. **Next-watch in shadow (Part 2 §2.3, Part 4 S1.5).** Asked for every pair `candidates` returns (up to
+   `2 × BACKLINK_MAX`). `candidates` already drops pairs below `join_low`, so the rules answer is always `yes`: the
+   log measures agreement only on accepted pairs. Stored on `triage_json.next_watch`; the backend's answer only on the
+   log row. Part 2 §2.4's shadow checks aren't built (D7). Cost: up to 6 sequential backend calls per `backlinks`
+   video inside the tick (`app/agent_tick.py` `_next_watch`).
+19. **Pair measurement (Part 2 §1.2, §1.3, §1.7, Part 4 S1.6; S1.6a).** Complete when every involved channel's
+   frontier ≥ d0+7; a missing day counts as zero and is listed in `missing_days`; a never-ingested target channel
+   leaves the row `awaiting_window` indefinitely. The extension lengthens only the post window, so `delta` = post ×
+   7/14 − pre (views/week). Floor = the source's views over every traffic source in the post window, not
+   `view_count`. `RESTATEMENT_HORIZON_DAYS = 28` after the post window: decided rows recomputed each run; `judged_at`
+   kept unless the outcome changes; a recompute that can't decide keeps the old verdict. `cancelled` treated rows
+   aren't measured; human rows are, even if later removed. d0 = the Pacific date of the timestamp; windows exclude
+   d0. `status` holds the outcome, `measurement_status` the progress (§7.4) (`app/lever_measurement.py`).
+20. **Weekly verdict and stop rule (Part 2 §1.3–§1.5, P1, Part 4 S1.6; S1.6b).** "Judged that week" =
+   `judged_at` in the Monday–Sunday UTC week; a missed run shifts rows to the next week, which isn't an extra window.
+   `cumulative_lift` is pooled (treated mean − holdout mean over all rows judged to date, current `delta`s). Band:
+   `helped` at ≥ `BACKLINK_MIN_LIFT`, `worse` at ≤ −it; no verdict without a judged treated and holdout row. Past
+   weeks never rewritten; a triggered stop is never cleared and keeps the lever off even if the lift recovers (owner
+   restart = delete the row). Human rows: `n_treated` and mean delta only, never stop. Job runs every channel.
+   `missing_days` doesn't exclude a row. Backlinks rows on Shorts enter no mean, either arm (`_without_shorts`; the
+   arm hash keeps it fair) (`app/lever_verdicts.py`).
+21. **The playlist test's draw (Part 2 §4, P3, Part 5 S2.1).** Members via `reembed._members` (latest action per
+   pair). `eligible_members` counts embedded members; centroid = their vector sum, raw cosine. Candidates on the
+   playlist's channel; NULL `privacy_status`/`is_short`/`is_episode` eligible. A refused threshold refuses the whole
+   draw, so the once-only draw isn't spent. A second draw raises `AlreadyDrawn`. Not atomic: a draw dying midway
+   leaves a partial draw a rerun refuses; recovery is deleting the channel's `playlist_arms` rows and proposals by
+   hand (`app/playlist_test.py`).
+22. **The playlist test's apply (Part 2 §2.5, Part 5 S2.2).** Only `failed` uses an attempt
+   (`apply_error.attempts`). Position = count of the arm's higher-ranked adds already in the playlist. After a 400
+   naming the position or sort order, that playlist's adds go appended, in rank, across runs; the extra call can
+   exceed the n × 50u budget by 50u. An arm settles `dosed`/`no_dose` once no approved add is unsent or retryable,
+   whatever is pending; a proposal approved after settling is never sent; nothing approved stays open while any is
+   pending. Kill switch off → nothing settles. A budget stop or quotaExceeded ends the run (channel `degraded`); a
+   token error fails only that channel. DRY_RUN checks no budget, settles nothing (`app/playlist_test.py`).
+23. **The playlist test's measurement and verdict (Part 2 §1.2, §1.3, §1.5, P3, Part 5 S2.3).** Weeks stop at
+   `PLAYLIST_EXPERIMENT_WINDOWS`. Every week's row and arm numbers are recomputed each run until done (unlike
+   backlinks); afterwards nothing is re-read. A vanished playlist leaves every week's means and ends
+   `insufficient_data`. `no_dose` arms keep their status. An errored arm holds back the channel's verdicts and end. No
+   verdict for a week lacking a dosed treated or a holdout arm, so such a test stays `pending`. `pre_weekly` = pre sum
+   × 7 / 28. Answer: `no` if the window-4 row triggered the stop rule, `yes` if not, else `pending`; nothing reads
+   `lever_verdicts.stopped(channel, 'playlist')`. A failed `playlist_arms` read skips the playlist half
+   (`app/playlist_test.py`).
+24. **Short-link recommendations (Part 2 §2.3, P4, Part 5 S2.4).** The per-run cap counts Shorts that get rows; a
+   Short with no vector or no target uses no slot and is retried. Refused thresholds refuse the channel's run
+   (`degraded`, `refused: <reason>`), noticed only when there are new Shorts. Each Short's rows go in one insert after
+   its pair decisions, so it is written whole or not at all; the log row's `intervention_id` stays NULL. A Short needs
+   `is_short` true; a NULL target is eligible; no episode filter. No `analytics_authorized` check; `channel_id`
+   nullable (`app/short_links.py`).
+25. **The Short-links page and the tick (Part 2 §1.4, §2.5, P4, Part 5 S2.5).** Pages count Shorts (grouped in-app),
+   those with a `pending` row first, then by feed views, then id; `status` filters rows within a Short. The tick
+   writes the ledger, the Short's other rows, then this row's `set`, so a partial tick is redone whole. Changing the
+   target leaves the old pair's intervention `applied`; nothing records when a link came off. A dismissed sibling
+   stays `dismissed`; `pending`/`set` siblings become `not_chosen`. Dismissing a `set` row is 409. Setting an earlier
+   target back records a new period under `short_link:<short>:<A>:2` (`_episode_key`). The card confirms before
+   recording (no undo route) and sits on the Playlists tab (`app/static/channel.html`).
+26. **Short links seen in the traffic, their measurement and verdicts (Part 2 §1.2, §1.4, Part 5 S2.6).** Window = the
+   target channel's latest 28 ingested data-days (`short_links.FEED_WINDOW_DAYS`); zero-view or blank-detail rows
+   never count. `detected_at`/`seen_at` = first day with views as Pacific midnight; only a NULL `seen_at` is written.
+   Intervention `channel_id` = the Short's. Once inferred, never re-inferred. Bias: d0 is the first day with views, so
+   a link set before detection first ran reads delta near zero, biasing `short_link` verdicts against older team
+   links (spec's d0 rule, kept). Floor stays the Short's views, every type; only `pair_views` takes `source_type`. Only
+   `human` rows measured; detection only on `TRAFFIC_INGEST_CHANNELS`, isolated from backlinks (`app/short_links.py`).
+27. **The title write and its revert (Part 2 §2.5, Part 6 S3.1, F1).** `title_changed` on apply is
+   `ApplyError(FAILED, "title_changed")`; on revert `HTTPException(409, "title_changed")`. Both compare the live title
+   exactly, after a 1u fetch. Each lever reads only its own kill switch. `payload.title_before` may be empty but must
+   be present. No human-edit ledger for titles: a stored title differing from live is overwritten on success. Fetch
+   and send shared with `backlinks_apply.py` (`app/titles_apply.py`).
+28. **The title writer, its checks, the preview and the bake-off (Part 2 §2.4, §3.3, Part 6 S3.2, F9, F12).** The
+   preview walks `warm.warm_pool` until `n` videos pass `TRIAGE.rules`, so it varies and inherits the pick's
+   exclusions; the bake-off samples by impressions without them (`pick=False`). Transcripts from the cache only
+   (`titles._transcript`), since a live fetch may cost 250u outside the quota gate. Median CTR over warm long videos
+   with impressions; ceiling's 1% of warm long videos. Top performers = browse + suggested views (28 traffic days) ÷
+   warm-window impressions. Search terms are the video's. Checks: all-whitespace = empty; a language not in `SCRIPTS`
+   (other than `en`) fails; URL = `https?://`, `www.`, `youtu.be/`, `youtube.com/`; `<`, `>`, line breaks fail
+   (`invalidTitle`). A malformed reply is a failed attempt, retried. Stamp: the spec's five inputs; `prompt_sha256`
+   of the rendered `system_prompt()`, so `TITLE_CANDIDATES` moves it. The bake-off hides each model behind one
+   shuffled code (`W1…Wn`), one call each (`app/titles.py`, `scripts/title_bakeoff.py`).
+29. **The old title path's retirement (Part 6 S3.6, F13).** A non-agent channel records `shorts_only` and is touched
+   so the round-robin moves on. Kept: `_next_video_for_channel` (no caller; mirrors the `next_audit_candidate()` SQL
+   function, droppable only by migration), `_applies_today`'s audit count, `eligibility.can_audit`,
+   `PausedReason.UNSAFE_MODEL`. The guard is in `apply_audit_internal` (`force`, default false) before any write, so a
+   refusal records nothing; apply-pending checks once, then per audit. `run-bulk`/`reaudit-quarantined` never apply,
+   so are unguarded. NULL `agent_enabled` = non-agent. Dashboard apply buttons send no `force`, so show the 409 on an
+   agent channel (`app/audits.py`).
+30. **Triage and routing for titles (Part 2 §2.1, §2.2, §1.3, Part 6 S3.3, F2–F5, F12).** The backlinks rule requires
+   `backlinks_enabled`. Title keys are read only while `title_enabled`; NULL `is_short` isn't a Short; a NULL CTR or
+   median never answers `title`. The title context is cached with the pool (`_pools`). The agent-run limit applies by
+   routed path, whatever the arm; turned-away videos are declined until the cooldown. No passing candidate → treated
+   `cancelled`, no `planned` step, counting toward `autopilot_daily_cap` and `TITLE_DAILY_CAP`. A raising writer →
+   `cancelled`, `writer_exception`, re-raised. `_agent_tick`'s "neither lever can run" uses `titles_open`, not the
+   daily limits, so a capped channel still ticks and declines. Each preview takes its own lever as open
+   (`titles_on=True` ignores `TITLE_APPLY_ENABLED`, `TITLE_CHANNELS` and limits) (`app/agent_tick.py`).
+31. **The agent loop, its tools and the trajectory (Part 2 §3.1, §3.2, Part 6 S3.4, F5, F11, F14).** Tools see only
+   the run's video (`Subject`); the model passes only schema arguments, keeping runs comparable (§3.5 (a)). The
+   agent's stamp hashes `AGENT_PROMPT` and adds `agent_model` (`AUDIT_MODEL`); only `planned` rows are stamped. A turn
+   = one `chat_tools` call; a reply without a tool call gets `NUDGE` and uses its turn; a terminal call ends the run.
+   First failing `submit_title` gets the failure back, the second ends `failed`, `checks_failed`. `chat_tools`
+   retries once immediately on timeout or ≥ 500, then raises → `cancelled`, `writer_exception`, with the trajectory
+   so far. Trajectory texts cut to 2,000 characters; the model gets results whole. `get_title_history` merges the
+   newest 10 of each table; `worst` performers count no views as 0; `write_candidates` is unchecked. A decline is
+   treated `declined` without `applied_at`, left out of the daily cap (F14) (`app/agent/loop.py`,
+   `app/agent/tools.py`).
+32. **Title measurement, verdicts, auto-revert (Part 2 §1.2, §1.3, §1.5, §1.7, Part 6 S3.5, F6–F8, F14).** Own module
+   (`app/title_measurement.py`). d0 = Pacific date of `applied_at`, else `created_at`. Declines are measured like
+   holdouts. Completeness reads only the video's channel frontier. No extension: under the floor →
+   `insufficient_data`. Impressions/CTR recorded, judge nothing. A judged title put back stays in its path's mean
+   (intention-to-treat). The harm guard is an extra stop condition; stops are sticky. Auto-revert compares with the
+   holdout mean of the row's judged week, else all holdouts judged so far; worst first; the limit counts reverts done;
+   the kill switch or a short ledger stops the channel's reverts for the run. The job's title half runs only on
+   channels with a `midas` `title` row, isolated. Once per experiment: a `midas` `title` holdout row, or treated row
+   unless `cancelled` without `applied_at` (declines included, F14), holds its video at any age (`warm._holds`,
+   `warm_pool()`); a row cancelled before its write holds only for the cooldown.
+33. **A path with no share is closed (Part 6 F5, F7).** `titles.path_closed`: stop rule fired or no share
+   (`TITLE_AGENT_PCT` 0 for the agent, 1 for the pipeline). `stopped` = both closed; `route` hands over only when its
+   path is closed and the other isn't (`app/titles.py`). Otherwise at `TITLE_AGENT_PCT=0` a pipeline stop would send
+   every title to the unreviewed agent, which, with no verdicts, would never stop (F7).
 34. **Search counts for titles; the pipeline writes the SEO team's structure (Part 6 F6, finding 3, P5; owner,
-   2026-10-31).** The spec measures a title on browse (3) + suggested (7) views and aims it away from search. The SEO
-   team rejected the structure of the 10-30 bake-off's candidates and gave their own, a bilingual, search-shaped one
-   (`titles.TITLE_STRUCTURE`); so the pipeline writes it, the agent writes its own structure within
-   `TITLE_LIMITS` (pipeline vs agent compares the two), and the title test counts search (5) too
-   (`title_measurement.SOURCE_TYPES = (3, 5, 7)`), so a search-shaped title isn't judged only on views it isn't
-   written for. Unchanged: the writer's context and the agent's tools still rank the channel's top performers by
-   browse + suggested views per impression (`titles.BROWSE_SUGGESTED`); `TITLE_MIN_PRE_VIEWS` now floors browse +
-   search + suggested. The 10-30 bake-off judged the earlier prompt; it is rerun with this one before
-   `WRITER_MODEL` is chosen. "Keep the series name" is a limit on both paths (a brand such as TMKOC), not a style.
-
-35. **Backlinks stay on the source's own channel (Part 2 §2.3, P2; owner, 2026-11-16).** The spec links to targets
-   on the source's channel or a sibling. Each channel is one language, so the 2026-11-16 previews (K2) linked a
-   Punjabi rhyme to its Gujarati, Haryanvi and Marathi versions, and a Haryanvi one to English and Bhojpuri rhymes;
-   the owner dropped cross-language links. `BACKLINK_SIBLINGS_ENABLED` (default false) makes `backlinks.target_pool`
-   read no siblings; `siblings` and its tests stay, for the setting to bring them back. A shared `default_language`
-   isn't used instead: Hindi, Bhojpuri, Rajasthani and 3D Animated all have `hi`. Blocks already on YouTube that
-   link a sibling stay as they are. The same day, from the same previews: a target at least `BACKLINK_DUPLICATE_SIM`
-   (0.98) like the source, or like a better target already kept, is left out as a re-upload under another title
-   ("| 4K", "LIVE": 0.985–0.993 there; the closest different videos 0.972), since `title_key` catches only equal
-   titles (`backlinks.candidates`).
+   2026-10-31).** Spec: measure on browse (3) + suggested (7) and aim away from search. Built: the pipeline writes the
+   SEO team's bilingual, search-shaped structure (`titles.TITLE_STRUCTURE`); the agent its own within `TITLE_LIMITS`;
+   the test counts search too (`title_measurement.SOURCE_TYPES = (3, 5, 7)`), as does `TITLE_MIN_PRE_VIEWS`. Top
+   performers are still ranked on browse + suggested (`titles.BROWSE_SUGGESTED`). The bake-off is rerun before
+   `WRITER_MODEL` is chosen. Keeping a series name (e.g. TMKOC) is a limit on both paths.
+35. **Backlinks stay on the source's own channel (Part 2 §2.3, P2; owner, 2026-11-16).** Spec: targets on the source's
+   channel or a sibling. Each channel is one language, so siblings meant cross-language links; dropped.
+   `BACKLINK_SIBLINGS_ENABLED` (default false) makes `backlinks.target_pool` read no siblings; `siblings` stays.
+   `default_language` can't substitute (Hindi, Bhojpuri, Rajasthani, 3D Animated all `hi`). Existing sibling blocks
+   stay. A target ≥ `BACKLINK_DUPLICATE_SIM` (0.98) like the source or a kept target is left out as a re-upload
+   (observed 0.985–0.993; closest different videos 0.972), since `title_key` catches only equal titles
+   (`backlinks.candidates`).
 
 ### 7.4 Contradictions within the spec
 
-- **`agent_enabled` and Part 2 §7.** Part 3 B2 adds `channels.agent_enabled` (built, `20261006020000`), but
-  Part 2 §7 says `bool default false` where B2 says `bool not null default false` (built as B2 says), and B4's
-  warm filter omits it while §2.1's eligibility requires it (B4 defers it to Slice 1's tick routing). Part 2 §7,
-  headed "Data model (Phase B)", also lists the Slice 3 `niche_reference_*` columns.
-- **Backlink block markers.** Part 2 §3.4 delimits the block by "fixed marker lines"; Part 4 S1.2 finds it "by its
-  exact heading line and the `youtu.be` lines under it". Part 4 wins (its Inputs); built as Part 4 (7.3 item 14).
-- **Playbook storage.** Part 2 §5 puts it in `channels.playbook_json`; Part 2 §7 (data model) doesn't list it.
-- **Warm window definition.** §8 `WARM_WINDOW_DAYS` = 28 "ingested data-days", and A7's query is labelled
-  "28 ingested days", but the query uses `date > current_date - 30` (calendar days). B4's acceptance compares
-  against that query's 566. As built, the filter uses ingested days (7.3 item 12).
-- **Intervention status vs measurement status.** Part 2 §7 gives `interventions` both `status` and
-  `measurement_status`; B2's lifecycle statuses (`planned`, `applied`, `measuring`, `judged`, `cancelled`) put
-  measurement state into `status` too, reusing strings already in `AuditStatus` and `MeasurementStatus`. B2 also
-  lists `insufficient_data`, which §1.7 describes as a measurement outcome, and `holdout`, which is also an `arm`
-  value. As built, all eight are `InterventionStatus` values (`app/status_vocab.py:184-210`). Resolved by S1.6a:
-  `status` carries the lifecycle and the outcome (`judged`, `insufficient_data`); `measurement_status` holds only
-  the measurement's progress, `awaiting_window|extended|done` (`InterventionMeasurement`,
-  `app/status_vocab.py:223-244`), so the two never disagree about an outcome (§2, 7.3 item 19).
-- **What counts as a Midas edit in B3.** B3 skips "every apply" in Phase B, yet Phase B allows no applies. The
-  manual paths that still write to YouTube (`POST /audits/{id}/apply`, `/apply-pending`,
-  `/playlists/proposals/decide`) are human-triggered through Midas: B3 doesn't say whether they are `human` or
-  `midas`. As built (B3a), a description written by any apply or revert counts as Midas's, however it was
-  triggered (`app/human_edits.py` `made_by_midas`); likewise (B3b) a membership from an approved proposal counts
-  as Midas's, as B3 change 2 says (`app/human_edits.py` `added_by_midas`).
-- **"Active intervention" exclusion.** Part 2 §1.6 limits *Midas* interventions to one per video; §2.1 and B4
-  exclude videos with "an active intervention" of any origin, which would let human edits block Midas picks.
-  Part 3 B2's test says "a second active intervention", no origin. As built (B2), §1.6's reading: `active_for`
-  and the partial unique index count `origin = 'midas'` only (`app/interventions.py`,
-  `20261006020000_interventions.sql`). B4 (built) counts Midas ones only, for the same reason and because human
-  rows never close (7.3 item 12).
-- **Which statuses are "active".** Neither Part says. As built: `planned`, `applied`, `measuring` and
-  `holdout` (a held-out video is the control arm for its window); `declined` is not, so a `no_change` triage
-  doesn't hold a video for a window, and the picker could pick it again next tick (Slice 1's concern)
-  (`app/status_vocab.py:217-220`).
-- **`get_search_terms`.** A3 answered yes (Part 2 §11.1), but §6's Slice 3 row doesn't list the tool and §7 has
-  no storage for terms.
-- **`WARM_MIN_IMPRESSIONS`** says "Revisit after Phase A live numbers" (§8); Phase A is done and it wasn't revisited.
-- **`decision_log` columns vs backends.** Part 2 §7 names the backend column `jev_answer`/`jev_probs`, while B5's
-  default backend is `llm`; and it has no column for the backend's name or the question set's name. As built
-  (exact DDL), `jev_answer` holds whichever backend answered; the backend is `DECIDE_BACKEND` at the time and the
-  question set is not stored: with `NEXT_WATCH` beside `TRIAGE`, it is told apart by `subject`'s shape (a video id
-  for `TRIAGE`, `<source>-><target>` for `NEXT_WATCH`), by `triage_json` on the linked intervention, and, by
-  `short_link_recommendations.decision_log_id`, which §8's agreement query uses (7.3 items 13, 18).
-- **Document framing.** "This file has two parts" (How to use) while it has three; "Ground truth used:
-  `STATE.md` @ `bddd373`" predates Phase A.
+- **`agent_enabled`.** Part 2 §7 says `bool default false`, B2 `bool not null default false` (built as B2). Part 2
+  §7 ("Data model (Phase B)") also lists Slice 3's `niche_reference_*` columns.
+- **Backlink block markers.** Part 2 §3.4: "fixed marker lines"; Part 4 S1.2: the exact heading line plus the
+  `youtu.be` lines. Built as Part 4 (7.3 item 14).
+- **Playbook storage.** Part 2 §5 puts it in `channels.playbook_json`; Part 2 §7 doesn't list it.
+- **Warm window.** §8 says 28 "ingested data-days"; A7's query used 30 calendar days. Built on ingested days (7.3
+  item 12).
+- **Intervention status vs measurement status.** B2's lifecycle statuses mix in measurement outcomes. As built,
+  `status` carries lifecycle and outcome (`judged`, `insufficient_data`); `measurement_status` only progress,
+  `awaiting_window|extended|done` (`app/status_vocab.py`; 7.3 item 19).
+- **Midas edits in B3.** B3 doesn't say whether human-triggered applies through Midas are `human` or `midas`. As
+  built, any apply, revert or approved proposal counts as Midas's (`app/human_edits.py` `made_by_midas`,
+  `added_by_midas`).
+- **"Active intervention".** Part 2 §1.6 limits *Midas* interventions to one per video; §2.1 and B4 say any
+  origin. As built, Midas only (`app/interventions.py` `active_for`, the partial unique index), since human rows
+  never close (7.3 item 12).
+- **Which statuses are active.** Neither Part says. As built: `planned|applied|measuring|holdout`, not `declined`
+  (`app/status_vocab.py`).
+- **`WARM_MIN_IMPRESSIONS`** says "Revisit after Phase A live numbers" (§8); it wasn't revisited.
+- **`decision_log` columns.** Part 2 §7 names them `jev_answer`/`jev_probs` though the default backend is `llm`,
+  and stores no backend or question-set name. As built, `jev_answer` holds whichever backend answered; the question
+  set is told apart by `subject`'s shape (video id vs `<source>-><target>`) and by
+  `short_link_recommendations.decision_log_id` (7.3 items 13, 18).
+- **Document framing.** "This file has two parts" while it has three; "Ground truth used: `STATE.md` @ `bddd373`"
+  predates Phase A.
 
 ---
 
