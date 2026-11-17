@@ -1398,158 +1398,45 @@ The live DB is unreachable from here. Every figure is quoted from a doc, with it
 - **Blank:** verdicts (none yet); Shorts upload volume and its Data API cost (not charged to the ledger, §7.2);
   playlist proposal queue size beyond ">1,000 pending".
 
-**SQL to refresh** (run on the office machine against `midas`, e.g. `docker compose exec db psql -U midas midas`;
-`count(1)`, because the office copy-paste path drops `*`):
+**SQL to refresh** (on the office machine: `docker compose exec db psql -U midas midas`; `count(1)`, because the
+office copy-paste path drops `*`):
 
 ```sql
--- channels live
-select id, name, default_language, analytics_authorized, measurement_enabled, reach_warmup,
-       playlist_health_enabled, autopilot_enabled, autopilot_paused_reason, autopilot_shorts_enabled
+-- channels and their switches
+select id, name, default_language, agent_enabled, autopilot_enabled, autopilot_daily_cap, autopilot_paused_reason,
+       autopilot_shorts_enabled, measurement_enabled, reach_warmup
 from channels order by name;
 
--- reach frontier per channel
-select channel_id, max(data_date) frontier, count(1) days_covered
-from reporting_reports_ingested where report_type = 'channel_reach_basic_a1' group by 1;
+-- data frontiers per channel and report type (reach, video traffic, playlist traffic)
+select channel_id, report_type, max(data_date) frontier, count(distinct data_date) days_ingested
+from reporting_reports_ingested group by 1,2 order by 1,2;
 
 -- daily Data API burn, last 30 days
 select date_trunc('day', occurred_at) d, sum(units) units, count(1) filter (where not success) failures
 from quota_log where units > 0 and occurred_at > now() - interval '30 days' group by 1 order by 1;
 
--- playlist health freshness
-select channel_id, max(health_computed_at), count(1) filter (where health_recommendation is not null)
-from playlists group by 1;
+-- interventions per channel, lever, origin, arm, status and measurement progress
+select channel_id, lever, origin, arm, status, measurement_status, count(1)
+from interventions group by 1,2,3,4,5,6 order by 1,2,3,4,5,6;
 
--- warm pool size per channel (>= 500 impressions, last 30 days of video_reach_daily)
-select channel_id, count(1) warm_videos
-from (select channel_id, video_id, sum(impressions) imp
-      from video_reach_daily where date > current_date - 30 group by 1,2) t
-where imp >= 500 group by 1 order by 2 desc;
-
--- Marathi's warm pool. Arguments: WARM_MIN_IMPRESSIONS, WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS,
--- TRIAGE_COOLDOWN_DAYS. 0 rows also when reach isn't certified.
-select count(1) warm_videos, min(impressions) floor_, max(impressions) top
-from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7);
-
--- traffic-source rows per data-day (B1)
-select channel_id, date, count(1) rows_, sum(views) views, max(report_id) report
-from video_traffic_source_daily group by 1,2 order by 1,2 desc;
-
--- playlist traffic rows per data-day (B1b)
-select channel_id, date, count(1) rows_, sum(views) views, sum(playlist_starts) starts, max(report_id) report
-from playlist_traffic_daily group by 1,2 order by 1,2 desc;
-
--- traffic frontier per channel and report type, from the ledger (a day whose report had 0 rows is ingested
--- but has no table rows), and the data-days missing between the first ingested day and current_date - 2
-select channel_id, report_type, min(data_date) first_day, max(data_date) frontier, count(distinct data_date) days_ingested
-from reporting_reports_ingested
-where report_type in ('channel_traffic_source_a3', 'playlist_traffic_source_a2') group by 1,2;
-
-select t.report_type, d::date missing_day
-from (values ('channel_traffic_source_a3'), ('playlist_traffic_source_a2')) t(report_type)
-cross join lateral generate_series(
-       (select min(data_date) from reporting_reports_ingested
-        where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg'),
-       current_date - 2, interval '1 day') d
-where d::date not in (select data_date from reporting_reports_ingested
-                      where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
-order by 1, 2;
-
--- interventions by origin, lever, arm and status (B2)
-select origin, lever, arm, status, count(1) from interventions group by 1,2,3,4 order by 1,2,3,4;
-
--- B3a: human backlinks detected, newest first
-select channel_id, video_id, payload->>'target_video_id' target, detected_at, payload->>'removed_detected_at' removed
-from interventions where origin = 'human' and lever = 'backlinks' order by detected_at desc limit 50;
-
--- B3b: human playlist memberships detected, newest first
-select channel_id, video_id, payload->>'playlist_id' playlist, payload->>'playlist_item_id' item, detected_at
-from interventions where origin = 'human' and lever = 'playlist' order by detected_at desc limit 50;
-
--- warm Marathi videos without a B6-recipe vector (want 0), and the
--- stored calibration
-select count(1) missing
-from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7) w
-where not exists (select 1 from video_embeddings e where e.video_id = w.id and e.chunk_index = 'pooled'
-                  and e.model_version = 'google/gemini-embedding-2-preview|tdt-v1');
-select id, playlist_thresholds from channels where playlist_thresholds is not null;
-
--- S1.6a: backlinks interventions by origin, arm, status and measurement progress
-select origin, arm, status, measurement_status, count(1)
-from interventions where lever = 'backlinks' group by 1,2,3,4 order by 1,2,3,4;
-
--- S1.6b: weekly verdicts per channel, newest first
-select channel_id, arm_scope, week_start, n_treated, n_holdout, lift, cumulative_lift, windows_judged, verdict,
-       stop_rule_triggered
-from lever_verdicts order by channel_id, week_start desc, arm_scope;
-
--- S2.1: the playlist test's arms per channel, and its proposals by status
-select channel_id, arm, status, count(1), sum(coalesce(array_length(proposal_ids, 1), 0)) proposals
-from playlist_arms group by 1,2,3 order by 1,2,3;
-select a.channel_id, p.status, count(1)
-from playlist_proposals p join playlist_arms a on a.id = p.arm_id group by 1,2 order by 1,2;
-
--- S2.2: the test's adds sent and failing, per channel and arm status, with each arm's dose dates
-select a.channel_id, a.status, count(1) filter (where p.applied_at is not null) sent,
-       count(1) filter (where p.applied_at is null and p.apply_error is not null) failing,
-       min(a.first_applied_at) first_applied, max(a.last_applied_at) last_applied
-from playlist_arms a join playlist_proposals p on p.arm_id = a.id
-where a.arm = 'treated' group by 1,2 order by 1,2;
-
--- S2.3: the playlist test's arms by measurement progress, and its weekly verdicts
-select channel_id, arm, status, measurement_status, count(1),
-       max(jsonb_array_length(measurement_result->'weeks')) weeks
-from playlist_arms group by 1,2,3,4 order by 1,2,3,4;
-select channel_id, week_start, windows_judged, n_treated, n_holdout, lift, cumulative_lift, verdict,
-       stop_rule_triggered
-from lever_verdicts where lever = 'playlist' order by channel_id, week_start;
-
--- S2.4: Short-link recommendations per channel and status, and how many have
--- their shadow next-watch logged
-select channel_id, status, count(1), count(distinct short_id) shorts, count(decision_log_id) logged
-from short_link_recommendations group by 1,2 order by 1,2;
-
--- S2.5/S2.6: Short links the team ticked as set and those seen in the traffic (timing ticked |
--- inferred_from_traffic), per channel, with how many were recommended and how far their measurement got
-select channel_id, payload->>'timing' timing, status, measurement_status, count(1),
-       count(1) filter (where (payload->>'recommended')::boolean) recommended, max(detected_at) latest
-from interventions where lever = 'short_link' group by 1,2,3,4 order by 1,2,3,4;
-
--- S2.6: recommendations seen in the traffic, per channel and status
-select channel_id, status, count(1), count(seen_at) seen
-from short_link_recommendations group by 1,2 order by 1,2;
-
--- S2.6: the weekly short_link human verdict rows
-select channel_id, week_start, n_treated, treated_mean_delta, windows_judged
-from lever_verdicts where lever = 'short_link' order by channel_id, week_start;
-
--- S3.3: title rows per channel, arm, status and path (the agent tick, #118), today's against TITLE_DAILY_CAP
-select channel_id, arm, status, payload->>'path' path, payload->'error'->>'reason' error, count(1),
-       count(1) filter (where created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc') today
-from interventions where origin = 'midas' and lever = 'title' group by 1,2,3,4,5 order by 1,2,3,4,5;
-
--- S3.4: agent runs per channel by how they ended, with their turns
-select channel_id, status, trajectory->'end'->>'kind' ended, trajectory->'end'->>'reason' reason, count(1),
-       round(avg((trajectory->>'turns')::int), 1) avg_turns
-from interventions where origin = 'midas' and lever = 'title' and payload->>'path' = 'agent'
-group by 1,2,3,4 order by 1,2,3,4;
-
--- S3.5: title rows per channel and path by measurement outcome, with the mean delta and the auto-reverts
--- (holdout rows have no path: 'holdout'); a decline is arm treated with no applied_at
-select channel_id, coalesce(payload->>'path', 'holdout') path, arm, status, measurement_status,
+-- title rows by path and outcome (holdout rows have no path); errors and auto-reverts
+select channel_id, coalesce(payload->>'path', 'holdout') path, status, payload->'error'->>'reason' error,
        count(1), round(avg((measurement_result->>'delta')::numeric), 3) mean_delta,
-       count(1) filter (where applied_at is null and arm = 'treated') declines,
        count(1) filter (where (payload->'revert'->>'auto')::boolean) auto_reverts
-from interventions where origin = 'midas' and lever = 'title' group by 1,2,3,4,5 order by 1,2,3,4,5;
+from interventions where origin = 'midas' and lever = 'title' group by 1,2,3,4 order by 1,2,3,4;
 
--- S3.5: the title verdicts per path, oldest week first
-select channel_id, arm_scope, week_start, n_treated, n_holdout, lift, cumulative_lift, windows_judged, verdict,
-       stop_rule_triggered
-from lever_verdicts where lever = 'title' order by channel_id, arm_scope, week_start;
+-- weekly verdicts, every lever
+select channel_id, lever, arm_scope, week_start, n_treated, n_holdout, lift, cumulative_lift, windows_judged,
+       verdict, stop_rule_triggered
+from lever_verdicts order by channel_id, lever, arm_scope, week_start;
 
--- S2.6 (E12): shadow agreement per question set, read-only. TRIAGE rows have a video id as subject, NEXT_WATCH
--- rows <source>-><target>; the Short-link NEXT_WATCH rows are those a recommendation's decision_log_id points at,
--- the backlinks ones those decide.link pointed at an intervention, and the rest (a write that failed) unlinked.
--- A backend failure is a NULL jev_answer; agreement is over the rows the backend answered.
+-- playlist test arms
+select channel_id, arm, status, measurement_status, count(1) from playlist_arms group by 1,2,3,4 order by 1,2,3,4;
+
+-- Short-link recommendations
+select channel_id, status, count(1), count(seen_at) seen from short_link_recommendations group by 1,2 order by 1,2;
+
+-- shadow agreement per question set (a NULL jev_answer is a backend failure)
 select case when d.subject not like '%->%' then 'triage'
             when exists (select 1 from short_link_recommendations s where s.decision_log_id = d.id)
               then 'next_watch: short links'
