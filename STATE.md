@@ -14,44 +14,21 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-16 (docs cleanup: old plan and design docs deleted (in git history), the office runbook is `docs/agents/office-runbook.md`). Earlier the same day: (office: titles live on Hindi, Marathi, Gujarati and English, pipeline only; backlinks widened to Tamil, Malayalam, Haryanvi, Rajasthani; §1; no code change). Earlier the same day: (titles: English gets its own one-half structure in `TITLE_STRUCTURE`, `<rhyme names> | TMKOC English Nursery Rhymes`, since the P3 preview's two halves repeated each other (owner); the pipeline's `strategy_version` moves; no migration). Earlier the same day: (titles: the pipeline's `TITLE_STRUCTURE` titles a story, episode or show with the language's word for an episode or a story, never rhymes, and keeps its season or episode number (owner, after the P1 previews); no migration). Earlier the same day: (backlinks link only to the source's own channel: `BACKLINK_SIBLINGS_ENABLED`, default false; and leave out a re-upload: a target ≥ `BACKLINK_DUPLICATE_SIM` (0.98) like the source or a kept target; owner, §7.3 item 35; no migration). Earlier: 2026-11-06 (the bake-off CSV gains `follows_structure` and `notes`; no migration). Earlier: 2026-11-05 (titles: no title gains an emoji on either path (`titles.check` `emoji`, a line in `TITLE_LIMITS`); the pipeline's `TITLE_STRUCTURE` puts TMKOC on every title, one rhyme is just its name, a compilation joins with `&`/`+` (§6); both paths' `strategy_version`s moved; no migration). Earlier: 2026-11-03 (jobs: the registry behind `/health/jobs` is kept across restarts in `LOG_DIR/job_status.json`, and a one-off `startup_catch_up` job runs the daily jobs a down office machine missed (`app/catch_up.py`, §4): the reach and traffic frontier had frozen at 2026-10-26; no migration). Earlier: 2026-10-31 (titles: the pipeline writes the SEO team's structure (`app/titles.py` `TITLE_STRUCTURE`, `TITLE_LIMITS`, §6), the agent gets the goal and the limits only (`AGENT_PROMPT`), search results count as a place a title is read, and the title test counts search views too (`app/title_measurement.py` `SOURCE_TYPES = (3, 5, 7)`, §7.3 item 34); both paths' `strategy_version`s moved; no migration). Earlier: 2026-10-30 (Slice 3 deployed at the office with titles off: migrations `20261030000000`, `20261030010000`, `20261030020000` applied, image `0577a7c` running, `TITLE_APPLY_ENABLED` unset; writer bake-off run on Marathi and Hindi; office to-do list `docs/agents/office-next.md`. Earlier the same day: Slice 3 merged to `main` (PRs #123–#128, `0577a7c`). Earlier the same day: Slice 3 built: #115–#120 on the stacked `slice-3/*` branches; final-review fixes: `titles.path_closed` (`a1c3d3c`: a path with no share, `TITLE_AGENT_PCT` 0 for the agent or 1 for the pipeline, counts as closed, so a pipeline stop closes the lever instead of handing titles to the agent), stale citations and sentences corrected; no migration). Earlier: 2026-10-30 (Slice 3 S3.5 #120: the weekly `lever_measurement` job measures `midas` `title` rows (`app/title_measurement.py` `measure_channel`: treated `measuring`, `holdout`, agent `declined`; pre d0−14 … d0−1, post d0+1 … d0+`TITLE_WINDOW_DAYS`, Pacific d0; browse (3) + suggested (7) views, `delta` = ln((post + 1) / (pre + 1)); pre under `TITLE_MIN_PRE_VIEWS` → `insufficient_data`; impressions and CTR recorded), writes `lever = 'title'` verdicts per path (`lever_verdicts.title_verdicts`, `arm_scope` `pipeline_vs_holdout`/`agent_vs_holdout`, the holdout shared, agent declines in the agent mean, stop at `TITLE_EXPERIMENT_WINDOWS` below `TITLE_MIN_LIFT` or at `TITLE_HARM_WINDOWS` at ≤ −`TITLE_HARM_LIFT`), puts back losing titles (`lever_verdicts.auto_revert`, `TITLE_REVERT_LIFT`, `TITLE_REVERTS_PER_DAY`, errors under `title reverts`); `titles.path_stopped` reads the triggered rows (`lever_verdicts.stopped(…, scope=)`); `GET /channels/{id}/title-test`; `TITLE_WINDOW_DAYS`, `TITLE_MIN_PRE_VIEWS`, `TITLE_MIN_LIFT`, `TITLE_EXPERIMENT_WINDOWS`, `TITLE_HARM_WINDOWS`, `TITLE_HARM_LIFT`, `TITLE_REVERT_LIFT`, `TITLE_REVERTS_PER_DAY`; migration `20261030010000` (a column comment only, not applied); a video is in the title experiment once: `warm_pool()` replaced by migration `20261030020000` (not applied) and `warm._holds` keep out any video with a `midas` `title` holdout row, or treated row unless `cancelled` before reaching YouTube, at any age). Earlier: 2026-10-30 (Slice 3 S3.4 #119: the agent path's treated titles are written by a hand-rolled tool-using agent, `app/agent/loop.py` `run_title_agent` → `AgentResult(kind, title, reason, trajectory)` (`title` → `planned` → `apply_title` as the pipeline; `decline` → `declined`, arm `treated`, `payload {path, title_before, rationale}`; `failed` → `cancelled`, `turn_cap` or `checks_failed`); `app/agent/tools.py` (`get_video`, `get_transcript`, `get_traffic_mix`, `get_search_terms`, `get_channel_top_performers`, `get_title_history`, `write_candidates`, terminal `submit_title`/`decline`); `openrouter.chat_tools`; `AGENT_MAX_TURNS`; `titles.AGENT_PROMPT`/`TITLE_BRIEF`, the agent's stamp hashing its own prompt and `agent_model`; `interventions.trajectory` in migration `20261030000000` (not applied), written through `interventions.record(trajectory=)` on every agent row; `scripts/preview_titles.py --path agent` runs the agent). Earlier: 2026-10-30 (Slice 3 S3.3 #118: the tick titles videos on `TITLE_CHANNELS` channels: `decide.TRIAGE`'s rules answer `title` after backlinks (`backlinks_enabled`, `title_enabled`, `title_excluded`, `channel_median_ctr`, `is_short` in the context), `QUESTION_SET_VERSION = "2026.11-s3-v1"`; `agent_tick._run_title` (holdout `{title_before}`; treated → `titles.route` → `titles.pipeline` on both paths → `planned` with `strategy_version` → `titles_apply.apply_title`, or `cancelled` `checks_failed`/`writer_exception`); `agent_tick.backlinks_enabled`, `titles_open`, `title_channel` (the title `ChannelContext` kept in `_pools` with the target pool), `_titles_today`; `titles.path_stopped` (always False until #120), `stopped`, `route`; `_agent_tick` returns `apply_disabled`/`no_heading` only when neither lever can run; `TITLE_CHANNELS`, `TITLE_DAILY_CAP`, `TITLE_AGENT_DAILY_RUNS`, `TITLE_EXCLUDE_VIDEOS`; `scripts/preview_titles.py` asks `TRIAGE.rules`; no migration). Earlier: 2026-10-30 (Slice 3 S3.6 #117: the autopilot tick's house-format title path deleted (`can_audit` → `TITLE_AUTOPILOT_ENABLED` → `audit_video` → validate → apply), with `TITLE_AUTOPILOT_DISABLED`, `_apply_audit_and_handle`, `APPLY_UNCLASSIFIED`, `_is_unsafe_model`/`UNSAFE_MODELS` and `_video_timeout_counts`; `TITLE_AUTOPILOT_ENABLED` removed from `app/config.py`; a channel with `agent_enabled` off gets the Shorts action only (`tick.outcome` `shorts_only`); the manual house-format applies (`POST /audits/{id}/apply`, `POST /channels/{id}/audits/apply-pending`) answer 409 `"agent channel: a house-format apply replaces the description and its backlink block; pass force=true"` on an `agent_enabled` channel unless `?force=true` (`audits._refuse_on_agent_channel`); no migration). Earlier: 2026-10-30 (Slice 3 S3.2 #116: `app/titles.py` (`channel_context`, `context`, `TITLE_PROMPT`, `write_candidates`, `check`/`SCRIPTS`, `pipeline`, `title_path`, `strategy_version`, `title_answers`, `preview`), `scripts/preview_titles.py`, `scripts/title_bakeoff.py`, `WRITER_MODEL` (= `AUDIT_MODEL`), `TITLE_CANDIDATES`, `TITLE_MAX_IMPRESSIONS`, `TITLE_AGENT_PCT`; the audit stamp no longer reads `WRITER_MODEL`; nothing in the tick calls the writer yet; no migration). Earlier: 2026-10-30 (Slice 3 S3.1 #115: `app/titles_apply.py` (`apply_title`, `revert_title`), the title-only snippet write and its revert, `POST /interventions/{id}/revert` dispatching applied `midas` `title` rows to `revert_title`, `TITLE_APPLY_ENABLED` (default false), `backlinks_apply._live_snippet`/`_send_snippet` split out of `_write_description`; nothing calls `apply_title` yet; no migration). Earlier: 2026-10-30 (spec Part 6, Slice 3, written and accepted (F1–F14): titles only, browse + suggested views vs holdout, pipeline vs agent; no code yet). Earlier: 2026-10-29 (office: Midas moved to a new office machine, restored from the NAS snapshot; backlinks switched on for English (14:04 UTC), Hindi and Bhojpuri (14:13 UTC), Gujarati (18:12 UTC) (`agent_enabled = autopilot_enabled = t`, `autopilot_daily_cap = 10`); Marathi's warm long-video pool is used up (the `warm_pool()` RPC returns 226 Shorts and no long video). Earlier: 2026-10-29 (backlink targets with the source's title, or a better target's, are left out (`backlinks.title_key`: hashtags, punctuation, case, spacing dropped), since the #s1-9 Hindi preview linked a video to three re-uploads of itself; a video triaged to `backlinks` whose block can't be rendered on the stored description (e.g. over 5,000 characters) is recorded `declined` with `triage_json.render_refused` before the arm is drawn (`agent_tick._unrenderable`), and the preview shows it as `no_change`; no migration). Earlier: 2026-10-29 (`backlinks.target_pool` (`Pool`: a source channel's `join_low`, eligible targets, their B6 vectors and warm impressions) and `candidates(video, pool=)`; the agent tick keeps each channel's pool for `agent_tick.POOL_TTL_SECONDS` (3600) in `_pool`, vectors as shared `array('d')`, since reading it per pick took minutes per video on channels with many siblings (the #s1-9 English preview: about an hour for 20 videos); no migration). Earlier: 2026-10-26 (STATE refresh: Slice 1 shown as live on Marathi everywhere, the #94 list of Slice 2 mismatches fixed (`interventions` writers, `decision_log` callers, `DecisionUsed` line, `added_by_midas` sources, `write_verdicts(lever=)`), `app/config.py` and `app/main.py` line citations updated). Earlier: 2026-10-26 (Slice 2 deployed at the office, #93 steps A1–E2: both Slice 2 migrations applied, image of 2026-10-26 04:46 UTC (#105, #106) running, Marathi's playlist test drawn (37 treated `planned`, 2 `no_dose`, 40 holdout; 151 adds approved, 14 rejected), `PLAYLIST_APPLY_ENABLED=true` in the office `.env`, Short-link recommendations written for 100 Marathi Shorts; Marathi `sync_shorts` was already on, 4,878 Shorts in `videos`, all with B6 vectors). Earlier: 2026-10-26 (`GET /channels/{id}/playlists/proposals` returns every pending proposal, paged past the 1,000-row cap, the playlist test's (`arm_id` set) first: the #93 D3 review found the test's 165 hidden behind the frozen engine's backlog; no migration). Earlier: 2026-10-26 (backlinks verdicts leave out rows whose video is a Short: `lever_verdicts._without_shorts`, called by `write_verdicts` for `lever = 'backlinks'` only; the A1 preflight of #93 found 44 treated, 11 holdout backlinks rows on Marathi Shorts from before #103; no migration). Earlier: 2026-10-26 (`warm.warm_pool`, the agent's pick, leaves out Shorts (`is_short` true; NULL stays in) on both the RPC and in-app paths, `_without_shorts`; `ranked_pool` and the `warm_pool()` SQL function unchanged; no migration). Earlier: 2026-10-26 (Slice 2 follow-ups from the final review: `decide_proposals` rejects only `pending` proposals; a Short's target set back after another records a new period under `short_link:<short>:<target>:<n>` (`app/short_links.py` `_episode_key`); the Short-links CSV escapes titles that start with `= + - @`). Earlier: 2026-10-26 (Slice 2 S2.6 #92: `app/short_links.py` `seen_pairs`/`detect` (type-32 pairs → `seen_at` and `human` `short_link` interventions, `timing: "inferred_from_traffic"`), called by the `lever_measurement` job before measuring on `TRAFFIC_INGEST_CHANNELS` channels under `short-link pairs`; `app/lever_measurement.py` measuring `short_link` rows on type 32 (`SOURCE_TYPES`, `source`, `pair_views(source_type=)`); `write_verdicts(lever=)` and `lever = 'short_link'` `human` verdict rows; `SHORT_LINK_SEEN_MIN_VIEWS`; the §8 shadow-agreement query; no migration). Earlier: 2026-10-26 (Slice 2 S2.5 #91: `app/short_links.py` `router` (`GET /channels/{id}/short-links`, `?format=csv`, `POST /short-links/{id}/set`, `POST /short-links/{id}/dismiss`), human `short_link` interventions with `ledger_key = short_link:<short>:<target>`, the "Short links" card on `app/static/channel.html`'s Playlists tab; no migration). Earlier: 2026-10-26 (Slice 2 S2.4 #90: `short_link_recommendations` in migration `20261027010000` (not applied), `app/short_links.py` (`shorts`, `targets`, `refresh`, `preview`, `run_weekly`), the weekly `short_link_refresh` job (Mon 10:30 UTC), `scripts/short_links.py`, `SHORT_LINK_CHANNELS`, `SHORT_LINK_TARGETS`, `SHORT_LINK_MIN_FEED_VIEWS`, `SHORT_LINK_MAX_PER_RUN`, `status_vocab.ShortLinkStatus`). Earlier: 2026-10-26 (Slice 2 S2.3 #89: `app/playlist_test.py` `measure_channel` (pre, post weeks, per-arm `measurement_result`, `lever = 'playlist'` rows in `lever_verdicts`), `GET /channels/{id}/playlist-test`, the `lever_measurement` job's `playlist arms` category, `lever_verdicts.verdicts`/`directional` taking the lever's thresholds, `PLAYLIST_EXPERIMENT_WINDOWS`, `PLAYLIST_MIN_LIFT`; no migration). Earlier: 2026-10-26 (Slice 2 S2.2 #88: `decide_proposals` only queues a proposal with `arm_id`, the daily `playlist_test_apply` job (11:00 UTC, `app/playlist_test.py` `run_apply`, `apply_channel`), `playlist_test.test_dates`, `yt_playlist_items_insert(position=)`, `PLAYLIST_APPLY_ENABLED`, `PLAYLIST_TEST_DAILY_UNITS`, `PLAYLIST_TEST_MAX_ATTEMPTS`; no migration). Earlier: 2026-10-26 (Slice 2 S2.1 #87: `playlist_arms` and four `playlist_proposals` columns in migration `20261027000000` (not applied), `app/playlist_test.py` (`eligible`, `survey`, `assign_arm`, `candidates`, `draw`, `preview`), `scripts/playlist_test.py`, `PLAYLIST_HOLDOUT_PCT`, `PLAYLIST_TEST_MAX_ADDS`, `status_vocab.PlaylistArm`/`PlaylistArmStatus`/`PlaylistArmMeasurement`/`PlaylistProposalSource`, `experiment` → "Playlist test" in `channel.html` `DECIDED_BY`). Earlier: 2026-10-26 (Slice 2 specified: spec Part 5, owner decisions E1–E13, tickets #87–#94; no code yet). Earlier: 2026-10-26 (fleet readiness #84/#85 deployed 2026-10-26; same day at the office: `reach_warmup = t` on Haryanvi, Rajasthani, 3D Animated, Kannada, Telugu, `TRAFFIC_INGEST_CHANNELS` = all 13 in the office `.env`, Hindi re-consented; Kannada and Telugu have no uploads on YouTube, owner). Earlier: 2026-10-25 (fleet readiness: backlink headings for every channel language in `backlinks.HEADINGS`, `YT_QUOTA_COLLECTION_RESERVE` on the autopilot apply gate, `app/channel_health.py` (`GET /health/channels`, the daily `channel_health` job), `video_sync` `degraded` on token skips; owner decisions 2026-10-25 in `docs/PLAN_TO_2026-11-27.md`). Earlier: 2026-10-25 (Slice 1 deployed and live on Marathi 2026-10-24: `BACKLINK_APPLY_ENABLED=true` in the office `.env`, Marathi `agent_enabled = autopilot_enabled = t`, `autopilot_daily_cap = 40`; Marathi re-consented 2026-10-24, Hindi, Bhojpuri, Punjabi tokens dead since 2026-10-16. Forward plan: `docs/PLAN_TO_2026-11-27.md`). Earlier: 2026-10-23 (#55: `client_max_body_size 16m` in `deploy/postgrest-proxy.conf`). Earlier: 2026-10-23 (Marathi backlink heading `आणखी गाणी पहा:` in `backlinks.HEADINGS`). Earlier: 2026-10-23 (Slice 1 review fixes: a treated `backlinks` row that never reached YouTube no longer uses up its video, the agent does nothing while `BACKLINK_APPLY_ENABLED` is off or the language has no heading, unsent treated attempts count toward the cap, `TITLE_AUTOPILOT_ENABLED`, `render`'s byte limit). Earlier: 2026-10-23 (Slice 1 S1.6b #68: `lever_verdicts` in migration `20261023010000` (not applied), `app/lever_verdicts.py` (`write_verdicts`, `run_weekly`, `GET /channels/{id}/interventions`, `GET /channels/{id}/lever-verdicts`), the weekly `lever_measurement` job (Mon 09:00 UTC), `agent_tick.backlinks_stopped` reading the stop rule, `BACKLINK_EXPERIMENT_WINDOWS`, `BACKLINK_MIN_LIFT`, `status_vocab.LeverVerdictScope`/`LeverVerdict`). Earlier: 2026-10-23 (Slice 1 S1.6a #67: `app/lever_measurement.py` `measure_channel`, pair measurement per backlinks intervention, not scheduled; `LEVER_MIN_SOURCE_VIEWS`; `status_vocab.InterventionMeasurement` for `interventions.measurement_status`). Earlier: 2026-10-23 (Slice 1 S1.5 #66: `decide.NEXT_WATCH`, asked in shadow per candidate pair by `app/agent_tick.py` `_next_watch` and stored as `triage_json.next_watch`, `backlinks.Candidates.join_low`, `QUESTION_SET_VERSION = "2026.10-s1-v2"`). Earlier: 2026-10-23 (Slice 1 S1.4b #65: the agent tick, `app/agent_tick.py` (`run`, `preview`, `backlinks_stopped`), `autopilot._agent_tick` behind `channels.agent_enabled`, `eligibility.can_run_agent`, `_applies_today` counting applied Midas interventions, `decide()` returning `log_id` and `decide.link`, the TRIAGE stop-rule input and `QUESTION_SET_VERSION = "2026.10-s1-v1"`, `scripts/preview_backlinks.py`). Earlier: 2026-10-23 (Slice 1 S1.3 #64: `app/backlinks_apply.py` `apply_backlinks` and `POST /interventions/{id}/revert`, `BACKLINK_APPLY_ENABLED`, `ApplyOutcome.QUOTA_INSUFFICIENT`/`APPLY_DISABLED`, `human_edits.made_by_midas` knows applied Midas blocks). Earlier: 2026-10-23 (Slice 1 S1.4a #63: `warm_pool()` replaced by `20261023000000`, cooldown and once-per-experiment exclusions in it and `app/warm.py`, `TRIAGE_COOLDOWN_DAYS`). Earlier: 2026-10-23 (Slice 1 S1.1 #62: `app/backlinks.py` `siblings`/`candidates`, `SIBLING_MIN_VIEWS`, `warm.warm_impressions`, `reach.coverage(report_type=)`). Earlier: 2026-10-23 (Slice 1 S1.2 #61: `app/backlinks.py`, `BACKLINK_MAX`). Earlier: 2026-10-13 (B10: Phase B deployed 2026-10-07/08 and its exit gate passed 2026-10-13, `docs/PHASE_B_FINDINGS.md`; #56, 2026-10-08: `youtube_client.channel_credentials`). Earlier: 2026-10-06 (full regeneration from §9; updated for B1a #30: `traffic_poll`, `video_traffic_source_daily`; B1b #31: `playlist_traffic_daily`; B8 #39: token failures skip in `video_sync`; B2 #32: `interventions`, `assign_arm`, `HOLDOUT_PCT`, `channels.agent_enabled`; B3a #33: `app/human_edits.py`, `interventions.ledger_key`; B3b #34: playlist-membership ledger in the walk; B4 #35: `app/warm.py`, `warm_pool()`, `WARM_*`; B5 #36: `app/decide.py`, `decision_log`, `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES`, the stamp's question-set version; B6 #37: `app/reembed.py`, `scripts/reembed.py`, `channels.playlist_thresholds`; B7 #38, 2026-10-07: `bho`/`raj` in `_LANG_NAMES` and `_NON_ISO_639_1`) · **Commit:** on top of `d2e3ce7` · **Branch:** `main`
-(Older design docs are deleted in the same change and live only in git history; nothing below cites them.
-`scripts/overnight_tickets.sh` is dev tooling, never deployed.)
+**Generated:** 2026-11-17 (cleanup: deploy history, dated changelog and the Phase A/B narrative removed; they are in
+git history) · **Commit:** on top of `36f2bca` · **Branch:** `main`
 
-**The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Its
-status line: Part 1 (Phase A) done, exit gate passed 2026-10-06; Part 3 (Phase B) done, exit gate passed 2026-10-13;
-Part 4 (Slice 1) built and live on Marathi; Part 5 (Slice 2) built and deployed on Marathi (2026-10-26); **Part 6 (Slice 3) "ready to build"** (2026-10-30, owner decisions F1–F14); Part 2
-the approved design, amended 2026-10-06 by P1–P7 (spec Part 2 §0.6).
+**The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
+(Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
+amended by P1–P7 (spec Part 2 §0.6).
 
-**Office deployment (from `docs/PHASE_A_FINDINGS.md`).** The office machine has run the Phase A image since
-2026-09-29 11:54 UTC, and was restarted ≈12:46 UTC on 2026-10-01 to pick up the `video_sync` job ("Status"
-table). The four A4 writers are confirmed frozen from the 2026-09-29 startup log (A0 raw evidence). All 13
-channels have `autopilot_enabled = f` (title autopilot off since ≈2026-09-23, owner); 11 have
-`autopilot_shorts_enabled = t`, so the autopilot tick still runs, for Shorts only (A0). The office `.env` sets
-`AUTOPILOT_TICK_SECONDS` to 30 (restart-day step 2, observed 2026-09-29). The last title apply fleet-wide was
-2026-09-24 04:00 UTC (A0, 24 h check PASS 2026-10-01). Two Reporting API jobs exist on Marathi
-`UCr5-YUqBiW7PUmeAtxUWuRg`, created 2026-09-29: `channel_traffic_source_a3` and `playlist_traffic_source_a2`;
-`channel_traffic_source_a2` is retired (404) (A1.1). A9 passed 2026-10-01: all 8 registered jobs `success`,
-Punjabi scored 2026-10-01 07:00 UTC (39 playlists). On 2026-10-06 `/health/jobs` showed `video_sync` **failed**
-for Hindi `UCR9qQMyP86aSt-1VgaMg7UA` (`"HTTPException: 401: token_expired"`; re-consented 2026-10-06) and
-`metrics_poll` **degraded** (A7 raw result 0). A manual sync of all channels ran 2026-10-06: Marathi has 5,804
-videos, synced 2026-10-06 07:48 UTC; Kannada and Telugu have 0 videos in `videos` ("Next session" item 2).
-Rollout channel #1 is **Marathi** (owner, 2026-10-06; A7). Phase B code so far is B1, both halves (#30 video,
-#31 playlist: `app/traffic_poll.py`, migrations `20261006000000`, `20261006010000`), B8 (#39: `app/sync.py`
-`TokenExpired`), B2 (#32: `app/interventions.py`, migration `20261006020000`), B3a (#33: `app/human_edits.py`,
-migration `20261006030000`) and B3b (#34: `app/human_edits.py` `record_playlist_additions`, called from the
-membership walk in `app/playlists_sync.py`; no migration) and B4 (#35: `app/warm.py`, the `warm_pool()` function in
-migration `20261006040000`; picked from by Slice 1's agent tick since S1.4b, live on Marathi since 2026-10-24) and B5 (#36: `app/decide.py`, `decision_log` in migration
-`20261006050000`; called since Slice 1 S1.4b by `app/agent_tick.py`, live on Marathi since 2026-10-24) and B6 (#37: `app/reembed.py`, run by `scripts/reembed.py`,
-`channels.playlist_thresholds` in migration `20261006060000`; not run yet) and B7's code half (#38: `bho`/`raj` →
-`hi`, `app/transcripts.py`, `app/youtube_metadata.py`; no channel uses them yet). **All of it is deployed** (B9a #40
-2026-10-07: B1 + B8; B9b #41 2026-10-07/08: the other five migrations, the languages, the Marathi re-embed), and #56
-(stored token expiry) since 2026-10-08. Live figures from the deploy are in `docs/PHASE_B_FINDINGS.md`.
+**Office deployment.** The office machine runs image `f049495` (2026-11-16). It is not a git checkout: only `.env`,
+`docker-compose.yml` and `client_secret.json` live there. What is switched on, per lever and channel, is in
+`docs/PLAN_TO_2026-11-27.md` ("What is live"); the rollback steps are in `docs/agents/office-runbook.md` (gitignored).
 
-**Data caveat for this generation.** The live database runs on the office machine, bound to
-`127.0.0.1:55432` there (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated
-this file. Live figures below are quoted from `docs/PHASE_A_FINDINGS.md` and `docs/PHASE_B_FINDINGS.md`, each labelled with its date and
-section; anything not recorded there is blank. §8 ends with the SQL to refresh them.
+**Data caveat.** The live database runs on the office machine, bound to `127.0.0.1:55432` there
+(`docker-compose.yml:21-22`), so it can't be reached from the machine that generated this file. Live figures are
+quoted from `docs/PHASE_A_FINDINGS.md`, `docs/PHASE_B_FINDINGS.md` and `docs/PLAN_TO_2026-11-27.md`, each with its
+date; anything not recorded there is blank. §8 ends with the SQL to refresh them.
 
 ---
 
@@ -61,11 +38,11 @@ Stages are the spec's build order (spec Part 2 §6).
 
 | Stage | Theme | Status | Evidence (paths) | Notes |
 |---|---|---|---|---|
-| **Phase A** | Gates | **done** (exit gate passed 2026-10-06, spec status line) | A4: `app/config.py:121-123,34`, `app/main.py:335-377`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:25-31`, `app/youtube_metadata.py:58-59` (the `bgc` entries). A6: `app/audits.py:196-278`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:82-108,634-637`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:450-466,515`, `app/audits.py:847-852`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | Every lever outcome (a) (findings "Phase A conclusion" §1). A5's `default_language = 'bgc'` was already set on Haryanvi (findings "Next session" item 5); the optional i18n probe was not run (A5 table blank). The findings "Exit gate" checklist ticks A11 with this §9-based regeneration (2026-10-06). |
-| **Phase B** | Plumbing (spec Part 3, B1–B10) | **done** (exit gate passed 2026-10-13; deployed 2026-10-07/08; `docs/PHASE_B_FINDINGS.md`) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:240`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:241-253`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:370-377`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:254-261`), `tests/test_decide.py`. B6: `app/reembed.py` (`recipe_text`, `MODEL_VERSION`, `estimate_channel`, `reembed_channel`, `calibrate_channel`), `scripts/reembed.py`, `supabase/migrations/20261006060000_channels_playlist_thresholds.sql`, `model_version` keyword on `app/embeddings.py` `pooled_embeddings`/`embedded_video_ids`, `tests/test_reembed.py`. B7 (code half): `bho`/`raj` in `_LANG_NAMES` (`app/transcripts.py:25-36`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-64`), `tests/test_language_codes.py`, `tests/test_youtube_metadata.py` | In Phase B nothing called `decide()`, so `decision_log` got no rows; Slice 1's agent tick (S1.4b, `app/agent_tick.py`) is its first caller, live on Marathi since 2026-10-24; only the B3 human ledger writes `interventions` (`human` rows: backlinks on full syncs, playlist memberships on the membership walk); the warm filter is picked from only by S1.4b's agent tick (`app/agent_tick.py`; `tests/test_warm.py` guards that; S1.1's candidates use its `warm_impressions`); the B6 recipe's vectors and `channels.playlist_thresholds` are written only by the one-off `scripts/reembed.py` (run for Marathi 2026-10-07/08) and read in production only by S1.1's `backlinks.candidates`, called by S1.4b's agent tick on `agent_enabled` channels; the `bho`/`raj` entries are unused, since the owner chose plain `hi` for Bhojpuri and Rajasthani (2026-10-06, `app/youtube_metadata.py:60-61`) and they exist so those channels can switch later without a code change. Partial footholds listed in §7.1. |
-| **Slice 1** | Backlinks + no change | **live on Marathi since 2026-10-24, on English, Hindi, Bhojpuri and Gujarati since 2026-10-29, and on Tamil, Malayalam, Haryanvi and Rajasthani since 2026-11-16** (cap 8 each; Marathi's cap 40 → 15; image `86f0751`+: own-channel targets only, re-uploads left out; office runbook `docs/agents/office-runbook.md`, gitignored; Punjabi was switched on with T1 and off again the same evening with nothing written, 3D Animated left out: a cartoon series) (deployed per `docs/agents/s1-7-office-steps.md` (deleted 2026-10-30); first treated applies 07:38 UTC, interventions 187–195; exit gate pending: first weekly verdict, #70) | S1.1: `app/backlinks.py` (`siblings`, `candidates`, `Candidates`), `SIBLING_MIN_VIEWS` (`app/config.py:270`), `app/warm.py` `warm_impressions`, `tests/test_backlink_candidates.py`. S1.2: `app/backlinks.py` (`render`, `find`, `strip`, `HEADINGS`), `BACKLINK_MAX` (`app/config.py:265`), `tests/test_backlinks.py`. S1.4a: `supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql` (`warm_pool()`), `app/warm.py` `_holds`, `TRIAGE_COOLDOWN_DAYS` (`app/config.py:275`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`. S1.3: `app/backlinks_apply.py` (`apply_backlinks`, `revert_intervention` = `POST /interventions/{id}/revert`), `BACKLINK_APPLY_ENABLED` (`app/config.py:279`), `ApplyOutcome.QUOTA_INSUFFICIENT`/`APPLY_DISABLED` (`app/apply_outcome.py`), `app/human_edits.py` `_midas_block`, `tests/test_backlinks_apply.py`. S1.4b: `app/agent_tick.py` (`run`, `preview`, `backlinks_stopped`), `app/autopilot.py` (`_agent_tick`, the `agent_enabled` branch in `tick`, `_applies_today`, `_react_to_apply_error`), `app/eligibility.py` `can_run_agent`, `app/decide.py` (`Decision.log_id`, `link`, `backlinks_stopped` in the TRIAGE rules), `scripts/preview_backlinks.py`, `tests/test_agent_tick.py`. S1.5: `app/decide.py` (`NEXT_WATCH`, `_next_watch_rules`), `app/agent_tick.py` `_next_watch`, `backlinks.Candidates.join_low`, `tests/test_decide.py`, `tests/test_agent_tick.py`. S1.6a: `app/lever_measurement.py` (`measure_channel`, `pair_views`, `windows`, `as_of`), `LEVER_MIN_SOURCE_VIEWS` (`app/config.py:341`), `InterventionMeasurement` (`app/status_vocab.py:223-244`), `tests/test_lever_measurement.py`. S1.6b: `supabase/migrations/20261023010000_lever_verdicts.sql`, `app/lever_verdicts.py` (`verdicts`, `write_verdicts`, `run_weekly`, the two read endpoints), the `lever_measurement` job (`app/main.py` `_register_jobs`), `app/agent_tick.py` `backlinks_stopped`, `BACKLINK_EXPERIMENT_WINDOWS`, `BACKLINK_MIN_LIFT` (`app/config.py:346,350`), `LeverVerdictScope`, `LeverVerdict` (`app/status_vocab.py:245-277`), `tests/test_lever_verdicts.py`, `tests/test_agent_tick.py` | Live on Marathi (`agent_enabled = autopilot_enabled = t`, `autopilot_daily_cap = 40`, D4) and, since 2026-10-29, English (14:04 UTC), Hindi and Bhojpuri (14:13 UTC) and Gujarati (18:12 UTC), `autopilot_daily_cap = 10` each; their headings (`en`, `hi`, `gu`) approved by native readers (owner, 2026-10-29). Marathi's warm long videos are used up (2026-10-29: the pool is 226 Shorts, 0 long videos; 93 long videos treated or held out), `BACKLINK_APPLY_ENABLED=true` in the office `.env`; `20261023000000` and `20261023010000` applied (both in `schema_migrations`, #93 A1, 2026-10-26). `backlinks.HEADINGS` has a heading for every channel language (Marathi's `आणखी गाणी पहा:` from the SEO team, the rest written by Claude and awaiting a native reader). While `BACKLINK_APPLY_ENABLED` is false or the language has no heading the agent does nothing (§3). Until the 2026-10-26 image (#103) the pick took Shorts: #93 A1 found 44 treated (`measuring`), 11 holdout, 51 declined and 1 cancelled `midas` backlinks rows on Marathi Shorts; the blocks stay (owner, not reverted) and since #105 those rows enter no verdict (`lever_verdicts._without_shorts`). Sibling targets appear only once the sibling channels have B6 vectors (B6 ran for Marathi only). The weekly `lever_measurement` job (Monday 09:00 UTC) writes the first verdict once treated and holdout rows are judged (expected 2026-11-02 or 11-09); the stop rule needs 3 windows. The next-watch question is asked in shadow per candidate pair; its rules answer is always `yes` there, since `candidates` keeps only pairs ≥ `join_low`. The tick has no house-format title path since S3.6 (#117: the branch is deleted, `app/autopilot.py` `tick`), the spec's precondition (spec Part 2 §6.1); since S3.3 (#118) triage may answer `title` after backlinks, on `TITLE_CHANNELS` channels while `TITLE_APPLY_ENABLED` is on (`TITLE_CHANNELS` defaults to Marathi, `app/config.py:299-303`; the switch defaults false, `app/config.py:283`, so no title is written by default). |
-| **Slice 2** | Playlist test (P3) + Short links (P4) | **deployed on Marathi 2026-10-26** (spec Part 5; #93 runbook `docs/agents/s2-7-office-steps.md` (deleted 2026-10-30), steps A1–E2 done: migrations applied, draw done (37 treated `planned` with 151 approved adds and 14 rejected, 2 `no_dose`, 40 holdout), `PLAYLIST_APPLY_ENABLED=true`, first adds at the 11:00 UTC run that day; 241 `pending` Short-link recommendations over 100 Shorts; D5 daily checks and F1 pending; #94 docs open) | S2.1: `supabase/migrations/20261027000000_playlist_arms.sql`, `app/playlist_test.py` (`survey`, `eligible`, `assign_arm`, `candidates`, `draw`, `preview`, `AlreadyDrawn`), `scripts/playlist_test.py`, `PLAYLIST_HOLDOUT_PCT`, `PLAYLIST_TEST_MAX_ADDS` (`app/config.py`), `PlaylistArm`, `PlaylistArmStatus`, `PlaylistArmMeasurement`, `PlaylistProposalSource` (`app/status_vocab.py`), `DECIDED_BY.experiment` (`app/static/channel.html`), `tests/test_playlist_test.py`, `tests/test_status_vocab.py`. S2.2: `app/playlists_router.py` `decide_proposals` (the `arm_id` branch), `app/playlist_test.py` (`run_apply`, `apply_channel`, `test_dates`, `POSITION_REFUSED`), the `playlist_test_apply` job (`app/main.py` `_register_jobs`), `app/youtube_client.py` `yt_playlist_items_insert(position=)`, `PLAYLIST_APPLY_ENABLED`, `PLAYLIST_TEST_DAILY_UNITS`, `PLAYLIST_TEST_MAX_ATTEMPTS` (`app/config.py`), `tests/test_playlist_test_apply.py`. S2.3: `app/playlist_test.py` (`measure_channel`, `windows`, `daily_starts`, `channel_playlist_test` = `GET /channels/{id}/playlist-test`, `ARMS`), `app/lever_verdicts.py` (`run_weekly`'s `playlist arms` category, `verdicts`/`directional` taking `min_lift`/`windows`, `ON_CONFLICT`), `PLAYLIST_EXPERIMENT_WINDOWS`, `PLAYLIST_MIN_LIFT` (`app/config.py`), `tests/test_playlist_test_measurement.py`. S2.4: `supabase/migrations/20261027010000_short_link_recommendations.sql`, `app/short_links.py` (`shorts`, `targets`, `refresh`, `preview`, `run_weekly`), the `short_link_refresh` job (`app/main.py` `_register_jobs`), `scripts/short_links.py`, `SHORT_LINK_CHANNELS`, `SHORT_LINK_TARGETS`, `SHORT_LINK_MIN_FEED_VIEWS`, `SHORT_LINK_MAX_PER_RUN` (`app/config.py`), `ShortLinkStatus` (`app/status_vocab.py`), `tests/test_short_links.py`. S2.5: `app/short_links.py` (`router`: `channel_short_links`, `set_short_link`, `dismiss_short_link`), the "Short links" card (`#sl-card`, `loadShortLinks`, `app/static/channel.html`), `tests/test_short_links_page.py`. S2.6: `app/short_links.py` (`seen_pairs`, `detect`, `PAIRS`), `app/lever_measurement.py` (`SOURCE_TYPES`, `source`, `targets`, `pair_views(source_type=)`), `app/lever_verdicts.py` (`write_verdicts(lever=)`, `run_weekly`'s detection), `SHORT_LINK_SEEN_MIN_VIEWS` (`app/config.py`), `tests/test_short_links_seen.py`, `tests/test_lever_measurement.py`, `tests/test_lever_verdicts.py`. Pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | Marathi was drawn 2026-10-26 04:10 UTC (`scripts/playlist_test.py --draw`); the 165 proposals were decided by SQL at 04:40 UTC (151 `approved`, 14 `rejected`), since the dashboard card then listed only the oldest 1,000 pending proposals (fixed by #106). The candidates concentrate on a handful of high-impression videos (one is proposed for about 25 playlists): Marathi's `join_high` (0.9014) is below most videos' cosine to a playlist's centroid (0.90–0.93), so it barely filters and the ranking is by impressions. Over 1,000 frozen-engine proposals are still `pending` on the card, and approving one writes to YouTube at once. Approving a test proposal (`arm_id` set) in the dashboard card only marks it `approved` (S2.2, `app/playlists_router.py` `decide_proposals`); the daily `playlist_test_apply` job sends it, and does nothing while `PLAYLIST_APPLY_ENABLED` is false (the default). The card's toast still says "Executed 0 change(s) on YouTube." for them; the response carries `queued`. The weekly `lever_measurement` job measures a drawn channel's test once it is dosed (`test_dates`) and writes `lever = 'playlist'` verdicts (S2.3); nothing reads them to stop anything. The weekly `short_link_refresh` job (S2.4) writes `pending` Short-link recommendations for Marathi once `20261027010000` is applied and Marathi's Shorts are in `videos` with B6 vectors (S2.7 step 2); the team sees them on the "Short links" card (Playlists tab, S2.5) and ticks a target it set in Studio, which writes a `human` `short_link` intervention; nothing reaches YouTube. The weekly `lever_measurement` job (S2.6) records the links it sees in type-32 traffic as `human` `short_link` interventions too, measures them on type 32 and writes `lever = 'short_link'` `human` verdict rows; it needs `20261027010000` applied once a Short-link pair shows up. Recommend-only proposal machinery exists (`playlist_proposals`, `app/playlists_router.py:271-297`). The add/remove and creation paths are frozen by default (§4). |
-| **Slice 3** | Agent challenger + titles | **live 2026-11-16, pipeline only**: office `.env` `TITLE_APPLY_ENABLED=true`, `TITLE_AGENT_PCT=0` (the agent waits for code checks: it got an episode number wrong and dropped TMKOC in the P1 previews), `TITLE_CHANNELS` = Hindi, Marathi, Gujarati and (T2, image `f049495`) English, `TITLE_EXCLUDE_VIDEOS=bKTmEfCOkRE,5TiKqa8hPgs,k8Bnw8PPx7w` (two LIVE streams, a 5M-subscriber video); first title written on Gujarati 2026-11-16 12:05 UTC; `WRITER_MODEL` unset (= `AUDIT_MODEL`, no SEO bake-off scores). Built, merged and deployed 2026-10-30 (`0577a7c`) with titles off (spec Part 6, owner decisions F1–F14, 2026-10-30): S3.1 built (#115), S3.2 built (#116), S3.3 built (#118), S3.4 built (#119), S3.5 built (#120), S3.6 built (#117), merged to `main`; S3.7 (deploy) in progress (migrations, image and the writer bake-off done 2026-10-30; `WRITER_MODEL`, previews and go-live left, `docs/agents/office-next.md`), S3.8 (docs) the owner's | S3.1: `app/titles_apply.py` (`apply_title`, `revert_title`), `app/backlinks_apply.py` (`revert_intervention`'s `title` dispatch, `_live_snippet`, `_send_snippet`), `TITLE_APPLY_ENABLED` (`app/config.py`), `tests/test_titles_apply.py`. S3.2: `app/titles.py`, `scripts/preview_titles.py`, `scripts/title_bakeoff.py`, `WRITER_MODEL`, `TITLE_CANDIDATES`, `TITLE_MAX_IMPRESSIONS`, `TITLE_AGENT_PCT` (`app/config.py`), `tests/test_titles.py`. S3.6: `app/autopilot.py` `tick` (the house-format branch deleted, `SHORTS_ONLY`), the title-autopilot setting gone from `app/config.py`, `app/audits.py` (`AGENT_CHANNEL_REFUSED`, `_refuse_on_agent_channel`, `apply_audit_internal(force=)`, `force` on `POST /audits/{id}/apply` and `/apply-pending`), `tests/test_audits_agent_guard.py`, `tests/test_agent_tick.py` `test_with_agent_enabled_off_the_tick_does_the_shorts_action_only`, `tests/test_autopilot_shorts_tick.py`, `tests/test_autopilot_tick_helpers.py`. S3.3: `app/decide.py` (`_triage_rules`, `QUESTION_SET_VERSION`), `app/agent_tick.py` (`_run_title`, `backlinks_enabled`, `titles_open`, `_title_enabled`, `_titles_today`, `title_channel`, `_assess`'s title keys), `app/titles.py` (`path_stopped`, `stopped`, `route`, `would_title` and `title_answers` on `TRIAGE.rules`), `app/autopilot.py` `_agent_tick`, `TITLE_CHANNELS`, `TITLE_DAILY_CAP`, `TITLE_AGENT_DAILY_RUNS`, `TITLE_EXCLUDE_VIDEOS` (`app/config.py`), `tests/test_agent_tick_titles.py`, `tests/test_decide.py`, `tests/test_titles.py`. S3.4: `app/openrouter.py` `chat_tools`, `app/agent/loop.py` (`run_title_agent`, `AgentResult`, `tools_called`), `app/agent/tools.py` (the tools, `SCHEMAS`, `call`), `app/titles.py` (`TITLE_BRIEF`, `AGENT_PROMPT`, `agent_system_prompt`, the agent stamp, `preview`'s agent run), `app/agent_tick.py` (`_run_title`'s agent path, `_agent_outcome`), `app/interventions.py` `record(trajectory=)`, `supabase/migrations/20261030000000_interventions_trajectory.sql`, `AGENT_MAX_TURNS` (`app/config.py`), `scripts/preview_titles.py`, `tests/test_agent_loop.py`, `tests/test_openrouter_tools.py`, `tests/test_agent_tick_titles.py`, `tests/test_titles.py`. S3.5: `app/title_measurement.py`, `app/lever_verdicts.py` (`title_verdicts`, `TITLE_SCOPES`, `_title_judged`, `write_verdicts(lever='title')`, `stopped(…, scope=)`, `auto_revert`, `REVERTS`, `run_weekly`'s title half, `channel_title_test` = `GET /channels/{id}/title-test`), `app/titles.py` (`path_stopped`, `path_closed`), `supabase/migrations/20261030020000_warm_pool_title_holds.sql` (`warm_pool()`), `app/warm.py` `_holds`, `LeverVerdictScope.PIPELINE_VS_HOLDOUT`/`AGENT_VS_HOLDOUT` (`app/status_vocab.py`), `supabase/migrations/20261030010000_lever_verdicts_title_scopes.sql`, the eight S3.5 settings (`app/config.py`), `tests/test_title_measurement.py`, `tests/test_title_verdicts.py`, `tests/test_status_vocab.py`, `tests/test_warm.py`, `tests/test_warm_pool_parity.py` | The tick titles videos (S3.3) only while `TITLE_APPLY_ENABLED` is true (default false) and the channel is in `TITLE_CHANNELS` (default Marathi): triage answers `title` after backlinks; a treated video is written by the pipeline or, on the agent path (`TITLE_AGENT_PCT`, 0.5), by the agent (S3.4), which may decline; every agent row stores its run in `interventions.trajectory` (migration `20261030000000`, applied 2026-10-30). While the switch is off no title row is written and the write and its revert send nothing. The weekly `lever_measurement` job measures title rows, writes a verdict per path against the shared holdout, stops a path by its stop rule or harm guard (`titles.path_stopped`); a stopped path, or one with no share (`TITLE_AGENT_PCT` 0 or 1), is closed (`titles.path_closed`), a closed path's videos go to the other path if it is open, and both closed close the lever and puts back losing titles (S3.5, `revert_title(auto=True)`, nothing sent while `TITLE_APPLY_ENABLED` is off); no title verdict exists yet. `20261030010000` (a column comment) and `20261030020000` (`warm_pool()` with the title hold) were applied the same day (§2). No `app/niche_reference.py`. The old title path is gone from the tick (S3.6): no tick path calls `audit_video`, and a channel with `agent_enabled` off does only the Shorts action. `audit_video` stays for the manual audit routes, whose house-format applies refuse on an agent channel unless `?force=true` (§5). |
+| **Phase A** | Gates | **done** (exit gate passed 2026-10-06) | A4: `app/config.py:121-123,34`, `app/main.py:335-377`, `tests/test_frozen_writers.py`. A5: `app/transcripts.py:25-31`, `app/youtube_metadata.py:58-59` (the `bgc` entries). A6: `app/audits.py:196-278`, `tests/test_strategy_version.py`. A8: `app/job_status.py`, `app/main.py:82-108,634-637`, `tests/test_main_fanout.py`. A10: `app/autopilot.py:450-466,515`, `app/audits.py:847-852`, `tests/test_revert_quota_gate.py`. Probes: `scripts/probes/*.py`. Record: `docs/PHASE_A_FINDINGS.md` | The four A4 writers stay frozen (§4). |
+| **Phase B** | Plumbing (spec Part 3, B1–B10) | **done** (exit gate passed 2026-10-13; `docs/PHASE_B_FINDINGS.md`) | B1a/B1b: `app/traffic_poll.py`, `app/reporting_client.py` (`ensure_job`, `parse_traffic_csv`, `parse_playlist_traffic_csv`, `TRAFFIC_SOURCE_TYPES`), `app/reporting_poll.py` (`replace_data_day`, `record_ingested`), `supabase/migrations/20261006000000_video_traffic_source_daily.sql`, `supabase/migrations/20261006010000_playlist_traffic_daily.sql`, `tests/test_traffic_poll.py`, `tests/test_reporting_ingest.py`. B8: `app/sync.py:41-70` (`TokenExpired`, `_token_failure_as_401`), `tests/test_sync_token_expiry.py`. B2: `app/interventions.py` (`assign_arm`, `active_for`, `record`), `app/status_vocab.py:143-220` (`Intervention*`, `ACTIVE_INTERVENTION_STATUSES`), `supabase/migrations/20261006020000_interventions.sql`, `HOLDOUT_PCT` (`app/config.py:240`), `tests/test_interventions.py`. B3a: `app/human_edits.py` (`video_links`, `made_by_midas`, `record_description_edits`), `app/sync.py:143-153,262-265,288-297` (`_record_human_edits`), `interventions.record(ledger_key=…)`, `supabase/migrations/20261006030000_interventions_ledger_key.sql`, `tests/test_human_edits.py`. B3b: `app/human_edits.py` (`added_by_midas`, `record_playlist_additions`), `app/playlists_sync.py:297-328,359-368` (`_record_human_memberships`), `tests/test_human_edits_playlists.py`. B4: `app/warm.py` (`ranked_pool`, `explore_order`, `warm_pool`), `supabase/migrations/20261006040000_warm_pool_rpc.sql` (`warm_pool()`), `WARM_*` (`app/config.py:241-253`), `app/reach.py` (`certify_covered`, `window_length`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`, `tests/test_warm_pool_parity_live.py`. B5: `app/decide.py` (`decide`, `Decision`, `QuestionSet`, `TRIAGE`, `QUESTION_SET_VERSION`, `NotConfigured`), `supabase/migrations/20261006050000_decision_log.sql`, `DecisionUsed` (`app/status_vocab.py:370-377`), `DECIDE_BACKEND`, `BACKLINK_MIN_CANDIDATES` (`app/config.py:254-261`), `tests/test_decide.py`. B6: `app/reembed.py` (`recipe_text`, `MODEL_VERSION`, `estimate_channel`, `reembed_channel`, `calibrate_channel`), `scripts/reembed.py`, `supabase/migrations/20261006060000_channels_playlist_thresholds.sql`, `model_version` keyword on `app/embeddings.py` `pooled_embeddings`/`embedded_video_ids`, `tests/test_reembed.py`. B7 (code half): `bho`/`raj` in `_LANG_NAMES` (`app/transcripts.py:25-36`) and `_NON_ISO_639_1` (`app/youtube_metadata.py:58-64`), `tests/test_language_codes.py`, `tests/test_youtube_metadata.py` | The B6 vectors and `channels.playlist_thresholds` are written only by the one-off `scripts/reembed.py`, and read by `backlinks.candidates`, `playlist_test` and `short_links`. The `bho`/`raj` language entries are unused: Bhojpuri and Rajasthani use plain `hi` (owner, `app/youtube_metadata.py:60-61`). Leftovers in §7.1. |
+| **Slice 1** | Backlinks + no change | **live** on Marathi (`autopilot_daily_cap` 15), English, Hindi, Bhojpuri, Gujarati (10), Tamil, Malayalam, Haryanvi, Rajasthani (8); off on Punjabi, 3D Animated (a cartoon series), Kannada and Telugu (no uploads) (`docs/PLAN_TO_2026-11-27.md`, 2026-11-16). Exit gate pending: the first weekly verdict (#70) | S1.1: `app/backlinks.py` (`siblings`, `candidates`, `Candidates`), `SIBLING_MIN_VIEWS` (`app/config.py:270`), `app/warm.py` `warm_impressions`, `tests/test_backlink_candidates.py`. S1.2: `app/backlinks.py` (`render`, `find`, `strip`, `HEADINGS`), `BACKLINK_MAX` (`app/config.py:265`), `tests/test_backlinks.py`. S1.4a: `supabase/migrations/20261023000000_warm_pool_agent_exclusions.sql` (`warm_pool()`), `app/warm.py` `_holds`, `TRIAGE_COOLDOWN_DAYS` (`app/config.py:275`), `tests/test_warm.py`, `tests/test_warm_pool_parity.py`. S1.3: `app/backlinks_apply.py` (`apply_backlinks`, `revert_intervention` = `POST /interventions/{id}/revert`), `BACKLINK_APPLY_ENABLED` (`app/config.py:279`), `ApplyOutcome.QUOTA_INSUFFICIENT`/`APPLY_DISABLED` (`app/apply_outcome.py`), `app/human_edits.py` `_midas_block`, `tests/test_backlinks_apply.py`. S1.4b: `app/agent_tick.py` (`run`, `preview`, `backlinks_stopped`), `app/autopilot.py` (`_agent_tick`, the `agent_enabled` branch in `tick`, `_applies_today`, `_react_to_apply_error`), `app/eligibility.py` `can_run_agent`, `app/decide.py` (`Decision.log_id`, `link`, `backlinks_stopped` in the TRIAGE rules), `scripts/preview_backlinks.py`, `tests/test_agent_tick.py`. S1.5: `app/decide.py` (`NEXT_WATCH`, `_next_watch_rules`), `app/agent_tick.py` `_next_watch`, `backlinks.Candidates.join_low`, `tests/test_decide.py`, `tests/test_agent_tick.py`. S1.6a: `app/lever_measurement.py` (`measure_channel`, `pair_views`, `windows`, `as_of`), `LEVER_MIN_SOURCE_VIEWS` (`app/config.py:341`), `InterventionMeasurement` (`app/status_vocab.py:223-244`), `tests/test_lever_measurement.py`. S1.6b: `supabase/migrations/20261023010000_lever_verdicts.sql`, `app/lever_verdicts.py` (`verdicts`, `write_verdicts`, `run_weekly`, the two read endpoints), the `lever_measurement` job (`app/main.py` `_register_jobs`), `app/agent_tick.py` `backlinks_stopped`, `BACKLINK_EXPERIMENT_WINDOWS`, `BACKLINK_MIN_LIFT` (`app/config.py:346,350`), `LeverVerdictScope`, `LeverVerdict` (`app/status_vocab.py:245-277`), `tests/test_lever_verdicts.py`, `tests/test_agent_tick.py` | `BACKLINK_APPLY_ENABLED=true` in the office `.env`; while it is false, or the language has no heading in `backlinks.HEADINGS`, backlinks don't run (§3). Targets are on the source's own channel only (`BACKLINK_SIBLINGS_ENABLED` false) and re-uploads are left out (`BACKLINK_DUPLICATE_SIM`) (§7.3 item 35). Backlink rows on Shorts written before the pick left Shorts out (Marathi: 44 treated, 11 holdout) keep their blocks (owner) and enter no verdict (`lever_verdicts._without_shorts`). Marathi's warm long videos were used up on 2026-10-29 (the pool was 226 Shorts, 0 long videos). The stop rule needs 3 windows. The next-watch question is asked in shadow per candidate pair; its rules answer is always `yes`, since `candidates` keeps only pairs ≥ `join_low`. |
+| **Slice 2** | Playlist test (P3) + Short links (P4) | **live on Marathi** since 2026-10-26: the playlist test is drawn (37 treated arms with 151 approved adds, 2 `no_dose`, 40 holdout) and dosed, `PLAYLIST_APPLY_ENABLED=true`; Short links are recommend-only (the team doesn't use the card yet). Docs (#94) open | S2.1: `supabase/migrations/20261027000000_playlist_arms.sql`, `app/playlist_test.py` (`survey`, `eligible`, `assign_arm`, `candidates`, `draw`, `preview`, `AlreadyDrawn`), `scripts/playlist_test.py`, `PLAYLIST_HOLDOUT_PCT`, `PLAYLIST_TEST_MAX_ADDS` (`app/config.py`), `PlaylistArm`, `PlaylistArmStatus`, `PlaylistArmMeasurement`, `PlaylistProposalSource` (`app/status_vocab.py`), `DECIDED_BY.experiment` (`app/static/channel.html`), `tests/test_playlist_test.py`, `tests/test_status_vocab.py`. S2.2: `app/playlists_router.py` `decide_proposals` (the `arm_id` branch), `app/playlist_test.py` (`run_apply`, `apply_channel`, `test_dates`, `POSITION_REFUSED`), the `playlist_test_apply` job (`app/main.py` `_register_jobs`), `app/youtube_client.py` `yt_playlist_items_insert(position=)`, `PLAYLIST_APPLY_ENABLED`, `PLAYLIST_TEST_DAILY_UNITS`, `PLAYLIST_TEST_MAX_ATTEMPTS` (`app/config.py`), `tests/test_playlist_test_apply.py`. S2.3: `app/playlist_test.py` (`measure_channel`, `windows`, `daily_starts`, `channel_playlist_test` = `GET /channels/{id}/playlist-test`, `ARMS`), `app/lever_verdicts.py` (`run_weekly`'s `playlist arms` category, `verdicts`/`directional` taking `min_lift`/`windows`, `ON_CONFLICT`), `PLAYLIST_EXPERIMENT_WINDOWS`, `PLAYLIST_MIN_LIFT` (`app/config.py`), `tests/test_playlist_test_measurement.py`. S2.4: `supabase/migrations/20261027010000_short_link_recommendations.sql`, `app/short_links.py` (`shorts`, `targets`, `refresh`, `preview`, `run_weekly`), the `short_link_refresh` job (`app/main.py` `_register_jobs`), `scripts/short_links.py`, `SHORT_LINK_CHANNELS`, `SHORT_LINK_TARGETS`, `SHORT_LINK_MIN_FEED_VIEWS`, `SHORT_LINK_MAX_PER_RUN` (`app/config.py`), `ShortLinkStatus` (`app/status_vocab.py`), `tests/test_short_links.py`. S2.5: `app/short_links.py` (`router`: `channel_short_links`, `set_short_link`, `dismiss_short_link`), the "Short links" card (`#sl-card`, `loadShortLinks`, `app/static/channel.html`), `tests/test_short_links_page.py`. S2.6: `app/short_links.py` (`seen_pairs`, `detect`, `PAIRS`), `app/lever_measurement.py` (`SOURCE_TYPES`, `source`, `targets`, `pair_views(source_type=)`), `app/lever_verdicts.py` (`write_verdicts(lever=)`, `run_weekly`'s detection), `SHORT_LINK_SEEN_MIN_VIEWS` (`app/config.py`), `tests/test_short_links_seen.py`, `tests/test_lever_measurement.py`, `tests/test_lever_verdicts.py`. Pre-spec engine frozen: `app/playlists.py`, `app/playlist_discovery.py` | The candidates concentrate on a handful of high-impression videos: Marathi's `join_high` (0.9014) is below most videos' cosine to a playlist's centroid (0.90–0.93), so it barely filters and the ranking is by impressions. Over 1,000 frozen-engine proposals are still `pending` on the dashboard card, and approving one writes to YouTube at once. Approving a test proposal (`arm_id` set) only marks it `approved` (`app/playlists_router.py` `decide_proposals`); the daily `playlist_test_apply` job sends it. The card's toast still says "Executed 0 change(s) on YouTube." for them; the response carries `queued`. The weekly `lever_measurement` job writes `lever = 'playlist'` verdicts once the post weeks are in; nothing reads them to stop anything. Short links: the weekly `short_link_refresh` job writes `pending` recommendations, the team ticks a target it set in Studio (a `human` `short_link` intervention), and the weekly job also records links it sees in type-32 traffic and writes `short_link` `human` verdict rows; nothing reaches YouTube. The frozen engine's add/remove and creation paths stay off (§4). |
+| **Slice 3** | Agent challenger + titles | **live, pipeline only**, on Hindi, Marathi, Gujarati and English since 2026-11-16: office `.env` `TITLE_APPLY_ENABLED=true`, `TITLE_AGENT_PCT=0` (the agent waits for fact checks: in the previews it changed an episode number and dropped TMKOC), `TITLE_EXCLUDE_VIDEOS=bKTmEfCOkRE,5TiKqa8hPgs,k8Bnw8PPx7w` (two LIVE streams, a 5M-subscriber video); `WRITER_MODEL` unset (= `AUDIT_MODEL`, `google/gemini-3.7-flash` at the office). Docs (#122) open | S3.1: `app/titles_apply.py` (`apply_title`, `revert_title`), `app/backlinks_apply.py` (`revert_intervention`'s `title` dispatch, `_live_snippet`, `_send_snippet`), `TITLE_APPLY_ENABLED` (`app/config.py`), `tests/test_titles_apply.py`. S3.2: `app/titles.py`, `scripts/preview_titles.py`, `scripts/title_bakeoff.py`, `WRITER_MODEL`, `TITLE_CANDIDATES`, `TITLE_MAX_IMPRESSIONS`, `TITLE_AGENT_PCT` (`app/config.py`), `tests/test_titles.py`. S3.6: `app/autopilot.py` `tick` (the house-format branch deleted, `SHORTS_ONLY`), the title-autopilot setting gone from `app/config.py`, `app/audits.py` (`AGENT_CHANNEL_REFUSED`, `_refuse_on_agent_channel`, `apply_audit_internal(force=)`, `force` on `POST /audits/{id}/apply` and `/apply-pending`), `tests/test_audits_agent_guard.py`, `tests/test_agent_tick.py` `test_with_agent_enabled_off_the_tick_does_the_shorts_action_only`, `tests/test_autopilot_shorts_tick.py`, `tests/test_autopilot_tick_helpers.py`. S3.3: `app/decide.py` (`_triage_rules`, `QUESTION_SET_VERSION`), `app/agent_tick.py` (`_run_title`, `backlinks_enabled`, `titles_open`, `_title_enabled`, `_titles_today`, `title_channel`, `_assess`'s title keys), `app/titles.py` (`path_stopped`, `stopped`, `route`, `would_title` and `title_answers` on `TRIAGE.rules`), `app/autopilot.py` `_agent_tick`, `TITLE_CHANNELS`, `TITLE_DAILY_CAP`, `TITLE_AGENT_DAILY_RUNS`, `TITLE_EXCLUDE_VIDEOS` (`app/config.py`), `tests/test_agent_tick_titles.py`, `tests/test_decide.py`, `tests/test_titles.py`. S3.4: `app/openrouter.py` `chat_tools`, `app/agent/loop.py` (`run_title_agent`, `AgentResult`, `tools_called`), `app/agent/tools.py` (the tools, `SCHEMAS`, `call`), `app/titles.py` (`TITLE_BRIEF`, `AGENT_PROMPT`, `agent_system_prompt`, the agent stamp, `preview`'s agent run), `app/agent_tick.py` (`_run_title`'s agent path, `_agent_outcome`), `app/interventions.py` `record(trajectory=)`, `supabase/migrations/20261030000000_interventions_trajectory.sql`, `AGENT_MAX_TURNS` (`app/config.py`), `scripts/preview_titles.py`, `tests/test_agent_loop.py`, `tests/test_openrouter_tools.py`, `tests/test_agent_tick_titles.py`, `tests/test_titles.py`. S3.5: `app/title_measurement.py`, `app/lever_verdicts.py` (`title_verdicts`, `TITLE_SCOPES`, `_title_judged`, `write_verdicts(lever='title')`, `stopped(…, scope=)`, `auto_revert`, `REVERTS`, `run_weekly`'s title half, `channel_title_test` = `GET /channels/{id}/title-test`), `app/titles.py` (`path_stopped`, `path_closed`), `supabase/migrations/20261030020000_warm_pool_title_holds.sql` (`warm_pool()`), `app/warm.py` `_holds`, `LeverVerdictScope.PIPELINE_VS_HOLDOUT`/`AGENT_VS_HOLDOUT` (`app/status_vocab.py`), `supabase/migrations/20261030010000_lever_verdicts_title_scopes.sql`, the eight S3.5 settings (`app/config.py`), `tests/test_title_measurement.py`, `tests/test_title_verdicts.py`, `tests/test_status_vocab.py`, `tests/test_warm.py`, `tests/test_warm_pool_parity.py` | Triage answers `title` after backlinks, on `TITLE_CHANNELS` channels while `TITLE_APPLY_ENABLED` is on (code defaults: Marathi, false). A treated video is written by the pipeline or, on the agent path (`TITLE_AGENT_PCT`), by the agent, which may decline; every agent row stores its run in `interventions.trajectory`. The weekly `lever_measurement` job measures title rows, writes a verdict per path against the shared holdout, and stops a path by its stop rule or harm guard; a stopped path, or one with no share, is closed (`titles.path_closed`), its videos go to the other path if that one is open, both closed close the lever, and losing titles are put back (`revert_title(auto=True)`). No title verdict yet: the first rows judge after their 14-day post window (~2026-12-01). The tick has no house-format title path: no tick path calls `audit_video`, a channel with `agent_enabled` off does only the Shorts action, and the manual house-format applies refuse on an agent channel unless `?force=true` (§5). No `app/niche_reference.py`. |
 | **Slice 4** | Playbook | **not started** | none | No `channels.playbook_json`. `app/reflection.py` (the thing Slice 4 retires) is frozen by `REFLECTION_ENABLED=false` (§4). |
 | **Slice 5** | Fleet | **not started** | none | `JobBudget` exists (`app/quota.py:232`) but has no per-channel shares. |
 
@@ -77,41 +54,39 @@ cutter (`app/shorts/*`), and the NAS backup (`app/backup.py`). The spec keeps th
 `AuditSuggestion`, quota, `status_vocab`, `reach.certify`, and the playlist write, inventory, health and proposal
 machinery (spec Part 2 §0.5 "Kept").
 
-**Channels live** (A7 query 1, `docs/PHASE_A_FINDINGS.md`, 2026-10-06). All 13: `analytics_authorized = t`,
-`autopilot_enabled = f`, `reach_warmup = f` on that date. Since then: Marathi `autopilot_enabled = agent_enabled = t` (2026-10-24, Slice 1), `reach_warmup = t` on Haryanvi, Rajasthani, 3D Animated, Kannada and Telugu (2026-10-26); Marathi `sync_shorts = t` (#93 A1, 2026-10-26). Warm pool and reach frontier are from the same A7 run.
+**Channels** (ids and languages from A7 query 1, `docs/PHASE_A_FINDINGS.md`; levers from
+`docs/PLAN_TO_2026-11-27.md`, 2026-11-16). All 13 are `analytics_authorized`. Punjabi is the only channel with
+`playlist_health_enabled`; `reach_warmup = t` on Haryanvi, Rajasthani, 3D Animated, Kannada and Telugu, the other
+eight ingest reach through `measurement_enabled`; Marathi has `sync_shorts = t`. The agent channels have
+`agent_enabled = autopilot_enabled = t`.
 
-| Channel | id | `default_language` | `measurement_enabled` | `playlist_health_enabled` | `autopilot_shorts_enabled` | Warm videos (≥500 imp, 30 d) | Reach frontier |
-|---|---|---|---|---|---|---|---|
-| Marathi (**rollout #1**) | `UCr5-YUqBiW7PUmeAtxUWuRg` | `mr` | t | f | t | 566 | 2026-10-04 (221 days) |
-| Punjabi | `UC8KjoL0Z9mTHKqB6gFutkJw` | `pa` | t | **t** (only one) | t | 342 | 2026-10-04 (213) |
-| Gujarati | `UCOVKJdzghm2gOnuaGeJTonA` | `gu` | t | f | t | 603 | 2026-10-04 (147) |
-| English | `UCMpj6iUMCMhB0k4L5EcxJwQ` | `en` | t | f | t | 1,008 | 2026-10-04 (148) |
-| Hindi | `UCR9qQMyP86aSt-1VgaMg7UA` | `hi` (set 2026-10-07) | t | f | t | 1,120 | 2026-09-26 (213; token expired, last synced 2026-09-24) |
-| Bhojpuri | `UC8oC7Yiz0WkH3PKb3GW42XA` | `hi` (set 2026-10-07) | t | f | t | 471 | 2026-10-04 (183) |
-| Tamil | `UCWb0eKKkX1NE1r_Tu6oKhdQ` | `ta` (set 2026-10-07) | t | f | t | 290 | 2026-10-04 (143) |
-| Malayalam | `UCX8BttGE4UAFdm1RRIULOPQ` | `ml` (set 2026-10-07) | t | f | t | 70 | 2026-10-04 (143) |
-| Haryanvi | `UCc4Tv_DEGDEKrKAt-vyVNmw` | `bgc` | f | f | t | no reach data | none |
-| Rajasthani | `UCFO6AQ_KBQDEaQiTi-dBEWQ` | `hi` (set 2026-10-07) | f | f | t | no reach data | none |
-| 3D Animated Series | `UCqtU4xCSjsSvE53Iy6NUKSg` | `hi` | f | f | t | no reach data | none |
-| Kannada | `UCo4_mZK5aAF7ugv4cTfZlEg` | `kn` | f | f | f | no reach data | none (0 videos) |
-| Telugu | `UCxK1-ftYdFvU4IuUW3POxRA` | `te` (set 2026-10-07) | f | f | f | no reach data | none (0 videos) |
-
-Every channel has a `default_language` since B9b step 7 (2026-10-07; `docs/PHASE_B_FINDINGS.md`), so
-`eligibility.can_audit` (`app/eligibility.py:66-84`) no longer gates any channel out on language. Harmless while
-`autopilot_enabled = f` everywhere.
+| Channel | id | `default_language` | Backlinks | Titles | Notes |
+|---|---|---|---|---|---|
+| Marathi | `UCr5-YUqBiW7PUmeAtxUWuRg` | `mr` | live, cap 15 | live | rollout #1; playlist test, Short links |
+| Punjabi | `UC8KjoL0Z9mTHKqB6gFutkJw` | `pa` | off | off | owner, 2026-11-16; Shorts continue |
+| Gujarati | `UCOVKJdzghm2gOnuaGeJTonA` | `gu` | live, cap 10 | live | |
+| English | `UCMpj6iUMCMhB0k4L5EcxJwQ` | `en` | live, cap 10 | live | |
+| Hindi | `UCR9qQMyP86aSt-1VgaMg7UA` | `hi` | live, cap 10 | live | |
+| Bhojpuri | `UC8oC7Yiz0WkH3PKb3GW42XA` | `hi` | live, cap 10 | off | |
+| Tamil | `UCWb0eKKkX1NE1r_Tu6oKhdQ` | `ta` | live, cap 8 | off | |
+| Malayalam | `UCX8BttGE4UAFdm1RRIULOPQ` | `ml` | live, cap 8 | off | |
+| Haryanvi | `UCc4Tv_DEGDEKrKAt-vyVNmw` | `bgc` | live, cap 8 | off | |
+| Rajasthani | `UCFO6AQ_KBQDEaQiTi-dBEWQ` | `hi` | live, cap 8 | off | |
+| 3D Animated Series | `UCqtU4xCSjsSvE53Iy6NUKSg` | `hi` | off | off | a cartoon series, not rhymes |
+| Kannada | `UCo4_mZK5aAF7ugv4cTfZlEg` | `kn` | off | off | no uploads |
+| Telugu | `UCxK1-ftYdFvU4IuUW3POxRA` | `te` | off | off | no uploads |
 
 Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `reach_warmup`,
 `playlist_health_enabled`, `autopilot_enabled`, `autopilot_shorts_enabled`, `sync_shorts`, and `agent_enabled`
-(`20261006020000`, B2; applied 2026-10-07; read by `autopilot.tick` and `eligibility.can_run_agent` since S1.4b, set on Marathi since 2026-10-24).
+(read by `autopilot.tick` and `eligibility.can_run_agent`).
 
 ---
 
 ## 2. Schema — as applied
 
 **Migrations** (`supabase/migrations/`, in order; bootstrap `supabase/bootstrap/000_roles.sql`,
-`010_storage_shim.sql` run first). The latest is `20261030020000` (S3.5, #120: `warm_pool()` replaced with the title hold), after `20261030010000` (S3.5, a column comment only), after `20261030000000` (S3.4, #119), all three applied at the office 2026-10-30 (`scripts/apply_migrations.py`). `20261027010000` (S2.4, #90) and `20261027000000` (S2.1, #87) were applied at the office 2026-10-26 (#93 B1). `20261023010000` (S1.6b, #68) and `20261023000000` (S1.4a, #63) were applied for Slice 1's deploy (A1 of #93 lists both in `schema_migrations`). `20261006060000` (B6, #37), `20261006050000` (B5, #36), `20261006040000` (B4, #35), `20261006030000` (B3a, #33), `20261006020000` (B2, #32),
-`20261006010000` (B1b, #31) and `20261006000000` (B1a, #30) are applied on the office machine: the B1 pair on
-2026-10-07 (B9a), the other five on 2026-10-07 (B9b) (`docs/PHASE_B_FINDINGS.md`).
+`010_storage_shim.sql` run first). All are applied at the office (`scripts/apply_migrations.py`); the latest is
+`20261030020000`.
 
 ```
 20260505092756_init.sql                          channels, videos, audit_configs, audits
@@ -201,7 +176,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   unique (video_id, date, source_type, source_detail)
   ```
   Index `(channel_id, date desc)`. Source: Reporting API `channel_traffic_source_a3` (`app/reporting_client.py:73`), summed over `country_code`, `subscribed_status`, `live_or_on_demand` (`app/reporting_client.py:443` `parse_traffic_csv` → `:397` `_aggregate_traffic_csv`).
-  **Retention** (owner, 2026-10-13): `source_detail` is kept only where `app/traffic_poll.py` `keeps_detail` says so (type 7 from a video in `videos`, any channel; type 14 `PL…` or `RD<one of our video ids>`; every other type) and the rest is folded into the blank-detail row for (video, day, type) by `collapse_unread_detail`, so per-type totals are exact. Rows ingested before it are folded by the one-off `scripts/collapse_traffic_detail.sql` (not yet run at the office).
+  **Retention** (owner, 2026-10-13): `source_detail` is kept only where `app/traffic_poll.py` `keeps_detail` says so (type 7 from a video in `videos`, any channel; type 14 `PL…` or `RD<one of our video ids>`; every other type) and the rest is folded into the blank-detail row for (video, day, type) by `collapse_unread_detail`, so per-type totals are exact. Rows ingested before it are folded by the one-off `scripts/collapse_traffic_detail.sql`.
 - **`playlist_traffic_daily`** (`20261006010000`, B1b):
   ```sql
   id bigserial primary key, playlist_id text not null (no FK), video_id text not null (no FK),
@@ -296,7 +271,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
   `payload` `{short_id, target_video_id, recommended, timing: "inferred_from_traffic"}` (`recommended` = a
   `short_link_recommendations` row exists for the pair), the same `ledger_key`, so a later tick links it.
   `ledger_key` is NULL on any other row.
-  Added by `20261030000000` (S3.4, #119; applied 2026-10-30), verbatim without its header comment:
+  Added by `20261030000000` (S3.4, #119), verbatim without its header comment:
   ```sql
   alter table interventions add column if not exists trajectory jsonb;
   ```
@@ -336,7 +311,7 @@ These are the files. The live DB's migration ledger was not checked (unreachable
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals` (§2 `playlist_arms` for its S2.1 columns), `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()` (B4, replaced by S1.4a, below).
 
 - **`warm_pool()`** (`20261023000000`, S1.4a #63, replacing B4's `20261006040000`; replaced again by
-  `20261030020000`, S3.5 #120, applied 2026-10-30, which adds the `title` clause shown below), verbatim without its header
+  `20261030020000`, S3.5 #120, which adds the `title` clause shown below), verbatim without its header
   comment, as of `20261030020000`. Its in-app twin is `app/warm.py` `_ranked_pool_inapp`; the agent tick picks through `warm.warm_pool` (§5). On top of B4's
   active-Midas exclusion it skips a video with any `midas` row created within `p_cooldown_days`
   (`TRIAGE_COOLDOWN_DAYS`), whatever its lever or status, or any `midas` `backlinks` row of arm `holdout`, or
@@ -577,8 +552,8 @@ Of the spec's Phase B tables `video_traffic_source_daily`, `playlist_traffic_dai
 ## 3. Config — verbatim
 
 Defaults from `app/config.py`. "Dev `.env`" is the generating machine's local `.env` (not in git). The office
-`.env` is hand-carried and was not read; the only office value on record is `AUTOPILOT_TICK_SECONDS=30`
-(`docs/PHASE_A_FINDINGS.md` restart-day step 2).
+`.env` is hand-carried and was not read; the office values on record are `AUTOPILOT_TICK_SECONDS=30`
+(`docs/PHASE_A_FINDINGS.md`) and the lever switches in §1 (`docs/PLAN_TO_2026-11-27.md`).
 
 **Settings the spec names** (spec Part 1 A4/A6, Part 2 §8):
 
@@ -735,10 +710,10 @@ the office startup log confirmed the freeze 2026-09-29 (`docs/PHASE_A_FINDINGS.m
 | `traffic_poll` | cron 06:30 UTC (`:440`) | `app/traffic_poll.py:173` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS` (`app/eligibility.py:170-178`). Two feeds per channel (`_FEEDS`, `app/traffic_poll.py:74`): **video** ensures the `channel_traffic_source_a3` job (`midas-traffic-source`, Marathi `3647f5d8…`) → `video_traffic_source_daily`; **playlist** ensures the `playlist_traffic_source_a2` job (`midas-playlist-traffic-source`, Marathi `381cf084…`) → `playlist_traffic_daily`. Both Marathi jobs are found, not created. Each feed ingests each data-day's newest not-yet-ingested report, a restatement replacing the day (`app/traffic_poll.py:89` `_newest_per_day`, `app/reporting_poll.py:104` `replace_data_day`), and ledgers it with its own `report_type`. Logs `"traffic_poll <id> data-day <d>: <n> rows written to <table> (report <r>)"` (`app/traffic_poll.py:118`). Feeds are isolated (`_poll_channel`, `app/traffic_poll.py:155`): a feed crash is recorded as `"<feed>: <Type>: <msg>"` and fails the channel, but the other feed still runs; per-report errors are judged per feed (categories `video reports`, `playlist reports`). Independent of `reporting_poll` |
 | `playlist_health_score` | cron 07:00 UTC (`:459`) | `main._daily_playlist_health_score` (`:225`) → `app/playlist_health.py:score_channel` | registered; `playlist_health_enabled` channels (Punjabi only, §1) |
 | `measurement_eval` | cron 08:00 UTC (`:474`) | `main._daily_measurement_eval` → `app/measurement.py:evaluate_with_failures` | registered |
-| `lever_measurement` | cron Mon 09:00 UTC (`app/main.py` `_register_jobs`) | `app/lever_verdicts.py` `run_weekly` | registered (S1.6b). Every channel (`Job.EVERY`): `lever_measurement.measure_channel` (S1.6a), then `write_verdicts` for the current week. `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("lever_measurement", …)`); per-row errors go through `job_status.item_error_verdict` under the category `interventions` (all errored → the channel fails as `"ItemsFailed: interventions: all <n> failed"` and gets no verdicts that run, some → `degraded`). **S2.3:** then, for a channel with any `playlist_arms` row (read once per run), `playlist_test.measure_channel`, under its own category `playlist arms` (`"ItemsFailed: playlist arms: all <n> failed"`, `"playlist arms: <e>/<n> failed"`) and its own `try`: a crash or failure in either half doesn't stop the other on the same channel, and both halves' messages are joined with `; `. A failed `playlist_arms` read (the table is missing until `20261027000000` is applied) is logged `"lever_measurement: playlist_arms unreadable; playlist test skipped: <err>"` and skips only the playlist half that run. **S2.6:** on a channel in `TRAFFIC_INGEST_CHANNELS`, first `short_links.detect` (the Short links seen in its type-32 traffic, §5), under its own category `short-link pairs` (`"ItemsFailed: short-link pairs: all <n> failed"`, `"short-link pairs: <e>/<n> failed"`) and its own `try`, so the measurement still runs; the measurement then covers `short_link` rows too (same `interventions` category), and after backlinks' verdicts `write_verdicts(lever='short_link')`. A channel with a type-32 pair fails the detection reading `short_link_recommendations` until `20261027010000` is applied. **S3.5:** on a channel with any `midas` `title` row (`_has_titles`, a `limit(1)` read), after backlinks and before the playlist test, in its own `try`: `title_measurement.measure_channel` under the category `title interventions` (`"ItemsFailed: title interventions: all <n> failed"` and no title verdicts that run), then `write_verdicts(lever='title')`, then `auto_revert` under `title reverts` (`"ItemsFailed: title reverts: all <n> failed"`, `"title reverts: <e>/<n> failed"`); a crash in the title half is logged `"lever_measurement <id>: titles crashed: …"` and fails the channel without stopping its other halves. Nothing reaches YouTube except the auto-revert's title writes (`titles_apply.revert_title(auto=True)`, behind `TITLE_APPLY_ENABLED` and `DRY_RUN`) |
+| `lever_measurement` | cron Mon 09:00 UTC (`app/main.py` `_register_jobs`) | `app/lever_verdicts.py` `run_weekly` | registered (S1.6b). Every channel (`Job.EVERY`): `lever_measurement.measure_channel` (S1.6a), then `write_verdicts` for the current week. `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("lever_measurement", …)`); per-row errors go through `job_status.item_error_verdict` under the category `interventions` (all errored → the channel fails as `"ItemsFailed: interventions: all <n> failed"` and gets no verdicts that run, some → `degraded`). **S2.3:** then, for a channel with any `playlist_arms` row (read once per run), `playlist_test.measure_channel`, under its own category `playlist arms` (`"ItemsFailed: playlist arms: all <n> failed"`, `"playlist arms: <e>/<n> failed"`) and its own `try`: a crash or failure in either half doesn't stop the other on the same channel, and both halves' messages are joined with `; `. A failed `playlist_arms` read is logged `"lever_measurement: playlist_arms unreadable; playlist test skipped: <err>"` and skips only the playlist half that run. **S2.6:** on a channel in `TRAFFIC_INGEST_CHANNELS`, first `short_links.detect` (the Short links seen in its type-32 traffic, §5), under its own category `short-link pairs` (`"ItemsFailed: short-link pairs: all <n> failed"`, `"short-link pairs: <e>/<n> failed"`) and its own `try`, so the measurement still runs; the measurement then covers `short_link` rows too (same `interventions` category), and after backlinks' verdicts `write_verdicts(lever='short_link')`. **S3.5:** on a channel with any `midas` `title` row (`_has_titles`, a `limit(1)` read), after backlinks and before the playlist test, in its own `try`: `title_measurement.measure_channel` under the category `title interventions` (`"ItemsFailed: title interventions: all <n> failed"` and no title verdicts that run), then `write_verdicts(lever='title')`, then `auto_revert` under `title reverts` (`"ItemsFailed: title reverts: all <n> failed"`, `"title reverts: <e>/<n> failed"`); a crash in the title half is logged `"lever_measurement <id>: titles crashed: …"` and fails the channel without stopping its other halves. Nothing reaches YouTube except the auto-revert's title writes (`titles_apply.revert_title(auto=True)`, behind `TITLE_APPLY_ENABLED` and `DRY_RUN`) |
 | `channel_health` | cron 10:00 UTC (`app/main.py` `_register_jobs`) | `app/channel_health.py` `run_daily` | registered (fleet readiness, not in the spec). Read-only: `check()` over every channel, and `JobRunFailed("channel_health", {<id>: "<problems>"})` when any channel has one: `last_synced_at` older than `SYNC_STALE_HOURS` (30) or NULL, a reach frontier (`Job.REACH` channels) more than `REACH_STALE_DAYS` (7) behind or none, a `channel_traffic_source_a3` frontier (`Job.TRAFFIC` channels) more than `TRAFFIC_STALE_DAYS` (4) behind or none, or a non-NULL `autopilot_paused_reason`. A channel with no row in `videos` is listed with `no_videos: true` and no problems (Kannada and Telugu, no uploads on 2026-10-26). Exists because the 2026-10-16 sign-in outage left every job `success` for a week |
 | `playlist_test_apply` | cron 11:00 UTC (`app/main.py` `_register_jobs`) | `app/playlist_test.py` `run_apply` | registered (S2.2), always; does nothing while `PLAYLIST_APPLY_ENABLED` is false (default). Otherwise, per channel with a treated `playlist_arms` row `planned` or `applying` (`apply_channel`), a playlist at a time in arm id order: its approved, unsent adds with attempts left go together only if n × 50u fits both `JobBudget("playlist_test_apply", PLAYLIST_TEST_DAILY_UNITS)` and `quota.can_afford(…, reserve=YT_QUOTA_COLLECTION_RESERVE)`, else the job stops for the day. Each add is `yt_playlist_items_insert` at position = the number of the arm's adds ahead of it in rank (`proposal_ids` order) already in the playlist; a 400 naming the position or sort order is retried once appended, and from then on (this run and later ones, read off `apply_error.reason = 'position_refused'`) that playlist's adds go appended. Success → the proposal's `applied_at`, `playlist_item_id`, and a `playlist_assignments` `added` row with `decision_source = 'experiment'` (`playlists._record_assignment`). Errors classified as `backlinks_apply._classified`: `failed` uses up an attempt (at most `PLAYLIST_TEST_MAX_ATTEMPTS`); `youtube_quota_exceeded` stops the job and makes the channel `degraded` (`"youtube_quota_exceeded: stopped for the day"`), never counted as an errored add; `token_expired` stops the channel and fails it. Arm status settles after each arm (§2 `playlist_arms`). `DRY_RUN` logs `"[DRY_RUN] playlist_test_apply <id>: would add […] to the top of <playlist>"` and writes nothing. `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("playlist_test_apply", …)`); per-add errors through `job_status.item_error_verdict` under `playlist adds` |
-| `short_link_refresh` | cron Mon 10:30 UTC (`app/main.py` `_register_jobs`) | `app/short_links.py` `run_weekly` | registered (S2.4), always. `refresh` for every channel in `SHORT_LINK_CHANNELS` ∩ `TRAFFIC_INGEST_CHANNELS` (none: logs `"short_link_refresh: no channels (SHORT_LINK_CHANNELS ∩ TRAFFIC_INGEST_CHANNELS); nothing to do"`). `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("short_link_refresh", …)`); per-Short write errors through `job_status.item_error_verdict` under `shorts` (`"ItemsFailed: shorts: all <n> failed"`, `"shorts: <e>/<n> failed"`). A channel whose thresholds are refused writes nothing and is `degraded` (`"refused: no_thresholds"` or `"refused: thresholds_other_model_version"`). DB and OpenRouter (the shadow next-watch) only; nothing reaches YouTube. Until `20261027010000` is applied, a channel with listed Shorts fails reading the table |
+| `short_link_refresh` | cron Mon 10:30 UTC (`app/main.py` `_register_jobs`) | `app/short_links.py` `run_weekly` | registered (S2.4), always. `refresh` for every channel in `SHORT_LINK_CHANNELS` ∩ `TRAFFIC_INGEST_CHANNELS` (none: logs `"short_link_refresh: no channels (SHORT_LINK_CHANNELS ∩ TRAFFIC_INGEST_CHANNELS); nothing to do"`). `traffic_poll`'s failure model: a channel that raises fails the run once every channel has run (`JobRunFailed("short_link_refresh", …)`); per-Short write errors through `job_status.item_error_verdict` under `shorts` (`"ItemsFailed: shorts: all <n> failed"`, `"shorts: <e>/<n> failed"`). A channel whose thresholds are refused writes nothing and is `degraded` (`"refused: no_thresholds"` or `"refused: thresholds_other_model_version"`). DB and OpenRouter (the shadow next-watch) only; nothing reaches YouTube. |
 | `nightly_db_backup` | cron `BACKUP_HOUR` local (`:541`) | `app/backup.py:run_nightly_backup` | registered; no-op if `BACKUP_ENABLED=false` |
 | `pot_provider_refresh` | interval 2 h (`:553`) | `main._refresh_pot_provider` | only if env `BGUTIL_POT_HTTP_BASE_URL` is set; absent on the office machine (`docs/PHASE_A_FINDINGS.md` A0 step 12) |
 
@@ -1215,81 +1190,41 @@ the real run re-embeds then calibrates each channel), `scripts/create_reporting_
 ## 7. Delta vs the specs
 
 Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2" is the design as amended by
-§0.6 (P1–P7); "Part 3" is Phase B (done 2026-10-13); "Part 4" is Slice 1, the Part marked ready to build.
+§0.6 (P1–P7); "Part 3" is Phase B; Parts 4–6 are Slices 1–3.
 
 ### 7.1 Spec'd but not built
 
-**Phase B (Part 3)**: done; the acceptances are recorded in `docs/PHASE_B_FINDINGS.md`. What remains:
-- **B1 retention.** Decided 2026-10-13 (owner), built at ingestion (`traffic_poll.keeps_detail`, §2). Not deployed,
-  and the existing rows aren't folded yet (`scripts/collapse_traffic_detail.sql`): `video_traffic_source_daily` was
-  4,766 MB / ≈15.0M rows on 2026-10-13.
-- **B3 scope.** The membership walk runs only inside `playlist_reconcile`, i.e. for the allowlisted channels
-  (`app/config.py:151-161`; Marathi is in the default). B3a sees an old video's edit only on a full sync, every
-  3 days (`app/sync.py:520`). As of 2026-10-13 every `human` row is a playlist membership (110); none is a backlink.
-- **B4** is wired into the agent tick only (S1.4b, `app/agent_tick.py`): the old audit picker, uncalled since S3.6, is still newest-first with no impressions filter
-  (`supabase/migrations/20260904000100_next_audit_candidate_exclude_episodes.sql:37`
-  `order by v.published_at desc, v.id`) and excludes in-window audits rather than active interventions (`:35-36`).
-- **B5:** `decide()` is called by S1.4b's triage (live on Marathi since 2026-10-24) and by the Short-link refresh (S2.4, since 2026-10-26), so `decision_log` has rows.
-- **B6:** run for Marathi only; the siblings wait for the office to deploy #55 (`deploy/postgrest-proxy.conf`
-  `client_max_body_size 16m`, merged 2026-10-23; every batch got 413 on Marathi under nginx's 1 MB default).
-  The playlist engine and its RPCs still use `EMBED_MODEL` and the global thresholds (§7.3 items 4–5); the only
-  reader of the new vectors and the stored thresholds is S1.1's `backlinks.candidates`, called by the agent tick.
-- **B7:** done; `bho`/`raj` stay unused while Bhojpuri and Rajasthani use plain `hi` (owner, 2026-10-06).
-- **B2's persistence of the A8 registry** ("Persisting it is Phase B work", Part 1 A8): built 2026-11-03 as a JSON
-  file under `LOG_DIR` (`app/job_status.py` `persist_to`), not a DB table, for the startup catch-up (§4).
+**Phase B (Part 3) leftovers**
+- **B1 retention:** built at ingestion (`traffic_poll.keeps_detail`, §2); rows ingested before it are folded only
+  by the one-off `scripts/collapse_traffic_detail.sql`, which isn't recorded as run (`video_traffic_source_daily`
+  was 4,766 MB / ≈15.0M rows on 2026-10-13, `docs/PHASE_B_FINDINGS.md`).
+- **B3 scope:** the membership walk runs only inside `playlist_reconcile`, i.e. for the allowlisted channels
+  (`app/config.py:151-161`); B3a sees an old video's edit only on a full sync, every 3 days (`app/sync.py:520`).
+- **B4:** the old audit picker (no caller) is still newest-first with no impressions filter
+  (`supabase/migrations/20260904000100_next_audit_candidate_exclude_episodes.sql:37`) and excludes in-window
+  audits rather than active interventions (`:35-36`).
+- **B6:** the playlist engine and its RPCs still use `EMBED_MODEL` and the global thresholds (§7.3 items 4–5).
+- **The A8 registry's persistence** is a JSON file under `LOG_DIR` (`app/job_status.py` `persist_to`), not a DB table.
 
 **Slice 1 (Part 2 §1–§2, §3.4, §6.1)**
-- Tick routing on `agent_enabled` (§6.1, Part 4 S1.4): built (S1.4b, `app/autopilot.py` `_agent_tick`,
-  `app/agent_tick.py`, `eligibility.can_run_agent`), live on Marathi since 2026-10-24.
-- The pick's cooldown and once-per-experiment exclusions (§2.1, Part 4 S1.4 "Pick"): built (S1.4a, `warm_pool()` in
-  `20261023000000`, `app/warm.py`), applied; called by the agent tick (S1.4b).
-- Rules triage, `no_change` as a `declined` intervention, holdout with would-be targets, the cap and the kill
-  switch (§2.2, §1.3, Part 4 S1.4): built (S1.4b, `app/agent_tick.py`), live on Marathi. The P1 stop rule's input
-  reads `lever_verdicts` since S1.6b (`agent_tick.backlinks_stopped`).
-- Backlink candidates and fleet siblings (P2, Part 4 S1.1): built (`app/backlinks.py` `siblings`, `candidates`),
-  called by the agent tick (S1.4b). Sibling targets appear only once the sibling channels have `MODEL_VERSION` vectors (S1.7 step 2;
-  B6 ran for Marathi only). The next-watch question in shadow (§2.3, Part 4 S1.5): built (`decide.NEXT_WATCH`,
-  asked by `app/agent_tick.py` `_next_watch`), live on Marathi.
 - Code checks for links (§2.4): not built. Partially present: `DESCRIPTION_MAX = 5000`, the 15-hashtag cap and
   `rejection()` (`app/audit_suggestion.py`).
-- Canonical backlink block (§3.4, Part 4 S1.2): built (`app/backlinks.py`), called by the agent tick and `apply_backlinks`, with
-  Marathi's heading `आणखी गाणी पहा:` (owner, 2026-10-23, D3), and since fleet readiness a heading for every channel language (§5 `backlinks.py`), not yet skimmed by native readers.
-- Description-only apply (§2.5, Part 4 S1.3): built (`app/backlinks_apply.py`), with its revert and the ledger
-  change; called by the agent tick (S1.4b) for treated rows, and refusing while `BACKLINK_APPLY_ENABLED` is false.
-- Weekly measurement and the stop rule (Part 4 S1.6, P1): built (S1.6a `app/lever_measurement.py`, S1.6b
-  `app/lever_verdicts.py`, the `lever_measurement` job, `lever_verdicts` in `20261023010000`), deployed and
-  applied; no verdict yet. The findings-doc write-ups of the first verdict and the stop-rule outcome are S1.8 (owner).
-- `reach_warmup` on human-run channels (§1.4): set 2026-10-26 on the 5 channels without reach (Haryanvi, Rajasthani, 3D Animated, Kannada, Telugu; `docs/PLAN_TO_2026-11-27.md`). The other 8 ingest reach through `measurement_enabled`.
+- Fleet-sibling targets (P2) are built but switched off (`BACKLINK_SIBLINGS_ENABLED`, §7.3 item 35).
+- The findings write-up of the first verdict and the stop-rule outcome (S1.8, #70): the owner's.
 
-**Slice 2 (Part 2 §4; Part 5; S2.1–S2.6 built, deployed on Marathi 2026-10-26)**
-- The P3 curated-playlist test (Part 5 S2.1–S2.3): the arms, candidates, draw and preview (S2.1, `app/playlist_test.py`, `playlist_arms` in `20261027000000`) and the queued, budgeted apply behind `PLAYLIST_APPLY_ENABLED` with `test_dates` (S2.2, `app/playlist_test.py` `run_apply`, the `playlist_test_apply` job) are built and deployed 2026-10-26; Marathi is drawn and dosing from that day. The measurement, weekly verdict and `GET /channels/{id}/playlist-test` (S2.3, `app/playlist_test.py` `measure_channel`, run by the `lever_measurement` job) are deployed; they measure once Marathi's dosing ends (`test_dates`). Jev fit check replacing `playlists._llm_judge`: not built, deferred by Part 5 E12.
-- Short → video links recommend-only to the team (P4, Part 5 S2.4–S2.6): the recommendations, their shadow next-watch and the weekly `short_link_refresh` job (S2.4, `app/short_links.py`, `short_link_recommendations` in `20261027010000`) are deployed 2026-10-26: 241 `pending` rows over 100 Marathi Shorts (two hand refreshes), every Marathi Short embedded. The page, the tick and the ledger (S2.5) and the traffic detection, type-32 measurement and `short_link` human verdicts (S2.6) are deployed the same day.
+**Slice 2 (Part 2 §4; Part 5)**
+- Jev fit check replacing `playlists._llm_judge`: not built, deferred by Part 5 E12.
 - Per-channel auto-apply flip for playlist adds: not built (`PLAYLIST_HITL` is one global setting,
   `app/config.py:115`).
 
 **Slice 3 (Part 2 §3; Part 6)**
-- The title-only write and its revert (Part 6 S3.1, F1): built (`app/titles_apply.py`), called by the tick since S3.3.
-- The pipeline's writer, its checks, the title stamp, the preview and the offline bake-off (Part 6 S3.2, F9, F12):
-  built (`app/titles.py`, `scripts/preview_titles.py`, `scripts/title_bakeoff.py`), called by the tick since S3.3.
-- Triage and routing for titles (Part 6 S3.3, F2–F5, F12): built (#118; `app/decide.py`, `app/agent_tick.py`
-  `_run_title`, `app/titles.py` `route`, `app/autopilot.py` `_agent_tick`). `titles.path_stopped` reads the title verdicts since S3.5.
-- Title measurement, verdicts per path, the stop rule and harm guard, auto-revert and the title-test endpoint
-  (Part 6 S3.5, F6–F8, F14): built (#120; `app/title_measurement.py`, `app/lever_verdicts.py`), run by the weekly
-  `lever_measurement` job; no title row measured yet. "The video never re-enters the title experiment" is built in
-  the pick (`warm._holds`, `warm_pool()` in `20261030020000`, applied 2026-10-30, and its in-app twin).
-- The agent loop, its tools and the trajectory (Part 6 S3.4, Part 2 §3.1, §3.2): built (#119; `app/agent/loop.py`,
-  `app/agent/tools.py`, `openrouter.chat_tools`, `AGENT_MAX_TURNS`, `interventions.trajectory` in `20261030000000`,
-  applied 2026-10-30), run by the tick for the agent path's treated titles and by `scripts/preview_titles.py --path agent`.
-- The old title path's retirement (Part 6 S3.6, F13): built (#117). The tick's house-format branch and
-  `TITLE_AUTOPILOT_ENABLED` are gone (`app/autopilot.py` `tick`); the manual applies refuse on an agent channel
-  unless `?force=true` (`app/audits.py` `_refuse_on_agent_channel`).
 - Agent tools Part 2 §3.2 lists that Part 6 leaves out: `get_related_top_performers`, `get_playlists`,
   `get_niche_reference`, `get_channel_playbook`, and `submit_change` (Slice 3's terminal tool is `submit_title`):
   none exist. The online per-family writer bake-off (§3.3) is not built (Part 6 F9: offline only).
-- Title objective aimed at browse/suggested views (P5): the writer's prompt (`TITLE_PROMPT`, S3.2) aims at them, and
-  the tick writes titles through it since S3.3 (while `TITLE_APPLY_ENABLED` is on); the weekly job measures them on those views since S3.5;
-  the old house format, still reachable from the manual audit routes (guarded on agent channels since S3.6),
-  optimises for search ("keyword-rich sentences", "high-value search phrases", `app/audit_suggestion.py:74-76`).
+- Title objective (P5): the pipeline writes the SEO team's search-shaped structure and the test counts search
+  views too (§7.3 item 34); the old house format, still reachable from the manual audit routes (guarded on agent
+  channels), optimises for search ("keyword-rich sentences", "high-value search phrases",
+  `app/audit_suggestion.py:74-76`).
 - Niche reference (§3.6): no `app/niche_reference.py`, no `niche_reference_refresh` job, no `channels.niche_reference_*`
   columns. `derive_niche_queries` and `_sample_competitors` still live in the frozen `app/reflection.py:239-339`.
 
@@ -1368,10 +1303,6 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    `playlist_traffic_daily` also has an `id bigserial`. The two report types are ingested as isolated feeds of one
    job: a crash in one feed fails the channel's run but doesn't stop the other (`app/traffic_poll.py:155`); the spec
    says only "same failure semantics as `reporting_poll`".
-   **Deploy order:** the reach path now reads and writes `report_type`, so `20261006000000` must be applied (and
-   PostgREST restarted) before the app restarts on this code, or `reporting_poll` and `measurement_eval` fail.
-   Apply `20261006010000` in the same window: without `playlist_traffic_daily` the playlist feed fails every
-   report, so `traffic_poll` fails Marathi daily (video rows still land).
 8. **Apply cost.** `quota.APPLY` = 51u (`app/quota.py:67`) but apply no longer fetches stats (`app/audits.py:546-556`):
    the gates overestimate by 1u. Spec Part 1 A10 says note it only.
 9. **`interventions` DDL (Part 2 §7, Part 3 B2).** The spec lists columns only. Built with `not null` on
@@ -1393,9 +1324,6 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    whose description was overridden in the request body isn't recognised, because the applied text isn't stored on
    the audit (`app/audits.py:515-522`). Only full syncs re-read old videos, so incremental syncs record nothing, and a
    video the team edits and Midas then rewrites within one full-sync interval is seen only as Midas's.
-   **Deploy order:** apply `20261006030000` with `20261006020000`, before the app restarts on this code, and restart
-   PostgREST. Without it every ledger write fails (no `ledger_key` column); the sync still succeeds and logs the
-   error per video, but no human edit is recorded until the migration lands, and edits synced meanwhile are lost.
 11. **Human-edit ledger, playlist memberships (Part 3 B3, change 2; B3b).** "Newly added" is "the walk has no
    `playlist_assignments` row of any action for the (video, playlist) pair", which is what the walk already used
    to decide what to seed (`app/playlists_sync.py:297-307`); the walk has no removal detection, so a video the
@@ -1406,7 +1334,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    `sync` rows. Only the channel's own videos count (the walk's `known_videos`), and a membership of a video not yet
    in `videos` is skipped; when that video is synced later the next walk of the playlist records it, even if the
    add predates the previous walk (a false `human` row; `videos` has no first-seen time to rule it out). Marathi
-   was fully synced 2026-10-06 (header), so its exposure at deploy is videos uploaded since. A ledger error doesn't
+   was fully synced 2026-10-06, so its exposure at deploy was videos uploaded since. A ledger error doesn't
    stop the walk seeding its `sync` rows, so the memberships of that page are never detected (as B3a's lost edits).
    The manual `/playlists/bootstrap` walk detects for whichever channel it is run on, allowlisted or not. "Midas added it" counts every non-`sync` `added` assignment and every approved
    `add` proposal, including those a person approved through `/playlists/proposals/decide`. Detection timing:
@@ -1705,7 +1633,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    measurement, in its own `try` and category, so a detection failure never blocks backlinks; `short_link` rows share
    the measurement's `interventions` category, and `write_verdicts(lever='short_link')` runs only on those channels,
    after backlinks' (a channel off the list has no measured human rows). The recommendations are read only when there
-   is a pair, so a channel with no type-32 pair runs before `20261027010000` is applied.
+   is a pair.
 27. **The title write and its revert (Part 2 §2.5, Part 6 S3.1, F1; #115).** Not in the spec, decided here:
    *`title_changed`* on the apply is `ApplyError(FAILED, "title_changed")` (Part 6: "refuses as `failed`, reason
    `title_changed`"), so a caller records `payload.error = {reason: "failed", detail: "title_changed"}` and the
@@ -1829,11 +1757,8 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    `max_turns`, `end {kind, reason, detail}` and `submits`; every text (message content, tool-call arguments, tool
    result) is cut to 2,000 characters there, while the model is sent each result whole (a transcript is up to
    `TRANSCRIPT_MAX_CHARS`); results are JSON with `ensure_ascii=False`, so Indic text isn't six times longer.
-   *The column is sent only when given* (`interventions.record(trajectory=)`), so pipeline, holdout and backlinks
-   rows work before `20261030000000` is applied; an agent-path row doesn't: its insert fails, no row is written,
-   the tick counts `agent_failed` and picks the same video next tick, until three failures pause the channel
-   (`autopilot._record_failure`). Apply the migration before the agent path can run (`TITLE_APPLY_ENABLED` with
-   `TITLE_AGENT_PCT` > 0). *`chat_tools`' retry* is immediate (no pause): a timeout is `httpx.TimeoutException`, a
+   *The column is sent only when given* (`interventions.record(trajectory=)`), so no other row needs it.
+   *`chat_tools`' retry* is immediate (no pause): a timeout is `httpx.TimeoutException`, a
    5xx a status ≥ 500; a 4xx or a body without `choices` isn't retried. *`get_title_history`* reads each table
    newest first with `limit(10)` (bounded, under the 1,000-row page) and merges; audits of any status, and `title`
    interventions of either origin. *`get_channel_top_performers`* is the channel context's warm long videos (≥
@@ -1872,7 +1797,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
    refuses an applied file whose content changed), so `20261030010000` records the four scopes as a `comment on
    column`, which `tests/test_status_vocab.py` reads; `arm_scope` has no check constraint, so the app needs nothing
    applied. *The endpoint* lives on `lever_verdicts`' router; "treated" counts rows that reached YouTube, "judged"
-   the rows in the path's mean; its read includes `trajectory`, so it fails until `20261030000000` is applied.
+   the rows in the path's mean.
    *Once per experiment for titles* (Part 6 S3.5 "the video never re-enters the title experiment", Part 2 §2.1): a
    `midas` `title` holdout row, or treated row unless `cancelled` without `applied_at`, holds its video at any age
    (`warm._holds`, `warm_pool()` in `20261030020000`). A decline holds it too, though no title went up: it is in the
@@ -1921,10 +1846,6 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   headed "Data model (Phase B)", also lists the Slice 3 `niche_reference_*` columns.
 - **Backlink block markers.** Part 2 §3.4 delimits the block by "fixed marker lines"; Part 4 S1.2 finds it "by its
   exact heading line and the `youtu.be` lines under it". Part 4 wins (its Inputs); built as Part 4 (7.3 item 14).
-- **Re-embed scope.** Resolved 2026-10-13: Part 2 §4 now says the rollout channel and its siblings first (B10).
-- **Sibling detection vs ingestion scope.** Resolved 2026-10-07: Part 2 §2.3 and §8 now say inbound only, from the
-  source channel's own report, and a sibling must itself be in `TRAFFIC_INGEST_CHANNELS` (Part 4 finding 1). Built
-  so (S1.1, `app/backlinks.py` `siblings`).
 - **Playbook storage.** Part 2 §5 puts it in `channels.playbook_json`; Part 2 §7 (data model) doesn't list it.
 - **Warm window definition.** §8 `WARM_WINDOW_DAYS` = 28 "ingested data-days", and A7's query is labelled
   "28 ingested days", but the query uses `date > current_date - 30` (calendar days). B4's acceptance compares
@@ -1962,9 +1883,6 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
   question set is not stored: since S1.5 adds `NEXT_WATCH`, it is told apart by `subject`'s shape (a video id
   for `TRIAGE`, `<source>-><target>` for `NEXT_WATCH`), by `triage_json` on the linked intervention, and, since S2.4, by
   `short_link_recommendations.decision_log_id`, which §8's agreement query uses (7.3 items 13, 18).
-- **B5 vs the Phase B exit gate.** Part 3's exit gate wants "`decide()` logs shadow decisions", but B5 adds no
-  caller and "Not doing in Phase B" excludes tick routing, so `decision_log` stays empty in Phase B. As built, the
-  gate can be met only by `tests/test_decide.py`.
 - **Document framing.** "This file has two parts" (How to use) while it has three; "Ground truth used:
   `STATE.md` @ `bddd373`" predates Phase A.
 
@@ -1972,63 +1890,34 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 
 ## 8. Operational reality
 
-The live DB is unreachable from here. Every figure is from `docs/PHASE_A_FINDINGS.md` or
-`docs/PHASE_B_FINDINGS.md`, labelled.
+The live DB is unreachable from here. Every figure is quoted from a doc, with its date.
 
-- **Phase B, 2026-10-13** (`docs/PHASE_B_FINDINGS.md`): every registered job `success`. Warm pool (B4, Marathi)
-  531, floor 500, top 7,303,586. `video_traffic_source_daily` 4,766 MB / ≈14,969,306 rows; `playlist_traffic_daily`
-  12 MB / ≈30,460 rows. Traffic frontiers: Marathi 2026-10-11 (43 data-days both feeds, no gaps from 08-30);
-  Hindi, Bhojpuri, English, Gujarati 2026-10-10/11 (35–36). `human` interventions 110, all `playlist`.
-  Marathi thresholds (B6, 2026-10-08): `join_high 0.9014`, `join_low 0.8454`, `leave 0.8703` (5,176 sims, 82
-  playlists). Office disk: C 94.3 GB free, D 59.2 GB free.
-- **2026-10-08 auth incident** (findings doc, "Fix #56"): stored `token_expiry` was July on 12 of 13 channels;
-  `video_sync` failed for 6 channels with `HttpError 401 Invalid Credentials` until #56.
-
-- **Outcome volume** (A7 query 2, 2026-10-06; applied/reverted audits): `awaiting_window` 575 · `neutral` 652 ·
-  `not_applicable/dormant` 4,254 · `not_applicable/other` 2,461 · `regression` 106 · `win` 64. Judged (822):
-  win 7.8% · regression 12.9% · neutral 79.3%.
-- **Per channel** (A7 query 3, 2026-10-06, excluding `not_applicable`): Punjabi awaiting 6 · neutral 147 ·
-  regression 4 · win 21; Bhojpuri neutral 1 · regression 3; English regression 4; Gujarati neutral 260 ·
-  regression 75 · win 29; Marathi awaiting 569 · neutral 244 · regression 20 · win 14.
-- **Dormant applies, last 90 days** (A7 warm-pool query 2, 2026-10-06): Gujarati 3,902 of 4,277 (91%) · Marathi
-  352 of 1,201 (29%) · Punjabi 0 of 563 · Haryanvi 0 of 68 · English 0 of 10 · Bhojpuri 0 of 8.
-- **Warm pool** (A7, 2026-10-06, ≥500 impressions, last 30 days): Hindi 1,120 · English 1,008 · Gujarati 603 ·
-  Marathi 566 · Bhojpuri 471 · Punjabi 342 · Tamil 290 · Malayalam 70; the other five have no reach data.
-- **Reach frontier** (A7 query 4, 2026-10-06): 2026-10-04 for Punjabi (213 days), Bhojpuri (183), English (148),
-  Gujarati (147), Marathi (221), Tamil (143), Malayalam (143); Hindi 2026-09-26 (213; token). No other channel
-  ingests reach.
-- **Audit statuses** (A7 query 6, 2026-10-06): applied 8,109 · failed 715 · pending 201 · quarantined 199 ·
-  shadow_pending 87 · reverted 3 · blocked_test_and_compare 1.
-- **Prompt versions** (A7 query 7, 2026-10-06): shadow only (Punjabi 3, Gujarati 1, Marathi 4) + Marathi retired 1;
-  none live.
-- **In-window audits at the pause** (A0, 2026-09-29): 1,910 (Marathi 1,198, Gujarati 706, Punjabi 6); last
-  window closes 2026-10-16.
-- **Data API burn** (A7 query 5, 2026-10-06): ≈8.5k–12.5k/day 09-06 → 09-20 (applies + reconcile); ≤1.4k/day
-  since 09-21 except 09-27 (4,374) and 10-06 (3,667, the manual sync). Ceiling 10k/day.
-- **Job health** (A7 raw result 0, 2026-10-06): all `success` except `video_sync` **failed** for Hindi
-  (`"HTTPException: 401: token_expired"`) and `metrics_poll` **degraded** (Bhojpuri playlists 1/48 · Gujarati
-  playlists 1/36 · Marathi videos 3/632 · Malayalam playlists 1/20). On 2026-10-01 all 8 then-registered jobs were
-  `success` (A9).
+- **Live, 2026-11-16** (`docs/PLAN_TO_2026-11-27.md`): 12 titles written on the first day (Hindi, Marathi,
+  Gujarati 4 each); backlink blocks on every newly enabled channel (Haryanvi 7, Malayalam 6, Rajasthani 6, Tamil
+  5); no errors, no pauses; Data API ≈6.2k units by 13:00 UTC (the 3,000u collection reserve stops writes near 7k).
+  NAS snapshot `midas.0.sql`, 3,766,099,174 bytes, 13:49 UTC.
+- **Quota budget** (`docs/PLAN_TO_2026-11-27.md`): 10,000 units/day for the fleet; a title or backlink write ≈ 51u
+  (`quota.APPLY`), so ≈ 130 writes/day fleet-wide after syncs and polls.
+- **Marathi thresholds** (B6, 2026-10-08, `docs/PHASE_B_FINDINGS.md`): `join_high 0.9014`, `join_low 0.8454`,
+  `leave 0.8703` (5,176 sims, 82 playlists).
 - **Traffic mix** (A1.1, Marathi, data date 2026-09-29, 52,319 report rows, 259,868 views): 14 Playlists 118,342
   (45.5%) · 24 Shorts feed 49,292 (19.0%) · 7 Suggested 48,862 (18.8%) · 3 Browse 17,652 (6.8%) · 8 Other 12,851
   (4.9%) · 4 Channels 7,432 (2.9%) · 5 Search 2,911 (1.1%) · 0 Direct 1,368 · 9 External 668 · 20 Endscreen 254 ·
   18 Playlist pages 148 · 27 Sound 33 · 32 Related video 27 · 26 Hashtag 20 · 17 Notifications 8. Type 14 split:
   `RD…` Mixes 117,929 · our `PL…` playlists **50** · other 363.
-- **Routing levers today** (A1.1/A1.3, 2026-09-29): 1,804 description-link pairs on Marathi → 4 attributable
-  views (type 7); Short → video (type 32) 27 views from 12 Shorts, none uploaded through Midas. Type-7 suggested
-  views from any of our channels: 11,113 of 48,862 (22.7%); Mixes seeded from our videos: 7,024 of 117,929 (6.0%).
+- **Routing levers before Midas** (A1.1/A1.3, 2026-09-29): 1,804 description-link pairs on Marathi → 4
+  attributable views (type 7); Short → video (type 32) 27 views from 12 Shorts. Type-7 suggested views from any of
+  our channels: 11,113 of 48,862 (22.7%); Mixes seeded from our videos: 7,024 of 117,929 (6.0%).
 - **Sensor shape** (A1.1): `channel_traffic_source_a3` has 15 columns, `playlist_traffic_source_a2` 16; source
   types are numeric codes; steady lag 2 days; the playlist report restates some data dates; ≈52k raw rows per
   Marathi channel-day. On-demand detail for PLAYLIST and SHORTS returns 400; RELATED_VIDEO and YT_SEARCH detail
-  work (A1.2, 2026-10-06). Search terms are available, with low-volume suppression in the report (233 of 319
-  type-5 rows empty) (A3).
+  work (A1.2). Search terms are available, with low-volume suppression in the report (233 of 319 type-5 rows
+  empty) (A3).
 - **Short → video link field** (A2, 2026-10-01): not readable or writable via the Data API.
-- **Older recorded facts still in code comments:** the 2026-08-23 verdicts (*"147 neutral / 21 win / 3
-  regression"*, `app/reflection.py:32-34`); *"381 dormant, of which 184 published inside their own pre-window"*
-  (`app/measurement.py:163-164`); reconcile consumed *"8.5k-9.2k"* units on 2026-08-03/04
-  (`supabase/migrations/20260812000000_playlist_membership_walked_at.sql:5`).
-- **Blank:** Shorts upload volume and its Data API cost (not charged to the ledger, §7.2); quarantine reasons;
-  playlist proposal queue size; the office `.env` contents beyond the tick setting.
+- **The old title autopilot** (A7, 2026-10-06, before it was retired): 822 judged applies, win 7.8% · regression
+  12.9% · neutral 79.3%; 4,254 applies landed on dormant videos (Gujarati 91% of its last-90-day applies).
+- **Blank:** verdicts (none yet); Shorts upload volume and its Data API cost (not charged to the ledger, §7.2);
+  playlist proposal queue size beyond ">1,000 pending".
 
 **SQL to refresh** (run on the office machine against `midas`, e.g. `docker compose exec db psql -U midas midas`;
 `count(1)`, because the office copy-paste path drops `*`):
@@ -2039,26 +1928,13 @@ select id, name, default_language, analytics_authorized, measurement_enabled, re
        playlist_health_enabled, autopilot_enabled, autopilot_paused_reason, autopilot_shorts_enabled
 from channels order by name;
 
--- outcome volume + dormancy ratio
-select measurement_status, measurement_result->>'reason_code' as reason, count(1)
-from audits where status in ('applied','reverted') group by 1,2 order by 1,2;
-
--- per-channel outcomes
-select v.channel_id, a.measurement_status, count(1)
-from audits a join videos v on v.id=a.video_id
-where a.measurement_status <> 'not_applicable' group by 1,2 order by 1,2;
-
--- reach frontier per channel (the ledger also holds traffic reports since 20261006000000)
+-- reach frontier per channel
 select channel_id, max(data_date) frontier, count(1) days_covered
 from reporting_reports_ingested where report_type = 'channel_reach_basic_a1' group by 1;
 
 -- daily Data API burn, last 30 days
 select date_trunc('day', occurred_at) d, sum(units) units, count(1) filter (where not success) failures
 from quota_log where units > 0 and occurred_at > now() - interval '30 days' group by 1 order by 1;
-
--- quarantine + prompt versions
-select status, count(1) from audits group by 1;
-select channel_id, status, count(1) from prompt_versions group by 1,2;
 
 -- playlist health freshness
 select channel_id, max(health_computed_at), count(1) filter (where health_recommendation is not null)
@@ -2070,21 +1946,20 @@ from (select channel_id, video_id, sum(impressions) imp
       from video_reach_daily where date > current_date - 30 group by 1,2) t
 where imp >= 500 group by 1 order by 2 desc;
 
--- B9b: Marathi's warm pool (B4; S1.4a's five-argument form, which needs 20261023000000 applied; before it, drop
--- the last argument). Arguments: WARM_MIN_IMPRESSIONS, WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS,
+-- Marathi's warm pool. Arguments: WARM_MIN_IMPRESSIONS, WARM_WINDOW_DAYS, MEASUREMENT_WINDOW_DAYS,
 -- TRIAGE_COOLDOWN_DAYS. 0 rows also when reach isn't certified.
 select count(1) warm_videos, min(impressions) floor_, max(impressions) top
 from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7);
 
--- traffic-source rows per data-day (B1; after the 20261006000000 migration is applied)
+-- traffic-source rows per data-day (B1)
 select channel_id, date, count(1) rows_, sum(views) views, max(report_id) report
 from video_traffic_source_daily group by 1,2 order by 1,2 desc;
 
--- playlist traffic rows per data-day (B1b; after the 20261006010000 migration is applied)
+-- playlist traffic rows per data-day (B1b)
 select channel_id, date, count(1) rows_, sum(views) views, sum(playlist_starts) starts, max(report_id) report
 from playlist_traffic_daily group by 1,2 order by 1,2 desc;
 
--- B9a acceptance: traffic frontier per channel and report type, from the ledger (a day whose report had 0 rows is ingested
+-- traffic frontier per channel and report type, from the ledger (a day whose report had 0 rows is ingested
 -- but has no table rows), and the data-days missing between the first ingested day and current_date - 2
 select channel_id, report_type, min(data_date) first_day, max(data_date) frontier, count(distinct data_date) days_ingested
 from reporting_reports_ingested
@@ -2100,18 +1975,18 @@ where d::date not in (select data_date from reporting_reports_ingested
                       where report_type = t.report_type and channel_id = 'UCr5-YUqBiW7PUmeAtxUWuRg')
 order by 1, 2;
 
--- interventions by origin, lever, arm and status (B2; after the 20261006020000 migration is applied)
+-- interventions by origin, lever, arm and status (B2)
 select origin, lever, arm, status, count(1) from interventions group by 1,2,3,4 order by 1,2,3,4;
 
--- B3a: human backlinks detected, newest first (after 20261006030000 is applied); the exit gate needs at least one
+-- B3a: human backlinks detected, newest first
 select channel_id, video_id, payload->>'target_video_id' target, detected_at, payload->>'removed_detected_at' removed
 from interventions where origin = 'human' and lever = 'backlinks' order by detected_at desc limit 50;
 
--- B3b: human playlist memberships detected, newest first (after 20261006030000 is applied)
+-- B3b: human playlist memberships detected, newest first
 select channel_id, video_id, payload->>'playlist_id' playlist, payload->>'playlist_item_id' item, detected_at
 from interventions where origin = 'human' and lever = 'playlist' order by detected_at desc limit 50;
 
--- B9b (B6; after scripts/reembed.py ran): warm Marathi videos without a B6-recipe vector (want 0), and the
+-- warm Marathi videos without a B6-recipe vector (want 0), and the
 -- stored calibration
 select count(1) missing
 from warm_pool('UCr5-YUqBiW7PUmeAtxUWuRg', 500, 28, 21, 7) w
@@ -2123,12 +1998,12 @@ select id, playlist_thresholds from channels where playlist_thresholds is not nu
 select origin, arm, status, measurement_status, count(1)
 from interventions where lever = 'backlinks' group by 1,2,3,4 order by 1,2,3,4;
 
--- S1.6b: weekly verdicts per channel (after 20261023010000 is applied), newest first
+-- S1.6b: weekly verdicts per channel, newest first
 select channel_id, arm_scope, week_start, n_treated, n_holdout, lift, cumulative_lift, windows_judged, verdict,
        stop_rule_triggered
 from lever_verdicts order by channel_id, week_start desc, arm_scope;
 
--- S2.1: the playlist test's arms per channel (after 20261027000000 is applied), and its proposals by status
+-- S2.1: the playlist test's arms per channel, and its proposals by status
 select channel_id, arm, status, count(1), sum(coalesce(array_length(proposal_ids, 1), 0)) proposals
 from playlist_arms group by 1,2,3 order by 1,2,3;
 select a.channel_id, p.status, count(1)
@@ -2149,7 +2024,7 @@ select channel_id, week_start, windows_judged, n_treated, n_holdout, lift, cumul
        stop_rule_triggered
 from lever_verdicts where lever = 'playlist' order by channel_id, week_start;
 
--- S2.4: Short-link recommendations per channel and status (after 20261027010000 is applied), and how many have
+-- S2.4: Short-link recommendations per channel and status, and how many have
 -- their shadow next-watch logged
 select channel_id, status, count(1), count(distinct short_id) shorts, count(decision_log_id) logged
 from short_link_recommendations group by 1,2 order by 1,2;
@@ -2173,7 +2048,7 @@ select channel_id, arm, status, payload->>'path' path, payload->'error'->>'reaso
        count(1) filter (where created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc') today
 from interventions where origin = 'midas' and lever = 'title' group by 1,2,3,4,5 order by 1,2,3,4,5;
 
--- S3.4: agent runs per channel by how they ended (after 20261030000000 is applied), with their turns
+-- S3.4: agent runs per channel by how they ended, with their turns
 select channel_id, status, trajectory->'end'->>'kind' ended, trajectory->'end'->>'reason' reason, count(1),
        round(avg((trajectory->>'turns')::int), 1) avg_turns
 from interventions where origin = 'midas' and lever = 'title' and payload->>'path' = 'agent'
@@ -2207,11 +2082,6 @@ select case when d.subject not like '%->%' then 'triage'
        round(count(1) filter (where d.jev_answer = d.rules_answer)::numeric
              / nullif(count(1) filter (where d.jev_answer is not null), 0), 3) agreement
 from decision_log d group by 1 order by 1;
-
--- applied audits in the last 90 days that landed on dormant videos
-select v.channel_id, count(1) filter (where a.measurement_result->>'reason_code' = 'dormant') dormant, count(1) total
-from audits a join videos v on v.id = a.video_id
-where a.applied_at > now() - interval '90 days' group by 1;
 ```
 
 ---
