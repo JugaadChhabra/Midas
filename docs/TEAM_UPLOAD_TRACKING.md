@@ -99,7 +99,8 @@ Roles:
 - **Password hashing**: add `argon2-cffi` (or `bcrypt`) to `requirements.txt`. Pin exactly,
   per the file's existing convention.
 - **No signup / invites.** Users are created with a script:
-  `scripts/create_user.py --email … --name … --role manager` (prompts for password).
+  `scripts/manage_users.py create --email … --name … --role manager` (prompts for password;
+  also `reset-password`, `deactivate`). Built in #144: see STATE.md.
 - **Login page**: `app/static/login.html` + `POST /session/login`, `POST /session/logout`,
   `GET /session/me` (sidebar uses it for name + role-based nav).
 - **Global gate**: one middleware/dependency that 401s every route except an explicit
@@ -299,7 +300,7 @@ Different concepts; don't reuse `_quota_date`.
   `scripts/apply_migrations.py`.
 - **After applying on the office machine: verify, then refresh the NAS snapshot** —
   `CLAUDE.md` rule, `snapshot_to_nas()`.
-- Bootstrap users with `scripts/create_user.py` and set `channels.manager_id` for every
+- Bootstrap users with `scripts/manage_users.py create` and set `channels.manager_id` for every
   channel (admin UI or a one-off SQL) before handing logins out — a channel with
   `manager_id = null` is visible only to admin/exec.
 - Update `STATE.md` in the same commits (new tables, routes, RPCs, pages, the auth gate).
@@ -308,7 +309,7 @@ Different concepts; don't reuse `_quota_date`.
 ## 10. Suggested build order
 
 1. Run the probe (§3). Adjust §5 if needed.
-2. Auth: tables, `create_user.py`, session endpoints, login page, global gate. Ship this
+2. Auth: tables, `manage_users.py`, session endpoints, login page, global gate. Ship this
    alone first — it also closes the open-LAN-port issue.
 3. `app/access.py` + scope all 64 routes + `tests/test_route_access.py`. Biggest step.
 4. `channel_uploads` table + sync changes + backfill.
