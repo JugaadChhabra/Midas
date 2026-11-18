@@ -486,8 +486,7 @@ Sidebar.mount({
   // Same rail as the board — one list, in Sidebar. Here the four sections are
   // in-page panels, so they get onSelect rather than hrefs. The divider label
   // is filled in by setChannels once the channel's name is known.
-  items: [{ id: 'running', label: 'Running', icon: 'running', href: '/' },
-          { section: '' }].concat(Sidebar.CHANNEL_ITEMS),
+  items: Sidebar.TOP_ITEMS.concat([{ section: '' }], Sidebar.CHANNEL_ITEMS),
   activeId: initialTab || 'autopilot',
   onSelect: switchTab,
 });

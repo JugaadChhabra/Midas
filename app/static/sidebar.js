@@ -30,6 +30,7 @@
 
   const ICONS = {
     running:     () => stroke('<path d="M3 12h4l2.5-6 4 12L16 12h5"/>'),
+    team:        () => stroke('<circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.8.6 3 2.2 3.4 4.7"/>'),
     videos:      () => stroke('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8.5 5.5 3.5L10 15.5z"/>'),
     autopilot:   () => stroke('<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/>'),
     playlists:   () => stroke('<path d="M3 6h11M3 12h11M3 18h7"/><path d="m16.5 12.5 4.5 2.75-4.5 2.75z"/>'),
@@ -333,6 +334,13 @@
     if (el) el.textContent = label;
   }
 
+  // The fleet-wide destinations above the divider, the same on every page:
+  // the board, and the Team page (roster, and later the uploads grid).
+  const TOP_ITEMS = [
+    { id: 'running', label: 'Running', icon: 'running', href: '/' },
+    { id: 'team',    label: 'Team',    icon: 'team',    href: '/team' },
+  ];
+
   // The four channel sections, in order. The rail is identical on every screen
   // — including the board, where they point into whichever channel you last
   // had open — so this list lives here rather than being retyped per page.
@@ -355,5 +363,5 @@
   }
 
   window.Sidebar = { mount, setChannels, setSection, shortLabel, commonWordPrefix,
-                     CHANNEL_ITEMS, rememberChannel, lastChannel };
+                     TOP_ITEMS, CHANNEL_ITEMS, rememberChannel, lastChannel };
 })();

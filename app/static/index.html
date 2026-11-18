@@ -55,7 +55,7 @@ const $ = (id) => document.getElementById(id);
 // re-points the links once /dashboard tells us which channels exist.
 let railChannel = Sidebar.lastChannel();
 Sidebar.mount({
-  items: [{ id: 'running', label: 'Running', icon: 'running', href: '/' }]
+  items: Sidebar.TOP_ITEMS
     .concat([{ section: '' }])
     .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
   activeId: 'running',
@@ -76,7 +76,7 @@ function pointRailAt(channels) {
   }
   document.querySelectorAll('.sidebar-nav a.snav').forEach(a => {
     const id = a.dataset.tab;
-    if (id !== 'running') a.setAttribute('href', railHref(id));
+    if (!Sidebar.TOP_ITEMS.some(it => it.id === id)) a.setAttribute('href', railHref(id));
   });
   return railChannel;
 }
