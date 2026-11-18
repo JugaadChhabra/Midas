@@ -22,9 +22,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app import backlinks, human_edits, quota
+from app.access import require_intervention
 from app.apply_outcome import ApplyError, ApplyOutcome
 from app.config import settings
 from app.db import supabase
@@ -181,7 +182,7 @@ def apply_backlinks(intervention: dict) -> dict:
     return {"status": InterventionStatus.MEASURING, "description": rendered}
 
 
-@router.post("/interventions/{intervention_id}/revert")
+@router.post("/interventions/{intervention_id}/revert", dependencies=[Depends(require_intervention)])
 def revert_intervention(intervention_id: int):
     """Remove an applied Midas backlinks block from the video's live description.
 

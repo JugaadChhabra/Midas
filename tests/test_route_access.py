@@ -40,22 +40,9 @@ NON_API_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc", "/
 
 #: PENDING (expand–contract): routes this ticket leaves unscoped. Each later
 #: ticket removes its routes as it scopes them; the list may only shrink, and the
-#: guard fails if a route here turns out to be scoped. Empty and deleted by #147.
+#: guard fails if a route here turns out to be scoped. #146 scoped the object-id
+#: routes; empty and deleted by #147.
 PENDING = {
-    # #146: routes addressed by another object's id get a resolver.
-    ("GET", "/videos/{video_id}"),
-    ("POST", "/videos/{video_id}/audit"),
-    ("GET", "/videos/{video_id}/audits"),
-    ("POST", "/audits/{audit_id}/apply"),
-    ("POST", "/audits/{audit_id}/revert"),
-    ("GET", "/audits/{audit_id}/measurement"),
-    ("POST", "/interventions/{intervention_id}/revert"),
-    ("POST", "/short-links/{recommendation_id}/set"),
-    ("POST", "/short-links/{recommendation_id}/dismiss"),
-    ("GET", "/shorts/jobs/{job_id}"),
-    ("GET", "/shorts/clips/{clip_id}/file"),
-    ("POST", "/shorts/clips/{clip_id}/upload"),
-    ("POST", "/videos/{video_id}/short"),
     # #147: list and global routes are filtered, or become admin-only.
     ("GET", "/auth/login"),
     ("GET", "/auth/callback"),
@@ -326,3 +313,171 @@ def test_the_channel_settings_patch_cannot_set_the_manager(store):
 
     assert _channel(store, CH_A)["manager_id"] == MANAGER_A
     assert _channel(store, CH_B)["manager_id"] == MANAGER_B
+
+
+# ── isolation: every object-id route (#146) ──────────────────────────────────
+#
+# A route addressed by a video, audit, intervention, Short-link recommendation,
+# Shorts job or clip id resolves the object to its channel and applies the same
+# check: manager A gets 404 for manager B's object, and the same 404 for an id
+# that doesn't exist. The objects on B's channel are shaped so a user who gets
+# through stops at the route's own refusal (a private video, an applied audit
+# with no before-state, a human intervention, a `set` recommendation, an
+# uploaded clip): nothing reaches YouTube or a model.
+
+V_A, V_B, V_NONE = "vid_A", "vid_B", "vid_unmapped"
+AUDIT_A, AUDIT_B = 10, 11
+INTERVENTION_A, INTERVENTION_B = 20, 21
+REC_A, REC_B, REC_B_NO_CHANNEL = 30, 31, 32
+JOB_A, JOB_B = 40, 41
+CLIP_A, CLIP_B = 50, 51
+
+#: Path parameter → (resolver, the 404 detail, A's object, B's object, an unknown id).
+OBJECTS = {
+    "video_id": (access.require_video, access.VIDEO_NOT_FOUND, V_A, V_B, "vid_none"),
+    "audit_id": (access.require_audit, access.AUDIT_NOT_FOUND, AUDIT_A, AUDIT_B, 999),
+    "intervention_id": (access.require_intervention, access.INTERVENTION_NOT_FOUND,
+                        INTERVENTION_A, INTERVENTION_B, 999),
+    "recommendation_id": (access.require_short_link, access.SHORT_LINK_NOT_FOUND,
+                          REC_A, REC_B, 999),
+    "job_id": (access.require_shorts_job, access.SHORTS_JOB_NOT_FOUND, JOB_A, JOB_B, 999),
+    "clip_id": (access.require_shorts_clip, access.SHORTS_CLIP_NOT_FOUND, CLIP_A, CLIP_B, 999),
+}
+
+#: Every route addressed by one of those ids (the #146 list), with its id.
+OBJECT_ROUTES = [
+    ("GET", "/videos/{video_id}"),
+    ("POST", "/videos/{video_id}/audit"),
+    ("GET", "/videos/{video_id}/audits"),
+    ("POST", "/videos/{video_id}/short"),
+    ("POST", "/audits/{audit_id}/apply"),
+    ("POST", "/audits/{audit_id}/revert"),
+    ("GET", "/audits/{audit_id}/measurement"),
+    ("POST", "/interventions/{intervention_id}/revert"),
+    ("POST", "/short-links/{recommendation_id}/set"),
+    ("POST", "/short-links/{recommendation_id}/dismiss"),
+    ("GET", "/shorts/jobs/{job_id}"),
+    ("GET", "/shorts/clips/{clip_id}/file"),
+    ("POST", "/shorts/clips/{clip_id}/upload"),
+]
+
+
+def _param(path):
+    names = [n for n in OBJECTS if "{" + n + "}" in path]
+    assert len(names) == 1, path
+    return names[0]
+
+
+def _object_rows(owner, channel, video, audit, intervention, rec, job, clip):
+    return {
+        "videos": {"id": video, "channel_id": channel, "title": f"Video {owner}",
+                   "privacy_status": "private", "tags": []},
+        "audits": {"id": audit, "video_id": video, "status": "applied",
+                   "title_before": None, "description_before": None},
+        "interventions": {"id": intervention, "video_id": video, "channel_id": channel,
+                          "lever": "backlinks", "origin": "human", "arm": "n/a",
+                          "status": "applied"},
+        "short_link_recommendations": {"id": rec, "channel_id": channel, "short_id": video,
+                                       "target_video_id": video, "status": "set",
+                                       "intervention_id": None},
+        "shorts_jobs": {"id": job, "channel_id": channel, "status": "DONE"},
+        "shorts_clips": {"id": clip, "job_id": job, "local_path": None, "rank": 1,
+                         "upload_status": "UPLOADED"},
+    }
+
+
+@pytest.fixture
+def objects(store):
+    """Each object type once on A's channel and once on B's; an unmapped video;
+    and a recommendation on B's Short with no channel_id (the column is
+    nullable: its channel is the Short's)."""
+    rows = [_object_rows("A", CH_A, V_A, AUDIT_A, INTERVENTION_A, REC_A, JOB_A, CLIP_A),
+            _object_rows("B", CH_B, V_B, AUDIT_B, INTERVENTION_B, REC_B, JOB_B, CLIP_B)]
+    for table in rows[0]:
+        store._tables[table] = [r[table] for r in rows]
+    store._tables["videos"].append({"id": V_NONE, "channel_id": CH_NONE,
+                                    "privacy_status": "private", "tags": []})
+    store._tables["short_link_recommendations"].append(
+        {"id": REC_B_NO_CHANNEL, "channel_id": None, "short_id": V_B,
+         "target_video_id": V_B, "status": "set", "intervention_id": None})
+    return store
+
+
+def _object_request(client, method, path, object_id):
+    url = path.replace("{" + _param(path) + "}", str(object_id))
+    assert "{" not in url, f"fill the path parameters of {path}"
+    return client.request(method, url)
+
+
+def _object_404(response, detail):
+    return (response.status_code == 404
+            and response.headers.get("content-type", "").startswith("application/json")
+            and response.json() == {"detail": detail})
+
+
+def test_the_object_routes_are_every_route_addressed_by_an_object_id():
+    keys = {key for route in _api_routes() for key in _keys(route)}
+    by_param = sorted(k for k in keys
+                      if "{channel_id}" not in k[1]
+                      and any("{" + n + "}" in k[1] for n in OBJECTS))
+    assert by_param == sorted(OBJECT_ROUTES)
+
+
+@pytest.mark.parametrize("method,path", OBJECT_ROUTES)
+def test_every_object_route_uses_its_resolver(method, path):
+    by_key = {key: route for route in _api_routes() for key in _keys(route)}
+    resolver = OBJECTS[_param(path)][0]
+    assert resolver in list(_calls(by_key[(method, path)].dependant))
+
+
+@pytest.mark.parametrize("method,path", OBJECT_ROUTES)
+def test_manager_gets_404_for_another_managers_object(objects, method, path):
+    _, detail, _, theirs, _ = OBJECTS[_param(path)]
+    r = _object_request(_as(MANAGER_A), method, path, theirs)
+    assert _object_404(r, detail), (r.status_code, r.text)
+
+
+@pytest.mark.parametrize("method,path", OBJECT_ROUTES)
+def test_manager_gets_the_same_404_for_an_unknown_object(objects, method, path):
+    _, detail, _, theirs, unknown = OBJECTS[_param(path)]
+    r = _object_request(_as(MANAGER_A), method, path, unknown)
+    other = _object_request(_as(MANAGER_A), method, path, theirs)
+    assert _object_404(r, detail), (r.status_code, r.text)
+    assert (r.status_code, r.json()) == (other.status_code, other.json())
+
+
+@pytest.mark.parametrize("method,path", OBJECT_ROUTES)
+def test_exec_gets_through_to_any_object(objects, method, path):
+    _, detail, _, theirs, _ = OBJECTS[_param(path)]
+    r = _object_request(_as(EXEC), method, path, theirs)
+    assert not _object_404(r, detail), (r.status_code, r.text)
+
+
+@pytest.mark.parametrize("method,path", OBJECT_ROUTES)
+def test_manager_gets_through_to_their_own_object(objects, method, path):
+    _, detail, mine, _, _ = OBJECTS[_param(path)]
+    r = _object_request(_as(MANAGER_A), method, path, mine)
+    assert not _object_404(r, detail), (r.status_code, r.text)
+    assert r.status_code != 403, r.text
+
+
+def test_manager_gets_404_for_a_video_on_a_channel_with_no_manager(objects):
+    r = _as(MANAGER_A).get(f"/videos/{V_NONE}")
+    assert _object_404(r, access.VIDEO_NOT_FOUND), (r.status_code, r.text)
+    assert _as(EXEC).get(f"/videos/{V_NONE}").status_code == 200
+
+
+def test_a_recommendation_with_no_channel_takes_its_shorts_channel(objects):
+    """`short_link_recommendations.channel_id` is nullable (S2.4): the Short's
+    channel decides."""
+    for path in ("/short-links/{id}/set", "/short-links/{id}/dismiss"):
+        url = path.format(id=REC_B_NO_CHANNEL)
+        assert _object_404(_as(MANAGER_A).post(url), access.SHORT_LINK_NOT_FOUND)
+        assert not _object_404(_as(MANAGER_B).post(url), access.SHORT_LINK_NOT_FOUND)
+
+
+def test_a_refused_object_route_writes_nothing(objects):
+    before = len(objects.writes)
+    for method, path in OBJECT_ROUTES:
+        _object_request(_as(MANAGER_A), method, path, OBJECTS[_param(path)][3])
+    assert objects.writes[before:] == []

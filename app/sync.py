@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timedelta, timezone
 from googleapiclient.errors import HttpError
 
-from app.access import require_channel
+from app.access import require_channel, require_video
 from app import human_edits
 from app.content_type import is_episode
 from app.db import supabase
@@ -488,7 +488,7 @@ def list_videos(channel_id: str):
     return videos
 
 
-@router.get("/videos/{video_id}")
+@router.get("/videos/{video_id}", dependencies=[Depends(require_video)])
 def get_video(video_id: str):
     """Single video row including the heavy `description`/`tags` columns that
     the list endpoint omits. Used by the channel page to lazy-load a video's
