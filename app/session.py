@@ -41,11 +41,12 @@ from urllib.parse import quote, urlsplit
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
+from app.access import current_user
 from app.db import supabase
 from app.status_vocab import ALL_USER_ROLES
 
@@ -324,5 +325,5 @@ def logout(request: Request):
 
 
 @router.get("/session/me")
-def me(request: Request):
-    return request.state.user
+def me(user: dict = Depends(current_user)):
+    return user

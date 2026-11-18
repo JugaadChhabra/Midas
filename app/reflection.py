@@ -1,7 +1,8 @@
 import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
+from app.access import require_channel
 from app import tracing, verdicts
 from app.config import settings
 from app.db import supabase
@@ -776,7 +777,7 @@ def _reflect_inner(channel_id: str) -> dict:
 
 # ── API endpoints ─────────────────────────────────────────────────────────────
 
-@router.get("/channels/{channel_id}/reflection/history")
+@router.get("/channels/{channel_id}/reflection/history", dependencies=[Depends(require_channel)])
 def reflection_history(channel_id: str):
     """List all prompt versions for a channel, newest first."""
     rows = (
@@ -796,7 +797,7 @@ def _require_reflection_enabled() -> None:
         raise HTTPException(409, "Reflection is frozen: REFLECTION_ENABLED=false")
 
 
-@router.post("/channels/{channel_id}/prompt-versions/{version_id}/promote")
+@router.post("/channels/{channel_id}/prompt-versions/{version_id}/promote", dependencies=[Depends(require_channel)])
 def promote_version(channel_id: str, version_id: int):
     """Manually promote a shadow candidate to live. Only valid for status=shadow."""
     _require_reflection_enabled()
@@ -819,7 +820,7 @@ def promote_version(channel_id: str, version_id: int):
     return {"ok": True, "promoted_version_id": version_id}
 
 
-@router.post("/channels/{channel_id}/reflection/trigger")
+@router.post("/channels/{channel_id}/reflection/trigger", dependencies=[Depends(require_channel)])
 def trigger_reflection(channel_id: str):
     """Manually trigger a reflection cycle (ignores cooldown check)."""
     _require_reflection_enabled()
@@ -827,7 +828,7 @@ def trigger_reflection(channel_id: str):
     return result
 
 
-@router.get("/channels/{channel_id}/reflection/shadow-comparison")
+@router.get("/channels/{channel_id}/reflection/shadow-comparison", dependencies=[Depends(require_channel)])
 def shadow_comparison(channel_id: str):
     """Return side-by-side comparison: live vs shadow_pending audits for same videos."""
     shadow_audits = all_rows(

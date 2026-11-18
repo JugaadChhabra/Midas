@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from datetime import datetime, timezone
 
+from app.access import current_user, filter_channels, require_channel
 from app.config import settings
 from app.db import supabase
 from app.status_vocab import PausedReason
@@ -111,16 +112,18 @@ def callback(request: Request, code: str | None = None, error: str | None = None
 
 
 @router.get("/channels")
-def list_channels():
-    res = supabase().table("channels").select(
+def list_channels(user: dict = Depends(current_user)):
+    """The channels the user can see (app/access.py): every one for admin and
+    exec, a manager's own for a manager."""
+    query = supabase().table("channels").select(
         "id,name,handle,last_synced_at,default_language,"
         "autopilot_enabled,autopilot_paused_reason,autopilot_daily_cap,autopilot_last_tick_at,"
         "sync_shorts,analytics_authorized,playlist_health_enabled,"
         "measurement_enabled,reach_warmup,"
         "autopilot_shorts_enabled,"
         "shorts_cut_mode,shorts_camera_motion,nas_folder"
-    ).execute()
-    return res.data
+    )
+    return filter_channels(query, user).execute().data
 
 
 class ChannelSettings(BaseModel):
@@ -137,7 +140,7 @@ class ChannelSettings(BaseModel):
     nas_folder: str | None = None
 
 
-@router.patch("/channels/{channel_id}")
+@router.patch("/channels/{channel_id}", dependencies=[Depends(require_channel)])
 def update_channel(channel_id: str, body: ChannelSettings):
     patch: dict = {}
     if body.default_language is not None:

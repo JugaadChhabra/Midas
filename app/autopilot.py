@@ -3,8 +3,9 @@ import math
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.access import require_channel
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -580,7 +581,7 @@ def tick():
 
 # ── HTTP endpoints ─────────────────────────────────────────────────────
 
-@router.post("/channels/{channel_id}/autopilot/resume")
+@router.post("/channels/{channel_id}/autopilot/resume", dependencies=[Depends(require_channel)])
 def resume_autopilot(channel_id: str):
     supabase().table("channels").update({
         "autopilot_paused_reason": None, "autopilot_paused_at": None,
@@ -589,7 +590,7 @@ def resume_autopilot(channel_id: str):
     return {"ok": True}
 
 
-@router.get("/channels/{channel_id}/autopilot/log")
+@router.get("/channels/{channel_id}/autopilot/log", dependencies=[Depends(require_channel)])
 def autopilot_log(channel_id: str):
     # The 50 latest audits for THIS channel, with the video title, in one query
     # via the channel-scoped accessor. Replaces an older form that pulled every

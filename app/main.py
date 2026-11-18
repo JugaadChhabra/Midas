@@ -7,7 +7,7 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.auth import router as auth_router
-from app import session
+from app import access, session
 from app.sync import router as sync_router
 from app.audits import router as audits_router
 from app import catch_up, eligibility, job_status, measurement, quota, sync, tracing
@@ -606,6 +606,7 @@ app = FastAPI(title="Midas", lifespan=lifespan)
 app.middleware("http")(session.gate)
 app.include_router(session.router)
 app.include_router(auth_router)
+app.include_router(access.router)
 app.include_router(sync_router)
 app.include_router(audits_router)
 app.include_router(quota_router)
