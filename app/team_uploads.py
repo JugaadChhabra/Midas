@@ -18,6 +18,10 @@
     end, it runs 7 days from or to it. Longer than ``MAX_DAYS`` (92), or
     backwards, is 422.
 
+``GET /team/uploads/videos?member_id=&day=&manager_id=`` (#152) → the uploads
+behind one cell, credited by the same code (``_scope``, ``_credited``), so a
+cell's count and its list can't disagree.
+
 Computed in Python, not by a SQL RPC, so the whole grid is testable offline
 (decided in #142).
 
@@ -126,29 +130,28 @@ def _count(cell: dict, is_short) -> None:
     cell["shorts" if is_short is True else "long_form"] += 1
 
 
-@router.get("/team/uploads")
-def uploads_grid(
-    from_: str | None = Query(None, alias="from"),
-    to: str | None = Query(None),
-    manager_id: int | None = Query(None),
-    user: dict = Depends(access.current_user),
-):
-    first, last = window(_parse_day(from_, "from"), _parse_day(to, "to"))
-    days = [first + timedelta(days=i) for i in range((last - first).days + 1)]
-    day_keys = [d.isoformat() for d in days]
-    sees_all = access.sees_all(user)
-    if not sees_all:
+def _scope(db, user: dict, manager_id: int | None) -> tuple[list[dict], int | None]:
+    """The user's visible channels, narrowed to ``manager_id``'s for admin and
+    exec (a manager's ``manager_id`` is ignored and comes back None)."""
+    if not access.sees_all(user):
         manager_id = None
-    db = supabase()
-
     query = access.filter_channels(db.table("channels").select(CHANNEL_COLUMNS), user)
     if manager_id is not None:
         query = query.eq("manager_id", manager_id)
-    channels = all_rows(query)
-    channel_ids = sorted(c["id"] for c in channels)
+    return all_rows(query), manager_id
 
+
+def _credited(db, channels: list[dict], first: date, last: date,
+              columns: str = UPLOAD_COLUMNS):
+    """The uploads on ``channels`` in the IST days ``[first, last]``, each with
+    the member credited for it (the assignment holding its channel on its IST
+    day, else None = Unassigned), and the assignments in the window by channel.
+
+    The one crediting rule, shared by the grid and its drill-down so a cell and
+    its list can't disagree."""
+    channel_ids = sorted(c["id"] for c in channels)
     uploads = rows_for_ids(
-        lambda ids: (db.table("channel_uploads").select(UPLOAD_COLUMNS)
+        lambda ids: (db.table("channel_uploads").select(columns)
                      .in_("channel_id", ids)
                      .gte("uploaded_at", ist_midnight(first).isoformat())
                      .lt("uploaded_at", ist_midnight(last + timedelta(days=1)).isoformat())),
@@ -163,12 +166,31 @@ def uploads_grid(
         if _day(a["starts_on"]) <= last and (ends is None or ends > first):
             by_channel.setdefault(a["channel_id"], []).append(a)
 
-    cells: dict[int | None, dict[str, dict]] = {}
+    credited = []
     for u in uploads:
         day = ist_day(u["uploaded_at"])
-        if not first <= day <= last:
-            continue
-        member = _holder(by_channel.get(u["channel_id"], []), day)
+        if first <= day <= last:
+            credited.append((_holder(by_channel.get(u["channel_id"], []), day), day, u))
+    return credited, by_channel
+
+
+@router.get("/team/uploads")
+def uploads_grid(
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = Query(None),
+    manager_id: int | None = Query(None),
+    user: dict = Depends(access.current_user),
+):
+    first, last = window(_parse_day(from_, "from"), _parse_day(to, "to"))
+    days = [first + timedelta(days=i) for i in range((last - first).days + 1)]
+    day_keys = [d.isoformat() for d in days]
+    sees_all = access.sees_all(user)
+    db = supabase()
+    channels, manager_id = _scope(db, user, manager_id)
+    credited, by_channel = _credited(db, channels, first, last)
+
+    cells: dict[int | None, dict[str, dict]] = {}
+    for member, day, u in credited:
         row = cells.setdefault(member, {})
         _count(row.setdefault(day.isoformat(), _zero()), u.get("is_short"))
 
@@ -224,3 +246,80 @@ def uploads_grid(
     return {"from": first.isoformat(), "to": last.isoformat(), "days": day_keys,
             "manager_id": manager_id, "managers": managers,
             "channels": shaped_channels, "rows": rows}
+
+
+# ── the drill-down (#152) ─────────────────────────────────────────────────────
+
+VIDEO_COLUMNS = ("video_id,channel_id,title,thumbnail_url,is_short,privacy_status,"
+                 "scheduled_publish_at,uploaded_at")
+
+#: The status pill: ``scheduled`` while a go-live time is set (YouTube clears
+#: ``status.publishAt`` once the video is live), else the privacy status. Shown
+#: only, never stored.
+SCHEDULED = "scheduled"
+
+
+def _status(upload: dict) -> str | None:
+    if upload.get("scheduled_publish_at"):
+        return SCHEDULED
+    return upload.get("privacy_status")
+
+
+def _ist_time(at: str) -> str:
+    """An ISO timestamp as IST wall-clock time, ``+05:30`` (sorts as time)."""
+    return datetime.fromisoformat(str(at).replace("Z", "+00:00")).astimezone(IST).isoformat()
+
+
+def _member(db, user: dict, member_id: int, channels: list[dict]) -> dict:
+    """The member asked for; 404 when unknown or, for a manager, neither theirs
+    nor ever assigned to one of their channels (whose rows their grid shows)."""
+    rows = (db.table("team_members").select("id,name,manager_id")
+            .eq("id", member_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
+    member = rows[0]
+    if access.sees_all(user) or member.get("manager_id") == user["id"]:
+        return member
+    held = rows_for_ids(
+        lambda ids: (db.table("channel_assignments").select("id")
+                     .eq("team_member_id", member_id).in_("channel_id", ids)),
+        sorted(c["id"] for c in channels))
+    if not held:
+        raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
+    return member
+
+
+@router.get("/team/uploads/videos")
+def uploads_videos(
+    day: str = Query(...),
+    member_id: int | None = Query(None),
+    manager_id: int | None = Query(None),
+    user: dict = Depends(access.current_user),
+):
+    """The uploads behind one grid cell: on the user's visible channels (and
+    ``manager_id``'s, for admin and exec, as the grid), on IST ``day``,
+    credited to ``member_id`` (omitted = Unassigned) by the grid's own rule.
+    Oldest first."""
+    the_day = _parse_day(day, "day")
+    if the_day is None:
+        raise HTTPException(422, "day must be a date (YYYY-MM-DD)")
+    db = supabase()
+    channels, manager_id = _scope(db, user, manager_id)
+    name = UNASSIGNED
+    if member_id is not None:
+        name = _member(db, user, member_id, channels)["name"]
+
+    credited, _ = _credited(db, channels, the_day, the_day, VIDEO_COLUMNS)
+    names = {c["id"]: c.get("name") for c in channels}
+    uploads = sorted((u for member, _, u in credited if member == member_id),
+                     key=lambda u: (_ist_time(u["uploaded_at"]), u["video_id"]))
+    videos = [{
+        "video_id": u["video_id"], "title": u.get("title"),
+        "thumbnail_url": u.get("thumbnail_url"),
+        "channel_id": u["channel_id"], "channel_name": names.get(u["channel_id"]),
+        "uploaded_at": u["uploaded_at"], "uploaded_at_ist": _ist_time(u["uploaded_at"]),
+        "is_short": u.get("is_short"), "privacy_status": u.get("privacy_status"),
+        "scheduled_publish_at": u.get("scheduled_publish_at"), "status": _status(u),
+    } for u in uploads]
+    return {"day": the_day.isoformat(), "member_id": member_id, "name": name,
+            "manager_id": manager_id, "videos": videos}
