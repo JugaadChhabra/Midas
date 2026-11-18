@@ -13,10 +13,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from app.access import current_user, filter_channels
 from app.config import settings
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
@@ -34,20 +35,23 @@ class AutoShortsRequest(BaseModel):
     url: str
 
 
-def _demo_channel_id(sb) -> str:
+def _demo_channel_id(sb, user: dict) -> str:
     """shorts_jobs.channel_id is NOT NULL and a FK to channels, so a job needs
-    one even though this flow never touches a channel. Borrow any existing row —
-    nothing is read back off it and nothing is ever published to it."""
-    rows = sb.table("channels").select("id").limit(1).execute().data or []
+    one even though this flow never touches a channel. Borrow an existing row —
+    nothing is read back off it and nothing is ever published to it. One the
+    user can see (#147): the job is then theirs to poll (``GET /shorts/jobs/{id}``
+    resolves it to this channel), and no other team's list shows it."""
+    rows = filter_channels(sb.table("channels").select("id"), user).limit(1).execute().data or []
     if not rows:
         raise HTTPException(
-            503, "No channel is connected yet — connect one at /auth/login first. "
-                 "AutoShorts doesn't publish to it; a job row just needs one to exist.")
+            503, "No channel to file the job under: none is connected, or none is "
+                 "mapped to you. AutoShorts doesn't publish to it; a job row just "
+                 "needs one to exist.")
     return rows[0]["id"]
 
 
 @router.post("/autoshorts/jobs")
-def create_autoshorts_job(body: AutoShortsRequest):
+def create_autoshorts_job(body: AutoShortsRequest, user: dict = Depends(current_user)):
     if not settings.SHORTS_YT_DOWNLOAD_ENABLED:
         raise HTTPException(503, "YouTube-URL cutting is off. Set SHORTS_YT_DOWNLOAD_ENABLED=true and restart.")
     url = body.url.strip()
@@ -61,7 +65,7 @@ def create_autoshorts_job(body: AutoShortsRequest):
     # happened to jobs 3218-3220 on 2026-08-04. The demo must not depend on
     # winning that race, so it never enqueues work it isn't about to run itself.
     inserted = sb.table("shorts_jobs").insert({
-        "channel_id":          _demo_channel_id(sb),
+        "channel_id":          _demo_channel_id(sb, user),
         "source_url":          url,
         "cut_mode":            "highlights",
         "camera_motion":       "calm",
@@ -82,6 +86,6 @@ def create_autoshorts_job(body: AutoShortsRequest):
     return {"job_id": job_id}
 
 
-@router.get("/autoshorts")
+@router.get("/autoshorts", dependencies=[Depends(current_user)])
 def autoshorts_page():
     return FileResponse(_STATIC_DIR / "autoshorts.html")

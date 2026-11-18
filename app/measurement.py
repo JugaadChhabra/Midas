@@ -52,7 +52,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 
-from app.access import require_audit, require_channel
+from app.access import require_admin, require_audit, require_channel
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -563,7 +563,7 @@ def channel_outcomes(channel_id: str):
     }
 
 
-@router.post("/measurement/evaluate")
+@router.post("/measurement/evaluate", dependencies=[Depends(require_admin)])
 def trigger_eval():
     """Manual ops trigger for the daily eval pass."""
     return eval_measurements()

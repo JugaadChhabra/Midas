@@ -8,12 +8,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone, timedelta
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.config import settings
 from app.db import supabase
-from app.rows import all_rows, all_rows_parallel
+from app.rows import all_rows, all_rows_parallel, rows_for_ids
 from app import eligibility
+from app.access import current_user, sees_all, visible_channel_ids
 from app import quota as quota_mod
 from app.shorts.status import WORKING_STATUSES
 
@@ -92,7 +93,19 @@ def invalidate_dashboard_cache() -> None:
 
 
 @router.get("/dashboard")
-def dashboard():
+def dashboard(user: dict = Depends(current_user)):
+    """The board for the signed-in user (team tracker #147). Admin and exec get
+    the cached fleet payload as it is; a manager gets it narrowed to their own
+    channels on read (``_scoped``). The cache itself stays unfiltered, so
+    ``invalidate_dashboard_cache`` and the ``dashboard_summary()`` RPC are
+    unchanged."""
+    payload = _cached_dashboard()
+    if sees_all(user):
+        return payload
+    return _scoped(payload, visible_channel_ids(user))
+
+
+def _cached_dashboard():
     """Cached wrapper around _compute_dashboard(). Double-checked locking so a
     burst of concurrent polls arriving after expiry recomputes exactly once —
     not once per request — then shares the result."""
@@ -255,6 +268,180 @@ def _aggregate_legacy() -> tuple[dict, int, int]:
     return stats, cut_total, uploaded_total
 
 
+def _summaries(enriched: list[dict]) -> tuple[dict, dict, dict]:
+    """The health block, the pipeline funnel and the channel-derived KPIs, from
+    the enriched per-channel rows. One definition for the fleet payload and a
+    manager's narrowed one (``_scoped``), so the two can't count differently."""
+    # Same predicate the tick uses, so the page cannot report a channel as
+    # running that autopilot would skip.
+    running_count = sum(1 for c in enriched if eligibility.can_audit(c))
+    paused_count = sum(1 for c in enriched if c.get("autopilot_paused_reason"))
+    enabled_count = sum(1 for c in enriched if c.get("autopilot_enabled"))
+    sync_hours = [c["hours_since_sync"] for c in enriched if c["hours_since_sync"] is not None]
+    worst_sync_hours = round(max(sync_hours), 1) if sync_hours else None
+
+    # Globals are summed from the per-channel aggregates. audited/applied use the
+    # latest-audit view (audited_regular+shorts / applied_latest) so numerator and
+    # denominator stay consistent with the per-channel cards.
+    total_videos = sum(c["video_count"] for c in enriched)
+    total_audited = sum(c["audited_regular"] + c["audited_shorts"] for c in enriched)
+    total_not_audited = max(0, total_videos - total_audited)
+    total_applied = sum(c["applied_latest"] for c in enriched)
+    applied_7d_total = sum(c["applied_7d"] for c in enriched)
+    pending_total = sum(c["pending_count"] for c in enriched)
+    daily_rate = applied_7d_total / 7.0
+    eta_days = round(total_not_audited / daily_rate) if daily_rate > 0 and total_not_audited > 0 else None
+    progress_pct = round(100.0 * total_audited / total_videos, 1) if total_videos > 0 else 0
+    apply_pct_of_audited = round(100.0 * total_applied / total_audited, 1) if total_audited > 0 else 0
+
+    health = {
+        "autopilot_running": running_count,
+        "autopilot_paused": paused_count,
+        "autopilot_enabled": enabled_count,
+        "autopilot_total": len(enriched),
+        "worst_sync_hours": worst_sync_hours,
+    }
+    pipeline = {
+        "total": total_videos,
+        "audited": total_audited,
+        "pending": pending_total,
+        "applied": total_applied,
+        "not_audited": total_not_audited,
+        "progress_pct": progress_pct,
+        "apply_pct_of_audited": apply_pct_of_audited,
+        "daily_rate": round(daily_rate, 1),
+        "eta_days": eta_days,
+    }
+    kpis = {
+        "channels": len(enriched),
+        "videos": total_videos,
+        "pending_total": pending_total,
+        "applied_today_total": sum(c["applied_today"] for c in enriched),
+        "applied_7d_total": applied_7d_total,
+        "delta_views_7d_total": sum(c["delta_views_7d"] for c in enriched),
+    }
+    return health, pipeline, kpis
+
+
+# ── A manager's board (#147) ──────────────────────────────────────────────
+# The fleet payload's per-channel rows narrow by filtering. Its Shorts totals,
+# "today" counts and activity feed are fleet-wide, so a manager's come from
+# ``_by_channel``: the same figures split per channel, computed once per cached
+# payload (so the cache's TTL and invalidation govern them too) and only when a
+# manager reads. Admin and exec never pay for it.
+
+#: How far back the per-channel activity feed looks for a manager's 8 events.
+_ACTIVITY_WINDOW = 200
+_ACTIVITY_ITEMS = 8
+
+_SCOPED_COUNTS = ("shorts_cut_total", "shorts_uploaded_total", "shorts_cut_today",
+                  "jobs_running", "audited_today")
+
+
+def _compute_by_channel(channel_names: dict[str, str]) -> dict:
+    """``{"counts": {channel_id: {<_SCOPED_COUNTS>}}, "activity": [...]}``."""
+    now = _now()
+    today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+    today = _iso(today_start)
+    counts: dict[str, dict] = {}
+
+    def _c(cid):
+        return counts.setdefault(cid, {k: 0 for k in _SCOPED_COUNTS})
+
+    jobs = all_rows(supabase().table("shorts_jobs").select("id,channel_id,status"))
+    job_channel = {j["id"]: j.get("channel_id") for j in jobs}
+    for j in jobs:
+        if j.get("channel_id") and j.get("status") in WORKING_STATUSES:
+            _c(j["channel_id"])["jobs_running"] += 1
+    for clip in all_rows(supabase().table("shorts_clips").select("id,job_id,upload_status,created_at")):
+        cid = job_channel.get(clip.get("job_id"))
+        if not cid:
+            continue
+        s = _c(cid)
+        s["shorts_cut_total"] += 1
+        if clip.get("upload_status") == "UPLOADED":
+            s["shorts_uploaded_total"] += 1
+        created = _parse_iso(clip.get("created_at"))
+        if created and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created and created >= today_start:
+            s["shorts_cut_today"] += 1
+
+    today_audits = all_rows(supabase().table("audits").select("id,video_id").gte("created_at", today))
+    recent = (
+        supabase().table("audits")
+        .select("id,video_id,status,applied_at,created_at")
+        .in_("status", ["applied", "pending", "quarantined", "failed"])
+        .order("created_at", desc=True)
+        .limit(_ACTIVITY_WINDOW)
+        .execute()
+    ).data or []
+    video_ids = {a["video_id"] for a in today_audits} | {a["video_id"] for a in recent}
+    videos = {v["id"]: v for v in rows_for_ids(
+        lambda chunk: supabase().table("videos").select("id,title,channel_id").in_("id", chunk),
+        sorted(video_ids))}
+    for a in today_audits:
+        cid = (videos.get(a["video_id"]) or {}).get("channel_id")
+        if cid:
+            _c(cid)["audited_today"] += 1
+    activity = []
+    for a in recent:
+        v = videos.get(a["video_id"]) or {}
+        cid = v.get("channel_id")
+        if not cid:
+            continue
+        activity.append({
+            "status": a["status"],
+            "video_id": a["video_id"],
+            "video_title": v.get("title"),
+            "channel_id": cid,
+            "channel_name": channel_names.get(cid),
+            "applied_at": a.get("applied_at"),
+            "created_at": a.get("created_at"),
+        })
+    return {"counts": counts, "activity": activity}
+
+
+def _by_channel(payload: dict) -> dict:
+    """``_compute_by_channel`` for this cached payload, computed once."""
+    with _dashboard_lock:
+        if _dashboard_cache.get("by_channel_for") is payload:
+            return _dashboard_cache["by_channel"]
+    names = {c["id"]: c.get("name") or c["id"] for c in payload["channels"]}
+    try:
+        result = _compute_by_channel(names)
+    except Exception:
+        # As the fleet path's counts: a failed read degrades to zeros and an
+        # empty feed rather than breaking the board.
+        log.warning("dashboard per-channel counts failed", exc_info=True)
+        result = {"counts": {}, "activity": []}
+    with _dashboard_lock:
+        _dashboard_cache["by_channel"] = result
+        _dashboard_cache["by_channel_for"] = payload
+    return result
+
+
+def _scoped(payload: dict, visible: set[str]) -> dict:
+    """The fleet payload narrowed to ``visible`` channels: their rows, and every
+    total, count and feed entry over them only. The quota block is the fleet's
+    shared Data API budget, not any channel's, and stays whole."""
+    channels = [c for c in payload["channels"] if c["id"] in visible]
+    health, pipeline, channel_kpis = _summaries(channels)
+    extra = _by_channel(payload) if channels else {"counts": {}, "activity": []}
+    counts = [extra["counts"].get(c["id"]) or {} for c in channels]
+    kpis = {**channel_kpis,
+            **{k: sum(c.get(k, 0) for c in counts) for k in _SCOPED_COUNTS}}
+    activity = [a for a in extra["activity"] if a["channel_id"] in visible][:_ACTIVITY_ITEMS]
+    return {
+        "channels": channels,
+        "kpis": {k: kpis[k] for k in payload["kpis"]},
+        "quota": payload["quota"],
+        "health": health,
+        "pipeline": pipeline,
+        "activity": activity,
+    }
+
+
 def _compute_dashboard():
     """One-shot payload for the home page.
 
@@ -306,6 +493,7 @@ def _compute_dashboard():
             "audited_shorts": s["audited_shorts"],
             "pending_count": s["pending_count"],
             "quarantined_count": s["quarantined_count"],
+            "applied_latest": s["applied_latest"],
             "applied_today": s["applied_today"],
             "applied_7d": s["applied_7d"],
             "applied_total": s["applied_total"],
@@ -315,28 +503,7 @@ def _compute_dashboard():
             **({"applied_by_day": s["applied_by_day"]} if "applied_by_day" in s else {}),
         })
 
-    # ── System health ─────────────────────────────────────────────────────
-    # Same predicate the tick uses, so the page cannot report a channel as
-    # running that autopilot would skip.
-    running_count = sum(1 for c in enriched if eligibility.can_audit(c))
-    paused_count = sum(1 for c in enriched if c.get("autopilot_paused_reason"))
-    enabled_count = sum(1 for c in enriched if c.get("autopilot_enabled"))
-    sync_hours = [c["hours_since_sync"] for c in enriched if c["hours_since_sync"] is not None]
-    worst_sync_hours = round(max(sync_hours), 1) if sync_hours else None
-
-    # ── Pipeline funnel ───────────────────────────────────────────────────
-    # Globals are summed from the per-channel aggregates. audited/applied use the
-    # latest-audit view (audited_regular+shorts / applied_latest) so numerator and
-    # denominator stay consistent with the per-channel cards.
-    total_videos_global = sum(s["video_count"] for s in stats.values())
-    total_audited_global = sum(s["audited_regular"] + s["audited_shorts"] for s in stats.values())
-    total_not_audited_global = max(0, total_videos_global - total_audited_global)
-    total_applied_global = sum(s["applied_latest"] for s in stats.values())
-    applied_7d_total = sum(s["applied_7d"] for s in stats.values())
-    daily_rate = applied_7d_total / 7.0
-    eta_days = round(total_not_audited_global / daily_rate) if daily_rate > 0 and total_not_audited_global > 0 else None
-    progress_pct = round(100.0 * total_audited_global / total_videos_global, 1) if total_videos_global > 0 else 0
-    apply_pct_of_audited = round(100.0 * total_applied_global / total_audited_global, 1) if total_audited_global > 0 else 0
+    health, pipeline, channel_kpis = _summaries(enriched)
 
     # ── Quota reset countdown ─────────────────────────────────────────────
     # From app.quota, which owns the boundary. This used to hardcode 07:00 UTC
@@ -402,38 +569,13 @@ def _compute_dashboard():
 
     # ── KPIs ──────────────────────────────────────────────────────────────
     kpis = {
-        "channels": len(channels),
-        "videos": total_videos_global,
-        "pending_total": sum(s["pending_count"] for s in stats.values()),
-        "applied_today_total": sum(s["applied_today"] for s in stats.values()),
-        "applied_7d_total": applied_7d_total,
-        "delta_views_7d_total": sum(s["delta_views_7d"] for s in stats.values()),
+        **channel_kpis,
         "shorts_cut_total": shorts_cut_total,
         "shorts_uploaded_total": shorts_uploaded_total,
         # Live "today / now" figures for the home hero tiles.
         "audited_today": audited_today,
         "shorts_cut_today": shorts_cut_today,
         "jobs_running": jobs_running,
-    }
-
-    health = {
-        "autopilot_running": running_count,
-        "autopilot_paused": paused_count,
-        "autopilot_enabled": enabled_count,
-        "autopilot_total": len(channels),
-        "worst_sync_hours": worst_sync_hours,
-    }
-
-    pipeline = {
-        "total": total_videos_global,
-        "audited": total_audited_global,
-        "pending": sum(s["pending_count"] for s in stats.values()),
-        "applied": total_applied_global,
-        "not_audited": total_not_audited_global,
-        "progress_pct": progress_pct,
-        "apply_pct_of_audited": apply_pct_of_audited,
-        "daily_rate": round(daily_rate, 1),
-        "eta_days": eta_days,
     }
 
     # Quota: today's used (authoritative via quota module) + 7-day sparkline.

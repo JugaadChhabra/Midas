@@ -5,7 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.access import require_shorts_clip, require_shorts_job, require_video
+from app.access import (
+    CHANNEL_NOT_FOUND, check_channel, current_user, require_shorts_clip, require_shorts_job,
+    require_video, scope_to_visible, sees_all,
+)
 from app.config import settings
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
@@ -30,7 +33,9 @@ class CreateJob(BaseModel):
 
 
 @router.post("/jobs")
-def create_job(body: CreateJob):
+def create_job(body: CreateJob, user: dict = Depends(current_user)):
+    # The channel comes from the body, so it gets the path routes' check (#147).
+    check_channel(user, body.channel_id)
     # Retired flow: cutting from a downloaded YouTube URL. Shorts now come from
     # the NAS source (see enqueue_language_jobs). Re-enable via SHORTS_YT_DOWNLOAD_ENABLED.
     if not settings.SHORTS_YT_DOWNLOAD_ENABLED:
@@ -65,11 +70,19 @@ _JOB_LIST_COLUMNS = (
 
 
 @router.get("/jobs")
-def list_jobs(channel_id: str | None = None):
+def list_jobs(channel_id: str | None = None, user: dict = Depends(current_user)):
+    """The newest 50 jobs, of one channel or of every channel the user sees: a
+    manager never gets another team's jobs, nor the channel-less NAS cut jobs
+    (``POST /shorts/cut``), which only admin and exec see (#147)."""
     sb = supabase()
     q = sb.table("shorts_jobs").select(_JOB_LIST_COLUMNS)
     if channel_id:
+        check_channel(user, channel_id)
         q = q.eq("channel_id", channel_id)
+    else:
+        q = scope_to_visible(q, user)
+        if q is None:
+            return []
     return q.order("id", desc=True).limit(50).execute().data or []
 
 
@@ -77,14 +90,28 @@ class CutLanguage(BaseModel):
     language: str
 
 
+def _cuts_folder(user: dict, folder: str) -> bool:
+    """Whether the user may cut ``folder``: admin and exec any; a manager only
+    the ``nas_folder`` of one of their own channels (#147)."""
+    if sees_all(user):
+        return True
+    q = scope_to_visible(supabase().table("channels").select("id,nas_folder"), user, "id")
+    rows = (q.execute().data or []) if q is not None else []
+    return any(resolve_folder(r.get("nas_folder") or "", [folder]) for r in rows)
+
+
 @router.post("/cut")
-def cut_language(body: CutLanguage):
+def cut_language(body: CutLanguage, user: dict = Depends(current_user)):
     """Enqueue a shorts job for every uncut video in a NAS language folder."""
     folders = list_source_languages()
     language = resolve_folder(body.language, folders)
     if language is None:
         raise HTTPException(400, f"Unknown NAS language folder: {body.language!r} "
                                  f"(folders on the NAS: {', '.join(map(repr, folders)) or 'none'})")
+    if not _cuts_folder(user, language):
+        # The folder is another team's channel's (or no channel's): the same
+        # 404 as for a channel they can't see.
+        raise HTTPException(404, CHANNEL_NOT_FOUND)
     try:
         enqueued = enqueue_language_jobs(language)
     except ValueError as exc:
@@ -93,21 +120,29 @@ def cut_language(body: CutLanguage):
     return {"language": language, "enqueued": enqueued}
 
 
-@router.get("/languages")
+@router.get("/languages", dependencies=[Depends(current_user)])
 def languages():
-    """NAS source language folders with their uncut video counts."""
+    """NAS source language folders with their uncut video counts. Every folder,
+    for every signed-in user: the NAS layout is shared, not any channel's, and
+    the channel page lists it to pick its own channel's folder (#147)."""
     return [{"language": lang, "uncut": uncut_count(lang)}
             for lang in list_source_languages()]
 
 
 @router.post("/jobs/clear-failed")
-def clear_failed_jobs(channel_id: str | None = None):
+def clear_failed_jobs(channel_id: str | None = None, user: dict = Depends(current_user)):
     """Delete FAILED shorts jobs (and their clips) so the list can start fresh.
-    Scoped to one channel when channel_id is given, else all channels."""
+    Scoped to one channel when channel_id is given, else every channel the user
+    sees (#147)."""
     sb = supabase()
     q = sb.table("shorts_jobs").select("id").eq("status", FAILED)
     if channel_id:
+        check_channel(user, channel_id)
         q = q.eq("channel_id", channel_id)
+    else:
+        q = scope_to_visible(q, user)
+        if q is None:
+            return {"deleted": 0}
     ids = [r["id"] for r in (q.execute().data or [])]
     if ids:
         # child rows first (FK), then the jobs; chunk to keep the URL short.

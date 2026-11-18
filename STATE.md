@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-18 (team tracker 04, #146: object-id routes scoped) · **Commit:** on top of
-`5467245` · **Branch:** `team-tracker/04-object-routes`
+**Generated:** 2026-11-18 (team tracker 05, #147: list and global routes scoped, admin-only routes, the
+route guard's pending list gone) · **Commit:** on top of `eb21ea2` · **Branch:** `team-tracker/05-list-admin-routes`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -668,12 +668,16 @@ channel) on `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`. For
 on a channel they can't see answer the same 404: `{"detail": "video_not_found"}`, `"audit_not_found"`,
 `"intervention_not_found"`, `"short_link_not_found"`, `"shorts_job_not_found"`, `"shorts_clip_not_found"`; admin and
 exec read nothing and pass, leaving an unknown id to the route's own 404 as before.
+List and global routes (#147) depend on `current_user` and narrow what they read to `visible_channel_ids`
+(`access.scope_to_visible`: `in_` the visible ids, or nothing read when there are none); a channel named in a body
+or query string goes through `access.check_channel` (the same 404 `channel_not_found`). Admin-only routes depend on
+`access.require_admin` (= `require_role(UserRole.ADMIN)`, 403 `{"detail": "forbidden"}` to exec and managers):
+`GET /auth/login`, `GET /auth/callback`, `GET /quota`, `GET /quota-cost-preview`, `GET /health/jobs`,
+`GET /health/channels`, `POST /measurement/evaluate`, and `PATCH /channels/{id}/manager`.
 Each dependency carries
 `access_rule = True`; `tests/test_route_access.py` walks `app.routes` and fails on a route with none that isn't on its
-open list (`/login`, `/session/login`, `/health`, `/session/logout`, `/`, `/channel`) or its PENDING list (the list
-and global routes, `/dashboard`, `/shorts/*`, `/autoshorts*`, `/quota*`, `/health/jobs`, `/health/channels`,
-`/measurement/evaluate`, `/auth/login`, `/auth/callback`, scoped by #147), and on a PENDING route that is now scoped.
-Until #147 lands, those routes still answer every signed-in user.
+open list (`/login`, `/session/login`, `/health`, `/session/logout`, `/`, `/channel`). There is no pending list: every
+other route is scoped, and a new unscoped route fails CI.
 
 - **Access** (`app/access.py` `router`): `PATCH /channels/{id}/manager` body `{manager_id: int | null}`, admin only
   (`require_channel` first, so a manager asking about another team's channel gets 404, about their own 403; exec
@@ -687,11 +691,11 @@ Until #147 lands, those routes still answer every signed-in user.
   unknown email spends one argon2 verify so it answers as slowly as a wrong password. `POST /session/logout` → 204,
   deletes the session row and the cookie. `GET /session/me` → `{id, email, name, role}`.
 
-- **Pages/health:** `GET /login` (Session, above); `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
-- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels` (only the user's visible channels, `access.filter_channels`; the sidebar switcher and the channel page read it), `PATCH /auth/channels/{id}` (`require_channel`; no `manager_id` field; enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
+- **Pages/health:** `GET /login` (Session, above); `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` (admin only) → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`, admin only) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py`, any signed-in user); `/static/*`.
+- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (both admin only; the callback stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels` (only the user's visible channels, `access.filter_channels`; the sidebar switcher and the channel page read it), `PATCH /auth/channels/{id}` (`require_channel`; no `manager_id` field; enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
-- **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply?force=`, `POST /channels/{id}/audits/apply-pending?force=` (both 409 `AGENT_CHANNEL_REFUSED`, "agent channel: a house-format apply replaces the description and its backlink block; pass force=true", on an `agent_enabled` channel unless `force=true`, before anything is sent or written; `audits._refuse_on_agent_channel`), `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk` (both only write `pending` audits, so unguarded), `POST /audits/{id}/revert` (409 "agent channel: an audit revert …; pass force=true" on an `agent_enabled` channel unless `?force=true`; 409 `quota_insufficient` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:847-852`), `GET /quota-cost-preview`.
-- **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes`, `POST /measurement/evaluate`.
+- **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply?force=`, `POST /channels/{id}/audits/apply-pending?force=` (both 409 `AGENT_CHANNEL_REFUSED`, "agent channel: a house-format apply replaces the description and its backlink block; pass force=true", on an `agent_enabled` channel unless `force=true`, before anything is sent or written; `audits._refuse_on_agent_channel`), `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk` (both only write `pending` audits, so unguarded), `POST /audits/{id}/revert` (409 "agent channel: an audit revert …; pass force=true" on an `agent_enabled` channel unless `?force=true`; 409 `quota_insufficient` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:847-852`), `GET /quota-cost-preview` (admin only; the channel page's apply confirm shows no cost estimate when it is refused).
+- **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes`, `POST /measurement/evaluate` (admin only).
 - **Reflection** (`app/reflection.py`): `GET /channels/{id}/reflection/history`, `POST /channels/{id}/prompt-versions/{vid}/promote`, `POST /channels/{id}/reflection/trigger`, `GET /channels/{id}/reflection/shadow-comparison`. Promote and trigger 409 `"Reflection is frozen: REFLECTION_ENABLED=false"` (`app/reflection.py:792`).
 - **Playlists** (`app/playlists_router.py`): `POST /channels/{id}/playlists/evaluate`, `GET /channels/{id}/playlists/health`, `POST /channels/{id}/playlists/bootstrap` (sync + embed all), `GET /channels/{id}/playlists/status`, `POST /channels/{id}/playlists/reconcile` (409 `"Playlist reconcile writes are frozen: PLAYLIST_RECONCILE_WRITES_ENABLED=false"`, `:263-267`), `GET /channels/{id}/playlists/proposals` (every `pending` proposal, `arm_id` ones first, then `proposed_at`, `id`), `POST /channels/{id}/playlists/proposals/decide` (executes adds/removes on YouTube, not frozen; `rejected` relabels only `pending` proposals; a proposal with `arm_id` is only marked `approved`/`rejected` and sends nothing, the response gaining `queued` when any).
 - **Autopilot** (`app/autopilot.py`): `POST /channels/{id}/autopilot/resume`, `GET /channels/{id}/autopilot/log`.
@@ -700,8 +704,23 @@ Until #147 lands, those routes still answer every signed-in user.
 - **Title test** (`app/lever_verdicts.py`): `GET /channels/{id}/title-test` → per path (`pipeline`|`agent`) `{treated, declined, cancelled {reason: n}, judged, insufficient, mean_delta, cumulative_lift, auto_reverts, stopped}`, `holdout {n, judged, mean_delta}`, and `trace` (tool-set stats over agent trajectories, `agent.loop.tools_called`). Read-only; reads `trajectory`, so needs `20261030000000`.
 - **Playlist test** (`app/playlist_test.py` `router`): `GET /channels/{id}/playlist-test` → `{"test_start", "test_end", "arms", "verdicts", "answer"}`; `answer` `pending` until a `treated_vs_holdout` row with `windows_judged` ≥ `PLAYLIST_EXPERIMENT_WINDOWS`, then `no` if it triggered the stop rule, else `yes`. Read-only.
 - **Short links** (`app/short_links.py` `router`; nothing reaches YouTube): `GET /channels/{id}/short-links?status=&limit=&offset=&format=` → one page of Shorts (not rows), those with a `pending` row first, then feed views, id, each with its recommendations in rank order plus YouTube/Studio URLs; unknown `status` 400, `limit` max 1000 (422 above); `format=csv` (else `json`; other 422) as `short-links-<id>.csv`, formula-leading cells prefixed `'` (`_cell`). `POST /short-links/{id}/set` (404 unknown): already `set` → `recorded: false`; else records the `human` `short_link` intervention (§2) under `_episode_key`, the Short's other `pending`/`set` rows → `not_chosen` (a `dismissed` stays), this row → `set`; → `{"recommendation", "intervention_id", "recorded"}`. `POST /short-links/{id}/dismiss` (404; 409 `"set: tick another target to change the Short's link"` on a `set` row) → `dismissed`, no intervention.
-- **Ops:** `GET /dashboard` (`app/dashboard.py:94`), `GET /quota` (`app/quota.py:295`), `GET /channels/{id}/performance`, `/performance/summary`, `/performance.csv` (`app/performance.py`).
-- **Shorts** (`app/shorts/routes.py`, prefix `/shorts`): `POST|GET /shorts/jobs`, `POST /shorts/cut`, `GET /shorts/languages`, `POST /shorts/jobs/clear-failed`, `GET /shorts/jobs/{id}`, `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`, `POST /videos/{id}/short`; `POST /autoshorts/jobs` (`app/shorts/autoshorts.py:49`).
+- **Ops:** `GET /dashboard` (`app/dashboard.py`): admin and exec get the cached fleet payload as before; a manager
+  gets it narrowed on read (`dashboard._scoped`) to their channels: their rows, `kpis`/`health`/`pipeline` over them
+  only (`_summaries`, shared with the fleet path), and the fleet-wide figures (`shorts_cut_total`,
+  `shorts_uploaded_total`, `shorts_cut_today`, `jobs_running`, `audited_today`, `activity`) from `_by_channel`, the
+  same figures split per channel, computed once per cached payload and only when a manager reads (`shorts_jobs`
+  and `shorts_clips` read whole; activity from the newest 200 audits, `_ACTIVITY_WINDOW`). The cache stays unfiltered;
+  `dashboard_summary()` and `invalidate_dashboard_cache` are unchanged; the `quota` block is the fleet's, whole for
+  everyone. Channel rows gained `applied_latest`. `GET /quota` (`app/quota.py`, admin only), `GET /channels/{id}/performance`, `/performance/summary`, `/performance.csv` (`app/performance.py`).
+- **Shorts** (`app/shorts/routes.py`, prefix `/shorts`): `POST /shorts/jobs` (the body's `channel_id` checked,
+  404 `channel_not_found`), `GET /shorts/jobs?channel_id=` (a named channel checked, else the user's visible channels;
+  channel-less NAS cut jobs show to admin and exec only), `POST /shorts/cut` (a manager may cut only a folder that is
+  the `nas_folder` of one of their channels, else 404 `channel_not_found`; the jobs stay channel-less as before),
+  `GET /shorts/languages` (every NAS folder, any signed-in user: the NAS layout is shared), `POST
+  /shorts/jobs/clear-failed` (a named channel checked, else only the user's visible channels' failed jobs),
+  `GET /shorts/jobs/{id}`, `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`, `POST /videos/{id}/short`;
+  `POST /autoshorts/jobs` (`app/shorts/autoshorts.py`; files the job under one of the user's visible channels, 503
+  when there is none).
 
 **Modules** (`app/`):
 
@@ -718,7 +737,7 @@ Until #147 lands, those routes still answer every signed-in user.
 | `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`); `can_run_agent` = `can_audit` and `agent_enabled` and `reach.certify` |
 | `status_vocab.py` | persisted status strings and their mirrors (`tests/test_status_vocab.py`) |
 | `auth.py` | OAuth + channel flag PATCH |
-| `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
+| `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `check_channel` and `scope_to_visible` for list and global routes (#147), `require_role` (403 `FORBIDDEN`), `require_admin`, the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
 | `content_type.py` | `is_episode` classifier |
@@ -744,7 +763,7 @@ Until #147 lands, those routes still answer every signed-in user.
 | `metrics_poll.py` | daily Analytics poll |
 | `measurement.py` / `verdicts.py` | title verdicts, `measurement_result` shape, rollups |
 | `performance.py` | per-channel performance table/CSV |
-| `dashboard.py` | `/dashboard`; `_aggregate_legacy` fallback/oracle for the RPC |
+| `dashboard.py` | `/dashboard` (narrowed per manager on read: `_scoped`, `_summaries`, `_by_channel`, #147); `_aggregate_legacy` fallback/oracle for the RPC |
 | `reflection.py` | weekly prompt rewrite (shadow/live/auto) + auto-revert; `derive_niche_queries`, `_sample_competitors` (frozen) |
 | `transcripts.py` | transcript fetch + `video_transcripts` cache; `lang_display_name` (`_LANG_NAMES`, `:25-36`, incl. `bgc`, `bho`, `raj`); Data API captions fallback |
 | `embeddings.py` / `openrouter.py` | embeddings and `chat_json`/`chat_text` via OpenRouter; `chat_tools(messages, tools, *, model=None, label=None)` (`tool_choice: "auto"`, returns the assistant message unparsed, retried once on timeout or 5xx), called only by `app/agent/loop.py` |
@@ -766,7 +785,7 @@ Until #147 lands, those routes still answer every signed-in user.
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
 | `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard. `login.html` (the sign-in form, inline script, loads only `theme.css`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` shows the signed-in user's name and role (`GET /session/me`) above the channel switcher, with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
+| `static/*` | vanilla-JS dashboard. `login.html` (the sign-in form, inline script, loads only `theme.css`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` shows the signed-in user's name and role (`GET /session/me`) above the channel switcher (whose "Add channel" link, `/auth/login`, only the admin sees: `.not-admin .admin-only`, `theme.css`), with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
 
 **Scripts:** `scripts/manage_users.py` (`create --email --name --role admin|exec|manager`, `reset-password --email`,
 `deactivate --email`; the password is typed twice at a `getpass` prompt, never an argument; reset and deactivate end
@@ -1188,7 +1207,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
-| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes #147 |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147) |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |
