@@ -21,6 +21,8 @@
 //                                             starts with the prefix
 //   SWR.get(url) / SWR.set(url, value)      — direct cache access
 //
+// It also wraps window.fetch so a 401 from Midas (signed out) goes to /login.
+//
 // Cache invalidation after a mutation: call SWR.invalidate(...) for the URLs
 // the mutation changed, then re-run the page's load function. Because swr()
 // always revalidates, the repaint happens within one round-trip regardless;
@@ -191,6 +193,37 @@
   }
 
   function logErr(e) { try { console.error('[swr]', e); } catch (x) { /* ignore */ } }
+
+  // ── Signed out → the login page ─────────────────────────────────────────
+  // The gate (app/session.py) answers 401 to any request whose session is
+  // missing, expired or whose user was deactivated. Every page loads this file
+  // first, and most of their requests are plain fetch() calls rather than
+  // swr(), so the redirect wraps window.fetch once, here: a 401 from Midas
+  // itself sends the browser to /login, which comes back to this page after.
+  // The login endpoint's own 401 (a wrong password) is the form's to show.
+  var LOGIN_PATH = '/session/login';
+  var redirecting = false;
+  function toLogin() {
+    if (redirecting) return;
+    redirecting = true;
+    var here = location.pathname + location.search;
+    location.assign(here === '/' ? '/login' : '/login?next=' + encodeURIComponent(here));
+  }
+  if (global.fetch && !global.fetch.midasSignedOut) {
+    var nativeFetch = global.fetch.bind(global);
+    var signedOutFetch = function (input, init) {
+      return nativeFetch(input, init).then(function (r) {
+        if (r.status === 401) {
+          var url;
+          try { url = new URL(r.url || String(input), location.href); } catch (e) { url = null; }
+          if (url && url.origin === location.origin && url.pathname !== LOGIN_PATH) toLogin();
+        }
+        return r;
+      });
+    };
+    signedOutFetch.midasSignedOut = true;
+    global.fetch = signedOutFetch;
+  }
 
   global.SWR = {
     swr: swr,
