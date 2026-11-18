@@ -22,6 +22,14 @@
   .dt-row.off .name { color:var(--ink-4); }
   .show-off { margin:0 0 1rem; }
   .show-off[hidden], #add-manager[hidden] { display:none; }
+
+  #ch-title { font-size:15px; margin:2rem 0 .4rem; }
+  .ch { --dt-cols: minmax(10rem, 1fr) minmax(12rem, 16rem) minmax(12rem, 16rem); }
+  .ch .since { font-size:12px; color:var(--ink-3); }
+  .ch .history { grid-column:1 / -1; font-size:12.5px; color:var(--ink-3); margin:.2rem 0 0; }
+  .ch .history summary { cursor:pointer; width:max-content; }
+  .ch .history ol { margin:.35rem 0 0; padding-left:1.2rem; }
+  .ch .history li { margin:.15rem 0; }
 </style>
 </head>
 <body>
@@ -56,8 +64,13 @@
 
       <div id="roster"><div class="skel" data-skeleton data-rows="4"></div></div>
 
-      <!-- Channel assignments (#149) go here: a member dropdown per channel,
-           with each channel's assignment history. -->
+      <!-- Channel assignments (#149): a member dropdown per visible channel,
+           its assignment history, and (admin only) its manager. -->
+      <h2 class="section-title" id="ch-title">Channels</h2>
+      <p class="note">Who uploads to each channel. Picking someone assigns the
+        channel to them from today (IST); uploads before today stay credited to
+        whoever held it then.</p>
+      <div id="channels"><div class="skel" data-skeleton data-rows="4"></div></div>
     </section>
   </main>
   </div>
@@ -240,6 +253,7 @@ async function load() {
   } catch (err) {
     $('roster').innerHTML = '<em class="muted">Could not load the roster.</em>';
   }
+  await loadAssignments();
 }
 
 $('add-manager').addEventListener('change', (e) => {
@@ -314,6 +328,120 @@ $('roster').addEventListener('keydown', (e) => {
     document.querySelector(`button[data-act="save"][data-id="${e.target.dataset.id}"]`).click();
   } else if (e.key === 'Escape') {
     editing = null; paintRoster();
+  }
+});
+
+// ── Channel assignments (#149) ────────────────────────────────────────
+// GET /team/assignments is scoped: the user's visible channels and every
+// assignment on them. A manager picks from their own active members; admin
+// and exec from the channel's manager's members (every active member when the
+// channel has no manager). Only the admin gets the channel → manager control
+// (PATCH /channels/{id}/manager is admin-only).
+let assign = { channels: [], assignments: [] };
+const isAdmin = () => me && me.role === 'admin';
+const fmtDay = (d) => d ? String(d).slice(0, 10) : '';
+
+function memberChoices(ch) {
+  const active = state.members.filter(m => m.is_active);
+  if (!seesAll()) return active;
+  return ch.manager_id ? active.filter(m => m.manager_id === ch.manager_id) : active;
+}
+
+function historyOf(chId) {
+  return assign.assignments.filter(a => a.channel_id === chId);   // newest first
+}
+
+function channelRow(ch) {
+  const rows = historyOf(ch.id);
+  const open = rows.find(a => a.ends_on == null);
+  const choices = memberChoices(ch);
+  // No "Unassigned" choice once someone holds it: v1 has no unassign, only
+  // reassign (and deactivating the holder).
+  const opts = (open ? [] : [{ value: '', label: 'Unassigned' }])
+    .concat(choices.map(m => ({ value: String(m.id), label: m.name })));
+  if (open && !choices.some(m => m.id === open.team_member_id)) {
+    opts.push({ value: String(open.team_member_id), label: open.member_name || `Member ${open.team_member_id}` });
+  }
+  const memberDd = `<div data-dropdown data-assign="${esc(ch.id)}" data-label="Member"
+      data-value="${open ? open.team_member_id : ''}"
+      data-options='${esc(JSON.stringify(opts))}'></div>
+      ${open ? `<div class="since">since ${esc(fmtDay(open.starts_on))}</div>` : ''}`;
+  const mgrOpts = [{ value: '', label: 'No manager' }]
+    .concat(state.managers.map(m => ({ value: String(m.id), label: m.name })));
+  if (ch.manager_id && !state.managers.some(m => m.id === ch.manager_id)) {
+    mgrOpts.push({ value: String(ch.manager_id), label: ch.manager_name || `Manager ${ch.manager_id}` });
+  }
+  const mgr = isAdmin()
+    ? `<div data-dropdown data-manager="${esc(ch.id)}" data-label="Manager"
+          data-value="${ch.manager_id ?? ''}" data-options='${esc(JSON.stringify(mgrOpts))}'></div>`
+    : `<span class="muted">${esc(ch.manager_name || 'No manager')}</span>`;
+  const history = rows.length ? `<details class="history"><summary>History (${rows.length})</summary><ol>${
+    rows.map(a => `<li>${esc(a.member_name || `Member ${a.team_member_id}`)}: ${esc(fmtDay(a.starts_on))}
+      → ${a.ends_on == null ? 'now' : esc(fmtDay(a.ends_on))}${a.assigned_by_name
+        ? ` <span class="muted">(by ${esc(a.assigned_by_name)})</span>` : ''}</li>`).join('')
+  }</ol></details>` : '';
+  return `<div class="dt-row"><div class="name">${esc(ch.name || ch.id)}</div>
+    <div>${memberDd}</div><div>${mgr}</div>${history}</div>`;
+}
+
+function paintChannels() {
+  const holder = $('channels');
+  if (!assign.channels.length) {
+    holder.innerHTML = `<div class="dt"><div class="dt-empty muted">${
+      seesAll() ? 'No channels yet.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`;
+    return;
+  }
+  holder.innerHTML = `<div class="dt ch"><div class="dt-scroll"><div class="dt-body">
+    <div class="dt-head"><div>Channel</div><div>Assigned to</div><div>Manager</div></div>
+    ${assign.channels.map(channelRow).join('')}
+  </div></div></div>`;
+  Components.init(holder);
+}
+
+async function loadAssignments() {
+  try {
+    const r = await fetch('/team/assignments');
+    if (!r.ok) throw new Error(r.statusText);
+    assign = await r.json();
+    paintChannels();
+  } catch (err) {
+    $('channels').innerHTML = '<em class="muted">Could not load the channels.</em>';
+  }
+}
+
+$('channels').addEventListener('change', async (e) => {
+  const el = e.target.closest('[data-dropdown]');
+  if (!el || !e.detail || !('value' in e.detail)) return;
+  const value = e.detail.value;
+  if (el.dataset.assign) {
+    const ch = assign.channels.find(c => c.id === el.dataset.assign);
+    const member = state.members.find(m => String(m.id) === value);
+    if (!value || !member) return;
+    const ok = await confirmDialog(
+      `Assign ${ch.name || ch.id} to ${member.name} from today? Uploads before today ` +
+      'stay credited to whoever held it then.', 'Assign');
+    if (!ok) { paintChannels(); return; }
+    try {
+      const res = await send('POST', `/channels/${encodeURIComponent(ch.id)}/assign`,
+                             { team_member_id: member.id });
+      toast(res.changed ? `${ch.name || ch.id} assigned to ${member.name}.`
+                        : `${member.name} already holds ${ch.name || ch.id}.`);
+    } catch (err) {
+      toast('Could not assign: ' + err.message, 'err');
+    }
+    await loadAssignments();
+  } else if (el.dataset.manager) {
+    const ch = assign.channels.find(c => c.id === el.dataset.manager);
+    try {
+      await send('PATCH', `/channels/${encodeURIComponent(ch.id)}/manager`,
+                 { manager_id: value ? Number(value) : null });
+      toast(value ? `${ch.name || ch.id} is now managed by ${
+        (state.managers.find(m => String(m.id) === value) || {}).name || 'that manager'}.`
+        : `${ch.name || ch.id} has no manager now.`);
+    } catch (err) {
+      toast('Could not change the manager: ' + err.message, 'err');
+    }
+    await loadAssignments();
   }
 });
 

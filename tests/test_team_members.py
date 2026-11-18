@@ -44,6 +44,9 @@ def store():
                          _member(MEET, "Meet", MANAGER_A),
                          _member(RACHEL, "Rachel", MANAGER_B),
                          _member(LEFT, "Left", MANAGER_A, active=False)],
+        # Deactivating a member ends their open assignments (#149;
+        # tests/test_team_assignments.py).
+        "channel_assignments": [],
     }, serial=("team_members",))
     patches = [patch.object(mod, "supabase", return_value=sb)
                for name, mod in list(sys.modules.items())
