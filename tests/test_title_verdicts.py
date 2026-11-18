@@ -11,7 +11,6 @@ from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import backlinks_apply as ba, eligibility, lever_measurement, main, quota, reach
 from app import lever_verdicts as lv
@@ -363,7 +362,7 @@ def _trajectory(*tools):
                          for i, t in enumerate(tools)]}
 
 
-def test_title_test_endpoint_reports_each_path_the_holdout_and_the_trace():
+def test_title_test_endpoint_reports_each_path_the_holdout_and_the_trace(authed_client):
     common = _trajectory("get_video", "get_transcript", "submit_title")
     rows = [pipe(1, 0.2, W1), pipe(2, 0.4, W1, status="insufficient_data", pre=10),
             pipe(3, None, W1, status="cancelled", applied=False, measurement_result=None,
@@ -380,7 +379,7 @@ def test_title_test_endpoint_reports_each_path_the_holdout_and_the_trace():
     stop = {"channel_id": CH, "lever": "title", "arm_scope": "agent_vs_holdout",
             "week_start": W1.isoformat(), "stop_rule_triggered": True}
     with db(rows, [stop]):
-        body = TestClient(main.app).get(f"/channels/{CH}/title-test").json()
+        body = authed_client().get(f"/channels/{CH}/title-test").json()
     p, a = body["paths"]["pipeline"], body["paths"]["agent"]
     assert body["holdout"] == {"n": 3, "judged": 2, "mean_delta": pytest.approx(0.05)}
     assert (p["treated"], p["declined"], p["judged"], p["insufficient"]) == (3, 0, 2, 1)

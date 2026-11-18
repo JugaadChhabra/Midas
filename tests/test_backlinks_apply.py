@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import backlinks, backlinks_apply as ba, human_edits as he
 from app import interventions as iv, main, quota, sync
@@ -257,8 +256,13 @@ def test_a_team_edit_since_the_last_sync_is_still_recorded(edges):
 
 # ── revert, through the endpoint ─────────────────────────────────────────
 
-def _client():
-    return TestClient(main.app, raise_server_exceptions=False)
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global _client
+    _client = lambda: authed_client(raise_server_exceptions=False)  # noqa: E731
 
 
 def test_a_revert_restores_the_original_text(edges):

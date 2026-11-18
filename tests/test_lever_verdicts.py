@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi.testclient import TestClient
 
 from app import agent_tick, eligibility, interventions, job_status, lever_measurement, main, reach, short_links
 from app import lever_verdicts as lv
@@ -303,7 +302,7 @@ def test_the_week_is_the_monday_of_the_utc_judged_date():
 
 # ── the job ──────────────────────────────────────────────────────────────
 
-def test_lever_measurement_is_registered_monday_0900_utc_and_shows_in_health_jobs():
+def test_lever_measurement_is_registered_monday_0900_utc_and_shows_in_health_jobs(authed_client):
     sched = BackgroundScheduler(daemon=True)
     main._register_jobs(sched)
     job = sched.get_job("lever_measurement")
@@ -316,7 +315,7 @@ def test_lever_measurement_is_registered_monday_0900_utc_and_shows_in_health_job
     reg = JobStatusRegistry()
     reg.watch(sched)
     with patch.object(job_status, "registry", reg):
-        body = TestClient(main.app).get("/health/jobs").json()
+        body = authed_client().get("/health/jobs").json()
     assert body["jobs"]["lever_measurement"]["status"] == "never_run"
 
 
@@ -388,11 +387,11 @@ def _intervention(id_, created, lever="backlinks", status="measuring", channel=C
             "created_at": f"2026-10-{created:02d}T08:00:00+00:00"}
 
 
-def test_interventions_endpoint_pages_newest_first():
+def test_interventions_endpoint_pages_newest_first(authed_client):
     rows = [_intervention(i, 1 + i // 2) for i in range(1, 8)]     # pairs share created_at
     rows.append(_intervention(99, 28, channel=OTHER))
     with db(rows):
-        client = TestClient(main.app)
+        client = authed_client()
         first = client.get(f"/channels/{CH}/interventions", params={"limit": 3}).json()
         second = client.get(f"/channels/{CH}/interventions",
                             params={"limit": 3, "offset": first["next_offset"]}).json()
@@ -405,11 +404,11 @@ def test_interventions_endpoint_pages_newest_first():
     assert last["next_offset"] is None and len(last["interventions"]) == 1
 
 
-def test_interventions_endpoint_filters_by_lever_and_status():
+def test_interventions_endpoint_filters_by_lever_and_status(authed_client):
     rows = [_intervention(1, 1), _intervention(2, 2, status="judged"),
             _intervention(3, 3, lever="playlist", status="applied")]
     with db(rows):
-        client = TestClient(main.app)
+        client = authed_client()
         judged_ = client.get(f"/channels/{CH}/interventions",
                              params={"lever": "backlinks", "status": "judged"}).json()
         playlist = client.get(f"/channels/{CH}/interventions", params={"lever": "playlist"}).json()
@@ -421,7 +420,7 @@ def test_interventions_endpoint_filters_by_lever_and_status():
     assert (bad_lever.status_code, bad_status.status_code, too_big.status_code) == (400, 400, 422)
 
 
-def test_lever_verdicts_endpoint_lists_every_week_newest_first_with_the_stop_state():
+def test_lever_verdicts_endpoint_lists_every_week_newest_first_with_the_stop_state(authed_client):
     verdicts = [{"id": i, "channel_id": CH, "lever": "backlinks", "arm_scope": scope,
                  "week_start": week, "stop_rule_triggered": stop}
                 for i, (scope, week, stop) in enumerate([
@@ -433,19 +432,19 @@ def test_lever_verdicts_endpoint_lists_every_week_newest_first_with_the_stop_sta
                      "arm_scope": "treated_vs_holdout", "week_start": "2026-10-19",
                      "stop_rule_triggered": False})
     with db(verdicts=verdicts):
-        body = TestClient(main.app).get(f"/channels/{CH}/lever-verdicts").json()
-        other = TestClient(main.app).get(f"/channels/{OTHER}/lever-verdicts").json()
+        body = authed_client().get(f"/channels/{CH}/lever-verdicts").json()
+        other = authed_client().get(f"/channels/{OTHER}/lever-verdicts").json()
     assert [r["id"] for r in body["verdicts"]] == [3, 1, 2]
     assert body["backlinks_stopped"] is True
     assert [r["id"] for r in other["verdicts"]] == [9] and other["backlinks_stopped"] is False
 
 
-def test_lever_verdicts_endpoint_reads_past_the_row_cap():
+def test_lever_verdicts_endpoint_reads_past_the_row_cap(authed_client):
     verdicts = [{"id": i, "channel_id": CH, "lever": "backlinks", "arm_scope": "human",
                  "week_start": "2026-10-05", "stop_rule_triggered": False}
                 for i in range(1, 1206)]
     with db(verdicts=verdicts), postgrest_cap():
-        body = TestClient(main.app).get(f"/channels/{CH}/lever-verdicts").json()
+        body = authed_client().get(f"/channels/{CH}/lever-verdicts").json()
     assert len(body["verdicts"]) == 1205
 
 

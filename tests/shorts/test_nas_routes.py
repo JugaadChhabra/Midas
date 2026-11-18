@@ -1,8 +1,16 @@
 from unittest.mock import patch
-from fastapi.testclient import TestClient
-from app.main import app
 
-client = TestClient(app)
+import pytest
+
+client = None
+
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global client
+    client = authed_client()
 
 
 def test_cut_endpoint_enqueues():

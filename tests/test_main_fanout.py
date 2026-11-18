@@ -268,7 +268,7 @@ def test_watch_registers_every_scheduled_job_and_records_real_runs():
     assert reg.snapshot()["idle_job"]["status"] == "never_run"
 
 
-def test_health_jobs_endpoint_returns_the_registry():
+def test_health_jobs_endpoint_returns_the_registry(authed_client):
     from app import job_status, main
 
     reg = JobStatusRegistry()
@@ -278,7 +278,7 @@ def test_health_jobs_endpoint_returns_the_registry():
                         JobRunFailed("Daily playlist_health_score", {"c1": "NameError: x"})))
 
     with patch.object(job_status, "registry", reg):
-        r = TestClient(main.app).get("/health/jobs")
+        r = authed_client().get("/health/jobs")
 
     assert r.status_code == 200
     body = r.json()

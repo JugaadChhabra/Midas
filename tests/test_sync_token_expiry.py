@@ -14,7 +14,6 @@ from unittest.mock import patch
 import httplib2
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
@@ -112,8 +111,13 @@ def edges():
 
 # ── HTTP: a token failure mid-call is 401, not 500 ───────────────────────────
 
-def _client():
-    return TestClient(main.app, raise_server_exceptions=False)
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global _client
+    _client = lambda: authed_client(raise_server_exceptions=False)  # noqa: E731
 
 
 def test_refresh_stats_token_failure_mid_call_returns_401(edges):

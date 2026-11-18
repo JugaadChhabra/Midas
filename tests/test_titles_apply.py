@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import autopilot as ap, backlinks, backlinks_apply as ba, channel_audits, main, quota
 from app import titles_apply as ta
@@ -93,8 +92,13 @@ def _changed(sent: dict, fetched: dict) -> set[str]:
     return {k for k in set(sent) | set(fetched) if sent.get(k) != fetched.get(k)}
 
 
-def _client():
-    return TestClient(main.app, raise_server_exceptions=False)
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global _client
+    _client = lambda: authed_client(raise_server_exceptions=False)  # noqa: E731
 
 
 def _title_of(sb):

@@ -11,9 +11,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 
-from app import interventions, main, short_links
+import pytest
+
+from app import interventions, short_links
 from app.status_vocab import ALL_SHORT_LINK_STATUSES
 from tests.fakes import FakeSupabase
 
@@ -38,6 +39,17 @@ def short_with_three(short, first_id, **kw):
     return [rec(first_id + i, short, f"{short}-t{i + 1}", i + 1, **kw) for i in range(3)]
 
 
+_signed_in_client = None
+
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global _signed_in_client
+    _signed_in_client = authed_client
+
+
 @contextmanager
 def db(recs=(), videos=(), stored_interventions=()):
     tables = {"short_link_recommendations": list(recs), "videos": list(videos),
@@ -45,7 +57,7 @@ def db(recs=(), videos=(), stored_interventions=()):
     sb = FakeSupabase(tables, serial=("interventions",))
     with patch.object(short_links, "supabase", return_value=sb), \
          patch.object(interventions, "supabase", return_value=sb):
-        yield sb, TestClient(main.app)
+        yield sb, _signed_in_client()
 
 
 def status_of(sb) -> dict:

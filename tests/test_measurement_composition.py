@@ -359,7 +359,7 @@ def test_an_error_before_the_channel_is_known_is_still_recorded():
     assert failed == {m.UNKNOWN_CHANNEL: "audit 9: RuntimeError: write failed"}
 
 
-def test_evaluate_endpoint_returns_the_summary_when_an_audit_fails():
+def test_evaluate_endpoint_returns_the_summary_when_an_audit_fails(authed_client):
     """POST /measurement/evaluate keeps its contract: 200 and the summary. Only
     the scheduler path turns errors into a failed run."""
     from fastapi.testclient import TestClient
@@ -379,7 +379,7 @@ def test_evaluate_endpoint_returns_the_summary_when_an_audit_fails():
     with patch.object(m, "supabase", return_value=sb), \
          patch.object(m.reach, "coverage", return_value=set()), \
          patch.object(m, "_eval_audit", side_effect=boom):
-        r = TestClient(main.app).post("/measurement/evaluate")
+        r = authed_client().post("/measurement/evaluate")
 
     assert r.status_code == 200
     body = r.json()
