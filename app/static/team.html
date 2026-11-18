@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Midas · Team</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<style>
+  body { margin:0; background:var(--ground); }
+
+  /* One panel per tab; the chip bar above picks which is shown. */
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  .add-row { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin:0 0 1.2rem; }
+  .add-row input, .dt-row input.rename {
+    font:inherit; font-size:13px; padding:.45rem .6rem; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:var(--panel-bg); color:inherit; min-width:14rem;
+  }
+  .dt { --dt-cols: minmax(10rem, 1fr) 7rem 13rem; }
+  .dt-row .acts { display:flex; gap:.35rem; justify-content:flex-end; }
+  .dt-row.off .name { color:var(--ink-4); }
+  .show-off { margin:0 0 1rem; }
+  .show-off[hidden], #add-manager[hidden] { display:none; }
+</style>
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+  <main class="app-main">
+    <header class="page-head">
+      <h1 class="page-title">Team</h1>
+    </header>
+
+    <!-- Tabs. Roster is the only one today; the Uploads grid (#151) is added
+         to TABS below and gets its own panel. -->
+    <div class="chip-bar" id="tabs" role="tablist" aria-label="Team sections"></div>
+
+    <!-- ─── ROSTER ─── -->
+    <section class="tab-panel" data-panel="roster" aria-label="Roster">
+      <p class="note">Your team members. They have no login: the roster is what
+        channels are assigned to, so each upload is credited to whoever held the
+        channel that day. Deactivate someone who has left; their past uploads
+        stay credited.</p>
+
+      <form class="add-row" id="add-form" autocomplete="off">
+        <input id="add-name" type="text" maxlength="100" placeholder="Name"
+               aria-label="New member's name" required />
+        <div id="add-manager" hidden></div>
+        <button class="btn-primary" type="submit" id="add-btn">Add member</button>
+      </form>
+
+      <label class="field-check show-off">
+        <input type="checkbox" id="show-off" />
+        <span>Show deactivated members</span>
+      </label>
+
+      <div id="roster"><div class="skel" data-skeleton data-rows="4"></div></div>
+
+      <!-- Channel assignments (#149) go here: a member dropdown per channel,
+           with each channel's assignment history. -->
+    </section>
+  </main>
+  </div>
+
+  <div id="toasts" aria-live="assertive" role="alert"></div>
+
+<script src="/static/swr.js"></script>
+<script src="/static/components.js"></script>
+<script src="/static/sidebar.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ── Rail ──────────────────────────────────────────────────────────────
+// The same rail as the board: its channel sections point into the channel
+// last opened (Sidebar.lastChannel), or the board until one has been.
+const railChannel = Sidebar.lastChannel();
+const railHref = (section) => railChannel
+  ? `/channel?id=${encodeURIComponent(railChannel)}#${section}` : '/';
+Sidebar.mount({
+  items: Sidebar.TOP_ITEMS
+    .concat([{ section: '' }])
+    .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
+  activeId: 'team',
+});
+fetch('/auth/channels').then(r => r.ok ? r.json() : []).then(chs => {
+  Sidebar.setChannels(chs, chs.some(c => c.id === railChannel) ? railChannel : null,
+                      { open: false });
+}).catch(() => {});
+
+function toast(msg, kind = 'ok', timeout = 3200) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = 0; el.style.transition = '.3s';
+                     setTimeout(() => el.remove(), 300); }, timeout);
+}
+
+function confirmDialog(message, okLabel = 'Confirm') {
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true">
+      <div class="modal-msg"></div>
+      <div class="modal-actions">
+        <button class="btn modal-cancel">Cancel</button>
+        <button class="btn modal-ok"></button>
+      </div></div>`;
+    back.querySelector('.modal-msg').textContent = message;
+    back.querySelector('.modal-ok').textContent = okLabel;
+    const close = (val) => { back.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    back.querySelector('.modal-cancel').onclick = () => close(false);
+    back.querySelector('.modal-ok').onclick = () => close(true);
+    back.onclick = (e) => { if (e.target === back) close(false); };
+    function onKey(e) { if (e.key === 'Escape') close(false); else if (e.key === 'Enter') close(true); }
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(back);
+    back.querySelector('.modal-ok').focus();
+  });
+}
+
+async function send(method, url, body) {
+  const r = await fetch(url, {
+    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = j.detail;
+    throw new Error(Array.isArray(d) ? (d[0] && d[0].msg) || 'invalid' : d || r.statusText);
+  }
+  return j;
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────
+const TABS = [{ id: 'roster', label: 'Roster' }];
+
+function showTab(id) {
+  document.querySelectorAll('#tabs .chip').forEach(c =>
+    c.setAttribute('aria-pressed', String(c.dataset.tab === id)));
+  document.querySelectorAll('.tab-panel').forEach(p =>
+    p.classList.toggle('active', p.dataset.panel === id));
+  history.replaceState(null, '', '#' + id);
+}
+
+$('tabs').innerHTML = TABS.map(t =>
+  `<button type="button" class="chip" role="tab" data-tab="${t.id}" aria-pressed="false">${esc(t.label)}</button>`
+).join('');
+$('tabs').onclick = (e) => { const c = e.target.closest('.chip'); if (c) showTab(c.dataset.tab); };
+showTab(TABS.some(t => '#' + t.id === location.hash) ? location.hash.slice(1) : TABS[0].id);
+
+// ── Roster ────────────────────────────────────────────────────────────
+// GET /team/members is already scoped: a manager gets their own members,
+// admin and exec every member plus the managers to choose from.
+let state = { members: [], managers: [] };
+let me = null;
+let editing = null;          // the member id whose name is being edited
+let addManager = '';         // admin/exec: the manager a new member goes under
+
+const seesAll = () => me && (me.role === 'admin' || me.role === 'exec');
+
+function paintAddForm() {
+  const holder = $('add-manager');
+  if (!seesAll()) { holder.hidden = true; return; }
+  const opts = [{ value: '', label: 'Choose a manager' }]
+    .concat(state.managers.map(m => ({ value: String(m.id), label: m.name })));
+  holder.hidden = false;
+  holder.innerHTML = '';
+  holder.dataset.dropdown = '';
+  holder.dataset.label = 'Manager';
+  holder.dataset.value = addManager;
+  holder.dataset.options = JSON.stringify(opts);
+  delete holder.dataset.cmpWired;
+  Components.init(holder.parentNode);
+}
+
+function memberRow(m) {
+  const name = editing === m.id
+    ? `<input class="rename" data-id="${m.id}" maxlength="100" value="${esc(m.name)}"
+              aria-label="New name for ${esc(m.name)}" />`
+    : `<span class="name">${esc(m.name)}</span>`;
+  const acts = editing === m.id
+    ? `<button class="btn-primary" data-act="save" data-id="${m.id}">Save</button>
+       <button class="btn-link" data-act="cancel">Cancel</button>`
+    : `<button data-act="rename" data-id="${m.id}">Rename</button>` +
+      (m.is_active
+        ? `<button data-act="deactivate" data-id="${m.id}">Deactivate</button>`
+        : `<button data-act="reactivate" data-id="${m.id}">Reactivate</button>`);
+  const status = m.is_active
+    ? '<span class="pill pill--ok pill--sm">Active</span>'
+    : '<span class="tag tag--off">Deactivated</span>';
+  return `<div class="dt-row${m.is_active ? '' : ' off'}">
+      <div>${name}</div><div>${status}</div><div class="acts">${acts}</div></div>`;
+}
+
+function table(members) {
+  return `<div class="dt"><div class="dt-scroll"><div class="dt-body">
+    <div class="dt-head"><div>Name</div><div>Status</div><div></div></div>
+    ${members.map(memberRow).join('')}
+  </div></div></div>`;
+}
+
+function paintRoster() {
+  const showOff = $('show-off').checked;
+  const members = state.members.filter(m => showOff || m.is_active);
+  const off = state.members.length - state.members.filter(m => m.is_active).length;
+  $('show-off').parentNode.hidden = off === 0;
+  if (!members.length) {
+    $('roster').innerHTML = `<div class="dt"><div class="dt-empty muted">${
+      state.members.length ? 'Everyone on the roster is deactivated.'
+                           : 'No team members yet. Add the first one above.'}</div></div>`;
+    return;
+  }
+  if (!seesAll()) { $('roster').innerHTML = table(members); return; }
+  // Admin and exec: one group per manager, in the order the server sent.
+  const groups = new Map();
+  members.forEach(m => {
+    const key = m.manager_name || `Manager ${m.manager_id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  });
+  $('roster').innerHTML = Array.from(groups, ([name, ms]) => `
+    <div class="group">
+      <div class="group-head"><span>${esc(name)}</span><span class="n">${ms.length}</span>
+        <span class="rule"></span></div>
+      ${table(ms)}
+    </div>`).join('');
+}
+
+async function load() {
+  try {
+    const [meR, listR] = await Promise.all([fetch('/session/me'), fetch('/team/members')]);
+    if (!listR.ok) throw new Error(listR.statusText);
+    me = meR.ok ? await meR.json() : null;
+    state = await listR.json();
+    paintAddForm();
+    paintRoster();
+  } catch (err) {
+    $('roster').innerHTML = '<em class="muted">Could not load the roster.</em>';
+  }
+}
+
+$('add-manager').addEventListener('change', (e) => {
+  if (e.detail && 'value' in e.detail) addManager = e.detail.value;
+});
+$('show-off').onchange = paintRoster;
+
+$('add-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $('add-name').value.trim();
+  if (!name) return;
+  const body = { name };
+  if (seesAll()) {
+    if (!addManager) { toast('Choose the manager this member works for.', 'warn'); return; }
+    body.manager_id = Number(addManager);
+  }
+  const btn = $('add-btn');
+  btn.disabled = true;
+  try {
+    const m = await send('POST', '/team/members', body);
+    $('add-name').value = '';
+    toast(`${m.name} added.`);
+    await load();
+  } catch (err) {
+    toast('Could not add: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+async function patch(id, change, done) {
+  try {
+    const m = await send('PATCH', `/team/members/${id}`, change);
+    toast(done(m));
+    editing = null;
+    await load();
+  } catch (err) {
+    toast('Could not save: ' + err.message, 'err');
+  }
+}
+
+$('roster').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  const member = state.members.find(m => m.id === id);
+  const act = btn.dataset.act;
+  if (act === 'rename') {
+    editing = id; paintRoster();
+    const input = document.querySelector(`input.rename[data-id="${id}"]`);
+    input && (input.focus(), input.select());
+  } else if (act === 'cancel') {
+    editing = null; paintRoster();
+  } else if (act === 'save') {
+    const name = document.querySelector(`input.rename[data-id="${id}"]`).value.trim();
+    if (!name || name === member.name) { editing = null; paintRoster(); return; }
+    await patch(id, { name }, m => `Renamed to ${m.name}.`);
+  } else if (act === 'deactivate') {
+    const ok = await confirmDialog(
+      `Deactivate ${member.name}? They drop off the roster; the uploads already ` +
+      'credited to them stay credited.', 'Deactivate');
+    if (ok) await patch(id, { is_active: false }, m => `${m.name} deactivated.`);
+  } else if (act === 'reactivate') {
+    await patch(id, { is_active: true }, m => `${m.name} is back on the roster.`);
+  }
+});
+
+$('roster').addEventListener('keydown', (e) => {
+  if (!e.target.matches('input.rename')) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.querySelector(`button[data-act="save"][data-id="${e.target.dataset.id}"]`).click();
+  } else if (e.key === 'Escape') {
+    editing = null; paintRoster();
+  }
+});
+
+load();
+</script>
+</body>
+</html>

@@ -36,6 +36,7 @@ from app.measurement import router as measurement_router
 from app.backlinks_apply import router as backlinks_apply_router
 from app.lever_verdicts import router as lever_verdicts_router, run_weekly as lever_measurement_weekly
 from app.channel_health import router as channel_health_router, run_daily as channel_health_daily
+from app.team import router as team_router
 from app.playlist_health import score_channel as playlist_health_score_channel
 from app.playlist_test import router as playlist_test_router, run_apply as playlist_test_apply_daily
 from app.short_links import router as short_links_router, run_weekly as short_link_refresh_weekly
@@ -624,6 +625,7 @@ app.include_router(lever_verdicts_router)
 app.include_router(playlist_test_router)
 app.include_router(short_links_router)
 app.include_router(channel_health_router)
+app.include_router(team_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
