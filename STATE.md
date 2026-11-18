@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-18 (team tracker 06, #150: `channel_uploads`, upload capture in `sync_channel`) ·
-**Commit:** on top of `d87655f` · **Branch:** `team-tracker/06-upload-capture`
+**Generated:** 2026-11-18 (team tracker 09, #151: the uploads grid, `GET /team/uploads`, the Team page's Uploads tab) ·
+**Commit:** on top of `6df8287` · **Branch:** `team-tracker/09-uploads-grid`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -307,7 +307,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 
 - **`team_members`** (`20261118020000`, team tracker #148), verbatim without the header comment. Each manager's
   roster: records only, no logins. Read and written only by `app/team.py` (`/team/members`) and
-  `app/access.py` `require_team_member`. Deactivated (`is_active` false), never deleted:
+  `app/access.py` `require_team_member`; also read by `app/team_uploads.py` (`GET /team/uploads`, #151). Deactivated (`is_active` false), never deleted:
   ```sql
   create table if not exists team_members (
       id          bigserial    primary key,
@@ -330,7 +330,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
   `POST /channels/{id}/assign` through the `assign_channel` RPC (closes the open row at the new start and opens
   the new one in one transaction; guarded by `tests/test_assign_channel_sql.py`), and `PATCH /team/members/{id}`
   deactivating a member (sets `ends_on` = today IST, or the row's `starts_on` if later, on their open rows). Read by
-  `GET /team/assignments`:
+  `GET /team/assignments` and `GET /team/uploads` (`app/team_uploads.py`, #151):
   ```sql
   create table if not exists channel_assignments (
       id              bigserial    primary key,
@@ -408,7 +408,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
   the video sync fetches, with its upload time, including what `videos` leaves out: private and scheduled uploads,
   and Shorts on a `sync_shorts = false` channel (so the levers and the autopilot, which read `videos`, never see
   them). No FK to `videos`; a video deleted from YouTube keeps its row. Written only by `app/sync.py`
-  `sync_channel` (`_record_uploads`), read by nothing yet (the Team page's grid, #151, will). `uploaded_at` = the
+  `sync_channel` (`_record_uploads`), read only by `app/team_uploads.py` (`GET /team/uploads`, #151). `uploaded_at` = the
   uploads-playlist item's `snippet.publishedAt` (#143's decision), else the first sync that saw it
   (`first_seen_at`); both raw timestamps are kept so it can be recomputed if #153's probe check picks
   `video_published_at`. Write-once in app code: new rows are inserted with ignore-duplicates; an existing row
@@ -874,6 +874,22 @@ other route is scoped, and a new unscoped route fails CI.
   manager_id, manager_name}], "assignments": [...]}`: the user's visible channels (`access.filter_channels`) by
   name, and every assignment on them, current and past, newest `starts_on` first; there is no unassign route.
 
+- **Team uploads** (`app/team_uploads.py` `router`, team tracker #151): `GET /team/uploads?from=&to=&manager_id=`
+  (`current_user`) → `{"from", "to", "days", "manager_id", "managers", "channels", "rows"}`. The window is IST days
+  `[from, to]` (`YYYY-MM-DD`): default the last 7 ending today IST (`DEFAULT_DAYS`); one end given → 7 days from or to
+  it; backwards, longer than `MAX_DAYS` (92) or not a date → 422. `channels` = the user's visible channels
+  (`access.filter_channels`), narrowed to `manager_id`'s for admin and exec only (a manager's `manager_id` is ignored
+  and echoed as null), each `{id, name, manager_id, last_synced_at}` by name. Reads `channel_uploads` for those
+  channels with `uploaded_at` in `[from 00:00 IST, to + 1 00:00 IST)` and their `channel_assignments`, both through
+  `rows.rows_for_ids` (paged past the 1000-row cap); credits each upload to the member whose assignment covered its
+  channel on the upload's IST day (`starts_on <= day < ends_on`, NULL = open), else Unassigned. `rows`: the in-scope
+  managers' active members plus anyone credited or assigned in the window, by manager name then member name, then
+  Unassigned (`member_id` null, name `"Unassigned"`, always present); each `{member_id, name, manager_id,
+  manager_name, is_active, days: {<day>: {total, shorts, long_form}}, total}`, every day present (zeros
+  included); a NULL `is_short` counts as long-form. `managers` = the active `manager` users for admin and exec
+  (the filter), `[]` for a manager. Computed in Python, no SQL function. Its IST conversion (`ist_day`,
+  `ist_midnight`) is its own, not the quota day.
+
 - **Pages/health:** `GET /login` (Session, above); `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` (admin only) → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`, admin only) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py`, any signed-in user); `/static/*`.
 - **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (both admin only; the callback stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels` (only the user's visible channels, `access.filter_channels`; the sidebar switcher and the channel page read it), `PATCH /auth/channels/{id}` (`require_channel`; no `manager_id` field; enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
@@ -923,6 +939,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `check_channel` and `scope_to_visible` for list and global routes (#147), `require_team_member` (#148, 404 `TEAM_MEMBER_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), `require_admin`, the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `team.py` | the Team page, the roster (team tracker #148) and channel assignments (#149): `GET /team`, `GET/POST /team/members`, `PATCH /team/members/{id}` (deactivating ends open assignments, `_end_assignments`), `POST /channels/{id}/assign` (the `assign_channel` RPC), `GET /team/assignments` (Routes); `IST` (`Asia/Kolkata`, deliberately not `quota.QUOTA_TZ`), `ist_day`; `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE`, `MEMBER_INACTIVE`, `ASSIGN_CONFLICT` |
+| `team_uploads.py` | the uploads grid (team tracker #151): `GET /team/uploads` (Routes); `IST` (`Asia/Kolkata`, its own, not `quota.QUOTA_TZ`), `ist_day`, `ist_midnight`, `window` (defaults and the 422s), `DEFAULT_DAYS` (7), `MAX_DAYS` (92), `UNASSIGNED` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger. Upload capture (team tracker #150): the playlist walk carries each item's `snippet.publishedAt`; every fetched video goes to `channel_uploads` (§2) before the opted-out-Shorts and private skips (`_upload_row`, `_record_uploads`; `_stored_uploads` reads the stored rows first). A stored `channel_uploads` `is_short` is reused unless the row is still `private` or NULL (`_settled_is_short`), else re-probed inside `MAX_SHORTS_PROBES_PER_SYNC`. A `channel_uploads` read or write failure is logged and never fails the sync |
 | `content_type.py` | `is_episode` classifier |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
@@ -1391,7 +1408,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
-| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147). Each manager's roster: `team_members`, `app/team.py`, the Team page (#148). Channel assignments: `channel_assignments`, `assign_channel()`, `POST /channels/{id}/assign`, `GET /team/assignments` (#149). Upload capture: `channel_uploads`, written by `sync_channel` (#150) |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147). Each manager's roster: `team_members`, `app/team.py`, the Team page (#148). Channel assignments: `channel_assignments`, `assign_channel()`, `POST /channels/{id}/assign`, `GET /team/assignments` (#149). Upload capture: `channel_uploads`, written by `sync_channel` (#150). The uploads grid: `GET /team/uploads`, `app/team_uploads.py`, the Team page's Uploads tab (#151) |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |
