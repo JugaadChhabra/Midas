@@ -30,6 +30,35 @@
   .ch .history summary { cursor:pointer; width:max-content; }
   .ch .history ol { margin:.35rem 0 0; padding-left:1.2rem; }
   .ch .history li { margin:.15rem 0; }
+
+  /* Uploads grid (#151): members × IST days, cell = total (S / L). */
+  .up-controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:.6rem; margin:0 0 .8rem; }
+  .up-controls label { display:grid; gap:3px; font-size:12px; color:var(--ink-3); }
+  .up-controls input[type="date"] {
+    font:inherit; font-size:13px; padding:.4rem .55rem; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:var(--panel-bg); color:inherit;
+  }
+  #up-manager[hidden] { display:none; }
+  .fresh { font-size:12px; color:var(--ink-3); margin:0 0 1rem; }
+  .fresh summary { cursor:pointer; width:max-content; }
+  .fresh ul { margin:.35rem 0 0; padding-left:1.2rem; }
+  .fresh .stale { color:var(--color-warn); }
+  .grid-wrap { overflow-x:auto; border:1px solid var(--border-soft); border-radius:var(--radius-sm);
+               background:var(--panel-bg); }
+  table.up { border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; width:100%; }
+  table.up th, table.up td { padding:.45rem .7rem; text-align:right; white-space:nowrap;
+                             border-bottom:1px solid var(--border-soft); }
+  table.up th { font-size:11.5px; font-weight:600; color:var(--ink-3); }
+  table.up th .dow { display:block; font-weight:400; color:var(--ink-4); }
+  table.up th:first-child, table.up td:first-child {
+    text-align:left; position:sticky; left:0; background:var(--panel-bg); z-index:1;
+  }
+  table.up td.zero { color:var(--ink-4); }
+  table.up td .sl { color:var(--ink-3); font-size:11.5px; }
+  table.up td.sum, table.up th.sum { border-left:1px solid var(--border-soft); font-weight:600; }
+  table.up tr.off td:first-child { color:var(--ink-4); }
+  table.up tr.unassigned td:first-child { font-style:italic; }
+  table.up .mgr { display:block; font-size:11px; color:var(--ink-4); }
 </style>
 </head>
 <body>
@@ -39,9 +68,25 @@
       <h1 class="page-title">Team</h1>
     </header>
 
-    <!-- Tabs. Roster is the only one today; the Uploads grid (#151) is added
-         to TABS below and gets its own panel. -->
+    <!-- Tabs: the Uploads grid (#151) and the Roster. -->
     <div class="chip-bar" id="tabs" role="tablist" aria-label="Team sections"></div>
+
+    <!-- ─── UPLOADS ─── -->
+    <section class="tab-panel" data-panel="uploads" aria-label="Uploads">
+      <p class="note">Videos uploaded per day (IST), credited to whoever held the
+        channel that day. Each cell is total (Shorts / long-form); a scheduled
+        video counts on the day it was uploaded, not the day it goes live.</p>
+      <form class="up-controls" id="up-form" autocomplete="off">
+        <label>From <input type="date" id="up-from" required /></label>
+        <label>To <input type="date" id="up-to" required /></label>
+        <button class="btn" type="submit">Show</button>
+        <button class="btn-link" type="button" data-days="7">Last 7 days</button>
+        <button class="btn-link" type="button" data-days="30">Last 30 days</button>
+        <div id="up-manager" hidden></div>
+      </form>
+      <div class="fresh" id="up-fresh"></div>
+      <div id="up-grid"><div class="skel" data-skeleton data-rows="4"></div></div>
+    </section>
 
     <!-- ─── ROSTER ─── -->
     <section class="tab-panel" data-panel="roster" aria-label="Roster">
@@ -148,7 +193,7 @@ async function send(method, url, body) {
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────
-const TABS = [{ id: 'roster', label: 'Roster' }];
+const TABS = [{ id: 'uploads', label: 'Uploads' }, { id: 'roster', label: 'Roster' }];
 
 function showTab(id) {
   document.querySelectorAll('#tabs .chip').forEach(c =>
@@ -445,7 +490,128 @@ $('channels').addEventListener('change', async (e) => {
   }
 });
 
-load();
+// ── Uploads grid (#151) ───────────────────────────────────────────────
+// GET /team/uploads is scoped: a manager gets their own channels and members;
+// admin and exec every channel, narrowed by the manager filter. Days are IST.
+const MAX_DAYS = 92;
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+let upManager = '';          // admin/exec: '' = every manager
+
+function istToday() {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+}
+
+function addDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function setRange(days) {
+  const to = istToday();
+  $('up-to').value = to;
+  $('up-from').value = addDays(to, -(days - 1));
+}
+
+function ago(iso) {
+  if (!iso) return null;
+  const h = (Date.now() - new Date(iso).getTime()) / 3600e3;
+  if (h < 1) return 'under an hour';
+  if (h < 48) return `${Math.floor(h)}h`;
+  return `${Math.floor(h / 24)} days`;
+}
+
+function paintFresh(channels) {
+  const holder = $('up-fresh');
+  if (!channels.length) { holder.innerHTML = ''; return; }
+  const synced = channels.filter(c => c.last_synced_at);
+  const oldest = synced.length
+    ? synced.reduce((a, b) => (a.last_synced_at < b.last_synced_at ? a : b)) : null;
+  const never = channels.length - synced.length;
+  // The routine sync runs every 6 hours; older than that is worth a look.
+  const isStale = (c) => !c.last_synced_at || Date.now() - new Date(c.last_synced_at) > 6 * 3600e3;
+  const head = oldest
+    ? `Data up to ${esc(ago(oldest.last_synced_at))} old (oldest: ${esc(oldest.name || oldest.id)})`
+    : 'No channel has synced yet';
+  holder.innerHTML = `<details><summary>${head}${never && oldest
+      ? `; ${never} channel${never > 1 ? 's' : ''} never synced` : ''}.</summary><ul>${
+    channels.map(c => `<li class="${isStale(c) ? 'stale' : ''}">${esc(c.name || c.id)}: ${
+      c.last_synced_at ? `synced ${esc(ago(c.last_synced_at))} ago` : 'never synced'}</li>`).join('')
+  }</ul></details>`;
+}
+
+function cell(c, cls = '') {
+  if (!c.total) return `<td class="zero ${cls}">0</td>`;
+  return `<td class="${cls}">${c.total} <span class="sl">(${c.shorts} / ${c.long_form})</span></td>`;
+}
+
+function paintGrid(data) {
+  const showMgr = seesAll() && !data.manager_id;
+  const head = data.days.map(d => {
+    const dow = DOW[new Date(d + 'T00:00:00Z').getUTCDay()];
+    return `<th scope="col"><span class="dow">${dow}</span>${esc(d.slice(5))}</th>`;
+  }).join('');
+  const body = data.rows.map(r => `<tr class="${r.member_id == null ? 'unassigned' : ''}${
+      r.is_active ? '' : ' off'}">
+    <td>${esc(r.name)}${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
+      showMgr && r.manager_name ? `<span class="mgr">${esc(r.manager_name)}</span>` : ''}</td>
+    ${data.days.map(d => cell(r.days[d])).join('')}${cell(r.total, 'sum')}</tr>`).join('');
+  $('up-grid').innerHTML = !data.channels.length
+    ? `<div class="dt"><div class="dt-empty muted">${seesAll()
+        ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`
+    : `<div class="grid-wrap"><table class="up">
+        <thead><tr><th scope="col">Member</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
+        <tbody>${body}</tbody></table></div>`;
+}
+
+function paintManagerFilter(managers) {
+  const holder = $('up-manager');
+  if (!seesAll()) { holder.hidden = true; return; }
+  const opts = [{ value: '', label: 'All managers' }]
+    .concat(managers.map(m => ({ value: String(m.id), label: m.name })));
+  holder.hidden = false;
+  holder.innerHTML = '';
+  holder.dataset.dropdown = '';
+  holder.dataset.label = 'Manager';
+  holder.dataset.value = upManager;
+  holder.dataset.options = JSON.stringify(opts);
+  delete holder.dataset.cmpWired;
+  Components.init(holder.parentNode);
+}
+
+async function loadUploads() {
+  const from = $('up-from').value, to = $('up-to').value;
+  if (!from || !to) return;
+  if (to < from) { toast('"To" is before "From".', 'warn'); return; }
+  if ((new Date(to) - new Date(from)) / 864e5 + 1 > MAX_DAYS) {
+    toast(`Pick at most ${MAX_DAYS} days.`, 'warn'); return;
+  }
+  const q = new URLSearchParams({ from, to });
+  if (seesAll() && upManager) q.set('manager_id', upManager);
+  try {
+    const r = await fetch('/team/uploads?' + q);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    paintManagerFilter(j.managers || []);
+    paintFresh(j.channels);
+    paintGrid(j);
+  } catch (err) {
+    $('up-grid').innerHTML = `<em class="muted">Could not load the uploads: ${esc(err.message)}</em>`;
+  }
+}
+
+$('up-form').onsubmit = (e) => { e.preventDefault(); loadUploads(); };
+$('up-form').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-days]');
+  if (b) { setRange(Number(b.dataset.days)); loadUploads(); }
+});
+$('up-manager').addEventListener('change', (e) => {
+  if (e.detail && 'value' in e.detail) { upManager = e.detail.value; loadUploads(); }
+});
+
+setRange(7);
+load().then(loadUploads);
 </script>
 </body>
 </html>
