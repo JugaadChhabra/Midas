@@ -1,8 +1,13 @@
 # Team Upload Tracking — what to build on Midas
 
-> **Status:** design agreed, not built. Written 2026-11-06 from a discussion held in the
-> (now retired) Argus repo. Nothing here exists in code yet — when parts land, move them
-> into `STATE.md` per `CLAUDE.md`.
+> **Status:** built (team tracker #143–#152, 2026-11-18). `STATE.md` is now the source of
+> truth for what exists: tables in §2 (`app_users`, `app_sessions`, `channels.manager_id`,
+> `team_members`, `channel_assignments`, `channel_uploads`), routes, the gate and access
+> rules in §5, modules and the Team page in §5's module table. This document stays as the
+> design record (written 2026-11-06 from a discussion held in the retired Argus repo); where
+> its design-level detail differs from the code, `STATE.md` wins. Still to do on the office
+> machine: apply the migrations, create the four users, set every channel's manager
+> (#142 build step 6).
 
 ## 1. Goal
 
