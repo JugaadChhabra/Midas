@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi.testclient import TestClient
 
 from app import main
 from tests.fakes import FakeSupabase
@@ -136,12 +135,12 @@ def test_reconcile_with_writes_on_adds_and_removes():
     ("/channels/c1/reflection/trigger", "REFLECTION_ENABLED"),
     ("/channels/c1/prompt-versions/7/promote", "REFLECTION_ENABLED"),
 ])
-def test_frozen_endpoint_returns_409_naming_the_flag(path, flag):
+def test_frozen_endpoint_returns_409_naming_the_flag(path, flag, authed_client):
     with patch.object(main.settings, flag, False), \
          patch("app.playlists_router.reconcile_channel") as reconcile, \
          patch("app.reflection.reflect") as reflect, \
          patch("app.reflection._promote_version") as promote:
-        r = TestClient(main.app).post(path)
+        r = authed_client().post(path)
 
     assert r.status_code == 409
     assert flag in r.json()["detail"]
@@ -150,19 +149,19 @@ def test_frozen_endpoint_returns_409_naming_the_flag(path, flag):
     promote.assert_not_called()
 
 
-def test_reconcile_endpoint_runs_when_writes_on():
+def test_reconcile_endpoint_runs_when_writes_on(authed_client):
     with patch.object(main.settings, "PLAYLIST_RECONCILE_WRITES_ENABLED", True), \
          patch("app.playlists_router.reconcile_channel", return_value={"added": 0}) as reconcile:
-        r = TestClient(main.app).post("/channels/c1/playlists/reconcile")
+        r = authed_client().post("/channels/c1/playlists/reconcile")
 
     assert r.status_code == 200
     reconcile.assert_called_once_with("c1")
 
 
-def test_reflection_trigger_runs_when_enabled():
+def test_reflection_trigger_runs_when_enabled(authed_client):
     with patch.object(main.settings, "REFLECTION_ENABLED", True), \
          patch("app.reflection.reflect", return_value={"reflected": False}) as reflect:
-        r = TestClient(main.app).post("/channels/c1/reflection/trigger")
+        r = authed_client().post("/channels/c1/reflection/trigger")
 
     assert r.status_code == 200
     reflect.assert_called_once_with("c1")

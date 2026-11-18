@@ -53,3 +53,37 @@ def _fresh_backlink_pools():
     agent_tick._pools.clear()
     yield
     agent_tick._pools.clear()
+
+
+# ── the signed-in client (team tracker #144) ────────────────────────────────
+# Every route but app/session.py's PUBLIC_PATHS needs a session. Route tests
+# sign in as an admin through rows in a FakeSupabase that stands in for the
+# session store only (app_users, app_sessions); each test still patches its own
+# module's `supabase` for the rows it is about.
+ADMIN_TOKEN = "test-admin-session-token"
+ADMIN_USER = {"id": 1, "email": "admin@example.com", "name": "Test Admin",
+              "role": "admin", "is_active": True, "password_hash": "unused"}
+
+
+@pytest.fixture
+def authed_client():
+    """A factory for a TestClient signed in as an active admin:
+    `authed_client()` or `authed_client(raise_server_exceptions=False)`."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from app import main, session
+    from tests.fakes import FakeSupabase
+
+    store = FakeSupabase({
+        "app_users": [dict(ADMIN_USER)],
+        "app_sessions": [{"token_hash": session.hash_token(ADMIN_TOKEN), "user_id": 1,
+                          "expires_at": "2999-01-01T00:00:00+00:00"}],
+    })
+
+    def make(**kw):
+        return TestClient(main.app, cookies={session.COOKIE: ADMIN_TOKEN}, **kw)
+
+    with patch.object(session, "supabase", return_value=store):
+        yield make

@@ -3,14 +3,18 @@
 The behaviour worth locking down is that a demo job never publishes (upload_cap
 0) and that the file endpoint refuses paths outside SHORTS_CACHE_DIR.
 """
+import pytest
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
 
 
-def _client():
-    from app.main import app
-    return TestClient(app, raise_server_exceptions=False)
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global _client
+    _client = lambda: authed_client(raise_server_exceptions=False)  # noqa: E731
 
 
 def _sb_with_channel(found=True):

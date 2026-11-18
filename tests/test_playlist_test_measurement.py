@@ -9,7 +9,6 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import eligibility, lever_measurement, main, playlist_test, reach
 from app import lever_verdicts as lv
@@ -277,13 +276,13 @@ def test_a_week_with_no_dosed_treated_or_no_holdout_arm_writes_no_verdict():
 
 
 @pytest.mark.parametrize("weekly, answer", [([8, 8, 8, 8], "yes"), ([7.5, 7.5, 7.5, 7.5], "no")])
-def test_the_answer_at_window_4(weekly, answer):
+def test_the_answer_at_window_4(weekly, answer, authed_client):
     arms = [treated(1, "PL1"), holdout(2, "PL2"), treated(3, "PL3", status="no_dose")]
     traffic = by_week("PL1", 1, weekly + [500]) + by_week("PL2", 1, [7, 7, 7, 7])
     with db(arms, traffic, through=week(5)[1]) as sb:
         playlist_test.measure_channel(CH)
         rows = verdict_rows(sb)
-        body = TestClient(main.app).get(f"/channels/{CH}/playlist-test").json()
+        body = authed_client().get(f"/channels/{CH}/playlist-test").json()
     assert [r["windows_judged"] for r in rows] == [1, 2, 3, 4]       # no week 5
     assert [r["stop_rule_triggered"] for r in rows] == [False, False, False, answer == "no"]
     assert rows[-1]["cumulative_lift"] == pytest.approx(weekly[0] - 7)
@@ -414,18 +413,18 @@ def test_the_real_job_end_to_end_writes_the_playlist_verdict():
 
 # ── the endpoint ─────────────────────────────────────────────────────────
 
-def test_the_endpoint_before_the_test_is_dosed_and_while_it_runs():
+def test_the_endpoint_before_the_test_is_dosed_and_while_it_runs(authed_client):
     with db([treated(1, "PL1", status="applying", first_applied_at=FIRST),
              holdout(2, "PL2")]):
-        body = TestClient(main.app).get(f"/channels/{CH}/playlist-test").json()
+        body = authed_client().get(f"/channels/{CH}/playlist-test").json()
     assert (body["test_start"], body["test_end"], body["answer"]) == (None, None, "pending")
     assert [a["id"] for a in body["arms"]] == [1, 2] and body["verdicts"] == []
 
     traffic = by_week("PL1", 1, [9]) + by_week("PL2", 1, [7])
     with db([treated(1, "PL1"), holdout(2, "PL2")], traffic, through=week(1)[1]):
         playlist_test.measure_channel(CH)
-        body = TestClient(main.app).get(f"/channels/{CH}/playlist-test").json()
-        other = TestClient(main.app).get(f"/channels/{OTHER}/playlist-test").json()
+        body = authed_client().get(f"/channels/{CH}/playlist-test").json()
+        other = authed_client().get(f"/channels/{OTHER}/playlist-test").json()
     assert (body["test_start"], body["test_end"]) == ("2026-11-02", "2026-11-04")
     assert [v["week_start"] for v in body["verdicts"]] == ["2026-11-05"]
     assert body["answer"] == "pending"

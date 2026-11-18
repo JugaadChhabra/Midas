@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-17 (cleanup: deploy history, dated changelog and the Phase A/B narrative removed; they are in
-git history) · **Commit:** on top of `36f2bca` · **Branch:** `main`
+**Generated:** 2026-11-18 (team tracker 02, #144: logins, sessions and the global gate) · **Commit:** on top of
+`5d590ec` · **Branch:** `team-tracker/02-logins`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -141,6 +141,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261030000000_interventions_trajectory.sql     interventions.trajectory (S3.4)
 20261030010000_lever_verdicts_title_scopes.sql  comment on lever_verdicts.arm_scope: + pipeline_vs_holdout|agent_vs_holdout (S3.5)
 20261030020000_warm_pool_title_holds.sql        warm_pool() replaced: + title rows hold once per experiment (S3.5)
+20261118000000_app_users_sessions.sql           app_users, app_sessions (team tracker #144)
 ```
 
 **Tables** (columns are the union across the migrations):
@@ -268,6 +269,37 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 - **`video_traffic_source_playlist`**: `video_id → videos, playlist_id text (no FK), channel_id, window_start, window_end, views bigint, unique(video_id, playlist_id, window_start, window_end)`. Never populated.
 - **`audit_strategies`**: `version text pk, prompt_template text not null, model text not null, config jsonb, status text default 'challenger', notes, created_at`. Seed `2026.07-baseline-v1`; rows upserted per audit and per title strategy (`app/titles.py` `strategy_version`, §6).
 - **`video_embeddings`**: `video_id, chunk_index, model_version text not null, embedding vector(3072), unique (video_id, chunk_index, model_version)`. Production uses `model_version = EMBED_MODEL`; `app/reembed.py` writes `MODEL_VERSION` = `"google/gemini-embedding-2-preview|tdt-v1"`, read by `app/backlinks.py` `candidates`.
+- **`app_users`**, **`app_sessions`** (`20261118000000`, team tracker #144), verbatim without the header comment.
+  Read and written only by `app/session.py` (the gate, `/session/*`, and the user-admin functions behind
+  `scripts/manage_users.py`). `email` stored lower-cased; `password_hash` an argon2id hash (`argon2-cffi`); `role`
+  mirrored by `status_vocab.UserRole` (`admin|exec|manager`). A session row is keyed by the sha256 hex of its cookie
+  token (the raw token is never stored); expired rows are deleted when read:
+  ```sql
+  create table if not exists app_users (
+      id             bigserial    primary key,
+      email          text         not null unique,
+      name           text         not null,
+      password_hash  text         not null,
+      role           text         not null check (role in ('admin', 'exec', 'manager')),
+      is_active      boolean      not null default true,
+      created_at     timestamptz  not null default now()
+  );
+
+  create table if not exists app_sessions (
+      token_hash   text         primary key,
+      user_id      bigint       not null references app_users(id) on delete cascade,
+      expires_at   timestamptz  not null,
+      created_at   timestamptz  not null default now()
+  );
+
+  -- Backs the cascade, and "every session of this user" (deactivate).
+  create index if not exists app_sessions_user_idx on app_sessions (user_id);
+
+  grant all on app_users to service_role;
+  grant all on sequence app_users_id_seq to service_role;
+  grant all on app_sessions to service_role;
+  ```
+
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()`.
 
 - **`warm_pool()`**, verbatim without its header comment, as of `20261030020000` (in-app twin `app/warm.py` `_ranked_pool_inapp`; the agent tick picks via `warm.warm_pool`). Excludes active Midas rows, any `midas` row within `p_cooldown_days`, and at any age backlinks holdout/applied rows and title holdout or non-`cancelled` treated rows:
@@ -543,7 +575,7 @@ Hardcoded constants that act like config: `reflection._MIN_DATA_POINTS=10`, `_NE
 (`app/playlists.py:28`); `metrics_poll.WINDOW_DAYS=7` (`app/metrics_poll.py:47`);
 `TIER2_TRAFFIC_SOURCE_SUPPORTED=False` (`app/metrics_poll.py:85`); `reach.ROLLOVER_SLOP_DAYS=1` (`app/reach.py:52`);
 `sync.SYNC_STALE_AFTER=timedelta(hours=6)`, `FULL_SYNC_INTERVAL=timedelta(days=3)` (`app/sync.py:515,520`);
-`decide.QUESTION_SET_VERSION="2026.11-s3-v1"` (`app/decide.py:39`); `agent_tick.CONTEXT_DAYS=28`, `agent_tick.POOL_TTL_SECONDS=3600` (`app/agent_tick.py`); `lever_measurement.WEEK=7`, `EXTENDED_DAYS=14`, `RESTATEMENT_HORIZON_DAYS=28` (`app/lever_measurement.py`); `playlist_test.MIN_EMBEDDED_MEMBERS=3` (`app/playlist_test.py`); `short_links.FEED_WINDOW_DAYS=28` (`app/short_links.py`); `title_measurement.PRE_DAYS=14`, `SOURCE_TYPES=(3, 5, 7)` (`app/title_measurement.py:60,63`); `agent.loop.TRAJECTORY_CHARS=2000` (`app/agent/loop.py:47`); `agent.tools.SEARCH_TERMS=25`, `TOP_PERFORMERS=10`, `HISTORY=10` (`app/agent/tools.py:31-34`); `titles.DESCRIPTION_CHARS=1500`, `SEARCH_TERMS=10`, `TOP_PERFORMERS=5` (`app/titles.py:58-61`); `reembed.RECIPE="tdt-v1"`, `BATCH_SIZE=50`,
+`decide.QUESTION_SET_VERSION="2026.11-s3-v1"` (`app/decide.py:39`); `agent_tick.CONTEXT_DAYS=28`, `agent_tick.POOL_TTL_SECONDS=3600` (`app/agent_tick.py`); `lever_measurement.WEEK=7`, `EXTENDED_DAYS=14`, `RESTATEMENT_HORIZON_DAYS=28` (`app/lever_measurement.py`); `playlist_test.MIN_EMBEDDED_MEMBERS=3` (`app/playlist_test.py`); `short_links.FEED_WINDOW_DAYS=28` (`app/short_links.py`); `title_measurement.PRE_DAYS=14`, `SOURCE_TYPES=(3, 5, 7)` (`app/title_measurement.py:60,63`); `agent.loop.TRAJECTORY_CHARS=2000` (`app/agent/loop.py:47`); `session.SESSION_DAYS=30`, `session.COOKIE="midas_session"` (`app/session.py`); `agent.tools.SEARCH_TERMS=25`, `TOP_PERFORMERS=10`, `HISTORY=10` (`app/agent/tools.py:31-34`); `titles.DESCRIPTION_CHARS=1500`, `SEARCH_TERMS=10`, `TOP_PERFORMERS=5` (`app/titles.py:58-61`); `reembed.RECIPE="tdt-v1"`, `BATCH_SIZE=50`,
 `_BYTES_PER_TOKEN=3`, `JOIN_HIGH_PCTL=50`, `LEAVE_PCTL=10`, `JOIN_LOW_PCTL=5`, `MIN_MEMBER_SIMS=30` (`app/reembed.py:33-51`); `quota.APPLY=(VIDEOS_LIST, VIDEOS_UPDATE)`
 = 51u (`app/quota.py:50-67`); `openrouter.EMBED_MODEL="google/gemini-embedding-2-preview"` (`app/openrouter.py:7`).
 
@@ -602,9 +634,28 @@ Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playboo
 
 ## 5. Surface area
 
-**Routes** (`app/main.py:596-613` mounts every router):
+**Routes** (`app/main.py:603-625` mounts every router).
 
-- **Pages/health:** `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
+**The global gate** (`app/session.py` `gate`, registered by `app.middleware("http")(session.gate)` in
+`app/main.py`), in order: a non-GET/HEAD/OPTIONS request whose `Origin` header isn't the request's `Host` (or is
+`null`) → 403 `{"detail": "cross_origin_refused"}`, on every path (no `Origin` passes to the next step); a path in
+`session.PUBLIC_PATHS` passes without a session: exactly `/login`, `/session/login`, `/static/theme.css`, `/health`
+(exact paths, so `/health/jobs`, `/health/channels` and the rest of `/static` are gated); anything else needs a
+valid `midas_session` cookie (an unexpired `app_sessions` row whose user is active, checked on every request; an
+expired row is deleted), else a GET/HEAD for a page (`session.PAGES` = `/`, `/channel`, `/autoshorts`, or any
+request whose `Accept` has `text/html`) → 303 to `/login?next=<path and query>` (`/login` for `/`), and every other
+request → 401 `{"detail": "not_authenticated"}`. The signed-in user is on `request.state.user` (`{id, email, name,
+role}`). The gate checks login only: every signed-in user, whatever the role, reaches every route (per-role
+access is team tracker #145). Scheduled jobs don't pass through it.
+
+- **Session** (`app/session.py` `router`): `GET /login` → `static/login.html` (public); `POST /session/login` (public)
+  body `{email, password}` → `{"user": {id, email, name, role}}` and sets `midas_session` (`httpOnly`,
+  `SameSite=Lax`, `Max-Age` 30 days (`SESSION_DAYS`), `Path=/`, `Secure` only over https); a wrong email, wrong
+  password or inactive user → 401 `{"detail": "Email or password is wrong."}` (`LOGIN_FAILED`), no session; an
+  unknown email spends one argon2 verify so it answers as slowly as a wrong password. `POST /session/logout` → 204,
+  deletes the session row and the cookie. `GET /session/me` → `{id, email, name, role}`.
+
+- **Pages/health:** `GET /login` (Session, above); `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
 - **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels`, `PATCH /auth/channels/{id}` (enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
 - **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply?force=`, `POST /channels/{id}/audits/apply-pending?force=` (both 409 `AGENT_CHANNEL_REFUSED`, "agent channel: a house-format apply replaces the description and its backlink block; pass force=true", on an `agent_enabled` channel unless `force=true`, before anything is sent or written; `audits._refuse_on_agent_channel`), `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk` (both only write `pending` audits, so unguarded), `POST /audits/{id}/revert` (409 "agent channel: an audit revert …; pass force=true" on an `agent_enabled` channel unless `?force=true`; 409 `quota_insufficient` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:847-852`), `GET /quota-cost-preview`.
@@ -635,6 +686,7 @@ Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playboo
 | `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`); `can_run_agent` = `can_audit` and `agent_enabled` and `reach.certify` |
 | `status_vocab.py` | persisted status strings and their mirrors (`tests/test_status_vocab.py`) |
 | `auth.py` | OAuth + channel flag PATCH |
+| `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
 | `content_type.py` | `is_episode` classifier |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
@@ -681,9 +733,12 @@ Spec'd jobs not registered: `niche_reference_refresh` (Part 2 §3.6) and playboo
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
 | `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard. `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
+| `static/*` | vanilla-JS dashboard. `login.html` (the sign-in form, inline script, loads only `theme.css`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` shows the signed-in user's name and role (`GET /session/me`) above the channel switcher, with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
 
-**Scripts:** `scripts/preview_titles.py` (`--channel`, `--n` 20, `--path pipeline|agent` default `pipeline`, `--csv [PATH]` default `logs/preview_titles_<channel>.csv`; prints `titles.preview` per title answer: arm, path, CTR vs median, candidates with checks, chosen title or failures; with `--path agent` the agent's tools, turns, submits and end; read-only, calls the writer and, for `agent`, the reasoning model), `scripts/title_bakeoff.py` (`--channel`, `--n` 20, `--models a,b,c`, `--out` default `logs/title_bakeoff_<channel>.csv`, `--seed`; each model once per video, one shuffled row per (video, model) with blank `score_1_3`, `wrong_or_broken_script`, `follows_structure`, `notes`; models hidden as `W1…Wn`, key in `<out stem>.key.csv`; no DB or YouTube writes), `scripts/short_links.py` (`--channel --preview`; prints what `refresh` would recommend; exits 1 when thresholds are refused; writes nothing), `scripts/playlist_test.py` (`--channel` and `--preview` (writes nothing) or `--draw` (no confirmation; exits 1 when refused or already drawn)), `scripts/preview_backlinks.py` (`--channel`, `--n` 20; rules answer, arm, targets, description before/after or the refusal; read-only), `scripts/reembed.py` (`--channels`, `--estimate` with `--usd-per-mtok`, `--skip-calibrate`; re-embeds then calibrates), `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`), `scripts/probe_reporting.py`, `scripts/probe_analytics.py`, `scripts/verify_reach_coverage.py`, `scripts/apply_migrations.py`, backfills, and the Phase A live probes in `scripts/probes/` (`probe_traffic_source_report.py` defaults to `channel_traffic_source_a3`, `:61`).
+**Scripts:** `scripts/manage_users.py` (`create --email --name --role admin|exec|manager`, `reset-password --email`,
+`deactivate --email`; the password is typed twice at a `getpass` prompt, never an argument; reset and deactivate end
+the user's sessions; writes `app_users`/`app_sessions` through `app/session.py`; exits 1 on a refusal),
+`scripts/preview_titles.py` (`--channel`, `--n` 20, `--path pipeline|agent` default `pipeline`, `--csv [PATH]` default `logs/preview_titles_<channel>.csv`; prints `titles.preview` per title answer: arm, path, CTR vs median, candidates with checks, chosen title or failures; with `--path agent` the agent's tools, turns, submits and end; read-only, calls the writer and, for `agent`, the reasoning model), `scripts/title_bakeoff.py` (`--channel`, `--n` 20, `--models a,b,c`, `--out` default `logs/title_bakeoff_<channel>.csv`, `--seed`; each model once per video, one shuffled row per (video, model) with blank `score_1_3`, `wrong_or_broken_script`, `follows_structure`, `notes`; models hidden as `W1…Wn`, key in `<out stem>.key.csv`; no DB or YouTube writes), `scripts/short_links.py` (`--channel --preview`; prints what `refresh` would recommend; exits 1 when thresholds are refused; writes nothing), `scripts/playlist_test.py` (`--channel` and `--preview` (writes nothing) or `--draw` (no confirmation; exits 1 when refused or already drawn)), `scripts/preview_backlinks.py` (`--channel`, `--n` 20; rules answer, arm, targets, description before/after or the refusal; read-only), `scripts/reembed.py` (`--channels`, `--estimate` with `--usd-per-mtok`, `--skip-calibrate`; re-embeds then calibrates), `scripts/create_reporting_job.py` (`--report-type`, default `channel_reach_basic_a1`), `scripts/probe_reporting.py`, `scripts/probe_analytics.py`, `scripts/verify_reach_coverage.py`, `scripts/apply_migrations.py`, backfills, and the Phase A live probes in `scripts/probes/` (`probe_traffic_source_report.py` defaults to `channel_traffic_source_a3`, `:61`).
 
 ---
 
@@ -1100,6 +1155,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Login only; per-role channel scoping is #145 |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |

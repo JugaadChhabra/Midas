@@ -37,6 +37,7 @@
     panel:       () => stroke('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>'),
     caret:       () => stroke('<path d="m7 15 5 5 5-5M7 9l5-5 5 5"/>', 15),
     plus:        () => stroke('<path d="M12 5v14M5 12h14"/>', 14),
+    logout:      () => stroke('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5M5 12h11"/>', 16),
     brand: () => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
         <circle cx="12" cy="12" r="3.4" fill="currentColor"/>
         <g stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
@@ -119,6 +120,14 @@
       </div>
       <nav class="sidebar-nav" role="tablist" aria-label="Sections">${items}</nav>
       <div class="sidebar-foot">
+        <div class="user-pill" id="user-pill" hidden>
+          <span class="user-meta">
+            <span class="user-name" id="user-name"></span>
+            <span class="user-role" id="user-role"></span>
+          </span>
+          <button class="user-logout" id="user-logout" type="button"
+                  title="Log out" aria-label="Log out">${icon('logout')}</button>
+        </div>
         <button class="chan-switch" id="chan-switch" type="button"
                 aria-haspopup="listbox" aria-expanded="false">
           <span class="chan-avatar" id="chan-avatar">··</span>
@@ -167,6 +176,35 @@
     });
 
     document.addEventListener('keydown', onKeydown);
+
+    aside.querySelector('#user-logout').onclick = logout;
+    loadUser(aside);
+  }
+
+  // ── Who is signed in ─────────────────────────────────────────────────
+  // The pill names the session's user (GET /session/me, app/session.py). A
+  // signed-out page never gets here: the gate redirects it, and swr.js sends
+  // any later 401 to /login.
+  const ROLE_LABEL = { admin: 'Admin', exec: 'Exec', manager: 'Manager' };
+
+  async function loadUser(aside) {
+    try {
+      const r = await fetch('/session/me');
+      if (!r.ok) return;
+      const me = await r.json();
+      aside.querySelector('#user-name').textContent = me.name || me.email || '';
+      aside.querySelector('#user-role').textContent = ROLE_LABEL[me.role] || me.role || '';
+      const pill = aside.querySelector('#user-pill');
+      pill.title = `${me.name || ''} · ${me.email || ''}`;
+      pill.hidden = false;
+    } catch (_) { /* the rail works without the pill */ }
+  }
+
+  async function logout() {
+    try { await fetch('/session/logout', { method: 'POST' }); } catch (_) { /* go anyway */ }
+    // The next person at this desk must not be painted this user's cached data.
+    try { window.SWR && SWR.evictAll(); } catch (_) { /* ignore */ }
+    location.assign('/login');
   }
 
   function toggleCollapse() {

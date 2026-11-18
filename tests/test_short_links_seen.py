@@ -106,7 +106,7 @@ def test_an_unrecommended_pair_is_recorded_too_as_not_recommended():
     assert row["ledger_key"] == f"short_link:{S2}:{T2}"
 
 
-def test_a_ticked_pair_is_never_duplicated_and_a_later_tick_is_a_no_op():
+def test_a_ticked_pair_is_never_duplicated_and_a_later_tick_is_a_no_op(authed_client):
     ticked = {"id": 50, "video_id": T1, "channel_id": CH, "lever": "short_link",
               "origin": "human", "arm": "n/a", "status": "applied",
               "ledger_key": f"short_link:{S1}:{T1}",
@@ -124,7 +124,7 @@ def test_a_ticked_pair_is_never_duplicated_and_a_later_tick_is_a_no_op():
         # The page's tick of the inferred pair links the inferred row.
         from fastapi.testclient import TestClient
         from app import main
-        body = TestClient(main.app).post("/short-links/2/set").json()
+        body = authed_client().post("/short-links/2/set").json()
     assert body["recorded"] is False
     assert body["intervention_id"] == inferred(sb)[0]["id"]
     assert len(sb.rows("interventions")) == 2

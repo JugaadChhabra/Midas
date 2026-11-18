@@ -39,6 +39,7 @@ TITLE_SCOPES_SQL = REPO / "supabase/migrations/20261030010000_lever_verdicts_tit
 PLAYLIST_ARMS_SQL = REPO / "supabase/migrations/20261027000000_playlist_arms.sql"
 SHORT_LINKS_SQL = REPO / "supabase/migrations/20261027010000_short_link_recommendations.sql"
 CHANNEL_HTML = REPO / "app/static/channel.html"
+APP_USERS_SQL = REPO / "supabase/migrations/20261118000000_app_users_sessions.sql"
 
 
 def _sql_not_in_lists(sql: str) -> list[set[str]]:
@@ -267,3 +268,13 @@ def test_the_experiment_decision_source_is_labelled_in_the_proposals_card():
     block = re.search(r"const DECIDED_BY = \{(.*?)\n  \};", CHANNEL_HTML.read_text(), re.S)
     assert block, "DECIDED_BY not found in channel.html"
     assert re.search(r"^\s*experiment:\s*'Playlist test',", block.group(1), re.M)
+
+
+def test_user_role_values_are_the_persisted_strings():
+    """app_users.role (team tracker #144): the Python vocabulary and the
+    table's check constraint list the same roles."""
+    assert sv.ALL_USER_ROLES == {"admin", "exec", "manager"}
+    m = re.search(r"role\s+text.*?check\s*\(role\s+in\s*\(([^)]*)\)\)",
+                  APP_USERS_SQL.read_text(), re.S | re.I)
+    assert m, "app_users.role check constraint not found"
+    assert {v.strip().strip("'") for v in m.group(1).split(",")} == sv.ALL_USER_ROLES

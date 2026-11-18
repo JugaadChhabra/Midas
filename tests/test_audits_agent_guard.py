@@ -5,10 +5,10 @@ backlinks it replaces the description and the block in it. The manual routes
 refuse there with 409 unless `?force=true`; on any other channel they work as
 before. Through the endpoints, with the DB and YouTube faked at the edge.
 """
+import pytest
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 
 from app import audits, main
 from tests.fakes import FakeSupabase
@@ -42,8 +42,13 @@ def _edges(sb):
         yield {"update": update, "afford": afford}
 
 
-def _client():
-    return TestClient(main.app, raise_server_exceptions=False)
+
+@pytest.fixture(autouse=True)
+def _signed_in(authed_client):
+    """Every request here is a signed-in admin's (tests/conftest.py
+    authed_client): the gate (app/session.py) refuses anything else."""
+    global _client
+    _client = lambda: authed_client(raise_server_exceptions=False)  # noqa: E731
 
 
 def _status(sb):

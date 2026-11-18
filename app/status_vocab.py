@@ -378,3 +378,19 @@ class DecisionUsed:
 
 
 ALL_DECISION_USED = frozenset({DecisionUsed.RULES, DecisionUsed.JEV})
+
+
+class UserRole:
+    """`app_users.role` — what a Midas login may see and do (team tracker,
+    #142/#144). Mirrored by the table's check constraint
+    (supabase/migrations/20261118000000_app_users_sessions.sql)."""
+
+    #: Everything, including OAuth connect, users and channel → manager mapping.
+    ADMIN = "admin"
+    #: Every channel, no user or OAuth admin.
+    EXEC = "exec"
+    #: Only the channels mapped to them.
+    MANAGER = "manager"
+
+
+ALL_USER_ROLES = frozenset({UserRole.ADMIN, UserRole.EXEC, UserRole.MANAGER})
