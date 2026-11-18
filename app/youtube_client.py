@@ -116,11 +116,16 @@ def yt_channels_list_uploads(yt, channel_id: str) -> dict | None:
 
 
 def yt_playlist_items_page(yt, channel_id: str, playlist_id: str, page_token: str | None) -> dict:
-    """One page of playlistItems."""
+    """One page of playlistItems.
+
+    `snippet` rides along at no extra cost (still 1 unit): the video sync reads
+    each uploads-playlist item's `snippet.publishedAt` as the upload time
+    (`channel_uploads.uploaded_at`, team tracker #150).
+    """
     success = False
     try:
         resp = yt.playlistItems().list(
-            part="contentDetails",
+            part="snippet,contentDetails",
             playlistId=playlist_id,
             maxResults=50,
             pageToken=page_token,

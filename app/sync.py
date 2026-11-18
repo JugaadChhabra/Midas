@@ -165,6 +165,9 @@ def sync_channel(channel_id: str, full: bool = False):
     uploads_playlist = channel_meta["uploads_playlist_id"]
 
     video_ids: list[str] = []
+    # The upload time per video: the uploads-playlist item's snippet.publishedAt
+    # (team tracker #143's decision), for channel_uploads.uploaded_at.
+    playlist_published: dict[str, str | None] = {}
     page_token: str | None = None
     reached_known = False
     try:
@@ -178,6 +181,7 @@ def sync_channel(channel_id: str, full: bool = False):
                     reached_known = True
                     break
                 video_ids.append(vid)
+                playlist_published[vid] = (item.get("snippet") or {}).get("publishedAt")
             page_token = resp.get("nextPageToken")
             if not page_token:
                 break
@@ -186,7 +190,10 @@ def sync_channel(channel_id: str, full: bool = False):
             raise HTTPException(429, "youtube_quota_exceeded")
         raise HTTPException(502, f"YouTube API error: {e}")
 
+    stored_uploads = _stored_uploads(channel_id, video_ids)
+
     rows: list[dict] = []
+    upload_rows: list[dict] = []
     privacy_changed_to_private: list[str] = []
     probes_used = 0            # bounded per sync — see MAX_SHORTS_PROBES_PER_SYNC
     for i in range(0, len(video_ids), 50):
@@ -205,6 +212,8 @@ def sync_channel(channel_id: str, full: bool = False):
             # only up to MAX_SHORTS_PROBES_PER_SYNC per run; past that, fall back
             # to the duration label (a later backfill corrects the remainder).
             prior = existing_is_short.get(item["id"])
+            if prior is None:
+                prior = _settled_is_short(stored_uploads.get(item["id"]))
             if prior is not None:
                 is_short = prior
             elif duration_seconds is None or duration_seconds > SHORTS_MAX_SECONDS:
@@ -220,9 +229,14 @@ def sync_channel(channel_id: str, full: bool = False):
                     )
             else:
                 is_short = duration_seconds <= SHORTS_MAX_SECONDS   # duration fallback
+            privacy = (item.get("status") or {}).get("privacyStatus")
+            # Every fetched video, before the two skips below: the Team page
+            # counts private, scheduled and opted-out-Shorts uploads too.
+            upload_rows.append(_upload_row(
+                channel_id, item, is_short, duration_seconds,
+                playlist_published.get(item["id"])))
             if not sync_shorts and is_short:
                 continue  # skip shorts when channel has sync_shorts = false
-            privacy = (item.get("status") or {}).get("privacyStatus")
             if privacy == "private":
                 # Don't ingest the snippet, but flip any existing row to private
                 # so the autopilot stops picking it. Without this the stored
@@ -257,6 +271,8 @@ def sync_channel(channel_id: str, full: bool = False):
                 "published_at": sn.get("publishedAt"),
                 "last_fetched_at": datetime.now(timezone.utc).isoformat(),
             })
+
+    _record_uploads(channel_id, upload_rows, stored_uploads)
 
     if rows:
         deduped = list({r["id"]: r for r in rows}.values())
@@ -296,6 +312,126 @@ def _record_human_edits(channel_id: str, stored: dict[str, str | None], rows: li
             channel_id, changes, also_ours={r["id"] for r in rows})
     except Exception as e:
         log.exception("sync %s: human-edit ledger failed; sync continues: %s", channel_id, e)
+
+
+# ── upload capture (team tracker #150) ──────────────────────────────────────
+#
+# Every video the sync fetches is recorded in channel_uploads with its upload
+# time, including the ones kept out of `videos` (private and scheduled uploads,
+# Shorts on a sync_shorts = false channel). uploaded_at is write-once: new rows
+# are inserted with ignore-duplicates, existing ones get only UPLOAD_MUTABLE.
+# The migration's trigger is the backstop. Like the human-edit ledger, a
+# failure here is logged and never fails the sync.
+
+#: The columns an existing channel_uploads row may change. Never uploaded_at,
+#: playlist_published_at or first_seen_at.
+UPLOAD_MUTABLE = ("title", "privacy_status", "scheduled_publish_at", "is_short",
+                  "thumbnail_url", "video_published_at")
+
+_UPLOAD_TIMESTAMPS = ("scheduled_publish_at", "video_published_at")
+
+#: Rows per channel_uploads insert, as for the videos upsert.
+_UPLOAD_BATCH = 100
+
+
+def _stored_uploads(channel_id: str, video_ids: list[str]) -> dict[str, dict]:
+    """The channel_uploads rows of the videos this sync fetches. {} on failure."""
+    try:
+        stored = rows_for_ids(
+            lambda chunk: (
+                supabase().table("channel_uploads")
+                .select("video_id,channel_id," + ",".join(UPLOAD_MUTABLE))
+                .in_("video_id", chunk)
+            ),
+            list(dict.fromkeys(video_ids)),
+            order_by="video_id",
+        )
+    except Exception as e:
+        log.exception("sync %s: reading channel_uploads failed; sync continues: %s",
+                      channel_id, e)
+        return {}
+    return {r["video_id"]: r for r in stored}
+
+
+def _settled_is_short(stored: dict | None) -> bool | None:
+    """A stored channel_uploads verdict worth reusing, else None (probe again).
+
+    A row still private, or never classified, is re-checked whenever the sync
+    fetches it, inside the per-sync probe cap.
+    """
+    if not stored or stored.get("privacy_status") == "private":
+        return None
+    return stored.get("is_short")
+
+
+def _upload_row(channel_id: str, item: dict, is_short: bool | None,
+                duration_seconds: int, playlist_published_at: str | None) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    sn = item.get("snippet") or {}
+    status = item.get("status") or {}
+    return {
+        "video_id": item["id"],
+        "channel_id": channel_id,
+        "title": sn.get("title"),
+        "is_short": is_short,
+        "duration_seconds": duration_seconds,
+        "privacy_status": status.get("privacyStatus"),
+        "scheduled_publish_at": status.get("publishAt"),
+        "thumbnail_url": f"https://i.ytimg.com/vi/{item['id']}/hqdefault.jpg",
+        "uploaded_at": playlist_published_at or now,
+        "playlist_published_at": playlist_published_at,
+        "video_published_at": sn.get("publishedAt"),
+        "first_seen_at": now,
+        "last_seen_at": now,
+    }
+
+
+def _same(column: str, stored, fetched) -> bool:
+    if column in _UPLOAD_TIMESTAMPS and stored and fetched:
+        return _parse_ts(stored) == _parse_ts(fetched)
+    return stored == fetched
+
+
+def _parse_ts(value: str):
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return value
+
+
+def _record_uploads(channel_id: str, fetched: list[dict], stored: dict[str, dict]) -> None:
+    """Write this sync's channel_uploads rows. Never fails the sync."""
+    if not fetched:
+        return
+    try:
+        rows = list({r["video_id"]: r for r in fetched}.values())
+        new = [r for r in rows if r["video_id"] not in stored]
+        for i in range(0, len(new), _UPLOAD_BATCH):
+            supabase().table("channel_uploads").upsert(
+                new[i:i + _UPLOAD_BATCH], on_conflict="video_id", ignore_duplicates=True,
+            ).execute()
+
+        # Existing rows: one update per row whose mutable fields changed (few:
+        # a go-live, a retitle), and last_seen_at for the rest in batches.
+        unchanged: list[str] = []
+        for r in rows:
+            old = stored.get(r["video_id"])
+            if old is None:
+                continue
+            changed = {c: r[c] for c in UPLOAD_MUTABLE if not _same(c, old.get(c), r[c])}
+            if not changed:
+                unchanged.append(r["video_id"])
+                continue
+            supabase().table("channel_uploads").update(
+                {**changed, "last_seen_at": r["last_seen_at"]}
+            ).eq("video_id", r["video_id"]).execute()
+        now = datetime.now(timezone.utc).isoformat()
+        for i in range(0, len(unchanged), _UPLOAD_BATCH):
+            supabase().table("channel_uploads").update({"last_seen_at": now}).in_(
+                "video_id", unchanged[i:i + _UPLOAD_BATCH]).execute()
+    except Exception as e:
+        log.exception("sync %s: recording channel_uploads failed; sync continues: %s",
+                      channel_id, e)
 
 
 def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:

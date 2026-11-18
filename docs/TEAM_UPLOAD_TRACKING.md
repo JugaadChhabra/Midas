@@ -55,6 +55,12 @@ Questions it must answer:
 
 If (1) is "no", stop and redesign §5 before building anything else.
 
+**Answers (2026-11-18, recorded on #143; the live probe moved to #153 as a rollout check):**
+(1) yes — `sync_channel` already receives private items from the uploads playlist; (2) `uploaded_at`
+= `playlistItem.snippet.publishedAt`, with both raw timestamps stored (`playlist_published_at`,
+`video_published_at`) so it can be recomputed; (3) unknown, cost at most a ≤3-day lag until the next
+full sync. Upload capture is built (#150): see STATE.md §2 `channel_uploads`.
+
 ## 4. Auth & access control
 
 Midas has **no auth today** and publishes `8000:8000` to the LAN (`docker-compose.yml`), while
