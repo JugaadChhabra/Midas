@@ -14,11 +14,14 @@ This module decides what the signed-in user may reach:
     Short-link recommendation, Shorts job or clip) depends on that object's
     resolver (``require_video`` …): object → channel, then the same check, and
     the same 404 for an unknown object as for an invisible one (#146).
+  * A list or global route depends on ``current_user`` and narrows what it
+    reads to ``visible_channel_ids`` (``scope_to_visible``); a channel named in
+    a body or query string goes through ``check_channel`` (the same 404) (#147).
   * Admin-only routes depend on ``require_role(UserRole.ADMIN)``: 403.
 
 Each dependency here carries ``access_rule = True``. ``tests/test_route_access.py``
 walks ``app.routes`` and fails on any route with no such dependency that isn't on
-its public allowlist, so a route added later can't skip scoping.
+its short open list, so a route added later can't skip scoping.
 
 ``require_channel`` reads nothing for admin and exec: they see every channel, and
 an unknown channel id is left to the route, as before. For a manager it is one
@@ -82,6 +85,23 @@ def can_see_channel(user: dict, channel_id: str) -> bool:
             .eq("id", channel_id).eq("manager_id", user["id"])
             .limit(1).execute().data) or []
     return bool(rows)
+
+
+def check_channel(user: dict, channel_id: str | None) -> None:
+    """404 unless the user can see ``channel_id``: for a channel named in a
+    request body or query string rather than the path (#147)."""
+    if not channel_id or not can_see_channel(user, channel_id):
+        raise HTTPException(404, CHANNEL_NOT_FOUND)
+
+
+def scope_to_visible(query, user: dict, column: str = "channel_id"):
+    """Narrow an unexecuted query on a table with a channel column to the
+    user's visible channels (#147). None when the user sees no channel: the
+    caller answers its empty result without a query."""
+    if sees_all(user):
+        return query
+    ids = visible_channel_ids(user)
+    return query.in_(column, sorted(ids)) if ids else None
 
 
 @_access_rule
@@ -197,6 +217,10 @@ def require_role(*roles: str):
 
     check.roles = allowed
     return check
+
+
+#: Admin-only routes (#147): OAuth connect, quota, job health, manual triggers.
+require_admin = require_role(UserRole.ADMIN)
 
 
 # ── channel → manager mapping (admin only) ───────────────────────────────

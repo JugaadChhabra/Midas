@@ -29,9 +29,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app import eligibility, job_status, reach
+from app.access import require_admin
 from app.db import supabase
 from app.reporting_client import TRAFFIC_REPORT_TYPE_ID
 
@@ -135,7 +136,7 @@ def run_daily() -> None:
         raise job_status.JobRunFailed("channel_health", failed)
 
 
-@router.get("/health/channels")
+@router.get("/health/channels", dependencies=[Depends(require_admin)])
 def health_channels():
     """Which channels have stopped syncing or ingesting (read from the DB)."""
     return check()

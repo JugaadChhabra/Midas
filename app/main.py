@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -644,7 +644,7 @@ def health():
     return {"ok": True, "dry_run": settings.DRY_RUN}
 
 
-@app.get("/health/jobs")
+@app.get("/health/jobs", dependencies=[Depends(access.require_admin)])
 def health_jobs():
     """Last run of every scheduled job (in-memory; a restart clears it)."""
     return {"jobs": job_status.registry.snapshot()}

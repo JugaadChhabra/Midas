@@ -5,7 +5,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from datetime import datetime, timezone
 
-from app.access import current_user, filter_channels, require_channel
+from app.access import current_user, filter_channels, require_admin, require_channel
 from app.config import settings
 from app.db import supabase
 from app.status_vocab import PausedReason
@@ -24,7 +24,9 @@ def _flow() -> Flow:
     )
 
 
-@router.get("/login")
+# Connecting a Google account adds a channel the whole fleet runs on: the
+# admin's, like the callback it returns to (#147).
+@router.get("/login", dependencies=[Depends(require_admin)])
 def login():
     flow = _flow()
     auth_url, _ = flow.authorization_url(
@@ -35,7 +37,7 @@ def login():
     return RedirectResponse(auth_url)
 
 
-@router.get("/callback")
+@router.get("/callback", dependencies=[Depends(require_admin)])
 def callback(request: Request, code: str | None = None, error: str | None = None):
     if error:
         raise HTTPException(status_code=400, detail=f"OAuth error: {error}")

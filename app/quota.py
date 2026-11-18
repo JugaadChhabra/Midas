@@ -4,8 +4,9 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.access import require_admin
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows
@@ -292,7 +293,7 @@ class JobBudget:
         )
 
 
-@router.get("/quota")
+@router.get("/quota", dependencies=[Depends(require_admin)])
 def quota_status():
     used = units_used_today()
     recent = (

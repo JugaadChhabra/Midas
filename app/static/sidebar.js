@@ -197,6 +197,8 @@
       const pill = aside.querySelector('#user-pill');
       pill.title = `${me.name || ''} · ${me.email || ''}`;
       pill.hidden = false;
+      // Connecting a Google account (/auth/login) is the admin's (#147).
+      aside.classList.toggle('not-admin', me.role !== 'admin');
     } catch (_) { /* the rail works without the pill */ }
   }
 
@@ -316,7 +318,7 @@
       `<a class="chan-opt${currentId ? '' : ' current'}" href="/">` +
       '<span class="chan-avatar sm">◆</span>' +
       '<span class="chan-opt-name">All channels</span></a>' +
-      '<a class="chan-opt" href="/auth/login">' +
+      '<a class="chan-opt admin-only" href="/auth/login">' +
       `<span class="chan-avatar sm">${icon('plus')}</span>` +
       '<span class="chan-opt-name">Add channel</span></a>';
   }

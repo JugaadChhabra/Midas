@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from app.access import require_audit, require_channel, require_video
+from app.access import require_admin, require_audit, require_channel, require_video
 from app import decide, tracing
 from app.config import settings
 from app.db import supabase
@@ -895,7 +895,7 @@ def revert_audit(audit_id: int, force: bool = False):
     return {"status": AuditStatus.REVERTED}
 
 
-@router.get("/quota-cost-preview")
+@router.get("/quota-cost-preview", dependencies=[Depends(require_admin)])
 def quota_cost_preview(action: str, n: int = 1):
     """Estimate quota cost for an upcoming bulk action. UI uses this for confirmations.
 

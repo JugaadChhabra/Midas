@@ -5,7 +5,8 @@ Two guards and the isolation tests:
 
   * The route-coverage guard walks ``app.routes`` and fails on any route with
     neither an access dependency (``app/access.py``, ``access_rule``) nor an
-    allowlist entry. A route added later fails here until it is scoped.
+    entry on the short open list. There is no pending list any more (#147): a
+    route added later fails here until it is scoped.
   * Every route whose path has a ``{channel_id}`` depends on ``require_channel``.
   * Manager A gets 404 on every such route for manager B's channel; exec, and A
     on A's own channel, get through.
@@ -38,30 +39,6 @@ OPEN_ROUTES = {
 #: Not APIRoutes: FastAPI's docs and the static mount, behind the gate.
 NON_API_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc", "/static"}
 
-#: PENDING (expand–contract): routes this ticket leaves unscoped. Each later
-#: ticket removes its routes as it scopes them; the list may only shrink, and the
-#: guard fails if a route here turns out to be scoped. #146 scoped the object-id
-#: routes; empty and deleted by #147.
-PENDING = {
-    # #147: list and global routes are filtered, or become admin-only.
-    ("GET", "/auth/login"),
-    ("GET", "/auth/callback"),
-    ("GET", "/quota"),
-    ("GET", "/quota-cost-preview"),
-    ("GET", "/health/jobs"),
-    ("GET", "/health/channels"),
-    ("POST", "/measurement/evaluate"),
-    ("GET", "/dashboard"),
-    ("POST", "/shorts/jobs"),
-    ("GET", "/shorts/jobs"),
-    ("POST", "/shorts/cut"),
-    ("GET", "/shorts/languages"),
-    ("POST", "/shorts/jobs/clear-failed"),
-    ("POST", "/autoshorts/jobs"),
-    ("GET", "/autoshorts"),
-}
-
-
 def _api_routes():
     return [r for r in main.app.routes if isinstance(r, APIRoute)]
 
@@ -84,20 +61,11 @@ def test_every_route_has_an_access_rule_or_an_allowlist_entry():
     unguarded = sorted(
         key for route in _api_routes() if not _access_calls(route)
         for key in _keys(route)
-        if key not in OPEN_ROUTES and key not in PENDING)
+        if key not in OPEN_ROUTES)
     assert unguarded == [], (
         "routes with no access dependency (app/access.py) and no allowlist entry: "
         f"{unguarded}. Scope them with require_channel, a resolver, require_role or "
         "current_user + visible_channel_ids.")
-
-
-def test_pending_routes_are_still_unscoped_and_still_exist():
-    """The PENDING list may only shrink: a scoped route must leave it."""
-    by_key = {key: route for route in _api_routes() for key in _keys(route)}
-    missing = sorted(k for k in PENDING if k not in by_key)
-    scoped = sorted(k for k in PENDING if k in by_key and _access_calls(by_key[k]))
-    assert missing == [], f"PENDING routes that no longer exist: {missing}"
-    assert scoped == [], f"PENDING routes now scoped; remove them from PENDING: {scoped}"
 
 
 def test_open_routes_exist_and_carry_no_channel():
@@ -481,3 +449,270 @@ def test_a_refused_object_route_writes_nothing(objects):
     for method, path in OBJECT_ROUTES:
         _object_request(_as(MANAGER_A), method, path, OBJECTS[_param(path)][3])
     assert objects.writes[before:] == []
+
+
+# ── admin-only routes (#147) ─────────────────────────────────────────────────
+
+#: Operational routes only the admin may use: OAuth connect, quota, job health,
+#: manual triggers.
+ADMIN_ONLY_ROUTES = [
+    ("GET", "/auth/login"),
+    ("GET", "/auth/callback"),
+    ("GET", "/quota"),
+    ("GET", "/quota-cost-preview?action=apply&n=1"),
+    ("GET", "/health/jobs"),
+    ("GET", "/health/channels"),
+    ("POST", "/measurement/evaluate"),
+]
+
+
+@pytest.mark.parametrize("method,url", ADMIN_ONLY_ROUTES)
+def test_admin_only_routes_depend_on_require_admin(method, url):
+    by_key = {key: route for route in _api_routes() for key in _keys(route)}
+    route = by_key[(method, url.split("?")[0])]
+    assert access.require_admin in list(_calls(route.dependant))
+
+
+@pytest.mark.parametrize("uid", [EXEC, MANAGER_A])
+@pytest.mark.parametrize("method,url", ADMIN_ONLY_ROUTES)
+def test_admin_only_routes_refuse_exec_and_managers(store, method, url, uid):
+    before = len(store.writes)
+    r = _as(uid).request(method, url, follow_redirects=False)
+    assert (r.status_code, r.json()) == (403, {"detail": access.FORBIDDEN}), r.text
+    assert store.writes[before:] == []
+
+
+def test_admin_reaches_the_admin_only_routes(store):
+    store._tables["quota_log"] = []
+    for method, url in [("GET", "/quota"), ("GET", "/quota-cost-preview?action=apply&n=1"),
+                        ("GET", "/health/jobs")]:
+        r = _as(ADMIN).request(method, url)
+        assert r.status_code == 200, (url, r.status_code, r.text)
+    callback = _as(ADMIN).get("/auth/callback")       # no code: the route's own 400
+    assert callback.status_code == 400
+
+
+# ── list routes: Shorts jobs (#147) ──────────────────────────────────────────
+
+def _job(jid, channel, status="DONE"):
+    return {"id": jid, "channel_id": channel, "status": status, "progress": 100,
+            "progress_label": "", "error_message": None, "source_url": f"nas://{jid}",
+            "source_video_id": None}
+
+
+@pytest.fixture
+def jobs(store):
+    store._serial.add("shorts_jobs")
+    store._tables["shorts_jobs"] = [
+        _job(1, CH_A), _job(2, CH_A, "FAILED"),
+        _job(3, CH_B), _job(4, CH_B, "FAILED"),
+        _job(5, CH_NONE, "FAILED"), _job(6, None, "FAILED"),   # a channel-less NAS cut
+    ]
+    store._tables["shorts_clips"] = [
+        {"id": 100 + j, "job_id": j, "upload_status": "UPLOADED", "created_at": None}
+        for j in range(1, 7)]
+    return store
+
+
+def _job_ids(r):
+    assert r.status_code == 200, r.text
+    return sorted(j["id"] for j in r.json())
+
+
+def test_shorts_job_list_shows_a_manager_only_their_channels(jobs):
+    assert _job_ids(_as(MANAGER_A).get("/shorts/jobs")) == [1, 2]
+    assert _job_ids(_as(MANAGER_B).get("/shorts/jobs")) == [3, 4]
+    assert _job_ids(_as(MANAGER_A).get(f"/shorts/jobs?channel_id={CH_A}")) == [1, 2]
+
+
+def test_shorts_job_list_shows_exec_every_job(jobs):
+    assert _job_ids(_as(EXEC).get("/shorts/jobs")) == [1, 2, 3, 4, 5, 6]
+    assert _job_ids(_as(EXEC).get(f"/shorts/jobs?channel_id={CH_B}")) == [3, 4]
+
+
+def test_shorts_job_list_for_another_managers_channel_is_404(jobs):
+    for channel in (CH_B, CH_NONE):
+        r = _as(MANAGER_A).get(f"/shorts/jobs?channel_id={channel}")
+        assert _access_404(r), r.text
+
+
+def test_a_manager_with_no_channels_lists_no_jobs(jobs):
+    _as(ADMIN).patch(f"/channels/{CH_A}/manager", json={"manager_id": None})
+    assert _job_ids(_as(MANAGER_A).get("/shorts/jobs")) == []
+    r = _as(MANAGER_A).post("/shorts/jobs/clear-failed")
+    assert r.json() == {"deleted": 0}
+
+
+def test_clear_failed_deletes_only_the_managers_own_failed_jobs(jobs):
+    r = _as(MANAGER_A).post("/shorts/jobs/clear-failed")
+
+    assert r.json() == {"deleted": 1}
+    assert sorted(j["id"] for j in jobs.rows("shorts_jobs")) == [1, 3, 4, 5, 6]
+    assert sorted(c["job_id"] for c in jobs.rows("shorts_clips")) == [1, 3, 4, 5, 6]
+
+
+def test_clear_failed_on_another_managers_channel_is_404_and_deletes_nothing(jobs):
+    r = _as(MANAGER_A).post(f"/shorts/jobs/clear-failed?channel_id={CH_B}")
+
+    assert _access_404(r), r.text
+    assert len(jobs.rows("shorts_jobs")) == 6
+
+
+def test_exec_clears_every_failed_job(jobs):
+    r = _as(EXEC).post("/shorts/jobs/clear-failed")
+    assert r.json() == {"deleted": 4}
+    assert sorted(j["id"] for j in jobs.rows("shorts_jobs")) == [1, 3]
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_creating_a_shorts_job_checks_the_bodys_channel(jobs, enabled):
+    body = {"source_url": "https://youtu.be/dQw4w9WgXcQ"}
+    with patch("app.shorts.routes.settings.SHORTS_YT_DOWNLOAD_ENABLED", enabled):
+        for channel in (CH_B, CH_NONE, "UC_no_such_channel"):
+            r = _as(MANAGER_A).post("/shorts/jobs", json={**body, "channel_id": channel})
+            assert _access_404(r), (channel, r.text)
+        own = _as(MANAGER_A).post("/shorts/jobs", json={**body, "channel_id": CH_A})
+    assert own.status_code == (200 if enabled else 410), own.text
+    inserted = [w for w in jobs.writes if w[:2] == ("shorts_jobs", "insert")]
+    assert [w[2]["channel_id"] for w in inserted] == ([CH_A] if enabled else [])
+
+
+# ── /shorts/cut and /shorts/languages (#147) ─────────────────────────────────
+
+@pytest.fixture
+def nas_folders(store):
+    for c in store._tables["channels"]:
+        c["nas_folder"] = {CH_A: "MARATHI", CH_B: "Hindi", CH_NONE: None}[c["id"]]
+    with patch("app.shorts.routes.list_source_languages",
+               return_value=["HINDI", "MARATHI", "TAMIL"]), \
+         patch("app.shorts.routes.enqueue_language_jobs", return_value=3) as enq:
+        yield enq
+
+
+def test_a_manager_cuts_only_their_own_channels_folder(store, nas_folders):
+    ok = _as(MANAGER_A).post("/shorts/cut", json={"language": "marathi"})
+    assert (ok.status_code, ok.json()) == (200, {"language": "MARATHI", "enqueued": 3})
+
+    for folder in ("HINDI", "TAMIL"):       # B's folder; no channel's folder
+        r = _as(MANAGER_A).post("/shorts/cut", json={"language": folder})
+        assert _access_404(r), (folder, r.text)
+    nas_folders.assert_called_once_with("MARATHI")
+
+
+def test_exec_cuts_any_folder(store, nas_folders):
+    r = _as(EXEC).post("/shorts/cut", json={"language": "TAMIL"})
+    assert r.status_code == 200, r.text
+
+
+def test_every_signed_in_user_lists_the_nas_folders(store, nas_folders):
+    with patch("app.shorts.routes.uncut_count", return_value=0):
+        r = _as(MANAGER_A).get("/shorts/languages")
+    assert [f["language"] for f in r.json()] == ["HINDI", "MARATHI", "TAMIL"]
+
+
+# ── AutoShorts (#147) ────────────────────────────────────────────────────────
+
+def test_an_autoshorts_job_is_filed_under_one_of_the_users_channels(jobs):
+    store = jobs
+    store._tables["shorts_jobs"] = []
+    with patch("app.shorts.autoshorts.settings.SHORTS_YT_DOWNLOAD_ENABLED", True), \
+         patch("app.shorts.autoshorts._spawn"):
+        r = _as(MANAGER_B).post("/autoshorts/jobs", json={"url": "https://youtu.be/dQw4w9WgXcQ"})
+    assert r.status_code == 200, r.text
+    assert [j["channel_id"] for j in store.rows("shorts_jobs")] == [CH_B]
+
+
+def test_a_manager_with_no_channels_cannot_file_an_autoshorts_job(jobs):
+    _as(ADMIN).patch(f"/channels/{CH_A}/manager", json={"manager_id": None})
+    before = len(jobs.writes)
+    with patch("app.shorts.autoshorts.settings.SHORTS_YT_DOWNLOAD_ENABLED", True), \
+         patch("app.shorts.autoshorts._spawn"):
+        r = _as(MANAGER_A).post("/autoshorts/jobs", json={"url": "https://youtu.be/dQw4w9WgXcQ"})
+    assert r.status_code == 503
+    assert jobs.writes[before:] == []
+
+
+# ── /dashboard (#147) ────────────────────────────────────────────────────────
+
+def _summary_row(cid, n):
+    """n of everything, so each channel's share of a total is recognisable."""
+    return {"channel_id": cid, "video_count": n, "regular_count": n, "shorts_count": 0,
+            "audited_regular": n, "audited_shorts": 0, "pending_count": n,
+            "quarantined_count": 0, "applied_latest": n, "applied_today": n,
+            "applied_7d": n, "applied_total": n, "delta_views_7d": n}
+
+
+@pytest.fixture
+def board(jobs):
+    from app import dashboard
+    store = jobs
+    store._rpc["dashboard_summary"] = {
+        "channels": [_summary_row(CH_A, 1), _summary_row(CH_B, 10), _summary_row(CH_NONE, 100)],
+        "shorts": {"cut_total": 6, "uploaded_total": 6},
+    }
+    store._tables["quota_log"] = []
+    store._tables["videos"] = [
+        {"id": "va", "channel_id": CH_A, "title": "A video"},
+        {"id": "vb", "channel_id": CH_B, "title": "B video"},
+    ]
+    store._tables["audits"] = [
+        {"id": 1, "video_id": "va", "status": "applied", "applied_at": None,
+         "created_at": "2000-01-01T00:00:00+00:00"},
+        {"id": 2, "video_id": "vb", "status": "pending", "applied_at": None,
+         "created_at": "2000-01-02T00:00:00+00:00"},
+    ]
+    dashboard.invalidate_dashboard_cache()
+    with patch.object(dashboard.settings, "DASHBOARD_USE_RPC", True):
+        yield store
+    dashboard.invalidate_dashboard_cache()
+
+
+def _board(uid):
+    r = _as(uid).get("/dashboard")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_the_dashboard_shows_a_manager_only_their_channels(board):
+    a = _board(MANAGER_A)
+
+    assert [c["id"] for c in a["channels"]] == [CH_A]
+    assert a["kpis"]["channels"] == 1
+    assert a["kpis"]["videos"] == 1
+    assert a["kpis"]["pending_total"] == 1
+    assert a["kpis"]["applied_7d_total"] == 1
+    assert a["pipeline"]["total"] == 1
+    assert a["health"]["autopilot_total"] == 1
+    # The Shorts totals count A's jobs' clips (jobs 1 and 2) only.
+    assert a["kpis"]["shorts_cut_total"] == 2
+    assert a["kpis"]["shorts_uploaded_total"] == 2
+    assert [e["channel_id"] for e in a["activity"]] == [CH_A]
+
+    b = _board(MANAGER_B)
+    assert [c["id"] for c in b["channels"]] == [CH_B]
+    assert b["kpis"]["videos"] == 10
+    assert b["kpis"]["shorts_cut_total"] == 2
+    assert [e["channel_id"] for e in b["activity"]] == [CH_B]
+
+
+def test_the_dashboard_shows_exec_and_admin_the_whole_fleet(board):
+    for uid in (EXEC, ADMIN):
+        d = _board(uid)
+        assert sorted(c["id"] for c in d["channels"]) == sorted([CH_A, CH_B, CH_NONE])
+        assert d["kpis"]["videos"] == 111
+        assert d["kpis"]["shorts_cut_total"] == 6
+
+
+def test_a_managers_board_has_the_fleet_boards_shape(board):
+    fleet, mine = _board(EXEC), _board(MANAGER_A)
+    assert mine.keys() == fleet.keys()
+    assert mine["kpis"].keys() == fleet["kpis"].keys()
+    assert mine["pipeline"].keys() == fleet["pipeline"].keys()
+    assert mine["health"].keys() == fleet["health"].keys()
+
+
+def test_the_dashboard_cache_stays_unfiltered(board):
+    """A manager's read first must not narrow what exec sees from the cache."""
+    _board(MANAGER_A)
+    assert len(_board(EXEC)["channels"]) == 3
+    assert len(board.rpc_calls) == 1
