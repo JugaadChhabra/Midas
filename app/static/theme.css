@@ -184,6 +184,7 @@ h1 { margin-bottom: .25rem; }
 .user-pill { display:flex; align-items:center; gap:.5rem; margin:0 0 .35rem;
              padding:.4rem .5rem; border-bottom:1px solid var(--border-soft); }
 .user-pill[hidden] { display:none; }
+.sidebar.not-admin .admin-only { display:none; }   /* #147: OAuth connect is admin-only */
 .user-meta { display:grid; flex:1; min-width:0; line-height:1.25; }
 .user-name { font-weight:600; font-size:.85rem; overflow:hidden; text-overflow:ellipsis;
              white-space:nowrap; }

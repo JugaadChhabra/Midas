@@ -1416,9 +1416,13 @@ function diffSection(label, body, changed, why) {
 }
 
 async function applyAudit(auditId, videoId) {
-  const pv = await (await fetch(`/quota-cost-preview?action=apply&n=1`)).json();
-  if (!pv.can_afford) { toast(`Cannot afford: needs ${pv.cost}, ${pv.remaining} left.`, 'err'); return; }
-  if (!await confirmDialog(`Push these changes to the live YouTube video? (~${pv.cost} quota units)`)) return;
+  // The cost preview is admin-only (#147): for anyone else there is no estimate,
+  // and the apply route's own quota gate (409 quota_insufficient) still holds.
+  const pvRes = await fetch(`/quota-cost-preview?action=apply&n=1`);
+  const pv = pvRes.ok ? await pvRes.json() : null;
+  if (pv && !pv.can_afford) { toast(`Cannot afford: needs ${pv.cost}, ${pv.remaining} left.`, 'err'); return; }
+  const cost = pv ? ` (~${pv.cost} quota units)` : '';
+  if (!await confirmDialog(`Push these changes to the live YouTube video?${cost}`)) return;
   const cell = $('audit-' + videoId).firstElementChild;
   const prev = cell.innerHTML;
   cell.innerHTML = '<div class="audit muted">Applying…</div>';
