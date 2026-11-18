@@ -2,10 +2,11 @@ import functools
 import logging
 import re
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timedelta, timezone
 from googleapiclient.errors import HttpError
 
+from app.access import require_channel
 from app import human_edits
 from app.content_type import is_episode
 from app.db import supabase
@@ -110,7 +111,7 @@ log = logging.getLogger("midas.sync")
 router = APIRouter(tags=["sync"])
 
 
-@router.post("/channels/{channel_id}/sync")
+@router.post("/channels/{channel_id}/sync", dependencies=[Depends(require_channel)])
 @_token_failure_as_401
 def sync_channel(channel_id: str, full: bool = False):
     """Sync a channel's videos.
@@ -331,7 +332,7 @@ def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:
     return refreshed
 
 
-@router.post("/channels/{channel_id}/refresh-stats")
+@router.post("/channels/{channel_id}/refresh-stats", dependencies=[Depends(require_channel)])
 @_token_failure_as_401
 def refresh_stats(channel_id: str):
     """Refresh view/like/comment counts and privacy_status for every synced
@@ -348,7 +349,7 @@ def refresh_stats(channel_id: str):
     return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
-@router.post("/channels/{channel_id}/refresh-applied-stats")
+@router.post("/channels/{channel_id}/refresh-applied-stats", dependencies=[Depends(require_channel)])
 @_token_failure_as_401
 def refresh_applied_stats(channel_id: str):
     """Refresh stats only for videos with applied audits. Cheap: 1 quota unit per 50 videos."""
@@ -374,7 +375,7 @@ def refresh_applied_stats(channel_id: str):
     return {"refreshed": _refresh_stats_for_ids(channel_id, yt, target_ids)}
 
 
-@router.get("/channels/{channel_id}/videos")
+@router.get("/channels/{channel_id}/videos", dependencies=[Depends(require_channel)])
 def list_videos(channel_id: str):
     # `description` and `tags` are intentionally NOT selected here. They are the
     # two largest columns on the row and are only needed when the user expands a

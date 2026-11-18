@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-18 (team tracker 02, #144: logins, sessions and the global gate) · **Commit:** on top of
-`5d590ec` · **Branch:** `team-tracker/02-logins`
+**Generated:** 2026-11-18 (team tracker 03, #145: the access module, channel-id routes scoped) · **Commit:** on top of
+`b67b548` · **Branch:** `team-tracker/03-access-channel-routes`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -142,11 +142,13 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261030010000_lever_verdicts_title_scopes.sql  comment on lever_verdicts.arm_scope: + pipeline_vs_holdout|agent_vs_holdout (S3.5)
 20261030020000_warm_pool_title_holds.sql        warm_pool() replaced: + title rows hold once per experiment (S3.5)
 20261118000000_app_users_sessions.sql           app_users, app_sessions (team tracker #144)
+20261118010000_channels_manager_id.sql          channels.manager_id → app_users, channels_manager_idx (team tracker #145)
 ```
 
 **Tables** (columns are the union across the migrations):
 
-- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false, playlist_thresholds jsonb`.
+- **`channels`**: `id text pk, name, handle, refresh_token text not null, access_token, token_expiry timestamptz, last_synced_at, created_at, default_language text, autopilot_enabled bool default false, autopilot_paused_reason text, autopilot_last_tick_at, autopilot_daily_cap int default 10, analytics_authorized bool default false, last_full_synced_at, playlist_health_enabled bool default false, measurement_enabled bool default false, autopilot_shorts_enabled bool not null default false, autopilot_shorts_daily_cap int not null default 1, autopilot_shorts_upload_cap int not null default 2, shorts_cut_mode text not null default 'highlights', shorts_camera_motion text not null default 'calm', sync_shorts bool (nullable), nas_folder text, autopilot_paused_at timestamptz, reach_warmup bool default false, agent_enabled boolean not null default false, playlist_thresholds jsonb, manager_id bigint → app_users (nullable)`.
+  `manager_id` (`20261118010000`, verbatim without its header comment: `alter table channels add column if not exists manager_id bigint references app_users(id);` and `create index if not exists channels_manager_idx on channels (manager_id);`): the manager who sees the channel; NULL = admin and exec only. Read by `app/access.py`, written only by `PATCH /channels/{id}/manager`.
   `playlist_thresholds` = `{model_version, join_high, join_low, leave, member_sims, playlists, method, computed_at}` from `app/reembed.py` `calibrate_channel`; read by `app/backlinks.py` `candidates` (`join_low`, only for `reembed.MODEL_VERSION`).
 - **`videos`**: `id text pk, channel_id → channels on delete cascade, title, description, tags text[], thumbnail_url, category_id, view_count, like_count, comment_count bigint, published_at, last_fetched_at, privacy_status text, thumbnail_optimized_at, playlists_optimized_at timestamptz, duration_seconds int, is_short bool, is_episode bool (nullable; NULL = not episode)`.
 - **`audits`**: `id bigserial pk, video_id → videos on delete cascade, status text default 'pending', suggested_title, suggested_description, suggested_tags text[], thumbnail_feedback, issues_found jsonb, ai_reasoning, applied_at, created_at, title_before, description_before, tags_before text[], view_count_at_apply, like_count_at_apply, comment_count_at_apply bigint, transcript_available bool, transcript_lang, keyframes_extracted int default 0, prompt_version_id → prompt_versions, measurement_status text default 'not_applicable', measurement_started_at, measurement_result jsonb, outcome_decision text default 'none', redo_of_audit_id → audits, strategy_version → audit_strategies`.
@@ -645,8 +647,26 @@ valid `midas_session` cookie (an unexpired `app_sessions` row whose user is acti
 expired row is deleted), else a GET/HEAD for a page (`session.PAGES` = `/`, `/channel`, `/autoshorts`, or any
 request whose `Accept` has `text/html`) → 303 to `/login?next=<path and query>` (`/login` for `/`), and every other
 request → 401 `{"detail": "not_authenticated"}`. The signed-in user is on `request.state.user` (`{id, email, name,
-role}`). The gate checks login only: every signed-in user, whatever the role, reaches every route (per-role
-access is team tracker #145). Scheduled jobs don't pass through it.
+role}`). The gate checks login only; what a signed-in user may reach is `app/access.py`'s (below). Scheduled jobs
+don't pass through either.
+
+**Access** (`app/access.py`, team tracker #145). `admin` and `exec` see every channel; a `manager` sees the channels
+whose `channels.manager_id` is them (`visible_channel_ids`, `filter_channels`); a channel with no manager is seen by
+admin and exec only. Every route whose path has a `{channel_id}` (33 routes, plus `PATCH /channels/{id}/manager`)
+has `dependencies=[Depends(require_channel)]`: 404 `{"detail": "channel_not_found"}` for a channel the user can't
+see, the same body as an unknown one (never 403); for admin and exec it reads nothing and passes, leaving an unknown
+id to the route as before; for a manager it reads `channels` once per request. `require_role(*roles)` → 403
+`{"detail": "forbidden"}`. `current_user` = `request.state.user` (401 if unset). Each dependency carries
+`access_rule = True`; `tests/test_route_access.py` walks `app.routes` and fails on a route with none that isn't on its
+open list (`/login`, `/session/login`, `/health`, `/session/logout`, `/`, `/channel`) or its PENDING list (the
+object-id routes, scoped by #146; the list and global routes, `/dashboard`, `/shorts/*`, `/autoshorts*`, `/quota*`,
+`/health/jobs`, `/health/channels`, `/measurement/evaluate`, `/auth/login`, `/auth/callback`, by #147), and on a
+PENDING route that is now scoped. Until those land, those routes still answer every signed-in user.
+
+- **Access** (`app/access.py` `router`): `PATCH /channels/{id}/manager` body `{manager_id: int | null}`, admin only
+  (`require_channel` first, so a manager asking about another team's channel gets 404, about their own 403; exec
+  403). `manager_id` must be an active `manager` user, else 400 `"manager_id must be an active manager"`; null
+  clears; unknown channel 404. → `{"id", "manager_id"}`.
 
 - **Session** (`app/session.py` `router`): `GET /login` → `static/login.html` (public); `POST /session/login` (public)
   body `{email, password}` → `{"user": {id, email, name, role}}` and sets `midas_session` (`httpOnly`,
@@ -656,7 +676,7 @@ access is team tracker #145). Scheduled jobs don't pass through it.
   deletes the session row and the cookie. `GET /session/me` → `{id, email, name, role}`.
 
 - **Pages/health:** `GET /login` (Session, above); `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py:85`); `/static/*`.
-- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels`, `PATCH /auth/channels/{id}` (enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
+- **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels` (only the user's visible channels, `access.filter_channels`; the sidebar switcher and the channel page read it), `PATCH /auth/channels/{id}` (`require_channel`; no `manager_id` field; enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
 - **Sync** (`app/sync.py`): `POST /channels/{id}/sync?full=`, `POST /channels/{id}/refresh-stats`, `POST /channels/{id}/refresh-applied-stats`, `GET /channels/{id}/videos`, `GET /videos/{id}`.
 - **Audits** (`app/audits.py`): `GET|POST /channels/{id}/audit-config`, `POST /channels/{id}/audit-config/elaborate`, `POST /videos/{id}/audit`, `GET /videos/{id}/audits`, `POST /audits/{id}/apply?force=`, `POST /channels/{id}/audits/apply-pending?force=` (both 409 `AGENT_CHANNEL_REFUSED`, "agent channel: a house-format apply replaces the description and its backlink block; pass force=true", on an `agent_enabled` channel unless `force=true`, before anything is sent or written; `audits._refuse_on_agent_channel`), `POST /channels/{id}/audits/reaudit-quarantined`, `POST /channels/{id}/audits/run-bulk` (both only write `pending` audits, so unguarded), `POST /audits/{id}/revert` (409 "agent channel: an audit revert …; pass force=true" on an `agent_enabled` channel unless `?force=true`; 409 `quota_insufficient` when `quota.can_afford(quota.cost(Op.VIDEOS_UPDATE))` is false, `app/audits.py:847-852`), `GET /quota-cost-preview`.
 - **Measurement** (`app/measurement.py`): `GET /audits/{id}/measurement`, `GET /channels/{id}/outcomes`, `POST /measurement/evaluate`.
@@ -686,6 +706,7 @@ access is team tracker #145). Scheduled jobs don't pass through it.
 | `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`); `can_run_agent` = `can_audit` and `agent_enabled` and `reach.certify` |
 | `status_vocab.py` | persisted status strings and their mirrors (`tests/test_status_vocab.py`) |
 | `auth.py` | OAuth + channel flag PATCH |
+| `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
 | `content_type.py` | `is_episode` classifier |
@@ -1155,7 +1176,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
-| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Login only; per-role channel scoping is #145 |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes are #146, list and global routes #147 |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |

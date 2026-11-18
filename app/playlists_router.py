@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
+from app.access import require_channel
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -128,7 +129,7 @@ def _envelope(channel_id: str, enabled: bool, computed_at: str | None,
     }
 
 
-@router.post("/channels/{channel_id}/playlists/evaluate")
+@router.post("/channels/{channel_id}/playlists/evaluate", dependencies=[Depends(require_channel)])
 def evaluate_playlists(channel_id: str):
     """Re-score this channel and return fresh recommendations.
 
@@ -159,7 +160,7 @@ def evaluate_playlists(channel_id: str):
     return body
 
 
-@router.get("/channels/{channel_id}/playlists/health")
+@router.get("/channels/{channel_id}/playlists/health", dependencies=[Depends(require_channel)])
 def get_playlist_health(channel_id: str):
     """Read the LAST stored scoring without re-running.
 
@@ -183,7 +184,7 @@ def get_playlist_health(channel_id: str):
     return body
 
 
-@router.post("/channels/{channel_id}/playlists/bootstrap")
+@router.post("/channels/{channel_id}/playlists/bootstrap", dependencies=[Depends(require_channel)])
 def bootstrap(channel_id: str):
     """Sync playlists from YouTube then embed all un-embedded videos.
 
@@ -194,7 +195,7 @@ def bootstrap(channel_id: str):
     return {**sync_result, "videos_embedded": embedded}
 
 
-@router.get("/channels/{channel_id}/playlists/status")
+@router.get("/channels/{channel_id}/playlists/status", dependencies=[Depends(require_channel)])
 def playlist_status(channel_id: str):
     """Embedding coverage and playlist assignment stats for a channel."""
     videos = all_rows(
@@ -260,7 +261,7 @@ def playlist_status(channel_id: str):
     }
 
 
-@router.post("/channels/{channel_id}/playlists/reconcile")
+@router.post("/channels/{channel_id}/playlists/reconcile", dependencies=[Depends(require_channel)])
 def reconcile(channel_id: str):
     """Manually trigger a playlist reconcile for a channel."""
     if not settings.PLAYLIST_RECONCILE_WRITES_ENABLED:
@@ -268,7 +269,7 @@ def reconcile(channel_id: str):
     return reconcile_channel(channel_id)
 
 
-@router.get("/channels/{channel_id}/playlists/proposals")
+@router.get("/channels/{channel_id}/playlists/proposals", dependencies=[Depends(require_channel)])
 def list_proposals(channel_id: str):
     """List every pending playlist proposal for a channel: the playlist test's
     (`arm_id` set) first, then the rest, each oldest first.
@@ -295,7 +296,7 @@ class DecideBody(BaseModel):
     decision: str  # 'approved' | 'rejected'
 
 
-@router.post("/channels/{channel_id}/playlists/proposals/decide")
+@router.post("/channels/{channel_id}/playlists/proposals/decide", dependencies=[Depends(require_channel)])
 def decide_proposals(channel_id: str, body: DecideBody):
     """Approve or reject a list of proposal IDs. Approved adds/removes execute immediately,
     except the playlist test's (`arm_id` set): those are only marked approved, and

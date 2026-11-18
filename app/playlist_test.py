@@ -55,8 +55,9 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.access import require_channel
 from app import job_status, lever_verdicts, quota, reach, warm
 from app.apply_outcome import ApplyOutcome
 from app.backlinks import NO_THRESHOLDS, THRESHOLDS_OTHER_MODEL, _thresholds
@@ -821,7 +822,7 @@ def _answer(verdicts: list[dict]) -> str:
     return NO if any(v["stop_rule_triggered"] for v in final) else YES
 
 
-@router.get("/channels/{channel_id}/playlist-test")
+@router.get("/channels/{channel_id}/playlist-test", dependencies=[Depends(require_channel)])
 def channel_playlist_test(channel_id: str):
     """The channel's playlist test: its dates (None until dosed), every arm,
     its weekly verdicts (oldest first), and the answer: `pending` until the

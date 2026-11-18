@@ -50,8 +50,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
+from app.access import require_channel
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -514,7 +515,7 @@ def get_measurement(audit_id: int):
     return audit
 
 
-@router.get("/channels/{channel_id}/outcomes")
+@router.get("/channels/{channel_id}/outcomes", dependencies=[Depends(require_channel)])
 def channel_outcomes(channel_id: str):
     """Win/neutral/regression rollup — Loop 2's input and the ops surface
     where human-gated regressions show up for review."""

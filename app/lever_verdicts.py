@@ -56,8 +56,9 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 
+from app.access import require_channel
 from app import eligibility, job_status, lever_measurement, playlist_test, short_links
 from app import title_measurement, titles_apply
 from app.agent import loop as agent_loop
@@ -529,7 +530,7 @@ def run_weekly(*, today: date | None = None) -> dict | None:
     return {"partial_errors": partial_errors} if partial_errors else None
 
 
-@router.get("/channels/{channel_id}/interventions")
+@router.get("/channels/{channel_id}/interventions", dependencies=[Depends(require_channel)])
 def channel_interventions(
     channel_id: str,
     lever: str | None = Query(default=None),
@@ -563,7 +564,7 @@ def channel_interventions(
             "next_offset": offset + limit if len(rows) == limit else None}
 
 
-@router.get("/channels/{channel_id}/lever-verdicts")
+@router.get("/channels/{channel_id}/lever-verdicts", dependencies=[Depends(require_channel)])
 def channel_lever_verdicts(channel_id: str):
     """Every weekly verdict row of the channel, newest week first, and whether
     the backlinks lever is stopped there."""
@@ -599,7 +600,7 @@ def _trace(rows: list[dict]) -> dict:
             "share_calling": {n: sum(n in t for t in runs) / len(runs) for n in names}}
 
 
-@router.get("/channels/{channel_id}/title-test")
+@router.get("/channels/{channel_id}/title-test", dependencies=[Depends(require_channel)])
 def channel_title_test(channel_id: str):
     """The title test on the channel (Part 6 S3.5), read-only: per path its
     treated, declined, cancelled (by reason; `reverted` for a title put back),

@@ -44,9 +44,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal, Mapping, NamedTuple
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 
+from app.access import require_channel
 from app import decide, interventions, job_status, lever_measurement, reach, warm
 from app.backlinks import NO_THRESHOLDS, SOURCE_NOT_EMBEDDED, THRESHOLDS_OTHER_MODEL, _thresholds
 from app.config import settings
@@ -439,7 +440,7 @@ def _csv(channel_id: str, body: dict) -> StreamingResponse:
     )
 
 
-@router.get("/channels/{channel_id}/short-links")
+@router.get("/channels/{channel_id}/short-links", dependencies=[Depends(require_channel)])
 def channel_short_links(
     channel_id: str,
     status: str | None = Query(default=None),

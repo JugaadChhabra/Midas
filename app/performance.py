@@ -1,8 +1,9 @@
 import csv
 import io
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from fastapi.responses import StreamingResponse
 
+from app.access import require_channel
 from app import verdicts
 from app.channel_audits import audits_for_channel, fetch_all
 from app.db import supabase
@@ -186,7 +187,7 @@ def _build_rows(channel_id: str, statuses: list[str] | None,
     return rows
 
 
-@router.get("/channels/{channel_id}/performance")
+@router.get("/channels/{channel_id}/performance", dependencies=[Depends(require_channel)])
 def channel_performance(channel_id: str, status: str | None = Query(default=None)):
     """status: comma-separated list. Default = applied (back-compat). Pass 'all' for any status."""
     if not status:
@@ -198,7 +199,7 @@ def channel_performance(channel_id: str, status: str | None = Query(default=None
     return _build_rows(channel_id, statuses)
 
 
-@router.get("/channels/{channel_id}/performance/summary")
+@router.get("/channels/{channel_id}/performance/summary", dependencies=[Depends(require_channel)])
 def performance_summary(channel_id: str, status: str | None = Query(default="applied")):
     """KPI strip + cohort breakdowns for the performance page header."""
     if status == "all":
@@ -306,7 +307,7 @@ def performance_summary(channel_id: str, status: str | None = Query(default="app
     }
 
 
-@router.get("/channels/{channel_id}/performance.csv")
+@router.get("/channels/{channel_id}/performance.csv", dependencies=[Depends(require_channel)])
 def performance_csv(channel_id: str, status: str | None = Query(default="applied")):
     if status == "all":
         statuses = None

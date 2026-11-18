@@ -3,9 +3,10 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
+from app.access import require_channel
 from app import decide, tracing
 from app.config import settings
 from app.db import supabase
@@ -74,7 +75,7 @@ class AuditConfigIn(BaseModel):
     reflection_mode: str | None = None
 
 
-@router.get("/channels/{channel_id}/audit-config")
+@router.get("/channels/{channel_id}/audit-config", dependencies=[Depends(require_channel)])
 def get_config(channel_id: str):
     res = supabase().table("audit_configs").select("*").eq("channel_id", channel_id).execute()
     if res.data:
@@ -82,7 +83,7 @@ def get_config(channel_id: str):
     return {"channel_id": channel_id, "raw_insights": "", "generated_prompt": DEFAULT_PROMPT, "shorts_prompt": ""}
 
 
-@router.post("/channels/{channel_id}/audit-config")
+@router.post("/channels/{channel_id}/audit-config", dependencies=[Depends(require_channel)])
 def save_config(channel_id: str, body: AuditConfigIn):
     payload = {
         "channel_id": channel_id,
@@ -97,7 +98,7 @@ def save_config(channel_id: str, body: AuditConfigIn):
     return {"ok": True}
 
 
-@router.post("/channels/{channel_id}/audit-config/elaborate")
+@router.post("/channels/{channel_id}/audit-config/elaborate", dependencies=[Depends(require_channel)])
 def elaborate(channel_id: str, body: AuditConfigIn):
     """Turn natural-language insights into a full audit prompt via LLM."""
     insights = (body.raw_insights or "").strip()
@@ -629,7 +630,7 @@ class ApplyPendingIn(BaseModel):
     video_ids: list[str] | None = None
 
 
-@router.post("/channels/{channel_id}/audits/apply-pending")
+@router.post("/channels/{channel_id}/audits/apply-pending", dependencies=[Depends(require_channel)])
 def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None, force: bool = False):
     """Bulk-apply pending audits for this channel. 409 on an agent channel unless
     `?force=true`, checked once before any apply.
@@ -725,7 +726,7 @@ def apply_pending_audits(channel_id: str, body: ApplyPendingIn | None = None, fo
     }
 
 
-@router.post("/channels/{channel_id}/audits/reaudit-quarantined")
+@router.post("/channels/{channel_id}/audits/reaudit-quarantined", dependencies=[Depends(require_channel)])
 def reaudit_quarantined(channel_id: str):
     """Re-run audit on every video whose latest audit is 'quarantined'.
 
@@ -777,7 +778,7 @@ class BulkAuditIn(BaseModel):
     video_ids: list[str]
 
 
-@router.post("/channels/{channel_id}/audits/run-bulk")
+@router.post("/channels/{channel_id}/audits/run-bulk", dependencies=[Depends(require_channel)])
 def run_bulk_audit(channel_id: str, body: BulkAuditIn):
     """Audit a user-selected list of videos. Each new audit is independent."""
     results: list[dict] = []
