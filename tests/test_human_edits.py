@@ -259,6 +259,7 @@ def _sync_sb(stored_description: str):
         ],
         "audits": [],
         "interventions": [],
+        "channel_uploads": [],
     })
 
 

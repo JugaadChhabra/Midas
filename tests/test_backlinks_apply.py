@@ -99,6 +99,7 @@ def _db(*, stored=LIVE, interventions=None, quota_log=()):
         "interventions": [_intervention()] if interventions is None else list(interventions),
         "audits": [],
         "quota_log": list(quota_log),
+        "channel_uploads": [],
     })
 
 

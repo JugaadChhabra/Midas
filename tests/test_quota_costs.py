@@ -56,6 +56,21 @@ def test_calls_for_batches_at_the_api_limit():
     assert quota.calls_for(500) == 10
 
 
+def test_the_uploads_playlist_page_reads_the_snippet_for_one_unit():
+    """Upload capture (#150) reads each item's snippet.publishedAt from the page
+    the sync already requests; adding `snippet` to `part` costs nothing extra."""
+    from app.youtube_client import yt_playlist_items_page
+    yt = MagicMock()
+    yt.playlistItems.return_value.list.return_value.execute.return_value = {"items": []}
+    with patch("app.youtube_client._log_quota") as charged:
+        yt_playlist_items_page(yt, "c1", "UU1", None)
+    parts = set(yt.playlistItems.return_value.list.call_args.kwargs["part"].split(","))
+    assert parts == {"snippet", "contentDetails"}
+    op = charged.call_args.args[1]
+    n = charged.call_args.args[3] if len(charged.call_args.args) > 3 else 1
+    assert quota.cost(op, n) == 1
+
+
 # ── charging ──────────────────────────────────────────────────────────────
 
 def test_charge_writes_the_priced_units_to_the_ledger():

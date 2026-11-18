@@ -90,7 +90,8 @@ class FakeYouTube:
 
 
 def _db(channels: list[dict], videos: list[dict] | None = None, **tables) -> FakeSupabase:
-    return FakeSupabase({"channels": channels, "videos": videos or [], "quota_log": [], **tables})
+    return FakeSupabase({"channels": channels, "videos": videos or [], "quota_log": [],
+                         "channel_uploads": [], **tables})
 
 
 @pytest.fixture
