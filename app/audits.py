@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from app.access import require_channel
+from app.access import require_audit, require_channel, require_video
 from app import decide, tracing
 from app.config import settings
 from app.db import supabase
@@ -447,12 +447,12 @@ def validate_audit(audit: dict) -> tuple[bool, str | None]:
     return reason is None, reason
 
 
-@router.post("/videos/{video_id}/audit")
+@router.post("/videos/{video_id}/audit", dependencies=[Depends(require_video)])
 def run_audit(video_id: str):
     return audit_video(video_id)
 
 
-@router.get("/videos/{video_id}/audits")
+@router.get("/videos/{video_id}/audits", dependencies=[Depends(require_video)])
 def list_audits(video_id: str):
     res = (
         supabase().table("audits")
@@ -615,7 +615,7 @@ def apply_audit_internal(audit_id: int, body: ApplyIn | None = None, *, force: b
     return {"status": AuditStatus.APPLIED, "payload": payload}
 
 
-@router.post("/audits/{audit_id}/apply")
+@router.post("/audits/{audit_id}/apply", dependencies=[Depends(require_audit)])
 def apply_audit(audit_id: int, body: ApplyIn | None = None, force: bool = False):
     """Push the audit's suggested metadata to YouTube. Respects DRY_RUN. 409 on
     an agent channel unless `?force=true`."""
@@ -811,7 +811,7 @@ def run_bulk_audit(channel_id: str, body: BulkAuditIn):
     return {"audited": audited, "failed": failed, "total": len(body.video_ids), "results": results}
 
 
-@router.post("/audits/{audit_id}/revert")
+@router.post("/audits/{audit_id}/revert", dependencies=[Depends(require_audit)])
 def revert_audit(audit_id: int, force: bool = False):
     """Restore a video's title/description/tags from the audit's *_before snapshot.
 

@@ -47,7 +47,7 @@ from typing import Literal, Mapping, NamedTuple
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 
-from app.access import require_channel
+from app.access import require_channel, require_short_link
 from app import decide, interventions, job_status, lever_measurement, reach, warm
 from app.backlinks import NO_THRESHOLDS, SOURCE_NOT_EMBEDDED, THRESHOLDS_OTHER_MODEL, _thresholds
 from app.config import settings
@@ -517,7 +517,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@router.post("/short-links/{recommendation_id}/set")
+@router.post("/short-links/{recommendation_id}/set", dependencies=[Depends(require_short_link)])
 def set_short_link(recommendation_id: int):
     """The team set this target on its Short in Studio (Part 2 §1.4, E11).
 
@@ -562,7 +562,7 @@ def set_short_link(recommendation_id: int):
             "recorded": stored is not None}
 
 
-@router.post("/short-links/{recommendation_id}/dismiss")
+@router.post("/short-links/{recommendation_id}/dismiss", dependencies=[Depends(require_short_link)])
 def dismiss_short_link(recommendation_id: int):
     """The team says this target is wrong for its Short: `dismissed`, no
     intervention. A `set` row is refused (409): the link is on the Short, and

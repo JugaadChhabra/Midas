@@ -1,10 +1,11 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from app.access import require_shorts_clip, require_shorts_job, require_video
 from app.config import settings
 from app.db import supabase
 from app.shorts.cutter.download import is_youtube_url
@@ -117,7 +118,7 @@ def clear_failed_jobs(channel_id: str | None = None):
     return {"deleted": len(ids)}
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}", dependencies=[Depends(require_shorts_job)])
 def get_job(job_id: int):
     sb = supabase()
     job = sb.table("shorts_jobs").select("*").eq("id", job_id).single().execute().data
@@ -127,7 +128,7 @@ def get_job(job_id: int):
     return {"job": job, "clips": clips}
 
 
-@router.get("/clips/{clip_id}/file")
+@router.get("/clips/{clip_id}/file", dependencies=[Depends(require_shorts_clip)])
 def clip_file(clip_id: int, download: bool = False):
     """Stream a cut clip off local disk, for in-page playback and download.
 
@@ -149,7 +150,7 @@ def clip_file(clip_id: int, download: bool = False):
                         filename=path.name if download else None)
 
 
-@router.post("/clips/{clip_id}/upload")
+@router.post("/clips/{clip_id}/upload", dependencies=[Depends(require_shorts_clip)])
 def upload_clip(clip_id: int):
     sb = supabase()
     clip = sb.table("shorts_clips").select("*").eq("id", clip_id).single().execute().data
@@ -184,7 +185,7 @@ class MakeShort(BaseModel):
     camera_motion: str = "calm"         # locked | calm | follow
 
 
-@video_router.post("/videos/{video_id}/short")
+@video_router.post("/videos/{video_id}/short", dependencies=[Depends(require_video)])
 def make_short(video_id: str, body: MakeShort | None = None):
     body = body or MakeShort()
     sb = supabase()

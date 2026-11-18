@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-18 (team tracker 03, #145: the access module, channel-id routes scoped) · **Commit:** on top of
-`b67b548` · **Branch:** `team-tracker/03-access-channel-routes`
+**Generated:** 2026-11-18 (team tracker 04, #146: object-id routes scoped) · **Commit:** on top of
+`5467245` · **Branch:** `team-tracker/04-object-routes`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -656,12 +656,24 @@ admin and exec only. Every route whose path has a `{channel_id}` (33 routes, plu
 has `dependencies=[Depends(require_channel)]`: 404 `{"detail": "channel_not_found"}` for a channel the user can't
 see, the same body as an unknown one (never 403); for admin and exec it reads nothing and passes, leaving an unknown
 id to the route as before; for a manager it reads `channels` once per request. `require_role(*roles)` → 403
-`{"detail": "forbidden"}`. `current_user` = `request.state.user` (401 if unset). Each dependency carries
+`{"detail": "forbidden"}`. `current_user` = `request.state.user` (401 if unset).
+Routes addressed by another object's id (#146) depend on that object's resolver, which maps the object to its channel
+and applies the same check: `require_video` (`videos.channel_id`) on `GET /videos/{id}`, `POST /videos/{id}/audit`,
+`GET /videos/{id}/audits`, `POST /videos/{id}/short`; `require_audit` (the audit's video's channel) on
+`POST /audits/{id}/apply`, `POST /audits/{id}/revert`, `GET /audits/{id}/measurement`; `require_intervention`
+(`interventions.channel_id`) on `POST /interventions/{id}/revert`; `require_short_link`
+(`short_link_recommendations.channel_id`, else the Short's channel) on `POST /short-links/{id}/set|dismiss`;
+`require_shorts_job` (`shorts_jobs.channel_id`) on `GET /shorts/jobs/{id}`; `require_shorts_clip` (the clip's job's
+channel) on `GET /shorts/clips/{id}/file`, `POST /shorts/clips/{id}/upload`. For a manager, an unknown object and one
+on a channel they can't see answer the same 404: `{"detail": "video_not_found"}`, `"audit_not_found"`,
+`"intervention_not_found"`, `"short_link_not_found"`, `"shorts_job_not_found"`, `"shorts_clip_not_found"`; admin and
+exec read nothing and pass, leaving an unknown id to the route's own 404 as before.
+Each dependency carries
 `access_rule = True`; `tests/test_route_access.py` walks `app.routes` and fails on a route with none that isn't on its
-open list (`/login`, `/session/login`, `/health`, `/session/logout`, `/`, `/channel`) or its PENDING list (the
-object-id routes, scoped by #146; the list and global routes, `/dashboard`, `/shorts/*`, `/autoshorts*`, `/quota*`,
-`/health/jobs`, `/health/channels`, `/measurement/evaluate`, `/auth/login`, `/auth/callback`, by #147), and on a
-PENDING route that is now scoped. Until those land, those routes still answer every signed-in user.
+open list (`/login`, `/session/login`, `/health`, `/session/logout`, `/`, `/channel`) or its PENDING list (the list
+and global routes, `/dashboard`, `/shorts/*`, `/autoshorts*`, `/quota*`, `/health/jobs`, `/health/channels`,
+`/measurement/evaluate`, `/auth/login`, `/auth/callback`, scoped by #147), and on a PENDING route that is now scoped.
+Until #147 lands, those routes still answer every signed-in user.
 
 - **Access** (`app/access.py` `router`): `PATCH /channels/{id}/manager` body `{manager_id: int | null}`, admin only
   (`require_channel` first, so a manager asking about another team's channel gets 404, about their own 403; exec
@@ -706,7 +718,7 @@ PENDING route that is now scoped. Until those land, those routes still answer ev
 | `eligibility.py` | which channels each job runs for (`Job.*`, `can_audit`, `can_cut_shorts`, `has_work`); `can_run_agent` = `can_audit` and `agent_enabled` and `reach.certify` |
 | `status_vocab.py` | persisted status strings and their mirrors (`tests/test_status_vocab.py`) |
 | `auth.py` | OAuth + channel flag PATCH |
-| `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
+| `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
 | `content_type.py` | `is_episode` classifier |
@@ -1176,7 +1188,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
-| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes are #146, list and global routes #147 |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes #147 |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |

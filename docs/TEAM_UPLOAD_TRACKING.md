@@ -132,7 +132,8 @@ Roles:
 
 Write it as: `app/access.py` with `current_user`, `visible_channel_ids(user)`,
 `require_channel(...)`, and the per-object resolvers. Every route imports from there. The
-access module, `channels.manager_id` and the channel-id routes are built in #145: see STATE.md §5.
+access module, `channels.manager_id` and the channel-id routes are built in #145, the object
+resolvers and object-id routes in #146: see STATE.md §5.
 
 **Guard test (required):** `tests/test_route_access.py` walks `app.routes` and fails if any
 route lacks an access dependency and isn't in the public allowlist. Then, for each kind

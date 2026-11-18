@@ -10,6 +10,10 @@ This module decides what the signed-in user may reach:
   * A route whose path has a ``{channel_id}`` depends on ``require_channel``,
     which answers 404 (never 403) for a channel the user can't see, so another
     team's channels aren't even revealed to exist.
+  * A route addressed by another object's id (a video, audit, intervention,
+    Short-link recommendation, Shorts job or clip) depends on that object's
+    resolver (``require_video`` …): object → channel, then the same check, and
+    the same 404 for an unknown object as for an invisible one (#146).
   * Admin-only routes depend on ``require_role(UserRole.ADMIN)``: 403.
 
 Each dependency here carries ``access_rule = True``. ``tests/test_route_access.py``
@@ -87,6 +91,98 @@ def require_channel(channel_id: str, user: dict = Depends(current_user)) -> str:
     if not can_see_channel(user, channel_id):
         raise HTTPException(404, CHANNEL_NOT_FOUND)
     return channel_id
+
+
+# ── object-id routes (#146) ──────────────────────────────────────────────
+#
+# A route addressed by another object's id resolves the object to its channel,
+# then applies the same check. An unknown object and one on a channel the user
+# can't see answer the same 404 (one detail per object type), so another team's
+# objects aren't revealed to exist. As in ``require_channel``, admin and exec
+# read nothing and pass: an unknown id is left to the route, as before.
+
+VIDEO_NOT_FOUND = "video_not_found"
+AUDIT_NOT_FOUND = "audit_not_found"
+INTERVENTION_NOT_FOUND = "intervention_not_found"
+SHORT_LINK_NOT_FOUND = "short_link_not_found"
+SHORTS_JOB_NOT_FOUND = "shorts_job_not_found"
+SHORTS_CLIP_NOT_FOUND = "shorts_clip_not_found"
+
+
+def _one(table: str, columns: str, object_id) -> dict | None:
+    rows = (supabase().table(table).select(columns)
+            .eq("id", object_id).limit(1).execute().data) or []
+    return rows[0] if rows else None
+
+
+def _video_channel(video_id: str | None) -> str | None:
+    video = _one("videos", "channel_id", video_id) if video_id else None
+    return video and video.get("channel_id")
+
+
+def _job_channel(job_id) -> str | None:
+    job = _one("shorts_jobs", "channel_id", job_id) if job_id is not None else None
+    return job and job.get("channel_id")
+
+
+def _resolve(user: dict, channel_of, object_id, detail: str):
+    """404 ``detail`` unless the user sees the channel ``channel_of(id)`` names
+    (None: the object doesn't exist)."""
+    if sees_all(user):
+        return object_id
+    channel_id = channel_of(object_id)
+    if not channel_id or not can_see_channel(user, channel_id):
+        raise HTTPException(404, detail)
+    return object_id
+
+
+@_access_rule
+def require_video(video_id: str, user: dict = Depends(current_user)) -> str:
+    """``/videos/{video_id}…``: the video's channel."""
+    return _resolve(user, _video_channel, video_id, VIDEO_NOT_FOUND)
+
+
+@_access_rule
+def require_audit(audit_id: int, user: dict = Depends(current_user)) -> int:
+    """``/audits/{audit_id}…``: the audited video's channel."""
+    def channel_of(i):
+        audit = _one("audits", "video_id", i)
+        return audit and _video_channel(audit.get("video_id"))
+    return _resolve(user, channel_of, audit_id, AUDIT_NOT_FOUND)
+
+
+@_access_rule
+def require_intervention(intervention_id: int, user: dict = Depends(current_user)) -> int:
+    """``/interventions/{intervention_id}…``: the intervention's channel."""
+    def channel_of(i):
+        row = _one("interventions", "channel_id", i)
+        return row and row.get("channel_id")
+    return _resolve(user, channel_of, intervention_id, INTERVENTION_NOT_FOUND)
+
+
+@_access_rule
+def require_short_link(recommendation_id: int, user: dict = Depends(current_user)) -> int:
+    """``/short-links/{recommendation_id}…``: the recommendation's channel, else
+    (the column is nullable) its Short's."""
+    def channel_of(i):
+        rec = _one("short_link_recommendations", "channel_id,short_id", i)
+        return rec and (rec.get("channel_id") or _video_channel(rec.get("short_id")))
+    return _resolve(user, channel_of, recommendation_id, SHORT_LINK_NOT_FOUND)
+
+
+@_access_rule
+def require_shorts_job(job_id: int, user: dict = Depends(current_user)) -> int:
+    """``/shorts/jobs/{job_id}``: the job's channel."""
+    return _resolve(user, _job_channel, job_id, SHORTS_JOB_NOT_FOUND)
+
+
+@_access_rule
+def require_shorts_clip(clip_id: int, user: dict = Depends(current_user)) -> int:
+    """``/shorts/clips/{clip_id}…``: the clip's job's channel."""
+    def channel_of(i):
+        clip = _one("shorts_clips", "job_id", i)
+        return clip and _job_channel(clip.get("job_id"))
+    return _resolve(user, channel_of, clip_id, SHORTS_CLIP_NOT_FOUND)
 
 
 def require_role(*roles: str):

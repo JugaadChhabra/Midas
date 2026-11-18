@@ -52,7 +52,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 
-from app.access import require_channel
+from app.access import require_audit, require_channel
 from app.config import settings
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
@@ -497,7 +497,7 @@ def evaluate_with_failures() -> tuple[dict, dict[str, str]]:
 
 # ── Endpoints (CIL §1.8, minimal slice subset) ────────────────────────────
 
-@router.get("/audits/{audit_id}/measurement")
+@router.get("/audits/{audit_id}/measurement", dependencies=[Depends(require_audit)])
 def get_measurement(audit_id: int):
     res = (
         supabase().table("audits")
