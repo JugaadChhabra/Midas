@@ -59,6 +59,28 @@
   table.up tr.off td:first-child { color:var(--ink-4); }
   table.up tr.unassigned td:first-child { font-style:italic; }
   table.up .mgr { display:block; font-size:11px; color:var(--ink-4); }
+
+  /* Drill-down (#152): a cell opens the videos behind it. */
+  table.up td button.cell-open { all:unset; cursor:pointer; border-radius:3px; padding:0 .15rem; }
+  table.up td button.cell-open:hover .n, table.up td button.cell-open:focus-visible .n {
+    text-decoration:underline; }
+  table.up td button.cell-open:focus-visible { outline:2px solid var(--color-accent); }
+  .modal.drill { max-width:760px; max-height:85vh; display:flex; flex-direction:column; }
+  .drill-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem;
+                margin:0 0 .8rem; }
+  .drill-head h2 { font-size:15px; margin:0; }
+  .drill-head .sub { font-size:12px; color:var(--ink-3); }
+  .drill-list { overflow-y:auto; margin:0 0 1rem; }
+  .drill-row { display:grid; grid-template-columns:88px 1fr auto; gap:.75rem; align-items:center;
+               padding:.5rem 0; border-bottom:1px solid var(--border-soft); font-size:13px; }
+  .drill-row img, .drill-row .no-thumb { width:88px; height:50px; object-fit:cover; border-radius:4px;
+               background:var(--surface-tint); display:block; }
+  .drill-row .title { font-weight:500; overflow-wrap:anywhere; }
+  .drill-row .title a { color:inherit; text-decoration:none; }
+  .drill-row .title a:hover { text-decoration:underline; }
+  .drill-row .meta { font-size:12px; color:var(--ink-3); margin-top:2px; }
+  .drill-row .side { display:grid; gap:4px; justify-items:end; text-align:right; }
+  .drill-row .when { font-size:11.5px; color:var(--ink-3); }
 </style>
 </head>
 <body>
@@ -541,9 +563,14 @@ function paintFresh(channels) {
   }</ul></details>`;
 }
 
-function cell(c, cls = '') {
+function cell(c, cls = '', open = null) {
   if (!c.total) return `<td class="zero ${cls}">0</td>`;
-  return `<td class="${cls}">${c.total} <span class="sl">(${c.shorts} / ${c.long_form})</span></td>`;
+  const text = `<span class="n">${c.total}</span> <span class="sl">(${c.shorts} / ${c.long_form})</span>`;
+  // A day cell opens its drill-down; the Total column doesn't.
+  return open
+    ? `<td class="${cls}"><button type="button" class="cell-open" data-member="${open.member}"
+         data-day="${open.day}" aria-label="Show the ${c.total} videos">${text}</button></td>`
+    : `<td class="${cls}">${text}</td>`;
 }
 
 function paintGrid(data) {
@@ -556,14 +583,105 @@ function paintGrid(data) {
       r.is_active ? '' : ' off'}">
     <td>${esc(r.name)}${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
       showMgr && r.manager_name ? `<span class="mgr">${esc(r.manager_name)}</span>` : ''}</td>
-    ${data.days.map(d => cell(r.days[d])).join('')}${cell(r.total, 'sum')}</tr>`).join('');
+    ${data.days.map(d => cell(r.days[d], '', { member: r.member_id ?? '', day: d })).join('')}${
+      cell(r.total, 'sum')}</tr>`).join('');
   $('up-grid').innerHTML = !data.channels.length
     ? `<div class="dt"><div class="dt-empty muted">${seesAll()
         ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`
     : `<div class="grid-wrap"><table class="up">
         <thead><tr><th scope="col">Member</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
         <tbody>${body}</tbody></table></div>`;
+  upShown = data;
 }
+
+// ── Drill-down (#152) ─────────────────────────────────────────────────
+// GET /team/uploads/videos lists the videos behind a cell, credited by the
+// same rule as the grid; the grid's manager filter goes with it so the
+// Unassigned list matches its cell.
+let upShown = null;          // the grid last painted
+
+const STATUS_PILL = {
+  scheduled: 'pill--info', public: 'pill--ok', unlisted: 'pill--neutral', private: 'pill--warn',
+};
+
+function istTime(iso, withDate = false) {
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+    ...(withDate ? { day: 'numeric', month: 'short' } : {}),
+  }).format(new Date(iso));
+}
+
+function statusPill(v) {
+  const status = v.status || 'unknown';
+  const label = status === 'scheduled' && v.scheduled_publish_at
+    ? `Scheduled · live ${istTime(v.scheduled_publish_at, true)} IST`
+    : status.charAt(0).toUpperCase() + status.slice(1);
+  return `<span class="pill pill--sm ${STATUS_PILL[status] || 'pill--neutral'}">${esc(label)}</span>`;
+}
+
+function kind(v) {
+  if (v.is_short === true) return 'Short';
+  if (v.is_short === false) return 'Long-form';
+  return '<span title="Not classified yet; counted as long-form">?</span>';
+}
+
+function drillRow(v) {
+  const href = `https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`;
+  const thumb = v.thumbnail_url
+    ? `<img src="${esc(v.thumbnail_url)}" loading="lazy" alt="" />` : '<span class="no-thumb"></span>';
+  return `<div class="drill-row">${thumb}
+    <div><div class="title"><a href="${href}" target="_blank" rel="noopener">${
+      esc(v.title || v.video_id)}</a></div>
+      <div class="meta">${esc(v.channel_name || v.channel_id)} · ${kind(v)}</div></div>
+    <div class="side">${statusPill(v)}<span class="when">Uploaded ${
+      esc(istTime(v.uploaded_at))} IST</span></div></div>`;
+}
+
+function drillModal() {
+  const back = document.createElement('div');
+  back.className = 'modal-backdrop';
+  back.innerHTML = `<div class="modal drill" role="dialog" aria-modal="true" aria-labelledby="drill-title">
+    <div class="drill-head"><div><h2 id="drill-title"></h2><div class="sub"></div></div></div>
+    <div class="drill-list"><div class="skel" data-skeleton data-rows="3"></div></div>
+    <div class="modal-actions"><button class="btn modal-cancel">Close</button></div></div>`;
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  back.querySelector('.modal-cancel').onclick = close;
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(back);
+  back.querySelector('.modal-cancel').focus();
+  return back;
+}
+
+async function openDrill(member, day) {
+  const row = (upShown?.rows || []).find(r => String(r.member_id ?? '') === member);
+  const back = drillModal();
+  const dow = DOW[new Date(day + 'T00:00:00Z').getUTCDay()];
+  back.querySelector('#drill-title').textContent = `${row ? row.name : 'Uploads'} · ${dow} ${day}`;
+  const q = new URLSearchParams({ day });
+  if (member) q.set('member_id', member);
+  if (seesAll() && upShown?.manager_id) q.set('manager_id', upShown.manager_id);
+  const list = back.querySelector('.drill-list');
+  try {
+    const r = await fetch('/team/uploads/videos?' + q);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    const shorts = j.videos.filter(v => v.is_short === true).length;
+    back.querySelector('.sub').textContent =
+      `${j.videos.length} video${j.videos.length === 1 ? '' : 's'} · ${shorts} Shorts / ${
+        j.videos.length - shorts} long-form · times in IST`;
+    list.innerHTML = j.videos.length ? j.videos.map(drillRow).join('')
+      : '<em class="muted">No uploads.</em>';
+  } catch (err) {
+    list.innerHTML = `<em class="muted">Could not load the videos: ${esc(err.message)}</em>`;
+  }
+}
+
+$('up-grid').addEventListener('click', (e) => {
+  const b = e.target.closest('button.cell-open');
+  if (b) openDrill(b.dataset.member, b.dataset.day);
+});
 
 function paintManagerFilter(managers) {
   const holder = $('up-manager');
