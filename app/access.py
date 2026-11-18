@@ -205,6 +205,26 @@ def require_shorts_clip(clip_id: int, user: dict = Depends(current_user)) -> int
     return _resolve(user, channel_of, clip_id, SHORTS_CLIP_NOT_FOUND)
 
 
+# ── team members (#148) ──────────────────────────────────────────────────
+#
+# A team member isn't on a channel: it belongs to a manager. A manager reaches
+# only their own members; another manager's member and an unknown id answer the
+# same 404. Admin and exec read nothing and pass, as above.
+
+TEAM_MEMBER_NOT_FOUND = "team_member_not_found"
+
+
+@_access_rule
+def require_team_member(member_id: int, user: dict = Depends(current_user)) -> int:
+    """``/team/members/{member_id}``: the member's manager must be the user."""
+    if sees_all(user):
+        return member_id
+    member = _one("team_members", "manager_id", member_id)
+    if not member or member.get("manager_id") != user["id"]:
+        raise HTTPException(404, TEAM_MEMBER_NOT_FOUND)
+    return member_id
+
+
 def require_role(*roles: str):
     """Route dependency factory: 403 unless the user has one of ``roles``."""
     allowed = frozenset(roles)
