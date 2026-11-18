@@ -14,8 +14,9 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-18 (team tracker 07, #148: `team_members`, `/team/members`, the Team page and its Roster
-tab) · **Commit:** on top of `25188ba` · **Branch:** `team-tracker/07-roster`
+**Generated:** 2026-11-18 (team tracker 08, #149: `channel_assignments`, `assign_channel()`,
+`POST /channels/{id}/assign`, `GET /team/assignments`, the Roster tab's channels) · **Commit:** on top of `216bf90` ·
+**Branch:** `team-tracker/08-assignments`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -144,6 +145,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261118000000_app_users_sessions.sql           app_users, app_sessions (team tracker #144)
 20261118010000_channels_manager_id.sql          channels.manager_id → app_users, channels_manager_idx (team tracker #145)
 20261118020000_team_members.sql                 team_members, team_members_manager_idx (team tracker #148)
+20261118030000_channel_assignments.sql          channel_assignments, assign_channel() (team tracker #149)
 ```
 
 **Tables** (columns are the union across the migrations):
@@ -322,7 +324,87 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
   grant all on sequence team_members_id_seq to service_role;
   ```
 
-- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()`.
+- **`channel_assignments`** and **`assign_channel()`** (`20261118030000`, team tracker #149), verbatim without the
+  header comment. Which team member holds which channel over `[starts_on, ends_on)`, IST dates (`team.IST`,
+  `Asia/Kolkata`), `ends_on` NULL while current; one open row per channel. Written only by `app/team.py`:
+  `POST /channels/{id}/assign` through the `assign_channel` RPC (closes the open row at the new start and opens
+  the new one in one transaction; guarded by `tests/test_assign_channel_sql.py`), and `PATCH /team/members/{id}`
+  deactivating a member (sets `ends_on` = today IST, or the row's `starts_on` if later, on their open rows). Read by
+  `GET /team/assignments`:
+  ```sql
+  create table if not exists channel_assignments (
+      id              bigserial    primary key,
+      channel_id      text         not null references channels(id) on delete cascade,
+      team_member_id  bigint       not null references team_members(id),
+      starts_on       date         not null,   -- IST date
+      ends_on         date,                    -- exclusive; null = current
+      assigned_by     bigint       references app_users(id),
+      created_at      timestamptz  not null default now(),
+      -- ends_on = starts_on is an empty range: an assignment replaced on the day
+      -- it started, which credits nothing.
+      constraint channel_assignments_range check (ends_on is null or ends_on >= starts_on)
+  );
+
+  -- At most one open assignment per channel.
+  create unique index if not exists channel_assignments_one_open
+      on channel_assignments (channel_id) where ends_on is null;
+
+  -- Backs "the open assignments of this member" (deactivation).
+  create index if not exists channel_assignments_member_idx
+      on channel_assignments (team_member_id);
+
+  grant all on channel_assignments to service_role;
+  grant all on sequence channel_assignments_id_seq to service_role;
+
+  -- Close the channel's open assignment and open the new one, in one transaction
+  -- (PostgREST runs one statement per request; a function call is one
+  -- transaction). The open row is locked first, so two concurrent assigns
+  -- serialise; with no open row, the unique index refuses the second insert.
+  -- The same member already open is returned unchanged. A start before the open
+  -- row's start raises (the API refuses it first; this is the backstop).
+  -- Guarded by tests/test_assign_channel_sql.py.
+  create or replace function assign_channel(
+      p_channel_id      text,
+      p_team_member_id  bigint,
+      p_starts_on       date,
+      p_assigned_by     bigint
+  )
+  returns channel_assignments
+  language plpgsql
+  as $$
+  declare
+      v_open  channel_assignments;
+      v_new   channel_assignments;
+  begin
+      select * into v_open
+        from channel_assignments
+       where channel_id = p_channel_id and ends_on is null
+         for update;
+
+      if found then
+          if p_starts_on < v_open.starts_on then
+              raise exception 'starts_on % is before the open assignment''s start %',
+                  p_starts_on, v_open.starts_on
+                  using errcode = '22023';
+          end if;
+          if v_open.team_member_id = p_team_member_id then
+              return v_open;
+          end if;
+          update channel_assignments set ends_on = p_starts_on where id = v_open.id;
+      end if;
+
+      insert into channel_assignments (channel_id, team_member_id, starts_on, assigned_by)
+      values (p_channel_id, p_team_member_id, p_starts_on, p_assigned_by)
+      returning * into v_new;
+      return v_new;
+  end;
+  $$;
+
+  revoke execute on function assign_channel(text, bigint, date, bigint) from public;
+  grant  execute on function assign_channel(text, bigint, date, bigint) to service_role;
+  ```
+
+- **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()`, `assign_channel()` (above).
 
 - **`warm_pool()`**, verbatim without its header comment, as of `20261030020000` (in-app twin `app/warm.py` `_ranked_pool_inapp`; the agent tick picks via `warm.warm_pool`). Excludes active Midas rows, any `midas` row within `p_cooldown_days`, and at any age backlinks holdout/applied rows and title holdout or non-`cancelled` treated rows:
   ```sql
@@ -672,7 +754,7 @@ don't pass through either.
 
 **Access** (`app/access.py`, team tracker #145). `admin` and `exec` see every channel; a `manager` sees the channels
 whose `channels.manager_id` is them (`visible_channel_ids`, `filter_channels`); a channel with no manager is seen by
-admin and exec only. Every route whose path has a `{channel_id}` (33 routes, plus `PATCH /channels/{id}/manager`)
+admin and exec only. Every route whose path has a `{channel_id}` (34 routes, plus `PATCH /channels/{id}/manager`)
 has `dependencies=[Depends(require_channel)]`: 404 `{"detail": "channel_not_found"}` for a channel the user can't
 see, the same body as an unknown one (never 403); for admin and exec it reads nothing and passes, leaving an unknown
 id to the route as before; for a manager it reads `channels` once per request. `require_role(*roles)` → 403
@@ -723,8 +805,19 @@ other route is scoped, and a new unscoped route fails CI.
   → 403 `forbidden`); admin and exec must give `manager_id` (400 `"manager_id is required"`), an active `manager`
   (400 `"manager_id must be an active manager"`). `PATCH /team/members/{id}` (`require_team_member`) body
   `{name?, is_active?}`: rename, deactivate or reactivate; an empty body 400 `"nothing to change"`; no field
-  moves a member to another manager. Deactivating ends nothing else yet: there are no channel assignments
-  (#149).
+  moves a member to another manager. Deactivating a member ends their open channel assignments (§2
+  `channel_assignments`).
+  `POST /channels/{id}/assign` (`current_user`, `require_channel`; #149) body `{team_member_id, starts_on?}` →
+  `{"assignment": {id, channel_id, team_member_id, starts_on, ends_on, assigned_by, created_at, member_name,
+  assigned_by_name}, "changed"}`: `starts_on` defaults to today in IST (`team.ist_day`); before the open row's
+  start → 400 (`"starts_on <d> is before the current assignment's start <d>"`); an unknown channel 404
+  `channel_not_found` (for admin and exec too); a manager's channel must be theirs (`require_channel`) and the member
+  theirs, else 404 `team_member_not_found` (also an unknown member); admin and exec assign any member to any channel;
+  a deactivated member 400 `"team member is deactivated"`; the member already holding it → `changed` false, nothing
+  written; else the `assign_channel` RPC, an `APIError` (a concurrent assign) → 409 `"the channel's assignment
+  changed meanwhile; try again"`. `GET /team/assignments` (`current_user`) → `{"channels": [{id, name,
+  manager_id, manager_name}], "assignments": [...]}`: the user's visible channels (`access.filter_channels`) by
+  name, and every assignment on them, current and past, newest `starts_on` first; there is no unassign route.
 
 - **Pages/health:** `GET /login` (Session, above); `GET /` → `static/index.html`; `GET /channel` → `static/channel.html`; `GET /health` → `{"ok": True, "dry_run": …}`; `GET /health/jobs` (admin only) → `{"jobs": {<job_id>: {status, last_run_at, error, failed_channels, partial_errors}}}`; `GET /health/channels` (`app/channel_health.py`, admin only) → per-channel freshness and `problems`, channels with problems first; `GET /autoshorts` (`app/shorts/autoshorts.py`, any signed-in user); `/static/*`.
 - **Auth/channels** (`app/auth.py`, prefix `/auth`): `GET /auth/login`, `GET /auth/callback` (both admin only; the callback stores tokens, sets `analytics_authorized` from granted scopes, clears the `token_expired` pause), `GET /auth/channels` (only the user's visible channels, `access.filter_channels`; the sidebar switcher and the channel page read it), `PATCH /auth/channels/{id}` (`require_channel`; no `manager_id` field; enabling `measurement_enabled` is 409 unless `reach.certify` passes, `app/auth.py:166-174`).
@@ -774,7 +867,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `auth.py` | OAuth + channel flag PATCH |
 | `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `check_channel` and `scope_to_visible` for list and global routes (#147), `require_team_member` (#148, 404 `TEAM_MEMBER_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), `require_admin`, the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
-| `team.py` | the Team page and the roster (team tracker #148): `GET /team`, `GET/POST /team/members`, `PATCH /team/members/{id}` (Routes); `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE` |
+| `team.py` | the Team page, the roster (team tracker #148) and channel assignments (#149): `GET /team`, `GET/POST /team/members`, `PATCH /team/members/{id}` (deactivating ends open assignments, `_end_assignments`), `POST /channels/{id}/assign` (the `assign_channel` RPC), `GET /team/assignments` (Routes); `IST` (`Asia/Kolkata`, deliberately not `quota.QUOTA_TZ`), `ist_day`; `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE`, `MEMBER_INACTIVE`, `ASSIGN_CONFLICT` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
 | `content_type.py` | `is_episode` classifier |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
@@ -821,7 +914,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
 | `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard. `login.html` (the sign-in form, inline script, loads only `theme.css`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` heads the rail with `TOP_ITEMS` (Running `/`, Team `/team`, #148) on every page, shows the signed-in user's name and role (`GET /session/me`) above the channel switcher (whose "Add channel" link, `/auth/login`, only the admin sees: `.not-admin .admin-only`, `theme.css`), with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `team.html` (#148, served at `/team`): a chip-bar of tabs, today only Roster (the uploads grid, #151, and the assignments UI, #149, are not built): the members from `GET /team/members`, grouped by manager for admin and exec, with add (admin and exec pick the manager in a `data-dropdown`), rename, deactivate (after a confirm) and reactivate, and a "Show deactivated members" toggle. `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
+| `static/*` | vanilla-JS dashboard. `login.html` (the sign-in form, inline script, loads only `theme.css`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` heads the rail with `TOP_ITEMS` (Running `/`, Team `/team`, #148) on every page, shows the signed-in user's name and role (`GET /session/me`) above the channel switcher (whose "Add channel" link, `/auth/login`, only the admin sees: `.not-admin .admin-only`, `theme.css`), with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `team.html` (#148, served at `/team`): a chip-bar of tabs, today only Roster (the uploads grid, #151, is not built): the members from `GET /team/members`, grouped by manager for admin and exec, with add (admin and exec pick the manager in a `data-dropdown`), rename, deactivate (after a confirm) and reactivate, and a "Show deactivated members" toggle; under it the Channels list (#149) from `GET /team/assignments`: per visible channel a member `data-dropdown` (a manager's own active members; for admin and exec the channel's manager's active members, every active member when it has none; no "Unassigned" once held) that assigns from today IST after a confirm (`POST /channels/{id}/assign`), "since <date>", a "History" `<details>` of its assignments, and the channel's manager: a `data-dropdown` for the admin only (`PATCH /channels/{id}/manager`, "No manager" clears), plain text for exec and managers. `channel.html`'s `DECIDED_BY` maps `experiment: 'Playlist test'`; the Playlists tab's "Short links" card (`#sl-card`, `loadShortLinks`) lists `GET /channels/{id}/short-links?limit=1000` with "Set in Studio" (after a `confirmDialog`), "Dismiss" and "Download CSV" |
 
 **Scripts:** `scripts/manage_users.py` (`create --email --name --role admin|exec|manager`, `reset-password --email`,
 `deactivate --email`; the password is typed twice at a `getpass` prompt, never an argument; reset and deactivate end
@@ -1243,7 +1336,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
-| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147). Each manager's roster: `team_members`, `app/team.py`, the Team page (#148) |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147). Each manager's roster: `team_members`, `app/team.py`, the Team page (#148). Channel assignments: `channel_assignments`, `assign_channel()`, `POST /channels/{id}/assign`, `GET /team/assignments` (#149) |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |
