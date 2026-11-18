@@ -14,9 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-18 (team tracker 08, #149: `channel_assignments`, `assign_channel()`,
-`POST /channels/{id}/assign`, `GET /team/assignments`, the Roster tab's channels) · **Commit:** on top of `216bf90` ·
-**Branch:** `team-tracker/08-assignments`
+**Generated:** 2026-11-18 (team tracker 06, #150: `channel_uploads`, upload capture in `sync_channel`) ·
+**Commit:** on top of `d87655f` · **Branch:** `team-tracker/06-upload-capture`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -146,6 +145,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261118010000_channels_manager_id.sql          channels.manager_id → app_users, channels_manager_idx (team tracker #145)
 20261118020000_team_members.sql                 team_members, team_members_manager_idx (team tracker #148)
 20261118030000_channel_assignments.sql          channel_assignments, assign_channel() (team tracker #149)
+20261118040000_channel_uploads.sql              channel_uploads + its freeze trigger (team tracker #150)
 ```
 
 **Tables** (columns are the union across the migrations):
@@ -402,6 +402,61 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 
   revoke execute on function assign_channel(text, bigint, date, bigint) from public;
   grant  execute on function assign_channel(text, bigint, date, bigint) to service_role;
+  ```
+
+- **`channel_uploads`** (`20261118040000`, team tracker #150), verbatim without the header comment. Every video
+  the video sync fetches, with its upload time, including what `videos` leaves out: private and scheduled uploads,
+  and Shorts on a `sync_shorts = false` channel (so the levers and the autopilot, which read `videos`, never see
+  them). No FK to `videos`; a video deleted from YouTube keeps its row. Written only by `app/sync.py`
+  `sync_channel` (`_record_uploads`), read by nothing yet (the Team page's grid, #151, will). `uploaded_at` = the
+  uploads-playlist item's `snippet.publishedAt` (#143's decision), else the first sync that saw it
+  (`first_seen_at`); both raw timestamps are kept so it can be recomputed if #153's probe check picks
+  `video_published_at`. Write-once in app code: new rows are inserted with ignore-duplicates; an existing row
+  gets only `sync.UPLOAD_MUTABLE` (`title, privacy_status, scheduled_publish_at, is_short, thumbnail_url,
+  video_published_at`) when one changed, plus `last_seen_at`; the trigger is the backstop. **Backfill:** none
+  run; the 3-day full sync (`FULL_SYNC_INTERVAL`) fills each channel's history after deploy (a manual
+  `POST /channels/{id}/sync?full=true` does one sooner), and videos deleted before that never appear. An
+  incremental sync records only the videos it fetches (above the first id known in `videos`), so a scheduled
+  video below a newer known one is updated at the next full sync:
+  ```sql
+  create table if not exists channel_uploads (
+      video_id               text         primary key,
+      channel_id             text         not null references channels(id) on delete cascade,
+      title                  text,
+      is_short               boolean,                 -- null = not yet classified
+      duration_seconds       int,
+      privacy_status         text,                    -- latest seen: private|unlisted|public
+      scheduled_publish_at   timestamptz,             -- video status.publishAt; null once live
+      thumbnail_url          text,
+      uploaded_at            timestamptz  not null,   -- write-once (trigger below)
+      playlist_published_at  timestamptz,             -- playlistItem snippet.publishedAt
+      video_published_at     timestamptz,             -- video snippet.publishedAt, latest seen
+      first_seen_at          timestamptz  not null default now(),
+      last_seen_at           timestamptz  not null default now()
+  );
+
+  -- Backs "this channel's uploads in a date window" (the Team page's grid).
+  create index if not exists channel_uploads_channel_uploaded
+      on channel_uploads (channel_id, uploaded_at);
+
+  -- uploaded_at and first_seen_at are write-once, whichever code path updates.
+  create or replace function channel_uploads_freeze_uploaded_at()
+  returns trigger
+  language plpgsql
+  as $$
+  begin
+      new.uploaded_at   := old.uploaded_at;
+      new.first_seen_at := old.first_seen_at;
+      return new;
+  end;
+  $$;
+
+  drop trigger if exists channel_uploads_freeze on channel_uploads;
+  create trigger channel_uploads_freeze
+      before update on channel_uploads
+      for each row execute function channel_uploads_freeze_uploaded_at();
+
+  grant all on channel_uploads to service_role;
   ```
 
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()`, `assign_channel()` (above).
@@ -868,7 +923,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `check_channel` and `scope_to_visible` for list and global routes (#147), `require_team_member` (#148, 404 `TEAM_MEMBER_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), `require_admin`, the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `team.py` | the Team page, the roster (team tracker #148) and channel assignments (#149): `GET /team`, `GET/POST /team/members`, `PATCH /team/members/{id}` (deactivating ends open assignments, `_end_assignments`), `POST /channels/{id}/assign` (the `assign_channel` RPC), `GET /team/assignments` (Routes); `IST` (`Asia/Kolkata`, deliberately not `quota.QUOTA_TZ`), `ist_day`; `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE`, `MEMBER_INACTIVE`, `ASSIGN_CONFLICT` |
-| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger |
+| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger. Upload capture (team tracker #150): the playlist walk carries each item's `snippet.publishedAt`; every fetched video goes to `channel_uploads` (§2) before the opted-out-Shorts and private skips (`_upload_row`, `_record_uploads`; `_stored_uploads` reads the stored rows first). A stored `channel_uploads` `is_short` is reused unless the row is still `private` or NULL (`_settled_is_short`), else re-probed inside `MAX_SHORTS_PROBES_PER_SYNC`. A `channel_uploads` read or write failure is logged and never fails the sync |
 | `content_type.py` | `is_episode` classifier |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, `rejection()`, `house_format_spec()` |
@@ -877,7 +932,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `titles_apply.py` | the title-only twin of `backlinks_apply.py`. `apply_title(intervention)` (`planned` treated `midas` `title` row with `payload.title`, `payload.title_before`): same gates (`TITLE_APPLY_ENABLED`, `DRY_RUN`, 51u), live title ≠ `title_before` → `ApplyError(FAILED, "title_changed")`, else sends only `title`; success → `measuring`, `before_state.title`, `videos.title`. `revert_title(intervention, *, auto)`: same gates, puts `before_state.title` back only if live is still `payload.title` (else 409 `title_changed`); → `cancelled`, `payload.revert {…, auto}`. Callers: agent tick (`apply_title`), revert route (`auto=False`), `lever_verdicts.auto_revert` (`auto=True`) |
 | `titles.py` | the title lever's writer, checks, routing and stamps; reads only, except `strategy_version`'s `audit_strategies` row. `channel_context` → `ChannelContext` (warm long videos' reach, `median_ctr`, `ceiling` = top 1% plus any over `TITLE_MAX_IMPRESSIONS`, `top_performers` by browse + suggested views per impression). `context(video)` (title, description start, cached transcript, CTR vs median, traffic mix, top 10 search terms, top performers). `system_prompt()` (`TITLE_PROMPT`, §6), `write_candidates` (`chat_json`, `WRITER_MODEL`, `label="titles.write"`, first `TITLE_CANDIDATES`). `check(title, video)` → first failure: `length` (`TITLE_MAX` = 100), `characters` (`<`, `>`, line break), `unchanged`, `script` (`SCRIPTS[language]`; every `HEADINGS` language but `en`), `hashtags`, `url`, `emoji` (`_EMOJI_RE`); same check on both paths. `pipeline(video)` → `Written`: first passing candidate, one retry with the failures, else `title` None. `title_path(video_id)`: sha256 hash vs `TITLE_AGENT_PCT`. `strategy_inputs`/`strategy_version(path)` (§6). `path_stopped` (`lever_verdicts.stopped(…, 'title', TITLE_SCOPES[path])`), `path_closed` (stopped or no share, §7.3 item 33), `stopped` (both closed), `route` (hands to the other path if its own is closed). `would_title`, `title_answers(…, pick=)` and `preview(…, path=)` for the scripts: no decide(), no interventions, no YouTube |
 | `youtube_metadata.py` | `videos.update` payload; `_NON_ISO_639_1 = {"bgc": "hi", "bho": "hi", "raj": "hi"}` (`:58-64`; `bho`/`raj` unused) |
-| `youtube_client.py` | Data API wrappers + quota charging; `yt_playlist_items_insert(position=)`; `channel_credentials` (expiry from `channels.token_expiry`, NULL = expired, refreshed and saved), shared with `analytics_client` |
+| `youtube_client.py` | Data API wrappers + quota charging; `yt_playlist_items_page` requests `part="snippet,contentDetails"` (1u, #150; also read by the membership walk); `yt_playlist_items_insert(position=)`; `channel_credentials` (expiry from `channels.token_expiry`, NULL = expired, refreshed and saved), shared with `analytics_client` |
 | `quota.py` | unit-cost table, daily ledger, `JobBudget`, `/quota` |
 | `analytics_client.py` | on-demand Analytics; `analytics_creds_for_channel` = `analytics_authorized` gate + `channel_credentials` (also used by the Reporting API) |
 | `reporting_client.py` / `reporting_poll.py` | Reporting API jobs (`ensure_job` per report type), CSV parsing (reach; video and playlist traffic aggregated, `TRAFFIC_SOURCE_TYPES`), reach → `video_reach_daily`, `video_metrics` backfill; latest-wins day replace (`replace_data_day`, `record_ingested`); `download_report_csv` retries a dropped connection (`DOWNLOAD_ATTEMPTS` = 3) and refreshes the token once on 401 |
@@ -1336,7 +1391,7 @@ Spec = `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. "Part 2
 | Playlist health scorer (tier-1 percentile bands) | `app/playlist_health.py` (its plan, `docs/PHASE_1B_PLAN.md`, is in git history) | Kept by Part 2 §0.5 ("inventory, health …") but no stage uses it |
 | `video_sync` daily job | `app/main.py:243-267,365-376` | Added 2026-10-01 after the A0 pause stopped sync (`docs/PHASE_A_FINDINGS.md` "Phase A conclusion" §3.6). Not in any Part, though B3 depends on sync |
 | Shorts cutter (NAS source, worker queue, autopilot Shorts, upload) | `app/shorts/*`, 7 migrations | Separate product line; the spec only says Shorts uploads continue (Part 2 §6.1). Uploads are not charged to the quota ledger (`app/shorts/youtube_upload.py` has no `can_afford`) |
-| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147). Each manager's roster: `team_members`, `app/team.py`, the Team page (#148). Channel assignments: `channel_assignments`, `assign_channel()`, `POST /channels/{id}/assign`, `GET /team/assignments` (#149) |
+| Logins and the global gate: `app_users`, `app_sessions`, `/login`, `/session/*`, `scripts/manage_users.py` | `app/session.py`, `20261118000000_app_users_sessions.sql`, `app/static/login.html` | Team tracker (`docs/TEAM_UPLOAD_TRACKING.md`, #142/#144), not in the spec. Closes the open LAN port: every route but `/login`, `/session/login`, `/static/theme.css`, `/health` needs a session. Per-role channel scoping (`app/access.py`, `channels.manager_id`, #145): the channel-id routes and `/auth/channels`; object-id routes through per-object resolvers (#146); list and global routes filtered, operational routes admin-only (#147). Each manager's roster: `team_members`, `app/team.py`, the Team page (#148). Channel assignments: `channel_assignments`, `assign_channel()`, `POST /channels/{id}/assign`, `GET /team/assignments` (#149). Upload capture: `channel_uploads`, written by `sync_channel` (#150) |
 | Self-hosted Postgres + PostgREST, nightly NAS snapshot, restore-on-empty | `app/backup.py`, `app/provision.py`, `docker-compose.yml`, `docs/SELF_HOSTED_DB.md` | Infra; the spec references it only in Part 3's schema discipline |
 | OTel/Phoenix tracing | `app/tracing.py`, `docs/OBSERVABILITY.md` | Spec reuses it for the agent (Part 2 §3.1) |
 | Egress RPCs with in-app parity fallbacks | migrations `202607*`, `app/dashboard.py`, `app/autopilot.py:116-123` | Supabase free-tier era |
