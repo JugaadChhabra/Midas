@@ -21,7 +21,8 @@
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
 amended by P1–P7 (spec Part 2 §0.6).
 
-**Office deployment.** The office machine runs image `f049495` (2026-11-16). It is not a git checkout: only `.env`,
+**Office deployment.** The office machine runs the image built from `main` at `c2d1dfd` (2026-11-19; the team
+tracker's migrations applied 2026-11-18, users and channel managers set, #153). It is not a git checkout: only `.env`,
 `docker-compose.yml` and `client_secret.json` live there. What is switched on, per lever and channel, is in
 `docs/PLAN_TO_2026-11-27.md` ("What is live"); the rollback steps are in `docs/agents/office-runbook.md` (gitignored).
 

@@ -5,9 +5,11 @@
 > `team_members`, `channel_assignments`, `channel_uploads`), routes, the gate and access
 > rules in §5, modules and the Team page in §5's module table. This document stays as the
 > design record (written 2026-11-06 from a discussion held in the retired Argus repo); where
-> its design-level detail differs from the code, `STATE.md` wins. Still to do on the office
-> machine: apply the migrations, create the four users, set every channel's manager
-> (#142 build step 6).
+> its design-level detail differs from the code, `STATE.md` wins. Live at the office since
+> 2026-11-19 (#153: migrations, the four users, every channel's manager). Changed since the
+> design (owner, 2026-11-19): a channel's uploads from before its **first** assignment are
+> credited to that first assignee (a later reassignment still never re-credits history), and
+> the grid has a By channel view (#163, #164).
 
 ## 1. Goal
 
