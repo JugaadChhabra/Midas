@@ -209,3 +209,74 @@ def test_every_cells_drill_down_count_equals_the_grid_cell(use, uid, manager_id)
             shorts = sum(1 for v in videos if v["is_short"] is True)
             assert {"total": len(videos), "shorts": shorts,
                     "long_form": len(videos) - shorts} == cell, (row["name"], day)
+
+
+# ── the "By channel" view ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("uid,manager_id", [
+    (MANAGER_A, None), (MANAGER_B, None), (EXEC, None), (ADMIN, MANAGER_A),
+])
+def test_channel_rows_count_every_upload_once_and_match_their_drill_down(use, uid, manager_id):
+    use(_busy())
+    scope = {} if manager_id is None else {"manager_id": manager_id}
+
+    grid = _grid(uid, **WINDOW, **scope)
+
+    # One row per channel in scope, by name, and the same uploads as the
+    # member rows: the two views total the same.
+    assert [r["channel_id"] for r in grid["channel_rows"]] == [c["id"] for c in grid["channels"]]
+    for k in ("total", "shorts", "long_form"):
+        assert (sum(r["total"][k] for r in grid["channel_rows"])
+                == sum(r["total"][k] for r in grid["rows"]))
+    for row in grid["channel_rows"]:
+        for day, cell in row["days"].items():
+            body = _videos(uid, day=day, channel_id=row["channel_id"], **scope)
+            assert {v["channel_id"] for v in body["videos"]} <= {row["channel_id"]}
+            shorts = sum(1 for v in body["videos"] if v["is_short"] is True)
+            assert {"total": len(body["videos"]), "shorts": shorts,
+                    "long_form": len(body["videos"]) - shorts} == cell, (row["name"], day)
+
+
+def test_a_channel_row_holds_uploads_whoever_was_credited(use):
+    use(_busy())
+
+    grid = _grid(ADMIN, **WINDOW)
+    marathi = next(r for r in grid["channel_rows"] if r["channel_id"] == CH_A)
+
+    # Pranav held Marathi until 11-14, Meet from then: one channel row.
+    assert (marathi["name"], marathi["manager_name"]) == ("Marathi", "Justin")
+    assert marathi["days"]["2026-11-12"]["total"] == 1
+    assert marathi["days"]["2026-11-14"]["total"] == 1
+    assert marathi["total"] == {"total": 3, "shorts": 1, "long_form": 2}
+    body = _videos(ADMIN, day="2026-11-14", channel_id=CH_A, member_id=PRANAV)
+    assert (body["name"], body["channel_id"], body["member_id"]) == ("Marathi", CH_A, None)
+    assert _ids(body) == ["a-14"]
+
+
+def test_a_channel_with_no_uploads_still_gets_a_row(use):
+    use(_busy())
+
+    rows = {r["channel_id"]: r for r in _grid(EXEC, **WINDOW)["channel_rows"]}
+
+    assert set(rows) == {CH_A, CH_A2, CH_B, CH_NONE}
+    assert rows[CH_NONE]["manager_id"] is None
+
+
+@pytest.mark.parametrize("channel_id", [CH_B, CH_NONE, "UCunknown"])
+def test_a_manager_cannot_drill_into_a_channel_outside_their_scope(use, channel_id):
+    use(_busy())
+
+    r = _as(MANAGER_A).get("/team/uploads/videos",
+                           params={"day": "2026-11-13", "channel_id": channel_id})
+
+    assert r.status_code == 404
+    assert r.json() == {"detail": "channel_not_found"}
+
+
+def test_admins_manager_filter_narrows_the_channel_drill_down_too(use):
+    use(_busy())
+
+    r = _as(ADMIN).get("/team/uploads/videos", params={
+        "day": "2026-11-10", "channel_id": CH_B, "manager_id": MANAGER_A})
+
+    assert r.status_code == 404

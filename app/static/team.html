@@ -105,6 +105,10 @@
         <button class="btn-link" type="button" data-days="7">Last 7 days</button>
         <button class="btn-link" type="button" data-days="30">Last 30 days</button>
         <div id="up-manager" hidden></div>
+        <div class="chip-bar" id="up-view" role="group" aria-label="Rows">
+          <button type="button" class="chip" data-view="member" aria-pressed="true">By member</button>
+          <button type="button" class="chip" data-view="channel" aria-pressed="false">By channel</button>
+        </div>
       </form>
       <div class="fresh" id="up-fresh"></div>
       <div id="up-grid"><div class="skel" data-skeleton data-rows="4"></div></div>
@@ -518,6 +522,9 @@ $('channels').addEventListener('change', async (e) => {
 const MAX_DAYS = 92;
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let upManager = '';          // admin/exec: '' = every manager
+// Rows per member (who uploaded) or per channel (where); remembered per browser.
+let upView = 'member';
+try { if (localStorage.getItem('midas:team:upView') === 'channel') upView = 'channel'; } catch {}
 
 function istToday() {
   // en-CA formats as YYYY-MM-DD.
@@ -568,7 +575,7 @@ function cell(c, cls = '', open = null) {
   const text = `<span class="n">${c.total}</span> <span class="sl">(${c.shorts} / ${c.long_form})</span>`;
   // A day cell opens its drill-down; the Total column doesn't.
   return open
-    ? `<td class="${cls}"><button type="button" class="cell-open" data-member="${open.member}"
+    ? `<td class="${cls}"><button type="button" class="cell-open" data-${open.kind}="${esc(open.id)}"
          data-day="${open.day}" aria-label="Show the ${c.total} videos">${text}</button></td>`
     : `<td class="${cls}">${text}</td>`;
 }
@@ -579,17 +586,24 @@ function paintGrid(data) {
     const dow = DOW[new Date(d + 'T00:00:00Z').getUTCDay()];
     return `<th scope="col"><span class="dow">${dow}</span>${esc(d.slice(5))}</th>`;
   }).join('');
-  const body = data.rows.map(r => `<tr class="${r.member_id == null ? 'unassigned' : ''}${
+  const byChannel = upView === 'channel';
+  const body = byChannel
+    ? (data.channel_rows || []).map(r => `<tr>
+    <td>${esc(r.name || r.channel_id)}${
+      showMgr ? `<span class="mgr">${esc(r.manager_name || 'No manager')}</span>` : ''}</td>
+    ${data.days.map(d => cell(r.days[d], '', { kind: 'channel', id: r.channel_id, day: d })).join('')}${
+      cell(r.total, 'sum')}</tr>`).join('')
+    : data.rows.map(r => `<tr class="${r.member_id == null ? 'unassigned' : ''}${
       r.is_active ? '' : ' off'}">
     <td>${esc(r.name)}${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
       showMgr && r.manager_name ? `<span class="mgr">${esc(r.manager_name)}</span>` : ''}</td>
-    ${data.days.map(d => cell(r.days[d], '', { member: r.member_id ?? '', day: d })).join('')}${
+    ${data.days.map(d => cell(r.days[d], '', { kind: 'member', id: r.member_id ?? '', day: d })).join('')}${
       cell(r.total, 'sum')}</tr>`).join('');
   $('up-grid').innerHTML = !data.channels.length
     ? `<div class="dt"><div class="dt-empty muted">${seesAll()
         ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`
     : `<div class="grid-wrap"><table class="up">
-        <thead><tr><th scope="col">Member</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
+        <thead><tr><th scope="col">${byChannel ? 'Channel' : 'Member'}</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
         <tbody>${body}</tbody></table></div>`;
   upShown = data;
 }
@@ -654,13 +668,16 @@ function drillModal() {
   return back;
 }
 
-async function openDrill(member, day) {
-  const row = (upShown?.rows || []).find(r => String(r.member_id ?? '') === member);
+async function openDrill({ member, channel }, day) {
+  const row = channel != null
+    ? (upShown?.channel_rows || []).find(r => r.channel_id === channel)
+    : (upShown?.rows || []).find(r => String(r.member_id ?? '') === member);
   const back = drillModal();
   const dow = DOW[new Date(day + 'T00:00:00Z').getUTCDay()];
   back.querySelector('#drill-title').textContent = `${row ? row.name : 'Uploads'} · ${dow} ${day}`;
   const q = new URLSearchParams({ day });
-  if (member) q.set('member_id', member);
+  if (channel != null) q.set('channel_id', channel);
+  else if (member) q.set('member_id', member);
   if (seesAll() && upShown?.manager_id) q.set('manager_id', upShown.manager_id);
   const list = back.querySelector('.drill-list');
   try {
@@ -680,8 +697,22 @@ async function openDrill(member, day) {
 
 $('up-grid').addEventListener('click', (e) => {
   const b = e.target.closest('button.cell-open');
-  if (b) openDrill(b.dataset.member, b.dataset.day);
+  if (b) openDrill({ member: b.dataset.member, channel: b.dataset.channel }, b.dataset.day);
 });
+
+function paintView() {
+  document.querySelectorAll('#up-view .chip').forEach(c =>
+    c.setAttribute('aria-pressed', String(c.dataset.view === upView)));
+}
+$('up-view').addEventListener('click', (e) => {
+  const c = e.target.closest('.chip');
+  if (!c || c.dataset.view === upView) return;
+  upView = c.dataset.view;
+  try { localStorage.setItem('midas:team:upView', upView); } catch {}
+  paintView();
+  if (upShown) paintGrid(upShown);
+});
+paintView();
 
 function paintManagerFilter(managers) {
   const holder = $('up-manager');
