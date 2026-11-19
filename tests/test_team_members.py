@@ -75,19 +75,21 @@ def _member_writes(store):
 
 # ── the page ─────────────────────────────────────────────────────────────────
 
-def test_the_team_page_is_served_to_any_signed_in_user(store):
+@pytest.mark.parametrize("path", ["/team", "/uploads"])
+def test_the_team_page_is_served_to_any_signed_in_user(store, path):
     for uid in TOKENS:
-        r = _as(uid).get("/team")
+        r = _as(uid).get(path)
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/html")
         assert "/static/theme.css" in r.text
         assert "/static/sidebar.js" in r.text
 
 
-def test_the_team_page_redirects_to_login_without_a_session(store):
-    r = TestClient(main.app).get("/team", follow_redirects=False)
+@pytest.mark.parametrize("path", ["/team", "/uploads"])
+def test_the_team_page_redirects_to_login_without_a_session(store, path):
+    r = TestClient(main.app).get(path, follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/login?next=%2Fteam"
+    assert r.headers["location"] == "/login?next=" + path.replace("/", "%2F")
 
 
 def test_the_roster_routes_need_a_session(store):

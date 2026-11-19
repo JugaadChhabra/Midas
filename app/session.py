@@ -65,7 +65,7 @@ PUBLIC_PATHS = frozenset({
 })
 
 #: HTML page routes: without a session these redirect to /login, never 401.
-PAGES = frozenset({"/", "/channel", "/autoshorts", "/team"})
+PAGES = frozenset({"/", "/channel", "/autoshorts", "/team", "/uploads"})
 
 #: The one message for every failed login, so it doesn't say which part was wrong.
 LOGIN_FAILED = "Email or password is wrong."

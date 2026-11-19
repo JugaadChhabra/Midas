@@ -34,8 +34,8 @@
   .ch .history li { margin:.15rem 0; }
 
   /* Uploads grid (#151): rows × IST days, one number per cell, shaded by
-     how busy the cell is; the Shorts / long-form split is a filter, and only
-     the Total column spells it out. */
+     how busy the cell is; the Shorts / long-form split is a filter, and a
+     hover card spells it out. */
   .up-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem 1rem; margin:0 0 1.4rem; }
   .up-bar .chip-bar { margin:0; }
   .up-bar .grow { flex:1 1 0; }
@@ -68,7 +68,8 @@
   table.up tbody tr:last-child td { border-bottom:0; }
   table.up thead th { padding:.55rem .4rem; font-size:11px; font-weight:500; color:var(--ink-4);
                       border-bottom:1px solid var(--border); vertical-align:bottom; }
-  table.up thead th .d { display:block; font-size:13px; font-weight:600; color:var(--ink-2); }
+  table.up thead th .d { font-size:13px; font-weight:600; color:var(--ink-2); }
+  table.up thead th .w { font-size:11.5px; color:var(--ink-4); margin-left:.25rem; }
   table.up thead th.today .d { color:var(--color-accent); }
   table.up thead th.today { box-shadow:inset 0 -2px 0 var(--color-accent); }
   table.up thead th.future .d { color:var(--ink-3); font-weight:500; }
@@ -110,17 +111,34 @@
   table.up th.sum, table.up td.sum { border-left:1px solid var(--border); padding:.45rem .9rem;
                                      text-align:right; min-width:5.5rem; }
   table.up td.sum b { font-size:14px; }
-  table.up td.sum .split { display:block; font-size:11px; color:var(--ink-4); }
   table.up tfoot td { border-top:1px solid var(--border); border-bottom:0; color:var(--ink-3);
                       font-weight:600; height:2.2rem; background:var(--surface-faint); }
   table.up tfoot td.name { background:var(--panel-bg); }
+  /* The hover card over a count: its total and Shorts / long-form split. */
+  .hovercard { position:fixed; z-index:50; pointer-events:none; min-width:12.5rem;
+    padding:.75rem .85rem; border-radius:var(--radius-md); background:var(--panel-bg);
+    border:1px solid var(--border); box-shadow:var(--shadow-2); font-size:12.5px;
+    font-variant-numeric:tabular-nums; opacity:0; transform:translateY(4px);
+    transition:opacity .12s ease-out, transform .12s ease-out; }
+  .hovercard.on { opacity:1; transform:none; }
+  .hovercard .hc-head { font-size:11.5px; color:var(--ink-3); margin:0 0 .35rem; }
+  .hovercard .hc-total { font-size:22px; font-weight:700; letter-spacing:-.01em; line-height:1.1; }
+  .hovercard .hc-total small { font-size:12px; font-weight:500; color:var(--ink-3); margin-left:.3rem; }
+  .hovercard .hc-bar { display:flex; height:6px; border-radius:3px; overflow:hidden; margin:.6rem 0 .55rem;
+                       background:var(--surface-tint); }
+  .hovercard .hc-bar i { display:block; height:100%; }
+  .hovercard .hc-row { display:flex; align-items:center; gap:.45rem; margin:.2rem 0; }
+  .hovercard .hc-row .sw { width:8px; height:8px; border-radius:2px; flex:0 0 auto; }
+  .hovercard .hc-row b { margin-left:auto; font-weight:600; }
+  .hovercard .hc-row .pct { color:var(--ink-4); width:2.6rem; text-align:right; }
+  .hovercard .hc-foot { margin:.5rem 0 0; padding:.45rem 0 0; border-top:1px solid var(--border-soft);
+                        font-size:11.5px; color:var(--ink-3); }
+  .hc-shorts { background:var(--color-accent); }
+  .hc-long { background:var(--color-ok); }
   .up-legend { display:flex; flex-wrap:wrap; gap:.4rem 1.2rem; font-size:11.5px; color:var(--ink-4);
                margin:.6rem 0 0; }
   .up-legend .sw { display:inline-block; width:10px; height:10px; border-radius:2px;
                    vertical-align:-1px; margin-right:.3rem; }
-  .up-help { font-size:12px; color:var(--ink-3); margin:1rem 0 0; max-width:46rem; }
-  .up-help summary { cursor:pointer; width:max-content; }
-  .up-help p { margin:.4rem 0 0; line-height:1.5; }
 
   /* Drill-down (#152): a cell opens the videos behind it. */
   .modal.drill { max-width:760px; max-height:85vh; display:flex; flex-direction:column; }
@@ -145,11 +163,8 @@
   <div class="app-shell" id="app-shell">
   <main class="app-main">
     <header class="page-head">
-      <h1 class="page-title">Team</h1>
+      <h1 class="page-title" id="page-title">Team</h1>
     </header>
-
-    <!-- Tabs: the Uploads grid (#151) and the Roster. -->
-    <div class="chip-bar" id="tabs" role="tablist" aria-label="Team sections"></div>
 
     <!-- ─── UPLOADS ─── -->
     <section class="tab-panel" data-panel="uploads" aria-label="Uploads">
@@ -180,16 +195,6 @@
       </div>
       <div class="up-summary" id="up-summary"></div>
       <div id="up-grid"><div class="skel" data-skeleton data-rows="4"></div></div>
-      <details class="up-help">
-        <summary>How uploads are counted</summary>
-        <p>A video counts on the IST day it goes live: a scheduled video on its
-          scheduled day (so future days show what is already queued), a public
-          video on the day it was published. A private video that isn't
-          scheduled isn't counted.</p>
-        <p>Each video is credited to whoever held its channel on that day.
-          Videos from before a channel's first assignment go to its first
-          assignee. Click any number to see the videos behind it.</p>
-      </details>
     </section>
 
     <!-- ─── ROSTER ─── -->
@@ -226,6 +231,7 @@
   </div>
 
   <div id="toasts" aria-live="assertive" role="alert"></div>
+  <div class="hovercard" id="hovercard" role="tooltip" aria-hidden="true"></div>
 
 <script src="/static/swr.js"></script>
 <script src="/static/components.js"></script>
@@ -246,7 +252,7 @@ Sidebar.mount({
   items: Sidebar.TOP_ITEMS
     .concat([{ section: '' }])
     .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
-  activeId: 'team',
+  activeId: location.pathname === '/uploads' ? 'uploads' : 'roster',
 });
 fetch('/auth/channels').then(r => r.ok ? r.json() : []).then(chs => {
   Sidebar.setChannels(chs, chs.some(c => c.id === railChannel) ? railChannel : null,
@@ -297,22 +303,13 @@ async function send(method, url, body) {
   return j;
 }
 
-// ── Tabs ──────────────────────────────────────────────────────────────
-const TABS = [{ id: 'uploads', label: 'Uploads' }, { id: 'roster', label: 'Roster' }];
-
-function showTab(id) {
-  document.querySelectorAll('#tabs .chip').forEach(c =>
-    c.setAttribute('aria-pressed', String(c.dataset.tab === id)));
-  document.querySelectorAll('.tab-panel').forEach(p =>
-    p.classList.toggle('active', p.dataset.panel === id));
-  history.replaceState(null, '', '#' + id);
-}
-
-$('tabs').innerHTML = TABS.map(t =>
-  `<button type="button" class="chip" role="tab" data-tab="${t.id}" aria-pressed="false">${esc(t.label)}</button>`
-).join('');
-$('tabs').onclick = (e) => { const c = e.target.closest('.chip'); if (c) showTab(c.dataset.tab); };
-showTab(TABS.some(t => '#' + t.id === location.hash) ? location.hash.slice(1) : TABS[0].id);
+// ── Page ──────────────────────────────────────────────────────────────
+// One file, two rail entries: /uploads shows the grid, /team the roster.
+const PAGE = location.pathname === '/uploads' ? 'uploads' : 'roster';
+document.querySelectorAll('.tab-panel').forEach(p =>
+  p.classList.toggle('active', p.dataset.panel === PAGE));
+$('page-title').textContent = PAGE === 'uploads' ? 'Uploads' : 'Roster';
+document.title = `Midas · ${PAGE === 'uploads' ? 'Uploads' : 'Roster'}`;
 
 // ── Roster ────────────────────────────────────────────────────────────
 // GET /team/members is already scoped: a manager gets their own members,
@@ -729,22 +726,69 @@ function paintSummary(data, rows) {
     <div class="fresh">${fresh}</div>`;
 }
 
-function dayCell(c, d, max, today, open) {
+// What the hover card shows for each count in the grid, keyed by data-hv.
+let hoverData = [];
+function hv(c, head, extra = {}) {
+  hoverData.push({ c, head, ...extra });
+  return hoverData.length - 1;
+}
+const dayLabel = (d) => { const p = dayParts(d); return `${p.dow}, ${p.mon} ${p.day}`; };
+
+function dayCell(c, d, max, today, open, rowName) {
   const v = count(c);
   const cls = `day${d > today ? ' future' : ''}`;
   if (!v) return `<td class="${cls}"><span class="nil">·</span></td>`;
   const h = max ? (v / max).toFixed(2) : 0;
-  return `<td class="${cls}"><button type="button" class="hit" style="--h:${h}"
+  const i = hv(c, `${rowName} · ${dayLabel(d)}`, { future: d > today, click: true });
+  return `<td class="${cls}"><button type="button" class="hit" style="--h:${h}" data-hv="${i}"
       data-${open.kind}="${esc(open.id)}" data-day="${d}"
-      title="${c.total} total: ${c.shorts} Shorts, ${c.long_form} long-form${d > today ? ' (scheduled)' : ''}"
-      aria-label="${c.total} videos on ${d}, show them">${v}</button></td>`;
+      aria-label="${c.total} videos on ${d}: ${c.shorts} Shorts, ${c.long_form} long-form. Show them">${v}</button></td>`;
 }
 
-function sumCell(c) {
+function sumCell(c, rowName) {
   const v = count(c);
-  return `<td class="sum"><b>${v}</b>${upKind === 'all' && c.total
-    ? `<span class="split">${c.shorts} S · ${c.long_form} L</span>` : ''}</td>`;
+  if (!c.total) return `<td class="sum"><b>${v}</b></td>`;
+  return `<td class="sum" data-hv="${hv(c, `${rowName} · ${fmtRange(upShown.from, upShown.to)}`)}"><b>${v}</b></td>`;
 }
+
+function hoverCard(i) {
+  const { c, head, future, click } = hoverData[i];
+  const pct = (n) => c.total ? Math.round(100 * n / c.total) + '%' : '';
+  return `<div class="hc-head">${esc(head)}</div>
+    <div class="hc-total">${c.total}<small>video${c.total === 1 ? '' : 's'}${future ? ' scheduled' : ''}</small></div>
+    <div class="hc-bar"><i class="hc-shorts" style="width:${pct(c.shorts) || 0}"></i><i class="hc-long" style="width:${pct(c.long_form) || 0}"></i></div>
+    <div class="hc-row"><span class="sw hc-shorts"></span>Shorts<b>${c.shorts}</b><span class="pct">${pct(c.shorts)}</span></div>
+    <div class="hc-row"><span class="sw hc-long"></span>Long-form<b>${c.long_form}</b><span class="pct">${pct(c.long_form)}</span></div>
+    ${future ? '<div class="hc-foot">Not live yet: goes live on this day.</div>'
+      : click ? '<div class="hc-foot">Click to see the videos</div>' : ''}`;
+}
+
+(function wireHoverCard() {
+  const card = $('hovercard');
+  let on = null;
+  const hide = () => { on = null; card.classList.remove('on'); card.setAttribute('aria-hidden', 'true'); };
+  const show = (el) => {
+    if (on === el) return;
+    on = el;
+    card.innerHTML = hoverCard(Number(el.dataset.hv));
+    const r = el.getBoundingClientRect();
+    const w = card.offsetWidth, h = card.offsetHeight;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    // Above the cell, or below it when there is no room.
+    const top = r.top - h - 8 >= 8 ? r.top - h - 8 : r.bottom + 8;
+    card.style.left = left + 'px';
+    card.style.top = top + 'px';
+    card.classList.add('on');
+    card.setAttribute('aria-hidden', 'false');
+  };
+  const grid = $('up-grid');
+  grid.addEventListener('mouseover', (e) => { const el = e.target.closest('[data-hv]'); if (el) show(el); else hide(); });
+  grid.addEventListener('mouseleave', hide);
+  grid.addEventListener('focusin', (e) => { const el = e.target.closest('[data-hv]'); if (el) show(el); });
+  grid.addEventListener('focusout', hide);
+  window.addEventListener('scroll', hide, true);
+})();
 
 function paintGrid(data) {
   upShown = data;
@@ -755,13 +799,15 @@ function paintGrid(data) {
     return;
   }
   buildLabels(data.channels);
+  hoverData = [];
+  $('hovercard').classList.remove('on');
   const showMgr = seesAll() && !data.manager_id;
   const byChannel = upView === 'channel';
   const today = istToday();
   const staleIds = new Set(data.channels.filter(isStale).map(c => c.id));
   const rows = byChannel
     ? (data.channel_rows || []).map(r => ({
-        r, open: { kind: 'channel', id: r.channel_id },
+        r, open: { kind: 'channel', id: r.channel_id }, label: chLabel(r.channel_id, r.name),
         cls: r.total.total ? '' : 'idle',
         name: `<span class="label" title="${esc(r.name || r.channel_id)}">${esc(chLabel(r.channel_id, r.name))}</span>${
           staleIds.has(r.channel_id) ? '<span class="warn-dot" title="Not synced for 6h+: recent uploads may be missing"></span>' : ''}${
@@ -771,7 +817,7 @@ function paintGrid(data) {
         // Unassigned with nothing in it is noise; show it only when it counts something.
         .filter(r => r.member_id != null || r.total.total)
         .map(r => ({
-          r, open: { kind: 'member', id: r.member_id ?? '' },
+          r, open: { kind: 'member', id: r.member_id ?? '' }, label: r.name,
           cls: `${r.member_id == null ? 'unassigned' : ''}${r.is_active ? '' : ' off'}${r.total.total ? '' : ' idle'}`,
           name: `<span class="label">${esc(r.name)}</span>${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
             showMgr && r.manager_name ? `<span class="sub">${esc(r.manager_name)}</span>` : ''}`,
@@ -781,29 +827,33 @@ function paintGrid(data) {
 
   let max = 0;
   rows.forEach(({ r }) => data.days.forEach(d => { max = Math.max(max, count(r.days[d])); }));
-  let prevMon = null;
   const head = data.days.map(d => {
     const p = dayParts(d);
-    const mon = p.mon !== prevMon ? ` ${p.mon}` : '';
-    prevMon = p.mon;
     const cls = d === today ? 'today' : d > today ? 'future' : '';
-    return `<th scope="col" class="${cls}"${d === today ? ' title="Today"' : ''}>${p.dow}<span class="d">${p.day}${mon}</span></th>`;
+    return `<th scope="col" class="${cls}"${d === today ? ' title="Today"' : ''}><span class="d">${p.mon} ${p.day}</span><span class="w">${p.dow}</span></th>`;
   }).join('');
+  const add = (cs) => cs.reduce((a, c) => ({ total: a.total + (c?.total || 0),
+    shorts: a.shorts + (c?.shorts || 0), long_form: a.long_form + (c?.long_form || 0) }),
+    { total: 0, shorts: 0, long_form: 0 });
   const foot = data.days.map(d => {
-    const v = sumRows.reduce((a, r) => a + count(r.days[d]), 0);
-    return `<td class="day">${v || '<span class="nil">·</span>'}</td>`;
+    const c = add(sumRows.map(r => r.days[d]));
+    const v = count(c);
+    return v ? `<td class="day" data-hv="${hv(c, `All · ${dayLabel(d)}`, { future: d > today })}">${v}</td>`
+      : '<td class="day"><span class="nil">·</span></td>';
   }).join('');
-  const grand = sumRows.reduce((a, r) => a + count(r.total), 0);
+  const all = add(sumRows.map(r => r.total));
+  const grand = count(all);
   const hasFuture = data.days.some(d => d > today);
   $('up-grid').innerHTML = `<div class="grid-wrap"><table class="up">
       <thead><tr><th scope="col" class="name">${byChannel ? 'Channel' : 'Member'}</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
-      <tbody>${rows.map(({ r, open, cls, name }) => `<tr class="${cls}"><td class="name">${name}</td>${
-        data.days.map(d => dayCell(r.days[d], d, max, today, open)).join('')}${sumCell(r.total)}</tr>`).join('')}</tbody>
-      <tfoot><tr><td class="name">All</td>${foot}<td class="sum"><b>${grand}</b></td></tr></tfoot>
+      <tbody>${rows.map(({ r, open, cls, name, label }) => `<tr class="${cls}"><td class="name">${name}</td>${
+        data.days.map(d => dayCell(r.days[d], d, max, today, open, label)).join('')}${sumCell(r.total, label)}</tr>`).join('')}</tbody>
+      <tfoot><tr><td class="name">All</td>${foot}<td class="sum"${all.total
+        ? ` data-hv="${hv(all, `All · ${fmtRange(data.from, data.to)}`)}"` : ''}><b>${grand}</b></td></tr></tfoot>
     </table></div>
     <div class="up-legend"><span><span class="sw" style="background:color-mix(in srgb, var(--color-accent) 48%, transparent)"></span>Darker = more ${
       KIND_WORD[upKind]}</span>${hasFuture ? `<span><span class="sw" style="background:repeating-linear-gradient(135deg, transparent 0 3px, var(--surface-tint) 3px 6px)"></span>Hatched = scheduled, not live yet</span>` : ''}${
-      byChannel && staleIds.size ? '<span><span class="sw" style="background:var(--color-warn);border-radius:50%"></span>Not synced for 6h+</span>' : ''}<span>Click a number to see its videos</span></div>`;
+      byChannel && staleIds.size ? '<span><span class="sw" style="background:var(--color-warn);border-radius:50%"></span>Not synced for 6h+</span>' : ''}<span>Hover for the Shorts / long-form split, click for the videos</span></div>`;
 }
 
 // ── Drill-down (#152) ─────────────────────────────────────────────────
@@ -976,7 +1026,7 @@ $('up-manager').addEventListener('change', (e) => {
 });
 
 setRange('7');
-load().then(loadUploads);
+load().then(() => { if (PAGE === 'uploads') loadUploads(); });
 </script>
 </body>
 </html>

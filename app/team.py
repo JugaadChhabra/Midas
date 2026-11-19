@@ -108,6 +108,12 @@ def team_page():
     return FileResponse(STATIC_DIR / "team.html")
 
 
+# The same page: the rail's Uploads entry; team.html picks its panel by path.
+@router.get("/uploads", dependencies=[Depends(access.current_user)])
+def uploads_page():
+    return FileResponse(STATIC_DIR / "team.html")
+
+
 def _users() -> dict[int, dict]:
     rows = all_rows(supabase().table("app_users").select("id,name,role,is_active"))
     return {u["id"]: u for u in rows}
