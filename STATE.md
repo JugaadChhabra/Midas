@@ -14,7 +14,7 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-19 (the uploads grid counts a video on its go-live day, `team_uploads.live_at`) ·
+**Generated:** 2026-11-19 (host move scripts to a Mac mini: `move-out.ps1`, `move-in.sh`, `docs/MOVE_TO_MAC_MINI.md`; the `midas` service pinned to `platform: linux/amd64` in `docker-compose.yml`) ·
 **Commit:** on top of `4154800` · **Branch:** `team-uploads-live-day`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
@@ -25,6 +25,10 @@ amended by P1–P7 (spec Part 2 §0.6).
 tracker's migrations applied 2026-11-18, users and channel managers set, #153). It is not a git checkout: only `.env`,
 `docker-compose.yml` and `client_secret.json` live there. What is switched on, per lever and channel, is in
 `docs/PLAN_TO_2026-11-27.md` ("What is live"); the rollback steps are in `docs/agents/office-runbook.md` (gitignored).
+A move of the host to a Mac mini (Apple Silicon) is scripted, not yet done (2026-11-19): `move-out.ps1` (Windows: final
+NAS snapshot of the stopped DB, config zip, `.env` renamed) and `move-in.sh` (Mac: restore from the NAS on first boot,
+row counts compared); steps in `docs/MOVE_TO_MAC_MINI.md`. The image is `linux/amd64` only
+(`.github/workflows/docker-publish.yml`), so on the Mac it runs under Rosetta (`docker-compose.yml` `platform`).
 
 **Data caveat.** The live database runs on the office machine, bound to `127.0.0.1:55432` there
 (`docker-compose.yml:21-22`), so it can't be reached from the machine that generated this file. Live figures are

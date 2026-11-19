@@ -89,6 +89,10 @@ services:
 
   midas:
     image: ghcr.io/jugaadchhabra/midas:latest
+    # CI builds amd64 only (.github/workflows/docker-publish.yml). On an Apple
+    # Silicon host this runs under Rosetta; without the pin the pull fails with
+    # "no matching manifest for linux/arm64". A no-op on an amd64 host.
+    platform: linux/amd64
     pull_policy: always
     container_name: midas
     depends_on:
