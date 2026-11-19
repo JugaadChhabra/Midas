@@ -681,6 +681,35 @@ def needs_full_sync(channel: dict) -> bool:
     return last is None or (datetime.now(timezone.utc) - last) > FULL_SYNC_INTERVAL
 
 
+def uploads_need_backfill(channel: dict) -> bool:
+    """True if `channel_uploads` holds this channel's recent videos but not its
+    history: every row was first seen after the last full sync.
+
+    Upload capture (#150) shipped between full syncs, and an incremental sync
+    records only the new videos it fetches, so a channel whose last full pass
+    predates the deploy showed only the days since (Gujarati, Punjabi and
+    Haryanvi on 2026-11-19) until its next 3-day full pass. A full sync stamps
+    `last_full_synced_at` after inserting its rows, so once one has run the
+    oldest row was first seen before that stamp and this is false again. A
+    channel with no rows, or one never fully synced, is left to
+    `needs_full_sync`. A failed read answers false: the 3-day rule still
+    catches up."""
+    last = _parse_ts(channel.get("last_full_synced_at"))
+    if last is None:
+        return False
+    try:
+        rows = (supabase().table("channel_uploads").select("first_seen_at")
+                .eq("channel_id", channel["id"]).order("first_seen_at").limit(1)
+                .execute().data)
+    except Exception as e:  # noqa: BLE001 - the backfill check never fails a sync
+        log.warning("channel_uploads backfill check failed for %s: %s", channel["id"], e)
+        return False
+    if not rows:
+        return False
+    first = _parse_ts(rows[0].get("first_seen_at"))
+    return first is not None and first > last
+
+
 def routine_sync(channel: dict) -> str:
     """One routine pass for `channel` (a row with id, last_synced_at,
     last_full_synced_at). Returns "fresh" (nothing to do), "full" or
@@ -689,7 +718,7 @@ def routine_sync(channel: dict) -> str:
     """
     if not is_stale(channel):
         return "fresh"
-    if needs_full_sync(channel):
+    if needs_full_sync(channel) or uploads_need_backfill(channel):
         # A full pass rebuilds every snippet and refreshes stats in the same call.
         sync_channel(channel["id"], full=True)
         return "full"

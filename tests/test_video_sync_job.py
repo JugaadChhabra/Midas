@@ -2,7 +2,7 @@
 autopilot is doing. Before it existed, sync ran only inside autopilot's
 title-audit path, so pausing title autopilot stopped it on every channel."""
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -42,10 +42,49 @@ def test_routine_sync_full_when_due():
 
 def test_routine_sync_incremental_otherwise():
     ch = {"id": "c", "last_synced_at": _ago(days=2), "last_full_synced_at": _ago(days=1)}
-    with patch.object(sync, "sync_channel") as sc, patch.object(sync, "refresh_stats") as rs:
+    with patch.object(sync, "sync_channel") as sc, patch.object(sync, "refresh_stats") as rs, \
+         patch.object(sync, "uploads_need_backfill", return_value=False):
         assert sync.routine_sync(ch) == "incremental"
     sc.assert_called_once_with("c")
     rs.assert_called_once_with("c")
+
+
+def test_routine_sync_full_when_upload_history_missing():
+    ch = {"id": "c", "last_synced_at": _ago(days=2), "last_full_synced_at": _ago(days=1)}
+    with patch.object(sync, "sync_channel") as sc, patch.object(sync, "refresh_stats"), \
+         patch.object(sync, "uploads_need_backfill", return_value=True):
+        assert sync.routine_sync(ch) == "full"
+    sc.assert_called_once_with("c", full=True)
+
+
+def _first_seen(rows):
+    db = MagicMock()
+    q = db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value
+    q.execute.return_value.data = rows
+    return patch.object(sync, "supabase", return_value=db)
+
+
+def test_uploads_need_backfill_when_every_row_is_newer_than_the_full_sync():
+    ch = {"id": "c", "last_full_synced_at": _ago(days=2)}
+    with _first_seen([{"first_seen_at": _ago(days=1)}]):
+        assert sync.uploads_need_backfill(ch) is True
+
+
+def test_uploads_backfilled_once_a_full_sync_saw_them():
+    ch = {"id": "c", "last_full_synced_at": _ago(hours=1)}
+    with _first_seen([{"first_seen_at": _ago(hours=2)}]):
+        assert sync.uploads_need_backfill(ch) is False
+
+
+def test_uploads_need_backfill_leaves_empty_and_never_synced_channels_alone():
+    with _first_seen([]):
+        assert sync.uploads_need_backfill({"id": "c", "last_full_synced_at": _ago(days=1)}) is False
+    assert sync.uploads_need_backfill({"id": "c"}) is False
+
+
+def test_uploads_need_backfill_answers_false_when_the_read_fails():
+    with patch.object(sync, "supabase", side_effect=RuntimeError("down")):
+        assert sync.uploads_need_backfill({"id": "c", "last_full_synced_at": _ago(days=1)}) is False
 
 
 # ── the job (app.main) ───────────────────────────────────────────────────────

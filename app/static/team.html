@@ -33,40 +33,96 @@
   .ch .history ol { margin:.35rem 0 0; padding-left:1.2rem; }
   .ch .history li { margin:.15rem 0; }
 
-  /* Uploads grid (#151): members × IST days, cell = total (S / L). */
-  .up-controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:.6rem; margin:0 0 .8rem; }
-  .up-controls label { display:grid; gap:3px; font-size:12px; color:var(--ink-3); }
-  .up-controls input[type="date"] {
-    font:inherit; font-size:13px; padding:.4rem .55rem; border-radius:var(--radius-sm);
+  /* Uploads grid (#151): rows × IST days, one number per cell, shaded by
+     how busy the cell is; the Shorts / long-form split is a filter, and only
+     the Total column spells it out. */
+  .up-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem 1rem; margin:0 0 1.4rem; }
+  .up-bar .chip-bar { margin:0; }
+  .up-bar .grow { flex:1 1 0; }
+  .up-custom { display:flex; align-items:center; gap:.35rem; font-size:12px; color:var(--ink-3); }
+  .up-custom[hidden], #up-manager[hidden] { display:none; }
+  .up-custom input[type="date"] {
+    font:inherit; font-size:12.5px; padding:.3rem .5rem; border-radius:var(--radius-sm);
     border:1px solid var(--border); background:var(--panel-bg); color:inherit;
   }
-  #up-manager[hidden] { display:none; }
-  .fresh { font-size:12px; color:var(--ink-3); margin:0 0 1rem; }
-  .fresh summary { cursor:pointer; width:max-content; }
-  .fresh ul { margin:.35rem 0 0; padding-left:1.2rem; }
-  .fresh .stale { color:var(--color-warn); }
-  .grid-wrap { overflow-x:auto; border:1px solid var(--border-soft); border-radius:var(--radius-sm);
+  .up-sep { width:1px; height:18px; background:var(--border); }
+
+  .up-summary { display:flex; flex-wrap:wrap; align-items:flex-end; gap:.4rem 2rem;
+                margin:0 0 1rem; font-variant-numeric:tabular-nums; }
+  .up-summary .big { font-size:28px; font-weight:700; letter-spacing:-.02em; line-height:1; }
+  .up-summary .big-u { font-size:14px; font-weight:600; color:var(--ink-3); margin-left:.3rem; }
+  .up-summary .range { font-size:13px; color:var(--ink-3); margin-top:.35rem; }
+  .up-stats { display:flex; gap:1.6rem; }
+  .up-stat { display:grid; gap:2px; }
+  .up-stat b { font-size:16px; font-weight:650; }
+  .up-stat span { font-size:11.5px; color:var(--ink-3); }
+  .up-summary .fresh { margin-left:auto; font-size:12px; color:var(--ink-3); text-align:right; }
+  .up-summary .fresh .stale { color:var(--color-warn); }
+
+  .grid-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius);
                background:var(--panel-bg); }
-  table.up { border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; width:100%; }
-  table.up th, table.up td { padding:.45rem .7rem; text-align:right; white-space:nowrap;
+  table.up { border-collapse:separate; border-spacing:0; font-size:13px;
+             font-variant-numeric:tabular-nums; width:100%; }
+  table.up th, table.up td { padding:0; text-align:center; white-space:nowrap;
                              border-bottom:1px solid var(--border-soft); }
-  table.up th { font-size:11.5px; font-weight:600; color:var(--ink-3); }
-  table.up th .dow { display:block; font-weight:400; color:var(--ink-4); }
-  table.up th:first-child, table.up td:first-child {
-    text-align:left; position:sticky; left:0; background:var(--panel-bg); z-index:1;
+  table.up tbody tr:last-child td { border-bottom:0; }
+  table.up thead th { padding:.55rem .4rem; font-size:11px; font-weight:500; color:var(--ink-4);
+                      border-bottom:1px solid var(--border); vertical-align:bottom; }
+  table.up thead th .d { display:block; font-size:13px; font-weight:600; color:var(--ink-2); }
+  table.up thead th.today .d { color:var(--color-accent); }
+  table.up thead th.today { box-shadow:inset 0 -2px 0 var(--color-accent); }
+  table.up thead th.future .d { color:var(--ink-3); font-weight:500; }
+  table.up th.name, table.up td.name {
+    text-align:left; position:sticky; left:0; z-index:1; background:var(--panel-bg);
+    padding:.5rem .9rem; min-width:9rem; border-right:1px solid var(--border-soft);
   }
-  table.up td.zero { color:var(--ink-4); }
-  table.up td .sl { color:var(--ink-3); font-size:11.5px; }
-  table.up td.sum, table.up th.sum { border-left:1px solid var(--border-soft); font-weight:600; }
-  table.up tr.off td:first-child { color:var(--ink-4); }
-  table.up tr.unassigned td:first-child { font-style:italic; }
-  table.up .mgr { display:block; font-size:11px; color:var(--ink-4); }
+  table.up td.name .sub { display:block; font-size:11px; color:var(--ink-4); }
+  table.up td.name .warn-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
+                               background:var(--color-warn); margin-left:.4rem; vertical-align:middle; }
+  table.up tr.idle td.name .label { color:var(--ink-3); }
+  table.up tr.off td.name .label, table.up tr.unassigned td.name .label { color:var(--ink-3); font-style:italic; }
+
+  /* A day cell: the count on a tint whose strength is the cell's share of the
+     busiest cell in view (--h, 0..1). */
+  table.up td.day { min-width:3rem; height:2.4rem; padding:3px 2px; }
+  table.up td.day > * { display:flex; align-items:center; justify-content:center;
+                        width:100%; height:2.1rem; box-sizing:border-box; border-radius:5px; }
+  table.up td.day .hit {
+    background:color-mix(in srgb, var(--color-accent) calc(6% + var(--h) * 42%), transparent);
+    font-weight:600;
+  }
+  table.up td.day.future .hit {
+    background:repeating-linear-gradient(135deg, transparent 0 4px, var(--surface-faint) 4px 8px),
+               color-mix(in srgb, var(--color-accent) calc(4% + var(--h) * 22%), transparent);
+    color:var(--ink-2); font-weight:500;
+  }
+  table.up td.day .nil { color:var(--ink-4); opacity:.5; }
+  table.up td.day button.hit { all:unset; display:flex; align-items:center; justify-content:center;
+    width:100%; height:2.1rem; border-radius:5px; cursor:pointer; font-weight:600;
+    background:color-mix(in srgb, var(--color-accent) calc(6% + var(--h) * 42%), transparent); }
+  table.up td.day.future button.hit {
+    background:repeating-linear-gradient(135deg, transparent 0 4px, var(--surface-faint) 4px 8px),
+               color-mix(in srgb, var(--color-accent) calc(4% + var(--h) * 22%), transparent);
+    color:var(--ink-2); font-weight:500; }
+  table.up td.day button.hit:hover { box-shadow:inset 0 0 0 1px var(--color-accent); }
+  table.up td.day button.hit:focus-visible { outline:2px solid var(--color-accent); outline-offset:-2px; }
+
+  table.up th.sum, table.up td.sum { border-left:1px solid var(--border); padding:.45rem .9rem;
+                                     text-align:right; min-width:5.5rem; }
+  table.up td.sum b { font-size:14px; }
+  table.up td.sum .split { display:block; font-size:11px; color:var(--ink-4); }
+  table.up tfoot td { border-top:1px solid var(--border); border-bottom:0; color:var(--ink-3);
+                      font-weight:600; height:2.2rem; background:var(--surface-faint); }
+  table.up tfoot td.name { background:var(--panel-bg); }
+  .up-legend { display:flex; flex-wrap:wrap; gap:.4rem 1.2rem; font-size:11.5px; color:var(--ink-4);
+               margin:.6rem 0 0; }
+  .up-legend .sw { display:inline-block; width:10px; height:10px; border-radius:2px;
+                   vertical-align:-1px; margin-right:.3rem; }
+  .up-help { font-size:12px; color:var(--ink-3); margin:1rem 0 0; max-width:46rem; }
+  .up-help summary { cursor:pointer; width:max-content; }
+  .up-help p { margin:.4rem 0 0; line-height:1.5; }
 
   /* Drill-down (#152): a cell opens the videos behind it. */
-  table.up td button.cell-open { all:unset; cursor:pointer; border-radius:3px; padding:0 .15rem; }
-  table.up td button.cell-open:hover .n, table.up td button.cell-open:focus-visible .n {
-    text-decoration:underline; }
-  table.up td button.cell-open:focus-visible { outline:2px solid var(--color-accent); }
   .modal.drill { max-width:760px; max-height:85vh; display:flex; flex-direction:column; }
   .drill-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem;
                 margin:0 0 .8rem; }
@@ -97,26 +153,43 @@
 
     <!-- ─── UPLOADS ─── -->
     <section class="tab-panel" data-panel="uploads" aria-label="Uploads">
-      <p class="note">Videos going live per day (IST), credited to whoever held the
-        channel that day (a channel's videos from before its first assignment go to
-        its first assignee). Each cell is total (Shorts / long-form). A scheduled
-        video counts on the day it goes live, so future days show what is already
-        queued; a private video that isn't scheduled isn't counted.</p>
-      <form class="up-controls" id="up-form" autocomplete="off">
-        <label>From <input type="date" id="up-from" required /></label>
-        <label>To <input type="date" id="up-to" required /></label>
-        <button class="btn" type="submit">Show</button>
-        <button class="btn-link" type="button" data-days="7">Last 7 days</button>
-        <button class="btn-link" type="button" data-days="30">Last 30 days</button>
-        <button class="btn-link" type="button" data-days="7" data-ahead="1">Next 7 days</button>
-        <div id="up-manager" hidden></div>
-        <div class="chip-bar" id="up-view" role="group" aria-label="Rows">
-          <button type="button" class="chip" data-view="member" aria-pressed="true">By member</button>
-          <button type="button" class="chip" data-view="channel" aria-pressed="false">By channel</button>
+      <div class="up-bar" id="up-form">
+        <div class="chip-bar" id="up-range" role="group" aria-label="Dates">
+          <button type="button" class="chip" data-range="7">Last 7 days</button>
+          <button type="button" class="chip" data-range="30">Last 30 days</button>
+          <button type="button" class="chip" data-range="next7">Next 7 days</button>
+          <button type="button" class="chip" data-range="custom">Custom</button>
         </div>
-      </form>
-      <div class="fresh" id="up-fresh"></div>
+        <div class="up-custom" id="up-custom" hidden>
+          <input type="date" id="up-from" aria-label="From" />
+          <span>to</span>
+          <input type="date" id="up-to" aria-label="To" />
+        </div>
+        <span class="grow"></span>
+        <div id="up-manager" hidden></div>
+        <div class="chip-bar" id="up-kind" role="group" aria-label="Count">
+          <button type="button" class="chip" data-kind="all">All</button>
+          <button type="button" class="chip" data-kind="shorts">Shorts</button>
+          <button type="button" class="chip" data-kind="long">Long-form</button>
+        </div>
+        <span class="up-sep" aria-hidden="true"></span>
+        <div class="chip-bar" id="up-view" role="group" aria-label="Rows">
+          <button type="button" class="chip" data-view="member">By member</button>
+          <button type="button" class="chip" data-view="channel">By channel</button>
+        </div>
+      </div>
+      <div class="up-summary" id="up-summary"></div>
       <div id="up-grid"><div class="skel" data-skeleton data-rows="4"></div></div>
+      <details class="up-help">
+        <summary>How uploads are counted</summary>
+        <p>A video counts on the IST day it goes live: a scheduled video on its
+          scheduled day (so future days show what is already queued), a public
+          video on the day it was published. A private video that isn't
+          scheduled isn't counted.</p>
+        <p>Each video is credited to whoever held its channel on that day.
+          Videos from before a channel's first assignment go to its first
+          assignee. Click any number to see the videos behind it.</p>
+      </details>
     </section>
 
     <!-- ─── ROSTER ─── -->
@@ -545,10 +618,21 @@ function addDays(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 
-function setRange(days, ahead = false) {
+// The date range: a preset chip, or Custom (the two date inputs).
+let upRange = '7';
+function setRange(range) {
+  upRange = range;
   const today = istToday();
-  $('up-from').value = ahead ? today : addDays(today, -(days - 1));
-  $('up-to').value = ahead ? addDays(today, days - 1) : today;
+  if (range === '7' || range === '30') {
+    $('up-from').value = addDays(today, -(Number(range) - 1));
+    $('up-to').value = today;
+  } else if (range === 'next7') {
+    $('up-from').value = today;
+    $('up-to').value = addDays(today, 6);
+  }
+  $('up-custom').hidden = range !== 'custom';
+  document.querySelectorAll('#up-range .chip').forEach(c =>
+    c.setAttribute('aria-pressed', String(c.dataset.range === range)));
 }
 
 function ago(iso) {
@@ -559,61 +643,167 @@ function ago(iso) {
   return `${Math.floor(h / 24)} days`;
 }
 
-function paintFresh(channels) {
-  const holder = $('up-fresh');
-  if (!channels.length) { holder.innerHTML = ''; return; }
-  const synced = channels.filter(c => c.last_synced_at);
-  const oldest = synced.length
-    ? synced.reduce((a, b) => (a.last_synced_at < b.last_synced_at ? a : b)) : null;
-  const never = channels.length - synced.length;
-  // The routine sync runs every 6 hours; older than that is worth a look.
-  const isStale = (c) => !c.last_synced_at || Date.now() - new Date(c.last_synced_at) > 6 * 3600e3;
-  const head = oldest
-    ? `Data up to ${esc(ago(oldest.last_synced_at))} old (oldest: ${esc(oldest.name || oldest.id)})`
-    : 'No channel has synced yet';
-  holder.innerHTML = `<details><summary>${head}${never && oldest
-      ? `; ${never} channel${never > 1 ? 's' : ''} never synced` : ''}.</summary><ul>${
-    channels.map(c => `<li class="${isStale(c) ? 'stale' : ''}">${esc(c.name || c.id)}: ${
-      c.last_synced_at ? `synced ${esc(ago(c.last_synced_at))} ago` : 'never synced'}</li>`).join('')
-  }</ul></details>`;
+// The routine sync runs every 6 hours; older than that is worth a look.
+const isStale = (c) => !c.last_synced_at || Date.now() - new Date(c.last_synced_at) > 6 * 3600e3;
+
+// Every channel is "Taarak Mehta Ka Ooltah Chashmah <something>": drop the
+// words all the names share, and the generic ones, so the row says
+// "Marathi". The full name stays in the tooltip.
+const GENERIC = new Set(['baalgeet', 'balgeet', 'rhymes', 'nursery', '/', '-', '|']);
+let channelLabels = new Map();
+function buildLabels(channels) {
+  const words = channels.map(c => (c.name || c.id).split(/\s+/));
+  let n = 0;
+  if (words.length > 1) {
+    while (words.every(w => w.length > n + 1 && w[n].toLowerCase() === words[0][n].toLowerCase())) n++;
+  }
+  channelLabels = new Map(channels.map((c, i) => {
+    const rest = words[i].slice(n);
+    const core = rest.filter(w => !GENERIC.has(w.toLowerCase()));
+    return [c.id, (core.length ? core : rest).join(' ') || c.name || c.id];
+  }));
+}
+const chLabel = (id, fallback) => channelLabels.get(id) || fallback || id;
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayParts = (iso) => {
+  const d = new Date(iso + 'T00:00:00Z');
+  return { dow: DOW[d.getUTCDay()], day: d.getUTCDate(), mon: MONTHS[d.getUTCMonth()] };
+};
+function fmtRange(from, to) {
+  const a = dayParts(from), b = dayParts(to);
+  if (from === to) return `${a.dow} ${a.day} ${a.mon}`;
+  return a.mon === b.mon ? `${a.day}–${b.day} ${b.mon}` : `${a.day} ${a.mon} – ${b.day} ${b.mon}`;
 }
 
-function cell(c, cls = '', open = null) {
-  if (!c.total) return `<td class="zero ${cls}">0</td>`;
-  const text = `<span class="n">${c.total}</span> <span class="sl">(${c.shorts} / ${c.long_form})</span>`;
-  // A day cell opens its drill-down; the Total column doesn't.
-  return open
-    ? `<td class="${cls}"><button type="button" class="cell-open" data-${open.kind}="${esc(open.id)}"
-         data-day="${open.day}" aria-label="Show the ${c.total} videos">${text}</button></td>`
-    : `<td class="${cls}">${text}</td>`;
+let upKind = 'all';          // all | shorts | long
+try { const k = localStorage.getItem('midas:team:upKind'); if (['shorts', 'long'].includes(k)) upKind = k; } catch {}
+const count = (c) => !c ? 0 : upKind === 'shorts' ? c.shorts : upKind === 'long' ? c.long_form : c.total;
+const KIND_WORD = { all: 'uploads', shorts: 'Shorts', long: 'long-form videos' };
+
+function paintSummary(data, rows) {
+  const holder = $('up-summary');
+  const sum = { total: 0, shorts: 0, long_form: 0 };
+  const perDay = {};
+  rows.forEach(r => {
+    ['total', 'shorts', 'long_form'].forEach(k => { sum[k] += r.total[k]; });
+    data.days.forEach(d => { perDay[d] = (perDay[d] || 0) + count(r.days[d]); });
+  });
+  const today = istToday();
+  // Whole days only: today is still filling up.
+  const past = data.days.filter(d => d < today);
+  const busiest = past.reduce((a, d) => (perDay[d] > (perDay[a] ?? -1) ? d : a), null);
+  const idle = (data.channel_rows || []).filter(r => !r.total.total);
+  const stale = data.channels.filter(isStale);
+  const synced = data.channels.filter(c => c.last_synced_at);
+  const oldest = synced.length
+    ? synced.reduce((a, b) => (a.last_synced_at < b.last_synced_at ? a : b)) : null;
+  const stat = (v, label, title = '') =>
+    `<div class="up-stat"${title ? ` title="${esc(title)}"` : ''}><b>${v}</b><span>${label}</span></div>`;
+  const stats = [];
+  if (upKind === 'all') {
+    stats.push(stat(sum.shorts, 'Shorts'), stat(sum.long_form, 'Long-form'));
+  }
+  if (past.length > 1) {
+    const avg = past.reduce((a, d) => a + perDay[d], 0) / past.length;
+    stats.push(stat(avg.toFixed(avg < 10 ? 1 : 0), 'a day on average'));
+  }
+  if (busiest && past.length > 1) {
+    const p = dayParts(busiest);
+    stats.push(stat(perDay[busiest], `busiest: ${p.dow} ${p.day} ${p.mon}`));
+  }
+  if (data.channel_rows) {
+    stats.push(stat(`${data.channel_rows.length - idle.length}/${data.channel_rows.length}`,
+      'channels posted', idle.length ? 'Nothing: ' + idle.map(r => chLabel(r.channel_id, r.name)).join(', ') : ''));
+  }
+  const fresh = !data.channels.length ? ''
+    : stale.length
+      ? `<span class="stale" title="${esc(stale.map(c => `${chLabel(c.id, c.name)}: ${
+          c.last_synced_at ? 'synced ' + ago(c.last_synced_at) + ' ago' : 'never synced'}`).join('\n'))}">${
+          stale.length} channel${stale.length > 1 ? 's' : ''} not synced for 6h+</span>`
+      : `Synced ${esc(ago(oldest.last_synced_at))} ago`;
+  holder.innerHTML = `
+    <div><div><span class="big">${upKind === 'all' ? sum.total : upKind === 'shorts' ? sum.shorts : sum.long_form}</span><span class="big-u">${
+      KIND_WORD[upKind]}</span></div><div class="range">${esc(fmtRange(data.from, data.to))}</div></div>
+    <div class="up-stats">${stats.join('')}</div>
+    <div class="fresh">${fresh}</div>`;
+}
+
+function dayCell(c, d, max, today, open) {
+  const v = count(c);
+  const cls = `day${d > today ? ' future' : ''}`;
+  if (!v) return `<td class="${cls}"><span class="nil">·</span></td>`;
+  const h = max ? (v / max).toFixed(2) : 0;
+  return `<td class="${cls}"><button type="button" class="hit" style="--h:${h}"
+      data-${open.kind}="${esc(open.id)}" data-day="${d}"
+      title="${c.total} total: ${c.shorts} Shorts, ${c.long_form} long-form${d > today ? ' (scheduled)' : ''}"
+      aria-label="${c.total} videos on ${d}, show them">${v}</button></td>`;
+}
+
+function sumCell(c) {
+  const v = count(c);
+  return `<td class="sum"><b>${v}</b>${upKind === 'all' && c.total
+    ? `<span class="split">${c.shorts} S · ${c.long_form} L</span>` : ''}</td>`;
 }
 
 function paintGrid(data) {
-  const showMgr = seesAll() && !data.manager_id;
-  const head = data.days.map(d => {
-    const dow = DOW[new Date(d + 'T00:00:00Z').getUTCDay()];
-    return `<th scope="col"><span class="dow">${dow}</span>${esc(d.slice(5))}</th>`;
-  }).join('');
-  const byChannel = upView === 'channel';
-  const body = byChannel
-    ? (data.channel_rows || []).map(r => `<tr>
-    <td>${esc(r.name || r.channel_id)}${
-      showMgr ? `<span class="mgr">${esc(r.manager_name || 'No manager')}</span>` : ''}</td>
-    ${data.days.map(d => cell(r.days[d], '', { kind: 'channel', id: r.channel_id, day: d })).join('')}${
-      cell(r.total, 'sum')}</tr>`).join('')
-    : data.rows.map(r => `<tr class="${r.member_id == null ? 'unassigned' : ''}${
-      r.is_active ? '' : ' off'}">
-    <td>${esc(r.name)}${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
-      showMgr && r.manager_name ? `<span class="mgr">${esc(r.manager_name)}</span>` : ''}</td>
-    ${data.days.map(d => cell(r.days[d], '', { kind: 'member', id: r.member_id ?? '', day: d })).join('')}${
-      cell(r.total, 'sum')}</tr>`).join('');
-  $('up-grid').innerHTML = !data.channels.length
-    ? `<div class="dt"><div class="dt-empty muted">${seesAll()
-        ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`
-    : `<div class="grid-wrap"><table class="up">
-        <thead><tr><th scope="col">${byChannel ? 'Channel' : 'Member'}</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
-        <tbody>${body}</tbody></table></div>`;
   upShown = data;
+  if (!data.channels.length) {
+    $('up-summary').innerHTML = '';
+    $('up-grid').innerHTML = `<div class="dt"><div class="dt-empty muted">${seesAll()
+      ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`;
+    return;
+  }
+  buildLabels(data.channels);
+  const showMgr = seesAll() && !data.manager_id;
+  const byChannel = upView === 'channel';
+  const today = istToday();
+  const staleIds = new Set(data.channels.filter(isStale).map(c => c.id));
+  const rows = byChannel
+    ? (data.channel_rows || []).map(r => ({
+        r, open: { kind: 'channel', id: r.channel_id },
+        cls: r.total.total ? '' : 'idle',
+        name: `<span class="label" title="${esc(r.name || r.channel_id)}">${esc(chLabel(r.channel_id, r.name))}</span>${
+          staleIds.has(r.channel_id) ? '<span class="warn-dot" title="Not synced for 6h+: recent uploads may be missing"></span>' : ''}${
+          showMgr ? `<span class="sub">${esc(r.manager_name || 'No manager')}</span>` : ''}`,
+      }))
+    : data.rows
+        // Unassigned with nothing in it is noise; show it only when it counts something.
+        .filter(r => r.member_id != null || r.total.total)
+        .map(r => ({
+          r, open: { kind: 'member', id: r.member_id ?? '' },
+          cls: `${r.member_id == null ? 'unassigned' : ''}${r.is_active ? '' : ' off'}${r.total.total ? '' : ' idle'}`,
+          name: `<span class="label">${esc(r.name)}</span>${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
+            showMgr && r.manager_name ? `<span class="sub">${esc(r.manager_name)}</span>` : ''}`,
+        }));
+  const sumRows = byChannel ? (data.channel_rows || []) : data.rows;
+  paintSummary(data, sumRows);
+
+  let max = 0;
+  rows.forEach(({ r }) => data.days.forEach(d => { max = Math.max(max, count(r.days[d])); }));
+  let prevMon = null;
+  const head = data.days.map(d => {
+    const p = dayParts(d);
+    const mon = p.mon !== prevMon ? ` ${p.mon}` : '';
+    prevMon = p.mon;
+    const cls = d === today ? 'today' : d > today ? 'future' : '';
+    return `<th scope="col" class="${cls}"${d === today ? ' title="Today"' : ''}>${p.dow}<span class="d">${p.day}${mon}</span></th>`;
+  }).join('');
+  const foot = data.days.map(d => {
+    const v = sumRows.reduce((a, r) => a + count(r.days[d]), 0);
+    return `<td class="day">${v || '<span class="nil">·</span>'}</td>`;
+  }).join('');
+  const grand = sumRows.reduce((a, r) => a + count(r.total), 0);
+  const hasFuture = data.days.some(d => d > today);
+  $('up-grid').innerHTML = `<div class="grid-wrap"><table class="up">
+      <thead><tr><th scope="col" class="name">${byChannel ? 'Channel' : 'Member'}</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
+      <tbody>${rows.map(({ r, open, cls, name }) => `<tr class="${cls}"><td class="name">${name}</td>${
+        data.days.map(d => dayCell(r.days[d], d, max, today, open)).join('')}${sumCell(r.total)}</tr>`).join('')}</tbody>
+      <tfoot><tr><td class="name">All</td>${foot}<td class="sum"><b>${grand}</b></td></tr></tfoot>
+    </table></div>
+    <div class="up-legend"><span><span class="sw" style="background:color-mix(in srgb, var(--color-accent) 48%, transparent)"></span>Darker = more ${
+      KIND_WORD[upKind]}</span>${hasFuture ? `<span><span class="sw" style="background:repeating-linear-gradient(135deg, transparent 0 3px, var(--surface-tint) 3px 6px)"></span>Hatched = scheduled, not live yet</span>` : ''}${
+      byChannel && staleIds.size ? '<span><span class="sw" style="background:var(--color-warn);border-radius:50%"></span>Not synced for 6h+</span>' : ''}<span>Click a number to see its videos</span></div>`;
 }
 
 // ── Drill-down (#152) ─────────────────────────────────────────────────
@@ -653,7 +843,7 @@ function drillRow(v) {
   return `<div class="drill-row">${thumb}
     <div><div class="title"><a href="${href}" target="_blank" rel="noopener">${
       esc(v.title || v.video_id)}</a></div>
-      <div class="meta">${esc(v.channel_name || v.channel_id)} · ${kind(v)}</div></div>
+      <div class="meta">${esc(chLabel(v.channel_id, v.channel_name))} · ${kind(v)}</div></div>
     <div class="side">${statusPill(v)}<span class="when">${
       v.status === 'scheduled' ? 'Goes live' : 'Live'} ${esc(istTime(v.live_at || v.uploaded_at))} IST</span>
       <span class="when">Uploaded ${esc(istTime(v.uploaded_at, true))} IST</span></div></div>`;
@@ -681,8 +871,9 @@ async function openDrill({ member, channel }, day) {
     ? (upShown?.channel_rows || []).find(r => r.channel_id === channel)
     : (upShown?.rows || []).find(r => String(r.member_id ?? '') === member);
   const back = drillModal();
-  const dow = DOW[new Date(day + 'T00:00:00Z').getUTCDay()];
-  back.querySelector('#drill-title').textContent = `${row ? row.name : 'Uploads'} · ${dow} ${day}`;
+  const p = dayParts(day);
+  const rowName = !row ? 'Uploads' : channel != null ? chLabel(row.channel_id, row.name) : row.name;
+  back.querySelector('#drill-title').textContent = `${rowName} · ${p.dow} ${p.day} ${p.mon}`;
   const q = new URLSearchParams({ day });
   if (channel != null) q.set('channel_id', channel);
   else if (member) q.set('member_id', member);
@@ -704,7 +895,7 @@ async function openDrill({ member, channel }, day) {
 }
 
 $('up-grid').addEventListener('click', (e) => {
-  const b = e.target.closest('button.cell-open');
+  const b = e.target.closest('button.hit');
   if (b) openDrill({ member: b.dataset.member, channel: b.dataset.channel }, b.dataset.day);
 });
 
@@ -751,23 +942,40 @@ async function loadUploads() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.detail || r.statusText);
     paintManagerFilter(j.managers || []);
-    paintFresh(j.channels);
     paintGrid(j);
   } catch (err) {
     $('up-grid').innerHTML = `<em class="muted">Could not load the uploads: ${esc(err.message)}</em>`;
   }
 }
 
-$('up-form').onsubmit = (e) => { e.preventDefault(); loadUploads(); };
-$('up-form').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-days]');
-  if (b) { setRange(Number(b.dataset.days), b.dataset.ahead === '1'); loadUploads(); }
+$('up-range').addEventListener('click', (e) => {
+  const c = e.target.closest('.chip');
+  if (!c) return;
+  setRange(c.dataset.range);
+  if (c.dataset.range === 'custom') $('up-from').focus();
+  else loadUploads();
 });
+['up-from', 'up-to'].forEach(id => $(id).addEventListener('change', () => {
+  if (upRange === 'custom') loadUploads();
+}));
+function paintKind() {
+  document.querySelectorAll('#up-kind .chip').forEach(c =>
+    c.setAttribute('aria-pressed', String(c.dataset.kind === upKind)));
+}
+$('up-kind').addEventListener('click', (e) => {
+  const c = e.target.closest('.chip');
+  if (!c || c.dataset.kind === upKind) return;
+  upKind = c.dataset.kind;
+  try { localStorage.setItem('midas:team:upKind', upKind); } catch {}
+  paintKind();
+  if (upShown) paintGrid(upShown);
+});
+paintKind();
 $('up-manager').addEventListener('change', (e) => {
   if (e.detail && 'value' in e.detail) { upManager = e.detail.value; loadUploads(); }
 });
 
-setRange(7);
+setRange('7');
 load().then(loadUploads);
 </script>
 </body>
