@@ -95,16 +95,18 @@
 
     <!-- ─── UPLOADS ─── -->
     <section class="tab-panel" data-panel="uploads" aria-label="Uploads">
-      <p class="note">Videos uploaded per day (IST), credited to whoever held the
-        channel that day (a channel's uploads from before its first assignment go to
-        its first assignee). Each cell is total (Shorts / long-form); a scheduled
-        video counts on the day it was uploaded, not the day it goes live.</p>
+      <p class="note">Videos going live per day (IST), credited to whoever held the
+        channel that day (a channel's videos from before its first assignment go to
+        its first assignee). Each cell is total (Shorts / long-form). A scheduled
+        video counts on the day it goes live, so future days show what is already
+        queued; a private video that isn't scheduled isn't counted.</p>
       <form class="up-controls" id="up-form" autocomplete="off">
         <label>From <input type="date" id="up-from" required /></label>
         <label>To <input type="date" id="up-to" required /></label>
         <button class="btn" type="submit">Show</button>
         <button class="btn-link" type="button" data-days="7">Last 7 days</button>
         <button class="btn-link" type="button" data-days="30">Last 30 days</button>
+        <button class="btn-link" type="button" data-days="7" data-ahead="1">Next 7 days</button>
         <div id="up-manager" hidden></div>
         <div class="chip-bar" id="up-view" role="group" aria-label="Rows">
           <button type="button" class="chip" data-view="member" aria-pressed="true">By member</button>
@@ -541,10 +543,10 @@ function addDays(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 
-function setRange(days) {
-  const to = istToday();
-  $('up-to').value = to;
-  $('up-from').value = addDays(to, -(days - 1));
+function setRange(days, ahead = false) {
+  const today = istToday();
+  $('up-from').value = ahead ? today : addDays(today, -(days - 1));
+  $('up-to').value = ahead ? addDays(today, days - 1) : today;
 }
 
 function ago(iso) {
@@ -631,9 +633,8 @@ function istTime(iso, withDate = false) {
 
 function statusPill(v) {
   const status = v.status || 'unknown';
-  const label = status === 'scheduled' && v.scheduled_publish_at
-    ? `Scheduled · live ${istTime(v.scheduled_publish_at, true)} IST`
-    : status.charAt(0).toUpperCase() + status.slice(1);
+  // The go-live time is on the row's own line ("Goes live …").
+  const label = status.charAt(0).toUpperCase() + status.slice(1);
   return `<span class="pill pill--sm ${STATUS_PILL[status] || 'pill--neutral'}">${esc(label)}</span>`;
 }
 
@@ -651,8 +652,9 @@ function drillRow(v) {
     <div><div class="title"><a href="${href}" target="_blank" rel="noopener">${
       esc(v.title || v.video_id)}</a></div>
       <div class="meta">${esc(v.channel_name || v.channel_id)} · ${kind(v)}</div></div>
-    <div class="side">${statusPill(v)}<span class="when">Uploaded ${
-      esc(istTime(v.uploaded_at))} IST</span></div></div>`;
+    <div class="side">${statusPill(v)}<span class="when">${
+      v.status === 'scheduled' ? 'Goes live' : 'Live'} ${esc(istTime(v.live_at || v.uploaded_at))} IST</span>
+      <span class="when">Uploaded ${esc(istTime(v.uploaded_at, true))} IST</span></div></div>`;
 }
 
 function drillModal() {
@@ -757,7 +759,7 @@ async function loadUploads() {
 $('up-form').onsubmit = (e) => { e.preventDefault(); loadUploads(); };
 $('up-form').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-days]');
-  if (b) { setRange(Number(b.dataset.days)); loadUploads(); }
+  if (b) { setRange(Number(b.dataset.days), b.dataset.ahead === '1'); loadUploads(); }
 });
 $('up-manager').addEventListener('change', (e) => {
   if (e.detail && 'value' in e.detail) { upManager = e.detail.value; loadUploads(); }

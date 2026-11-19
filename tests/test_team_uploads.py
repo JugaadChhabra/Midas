@@ -49,12 +49,15 @@ def _utc(ist: str) -> str:
     return at.astimezone(ZoneInfo("UTC")).isoformat()
 
 
-def _upload(video_id, channel_id, ist, is_short=False, privacy="public", scheduled=None):
+def _upload(video_id, channel_id, ist, is_short=False, privacy="public", scheduled=None,
+            published=None):
+    """``ist`` is the upload time; ``published`` (IST) YouTube's publish time."""
     return {"video_id": video_id, "channel_id": channel_id, "title": video_id,
             "is_short": is_short, "duration_seconds": 30 if is_short else 300,
             "privacy_status": privacy, "scheduled_publish_at": scheduled,
             "thumbnail_url": None, "uploaded_at": _utc(ist),
-            "playlist_published_at": _utc(ist), "video_published_at": None,
+            "playlist_published_at": _utc(ist),
+            "video_published_at": _utc(published) if published else None,
             "first_seen_at": _utc(ist), "last_seen_at": _utc(ist)}
 
 
@@ -250,14 +253,50 @@ def test_an_upload_of_unknown_type_counts_as_long_form(use):
     assert _cell(body, PRANAV, "2026-11-12") == {"total": 1, "shorts": 0, "long_form": 1}
 
 
-def test_a_scheduled_video_counts_on_its_upload_day_not_its_go_live_day(use):
+def test_a_scheduled_video_counts_on_its_go_live_day_not_its_upload_day(use):
+    # Uploaded Wednesday for Saturday 10:00 IST (04:30 UTC).
     use(_store([_upload("sched", CH_A, "2026-11-11 15:00", privacy="private",
-                        scheduled="2026-11-20T04:30:00+00:00")]))
+                        scheduled="2026-11-14T04:30:00+00:00")]))
 
     body = _grid(MANAGER_A, **WINDOW)
 
-    assert _cell(body, PRANAV, "2026-11-11")["total"] == 1
+    assert _cell(body, PRANAV, "2026-11-11")["total"] == 0
+    assert _cell(body, PRANAV, "2026-11-14")["total"] == 1
     assert _row(body, PRANAV)["total"]["total"] == 1
+
+
+def test_a_video_scheduled_past_the_window_isnt_counted_in_it(use):
+    use(_store([_upload("later", CH_A, "2026-11-12 15:00", privacy="private",
+                        scheduled="2026-11-20T04:30:00+00:00")]))
+
+    assert _row(_grid(MANAGER_A, **WINDOW), PRANAV)["total"]["total"] == 0
+    # A window reaching that day shows it: what is queued for the weekend.
+    body = _grid(MANAGER_A, **{"from": "2026-11-17", "to": "2026-11-23"})
+    assert _cell(body, PRANAV, "2026-11-20")["total"] == 1
+
+
+def test_a_published_video_counts_on_youtubes_publish_day(use):
+    # Uploaded private on the 10th, made public on the 13th.
+    use(_store([_upload("flip", CH_A, "2026-11-10 09:00", published="2026-11-13 18:00")]))
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert _cell(body, PRANAV, "2026-11-10")["total"] == 0
+    assert _cell(body, PRANAV, "2026-11-13")["total"] == 1
+
+
+def test_a_published_video_from_before_the_window_counts_when_it_went_live(use):
+    use(_store([_upload("old", CH_A, "2026-10-01 09:00", published="2026-11-12 09:00")]))
+
+    assert _cell(_grid(MANAGER_A, **WINDOW), PRANAV, "2026-11-12")["total"] == 1
+
+
+def test_a_private_unscheduled_video_never_went_live_and_isnt_counted(use):
+    use(_store([_upload("draft", CH_A, "2026-11-12 09:00", privacy="private")]))
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert all(r["total"]["total"] == 0 for r in body["rows"])
 
 
 def test_members_with_nothing_uploaded_still_get_a_row(use):

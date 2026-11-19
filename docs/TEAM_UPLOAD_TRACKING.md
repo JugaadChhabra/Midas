@@ -9,7 +9,8 @@
 > 2026-11-19 (#153: migrations, the four users, every channel's manager). Changed since the
 > design (owner, 2026-11-19): a channel's uploads from before its **first** assignment are
 > credited to that first assignee (a later reassignment still never re-credits history), and
-> the grid has a By channel view (#163, #164).
+> the grid has a By channel view (#163, #164); videos count on their go-live day, not their
+> upload day (§2 "Upload day").
 
 ## 1. Goal
 
@@ -28,7 +29,7 @@ per day per person**. Upload views/analytics are out of scope; YouTube Studio co
 | Midas operation | Justin/Ishwari pick and run Midas features (autopilot, audits, playlists, shorts…) on their channels. |
 | Channel ↔ member | One channel → exactly one member at a time. Assignments are **dated** so reassignment never re-credits history. |
 | Who assigns | A manager assigns **their own** members to **their own** channels. |
-| Upload day | A video counts on the **IST day it was uploaded**, not the day it goes public. Scheduled videos count on upload day. |
+| Upload day | ~~A video counts on the IST day it was uploaded~~. **Changed 2026-11-19 (owner):** a video counts on the **IST day it goes live** (a scheduled video on its go-live day; a private, unscheduled one not at all), since the team schedules weekend videos ahead. |
 | Freshness | Existing routine sync cadence (`SYNC_STALE_AFTER = 6h`, `app/sync.py`) is fine. No extra polling. |
 | YouTube client / quota | **No new client.** Data comes from calls `sync_channel` already makes. Marginal quota ≈ 0. |
 | Channel connection | Jugaad connects channels (OAuth on `localhost` on the office machine). Midas only runs channels owned by these two managers. |
