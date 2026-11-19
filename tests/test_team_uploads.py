@@ -185,10 +185,9 @@ def test_a_reassignment_mid_range_credits_each_member_their_own_days(use):
     assert _cell(body, MEET, "2026-11-13")["total"] == 1
 
 
-def test_an_upload_on_a_channel_nobody_held_that_day_is_unassigned(use):
+def test_an_upload_on_a_channel_never_assigned_is_unassigned(use):
     use(_store(
-        [_upload("before", CH_A, "2026-11-11 09:00"),
-         _upload("held", CH_A, "2026-11-12 09:00"),
+        [_upload("held", CH_A, "2026-11-12 09:00"),
          _upload("never", CH_A2, "2026-11-12 09:00", is_short=True)],
         assignments=[_assignment(1, CH_A, PRANAV, "2026-11-12")]))
 
@@ -196,11 +195,51 @@ def test_an_upload_on_a_channel_nobody_held_that_day_is_unassigned(use):
 
     unassigned = _row(body, None)
     assert unassigned["name"] == "Unassigned"
-    assert unassigned["total"] == {"total": 2, "shorts": 1, "long_form": 1}
-    assert _cell(body, None, "2026-11-11")["total"] == 1
+    assert unassigned["total"] == {"total": 1, "shorts": 1, "long_form": 0}
     assert _row(body, PRANAV)["total"]["total"] == 1
     # Unassigned is the last row.
     assert body["rows"][-1]["member_id"] is None
+
+
+def test_the_first_assignee_is_credited_with_the_channels_history(use):
+    # Assigned today, Pranav gets the channel's earlier uploads too (backfill).
+    use(_store(
+        [_upload("before", CH_A, "2026-11-10 09:00"),
+         _upload("held", CH_A, "2026-11-15 09:00", is_short=True)],
+        assignments=[_assignment(1, CH_A, PRANAV, "2026-11-15")]))
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert _cell(body, PRANAV, "2026-11-10")["total"] == 1
+    assert _row(body, PRANAV)["total"] == {"total": 2, "shorts": 1, "long_form": 1}
+    assert _row(body, None)["total"]["total"] == 0
+
+
+def test_a_later_assignee_gets_only_their_own_days_not_the_history(use):
+    use(_store(
+        [_upload("history", CH_A, "2026-11-10 09:00"),
+         _upload("first", CH_A, "2026-11-12 09:00"),
+         _upload("second", CH_A, "2026-11-14 09:00")],
+        assignments=[_assignment(1, CH_A, PRANAV, "2026-11-12", "2026-11-14"),
+                     _assignment(2, CH_A, MEET, "2026-11-14")]))
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert _row(body, PRANAV)["total"]["total"] == 2
+    assert _cell(body, PRANAV, "2026-11-10")["total"] == 1
+    assert _row(body, MEET)["total"]["total"] == 1
+
+
+def test_the_backfill_reaches_past_the_window_to_find_the_first_assignee(use):
+    # The first assignment starts after the window: its history still counts.
+    use(_store(
+        [_upload("old", CH_A, "2026-11-11 09:00")],
+        assignments=[_assignment(1, CH_A, MEET, "2026-11-20")]))
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert _row(body, MEET)["total"]["total"] == 1
+    assert _row(body, None)["total"]["total"] == 0
 
 
 def test_an_upload_of_unknown_type_counts_as_long_form(use):

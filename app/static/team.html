@@ -96,7 +96,8 @@
     <!-- ─── UPLOADS ─── -->
     <section class="tab-panel" data-panel="uploads" aria-label="Uploads">
       <p class="note">Videos uploaded per day (IST), credited to whoever held the
-        channel that day. Each cell is total (Shorts / long-form); a scheduled
+        channel that day (a channel's uploads from before its first assignment go to
+        its first assignee). Each cell is total (Shorts / long-form); a scheduled
         video counts on the day it was uploaded, not the day it goes live.</p>
       <form class="up-controls" id="up-form" autocomplete="off">
         <label>From <input type="date" id="up-from" required /></label>
@@ -139,8 +140,9 @@
            its assignment history, and (admin only) its manager. -->
       <h2 class="section-title" id="ch-title">Channels</h2>
       <p class="note">Who uploads to each channel. Picking someone assigns the
-        channel to them from today (IST); uploads before today stay credited to
-        whoever held it then.</p>
+        channel to them from today (IST). The first person given a channel is also
+        credited with its earlier uploads; after a change, uploads before today
+        stay credited to whoever held it then.</p>
       <div id="channels"><div class="skel" data-skeleton data-rows="4"></div></div>
     </section>
   </main>
@@ -489,8 +491,10 @@ $('channels').addEventListener('change', async (e) => {
     const member = state.members.find(m => String(m.id) === value);
     if (!value || !member) return;
     const ok = await confirmDialog(
-      `Assign ${ch.name || ch.id} to ${member.name} from today? Uploads before today ` +
-      'stay credited to whoever held it then.', 'Assign');
+      `Assign ${ch.name || ch.id} to ${member.name} from today? ` +
+      (!(assign.assignments || []).some(a => a.channel_id === ch.id)
+        ? 'As its first assignee, they are also credited with its earlier uploads.'
+        : 'Uploads before today stay credited to whoever held it then.'), 'Assign');
     if (!ok) { paintChannels(); return; }
     try {
       const res = await send('POST', `/channels/${encodeURIComponent(ch.id)}/assign`,

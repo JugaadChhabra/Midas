@@ -80,7 +80,9 @@ def test_unassigned_is_member_id_omitted(use):
 
     assert (body["member_id"], body["name"]) == (None, "Unassigned")
     assert _ids(body) == ["never"]
-    assert _ids(_videos(MANAGER_A, day="2026-11-11")) == ["before"]
+    # Before the channel's first assignment: its first assignee's (backfill).
+    assert _ids(_videos(MANAGER_A, day="2026-11-11")) == []
+    assert _ids(_videos(MANAGER_A, member_id=PRANAV, day="2026-11-11")) == ["before"]
 
 
 def test_a_reassigned_channel_lists_each_day_under_its_holder(use):

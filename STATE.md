@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-19 (the uploads grid's "By channel" view: `channel_rows`, `GET /team/uploads/videos?channel_id=`) ·
-**Commit:** on top of `75a8e76` · **Branch:** `team-uploads-by-channel`
+**Generated:** 2026-11-19 (the uploads grid credits a channel's history to its first assignee) ·
+**Commit:** on top of `59c7564` · **Branch:** `team-uploads-first-holder-backfill`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -882,7 +882,9 @@ other route is scoped, and a new unscoped route fails CI.
   and echoed as null), each `{id, name, manager_id, last_synced_at}` by name. Reads `channel_uploads` for those
   channels with `uploaded_at` in `[from 00:00 IST, to + 1 00:00 IST)` and their `channel_assignments`, both through
   `rows.rows_for_ids` (paged past the 1000-row cap); credits each upload to the member whose assignment covered its
-  channel on the upload's IST day (`starts_on <= day < ends_on`, NULL = open), else Unassigned. `rows`: the in-scope
+  channel on the upload's IST day (`starts_on <= day < ends_on`, NULL = open); an upload from before the channel's
+  first assignment (earliest `starts_on`, then `id`, over all its assignments, not just the window's) to that first
+  assignee (backfill, owner 2026-11-19); else Unassigned (never assigned, or a gap between assignments). `rows`: the in-scope
   managers' active members plus anyone credited or assigned in the window, by manager name then member name, then
   Unassigned (`member_id` null, name `"Unassigned"`, always present); each `{member_id, name, manager_id,
   manager_name, is_active, days: {<day>: {total, shorts, long_form}}, total}`, every day present (zeros
