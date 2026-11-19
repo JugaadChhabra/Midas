@@ -25,6 +25,10 @@ cell's count and its list can't disagree.
 Computed in Python, not by a SQL RPC, so the whole grid is testable offline
 (decided in #142).
 
+``channel_rows`` (the "By channel" view) holds the same uploads by channel: one
+row per in-scope channel, every day, zeros included, whoever was credited. The
+drill-down takes ``channel_id`` for one of its cells.
+
 Rows: every active member of the managers in scope, plus anyone credited or
 assigned on an in-scope channel in the window (a deactivated member keeps the
 row their uploads need), ordered by manager name then member name; then
@@ -190,9 +194,12 @@ def uploads_grid(
     credited, by_channel = _credited(db, channels, first, last)
 
     cells: dict[int | None, dict[str, dict]] = {}
+    channel_cells: dict[str, dict[str, dict]] = {}
     for member, day, u in credited:
         row = cells.setdefault(member, {})
         _count(row.setdefault(day.isoformat(), _zero()), u.get("is_short"))
+        by_ch = channel_cells.setdefault(u["channel_id"], {})
+        _count(by_ch.setdefault(day.isoformat(), _zero()), u.get("is_short"))
 
     # Rows: the in-scope managers' active members, plus whoever is credited or
     # assigned in the window.
@@ -216,8 +223,7 @@ def uploads_grid(
     for m in rows_for_ids(lambda ids: member_query().in_("id", ids), sorted(wanted)):
         members[m["id"]] = m
 
-    def shaped(member_id, name, manager, is_active):
-        row = cells.get(member_id, {})
+    def days_and_total(row: dict) -> tuple[dict, dict]:
         total = _zero()
         per_day = {}
         for key in day_keys:
@@ -225,6 +231,10 @@ def uploads_grid(
             per_day[key] = cell
             for k in total:
                 total[k] += cell[k]
+        return per_day, total
+
+    def shaped(member_id, name, manager, is_active):
+        per_day, total = days_and_total(cells.get(member_id, {}))
         return {"member_id": member_id, "name": name,
                 "manager_id": manager, "manager_name": (users.get(manager) or {}).get("name"),
                 "is_active": is_active, "days": per_day, "total": total}
@@ -243,9 +253,16 @@ def uploads_grid(
     shaped_channels = sorted(
         ({k: c.get(k) for k in CHANNEL_COLUMNS.split(",")} for c in channels),
         key=lambda c: ((c["name"] or "").lower(), c["id"]))
+    channel_rows = []
+    for c in shaped_channels:
+        per_day, total = days_and_total(channel_cells.get(c["id"], {}))
+        channel_rows.append({
+            "channel_id": c["id"], "name": c["name"], "manager_id": c.get("manager_id"),
+            "manager_name": (users.get(c.get("manager_id")) or {}).get("name"),
+            "days": per_day, "total": total})
     return {"from": first.isoformat(), "to": last.isoformat(), "days": day_keys,
             "manager_id": manager_id, "managers": managers,
-            "channels": shaped_channels, "rows": rows}
+            "channels": shaped_channels, "rows": rows, "channel_rows": channel_rows}
 
 
 # ── the drill-down (#152) ─────────────────────────────────────────────────────
@@ -294,24 +311,36 @@ def uploads_videos(
     day: str = Query(...),
     member_id: int | None = Query(None),
     manager_id: int | None = Query(None),
+    channel_id: str | None = Query(None),
     user: dict = Depends(access.current_user),
 ):
     """The uploads behind one grid cell: on the user's visible channels (and
     ``manager_id``'s, for admin and exec, as the grid), on IST ``day``,
     credited to ``member_id`` (omitted = Unassigned) by the grid's own rule.
-    Oldest first."""
+    With ``channel_id`` (the "By channel" view), that channel's uploads that
+    day instead, whoever was credited; ``member_id`` is then ignored, and a
+    channel outside the scope is 404 ``channel_not_found``. Oldest first."""
     the_day = _parse_day(day, "day")
     if the_day is None:
         raise HTTPException(422, "day must be a date (YYYY-MM-DD)")
     db = supabase()
     channels, manager_id = _scope(db, user, manager_id)
-    name = UNASSIGNED
-    if member_id is not None:
-        name = _member(db, user, member_id, channels)["name"]
+    names = {c["id"]: c.get("name") for c in channels}
+    if channel_id is not None:
+        if channel_id not in names:
+            raise HTTPException(404, access.CHANNEL_NOT_FOUND)
+        member_id = None
+        name = names[channel_id] or channel_id
+        channels = [c for c in channels if c["id"] == channel_id]
+        wanted = lambda member: True  # noqa: E731
+    else:
+        name = UNASSIGNED
+        if member_id is not None:
+            name = _member(db, user, member_id, channels)["name"]
+        wanted = lambda member: member == member_id  # noqa: E731
 
     credited, _ = _credited(db, channels, the_day, the_day, VIDEO_COLUMNS)
-    names = {c["id"]: c.get("name") for c in channels}
-    uploads = sorted((u for member, _, u in credited if member == member_id),
+    uploads = sorted((u for member, _, u in credited if wanted(member)),
                      key=lambda u: (_ist_time(u["uploaded_at"]), u["video_id"]))
     videos = [{
         "video_id": u["video_id"], "title": u.get("title"),
@@ -321,5 +350,5 @@ def uploads_videos(
         "is_short": u.get("is_short"), "privacy_status": u.get("privacy_status"),
         "scheduled_publish_at": u.get("scheduled_publish_at"), "status": _status(u),
     } for u in uploads]
-    return {"day": the_day.isoformat(), "member_id": member_id, "name": name,
-            "manager_id": manager_id, "videos": videos}
+    return {"day": the_day.isoformat(), "member_id": member_id, "channel_id": channel_id,
+            "name": name, "manager_id": manager_id, "videos": videos}
