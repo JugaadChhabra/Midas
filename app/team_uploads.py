@@ -8,7 +8,10 @@
     (``app/rows.py``).
   * Credits each upload to the member whose assignment covered its channel on
     the upload's IST day (``starts_on <= day < ends_on``, ``ends_on`` NULL =
-    open), else to Unassigned. A scheduled or private video counts on the day
+    open). An upload from before the channel's first assignment is credited to
+    that first assignee (backfill: assigning a channel brings its history with
+    it; owner, 2026-11-19). Unassigned holds only uploads on a channel nobody
+    has been assigned yet, or in a gap between two assignments. A scheduled or private video counts on the day
     it was uploaded (``uploaded_at``), not the day it goes public.
   * Counts ``{total, shorts, long_form}`` per member per day; a NULL
     ``is_short`` (not yet classified) counts as long-form.
@@ -116,12 +119,15 @@ def _day(value) -> date | None:
     return date.fromisoformat(str(value)[:10]) if value else None
 
 
-def _holder(assignments: list[dict], day: date):
-    """The member id holding the channel on ``day``, else None."""
+def _holder(assignments: list[dict], day: date, first: dict | None = None):
+    """The member id holding the channel on ``day``; before the channel's
+    ``first`` assignment, that assignment's member (the backfill); else None."""
     for a in assignments:
         starts, ends = _day(a["starts_on"]), _day(a.get("ends_on"))
         if starts <= day and (ends is None or day < ends):
             return a["team_member_id"]
+    if first is not None and day < _day(first["starts_on"]):
+        return first["team_member_id"]
     return None
 
 
@@ -149,7 +155,8 @@ def _credited(db, channels: list[dict], first: date, last: date,
               columns: str = UPLOAD_COLUMNS):
     """The uploads on ``channels`` in the IST days ``[first, last]``, each with
     the member credited for it (the assignment holding its channel on its IST
-    day, else None = Unassigned), and the assignments in the window by channel.
+    day; before the channel's first assignment, its first assignee; else None
+    = Unassigned), and the assignments in the window by channel.
 
     The one crediting rule, shared by the grid and its drill-down so a cell and
     its list can't disagree."""
@@ -165,6 +172,11 @@ def _credited(db, channels: list[dict], first: date, last: date,
                      .in_("channel_id", ids)),
         channel_ids)
     by_channel: dict[str, list[dict]] = {}
+    earliest: dict[str, dict] = {}
+    for a in assignments:
+        held = earliest.get(a["channel_id"])
+        if held is None or (str(a["starts_on"]), a["id"]) < (str(held["starts_on"]), held["id"]):
+            earliest[a["channel_id"]] = a
     for a in assignments:
         ends = _day(a.get("ends_on"))
         if _day(a["starts_on"]) <= last and (ends is None or ends > first):
@@ -174,7 +186,8 @@ def _credited(db, channels: list[dict], first: date, last: date,
     for u in uploads:
         day = ist_day(u["uploaded_at"])
         if first <= day <= last:
-            credited.append((_holder(by_channel.get(u["channel_id"], []), day), day, u))
+            credited.append((_holder(by_channel.get(u["channel_id"], []), day,
+                                     earliest.get(u["channel_id"])), day, u))
     return credited, by_channel
 
 
