@@ -43,6 +43,8 @@ def test_a_member_and_day_list_the_videos_behind_the_cell(use):
         "channel_id": CH_A, "channel_name": "Marathi",
         "uploaded_at": "2026-11-12T04:30:00+00:00",
         "uploaded_at_ist": "2026-11-12T10:00:00+05:30",
+        "live_at": "2026-11-12T04:30:00+00:00",
+        "live_at_ist": "2026-11-12T10:00:00+05:30",
         "is_short": False, "privacy_status": "public", "scheduled_publish_at": None,
         "status": "public",
     }
@@ -50,9 +52,10 @@ def test_a_member_and_day_list_the_videos_behind_the_cell(use):
     assert v2["uploaded_at_ist"] == "2026-11-12T23:30:00+05:30"
 
 
-def test_the_status_pill_is_scheduled_public_unlisted_or_private(use):
-    use(_store([_upload("s", CH_A, "2026-11-12 09:00", privacy="private",
-                        scheduled="2026-11-20T04:30:00+00:00"),
+def test_the_status_pill_is_scheduled_public_or_unlisted(use):
+    # Scheduled for 11-12 09:30 IST (04:00 UTC), uploaded days before.
+    use(_store([_upload("s", CH_A, "2026-11-09 09:00", privacy="private",
+                        scheduled="2026-11-12T04:00:00+00:00"),
                 _upload("pub", CH_A, "2026-11-12 10:00"),
                 _upload("unl", CH_A, "2026-11-12 11:00", privacy="unlisted"),
                 _upload("pri", CH_A, "2026-11-12 12:00", privacy="private"),
@@ -61,10 +64,14 @@ def test_the_status_pill_is_scheduled_public_unlisted_or_private(use):
     body = _videos(MANAGER_A, member_id=PRANAV, day="2026-11-12")
 
     by_id = {v["video_id"]: v for v in body["videos"]}
+    # A private, unscheduled video never went live: not listed.
     assert {k: v["status"] for k, v in by_id.items()} == {
-        "s": "scheduled", "pub": "public", "unl": "unlisted", "pri": "private",
-        "unknown": "public"}
-    assert by_id["s"]["scheduled_publish_at"] == "2026-11-20T04:30:00+00:00"
+        "s": "scheduled", "pub": "public", "unl": "unlisted", "unknown": "public"}
+    assert by_id["s"]["scheduled_publish_at"] == "2026-11-12T04:00:00+00:00"
+    assert by_id["s"]["live_at_ist"] == "2026-11-12T09:30:00+05:30"
+    assert by_id["s"]["uploaded_at_ist"] == "2026-11-09T09:00:00+05:30"
+    # Ordered by go-live time.
+    assert _ids(body)[0] == "s"
     # An unclassified video says so; the UI shows "?".
     assert by_id["unknown"]["is_short"] is None
 

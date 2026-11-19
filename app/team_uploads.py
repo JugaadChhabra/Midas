@@ -1,18 +1,21 @@
 """The Team page's uploads grid (team tracker 09, #151, spec #142).
 
-``GET /team/uploads?from=&to=&manager_id=`` → who uploaded what, per IST day:
+``GET /team/uploads?from=&to=&manager_id=`` → what went live, per IST day:
 
   * Reads ``channel_uploads`` (written by the video sync, #150) for the user's
-    visible channels in the IST window ``[from 00:00, to + 1 00:00)``, and the
-    assignments on those channels (#149). Both paged past the 1000-row cap
-    (``app/rows.py``).
+    visible channels going live in the IST window ``[from 00:00, to + 1
+    00:00)``, and the assignments on those channels (#149). Both paged past the
+    1000-row cap (``app/rows.py``).
+  * A video counts on its go-live IST day (``live_at``: a scheduled video's
+    go-live time, else YouTube's publish time; a private, unscheduled video
+    never went live and isn't counted; owner, 2026-11-19). A day in the future
+    shows what is already scheduled for it.
   * Credits each upload to the member whose assignment covered its channel on
-    the upload's IST day (``starts_on <= day < ends_on``, ``ends_on`` NULL =
+    that day (``starts_on <= day < ends_on``, ``ends_on`` NULL =
     open). An upload from before the channel's first assignment is credited to
     that first assignee (backfill: assigning a channel brings its history with
     it; owner, 2026-11-19). Unassigned holds only uploads on a channel nobody
-    has been assigned yet, or in a gap between two assignments. A scheduled or private video counts on the day
-    it was uploaded (``uploaded_at``), not the day it goes public.
+    has been assigned yet, or in a gap between two assignments.
   * Counts ``{total, shorts, long_form}`` per member per day; a NULL
     ``is_short`` (not yet classified) counts as long-form.
   * ``manager_id`` narrows the channels to that manager's; honoured only for
@@ -67,7 +70,23 @@ MAX_DAYS = 92
 
 UNASSIGNED = "Unassigned"
 
-UPLOAD_COLUMNS = "video_id,channel_id,is_short,uploaded_at"
+UPLOAD_COLUMNS = ("video_id,channel_id,is_short,uploaded_at,privacy_status,"
+                  "scheduled_publish_at,video_published_at")
+
+
+def live_at(upload: dict) -> str | None:
+    """When the video goes (or went) live, which places it in the grid (owner,
+    2026-11-19: the team schedules weekend videos ahead, and a video counts on
+    the day viewers get it). A scheduled video: its go-live time
+    (``scheduled_publish_at``, still set until a sync sees it live; equal to
+    the go-live time either way). Else a private video never went live: None,
+    left out. Else (public, unlisted) YouTube's publish time
+    (``video_published_at``), falling back to ``uploaded_at`` when unknown."""
+    if upload.get("scheduled_publish_at"):
+        return upload["scheduled_publish_at"]
+    if upload.get("privacy_status") == "private":
+        return None
+    return upload.get("video_published_at") or upload.get("uploaded_at")
 ASSIGNMENT_COLUMNS = "id,channel_id,team_member_id,starts_on,ends_on"
 CHANNEL_COLUMNS = "id,name,manager_id,last_synced_at"
 
@@ -153,20 +172,31 @@ def _scope(db, user: dict, manager_id: int | None) -> tuple[list[dict], int | No
 
 def _credited(db, channels: list[dict], first: date, last: date,
               columns: str = UPLOAD_COLUMNS):
-    """The uploads on ``channels`` in the IST days ``[first, last]``, each with
-    the member credited for it (the assignment holding its channel on its IST
-    day; before the channel's first assignment, its first assignee; else None
+    """The uploads on ``channels`` going live (``live_at``) in the IST days
+    ``[first, last]``, each with the member credited for it (the assignment
+    holding its channel on its go-live IST day; before the channel's first assignment, its first assignee; else None
     = Unassigned), and the assignments in the window by channel.
 
     The one crediting rule, shared by the grid and its drill-down so a cell and
     its list can't disagree."""
     channel_ids = sorted(c["id"] for c in channels)
-    uploads = rows_for_ids(
-        lambda ids: (db.table("channel_uploads").select(columns)
-                     .in_("channel_id", ids)
-                     .gte("uploaded_at", ist_midnight(first).isoformat())
-                     .lt("uploaded_at", ist_midnight(last + timedelta(days=1)).isoformat())),
-        channel_ids, order_by="video_id")
+    start = ist_midnight(first).isoformat()
+    end = ist_midnight(last + timedelta(days=1)).isoformat()
+
+    # live_at reads one of three columns; one plain range read per column (no
+    # PostgREST or-filter), merged by video id, the exact day decided below.
+    def in_window(column, null_column=None):
+        def query(ids):
+            q = (db.table("channel_uploads").select(columns).in_("channel_id", ids)
+                 .gte(column, start).lt(column, end))
+            return q.is_(null_column, "null") if null_column else q
+        return rows_for_ids(query, channel_ids, order_by="video_id")
+
+    merged: dict[str, dict] = {}
+    for u in (in_window("scheduled_publish_at") + in_window("video_published_at")
+              + in_window("uploaded_at", null_column="video_published_at")):
+        merged[u["video_id"]] = u
+    uploads = [merged[k] for k in sorted(merged)]
     assignments = rows_for_ids(
         lambda ids: (db.table("channel_assignments").select(ASSIGNMENT_COLUMNS)
                      .in_("channel_id", ids)),
@@ -184,7 +214,10 @@ def _credited(db, channels: list[dict], first: date, last: date,
 
     credited = []
     for u in uploads:
-        day = ist_day(u["uploaded_at"])
+        at = live_at(u)
+        if at is None:
+            continue
+        day = ist_day(at)
         if first <= day <= last:
             credited.append((_holder(by_channel.get(u["channel_id"], []), day,
                                      earliest.get(u["channel_id"])), day, u))
@@ -281,7 +314,7 @@ def uploads_grid(
 # ── the drill-down (#152) ─────────────────────────────────────────────────────
 
 VIDEO_COLUMNS = ("video_id,channel_id,title,thumbnail_url,is_short,privacy_status,"
-                 "scheduled_publish_at,uploaded_at")
+                 "scheduled_publish_at,uploaded_at,video_published_at")
 
 #: The status pill: ``scheduled`` while a go-live time is set (YouTube clears
 #: ``status.publishAt`` once the video is live), else the privacy status. Shown
@@ -354,12 +387,13 @@ def uploads_videos(
 
     credited, _ = _credited(db, channels, the_day, the_day, VIDEO_COLUMNS)
     uploads = sorted((u for member, _, u in credited if wanted(member)),
-                     key=lambda u: (_ist_time(u["uploaded_at"]), u["video_id"]))
+                     key=lambda u: (_ist_time(live_at(u)), u["video_id"]))
     videos = [{
         "video_id": u["video_id"], "title": u.get("title"),
         "thumbnail_url": u.get("thumbnail_url"),
         "channel_id": u["channel_id"], "channel_name": names.get(u["channel_id"]),
         "uploaded_at": u["uploaded_at"], "uploaded_at_ist": _ist_time(u["uploaded_at"]),
+        "live_at": live_at(u), "live_at_ist": _ist_time(live_at(u)),
         "is_short": u.get("is_short"), "privacy_status": u.get("privacy_status"),
         "scheduled_publish_at": u.get("scheduled_publish_at"), "status": _status(u),
     } for u in uploads]
