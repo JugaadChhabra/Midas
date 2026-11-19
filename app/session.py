@@ -8,8 +8,8 @@ Midas used to answer anyone on the office LAN. Now every request passes
     with 403, whatever the path (CSRF belt-and-braces on top of the
     ``SameSite=Lax`` cookie). A request with no ``Origin`` (curl, a script) is
     let through to the session check, which still needs the cookie.
-  * ``PUBLIC_PATHS`` (the login page, the login endpoint, the one stylesheet
-    the login page loads, and ``/health`` for the Docker healthcheck) pass
+  * ``PUBLIC_PATHS`` (the login page, the login endpoint, the stylesheet and
+    logo the login page loads, and ``/health`` for the Docker healthcheck) pass
     without a session. Nothing else does: the list is exact paths, not
     prefixes, so ``/health/jobs`` and the rest of ``/static`` stay behind it.
   * Any other request needs a valid session cookie. Without one, a GET that
@@ -59,7 +59,8 @@ SESSION_DAYS = 30
 PUBLIC_PATHS = frozenset({
     "/login",
     "/session/login",
-    "/static/theme.css",   # the login page's only asset; its script is inline
+    "/static/theme.css",   # the login page's stylesheet; its script is inline
+    "/static/midas.png",   # the logo and tab icon, shown on the login page too
     "/health",             # the Docker healthcheck
 })
 

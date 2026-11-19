@@ -39,12 +39,7 @@
     caret:       () => stroke('<path d="m7 15 5 5 5-5M7 9l5-5 5 5"/>', 15),
     plus:        () => stroke('<path d="M12 5v14M5 12h14"/>', 14),
     logout:      () => stroke('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5M5 12h11"/>', 16),
-    brand: () => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="3.4" fill="currentColor"/>
-        <g stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
-          <path d="M12 1.7v3.5M12 18.8v3.5M22.3 12h-3.5M5.2 12H1.7"/>
-          <path d="m19.3 4.7-2.5 2.5M7.2 16.8l-2.5 2.5M19.3 19.3l-2.5-2.5M7.2 7.2 4.7 4.7"/>
-        </g></svg>`,
+    brand: () => `<img class="brand-logo" src="/static/midas.png" width="26" height="26" alt="">`,
   };
   const icon = (name) => (ICONS[name] || ICONS.home)();
 

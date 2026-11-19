@@ -220,7 +220,7 @@ def test_the_public_allowlist_is_exact():
     """Exact paths, not prefixes: a new route under /health or /static stays
     behind the gate."""
     assert session.PUBLIC_PATHS == {"/login", "/session/login", "/static/theme.css",
-                                    "/health"}
+                                    "/static/midas.png", "/health"}
 
 
 # ── the Origin check ────────────────────────────────────────────────────────

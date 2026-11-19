@@ -155,6 +155,9 @@ h1 { margin-bottom: .25rem; }
 .sidebar-brand { display:flex; align-items:center; gap:.55rem; min-width:0;
                  text-decoration:none; color:inherit; font-weight:700; font-size:1rem; }
 .sidebar-brand svg { flex:0 0 auto; }
+/* The logo (/static/midas.png): one file for the rail, the login page and the
+   tab icon. It is its own rounded tile, so it gets no border or background. */
+.brand-logo { flex:0 0 auto; display:block; object-fit:contain; }
 .sidebar-toggle { display:flex; padding:.3rem; border:0; background:none; cursor:pointer;
                   border-radius:var(--radius-sm); opacity:.6; color:inherit; }
 .sidebar-toggle:hover { background:var(--surface-tint); opacity:1; }
