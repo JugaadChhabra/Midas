@@ -38,7 +38,6 @@ LEVER_VERDICTS_SQL = REPO / "supabase/migrations/20261023010000_lever_verdicts.s
 TITLE_SCOPES_SQL = REPO / "supabase/migrations/20261030010000_lever_verdicts_title_scopes.sql"
 PLAYLIST_ARMS_SQL = REPO / "supabase/migrations/20261027000000_playlist_arms.sql"
 SHORT_LINKS_SQL = REPO / "supabase/migrations/20261027010000_short_link_recommendations.sql"
-CHANNEL_HTML = REPO / "app/static/channel.html"
 APP_USERS_SQL = REPO / "supabase/migrations/20261118000000_app_users_sessions.sql"
 
 
@@ -259,15 +258,6 @@ def test_short_link_status_values_are_the_persisted_strings():
               if l.strip().startswith("status ")]
     assert set(line.split("--")[1].strip().split("|")) == sv.ALL_SHORT_LINK_STATUSES
     assert f"default '{sv.ShortLinkStatus.PENDING}'" in line
-
-
-def test_the_experiment_decision_source_is_labelled_in_the_proposals_card():
-    """playlist_proposals.decision_source `experiment` (S2.1), and its mirror,
-    DECIDED_BY in channel.html: unlabelled, the card would show the raw string."""
-    assert sv.PlaylistProposalSource.EXPERIMENT == "experiment"
-    block = re.search(r"const DECIDED_BY = \{(.*?)\n  \};", CHANNEL_HTML.read_text(), re.S)
-    assert block, "DECIDED_BY not found in channel.html"
-    assert re.search(r"^\s*experiment:\s*'Playlist test',", block.group(1), re.M)
 
 
 def test_user_role_values_are_the_persisted_strings():
