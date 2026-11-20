@@ -47,8 +47,15 @@
          background:var(--c1); border:1px solid var(--c1d); border-radius:12px;
          color:#fff; cursor:default;
          box-shadow:0 2px 0 var(--c1d), 0 10px 28px rgb(0 0 0 / .14); }
-  .mgr.nomgr { --c1:hsl(220 9% 52%); --c1d:hsl(220 9% 40%); --c3:hsl(220 10% 62%); --c3d:hsl(220 9% 46%);
-               --c2:hsl(220 9% 58%); --c2d:hsl(220 9% 44%); }
+  /* A channel with no manager has no card to sit in: it floats loose on the
+     canvas, grey, drifting a little, until someone drags it onto a member or a
+     tray (or picks a manager in its card). */
+  .free-slot { --c3:hsl(220 9% 56%); --c3d:hsl(220 9% 44%); position:absolute; z-index:1; width:200px;
+               animation:drift 7s ease-in-out infinite alternate; }
+  .free-slot .ch { box-shadow:0 6px 16px rgb(0 0 0 / .22); }
+  @keyframes drift { 0% { translate:0 0; rotate:-1.2deg; } 50% { translate:5px -4px; rotate:.6deg; }
+                     100% { translate:-4px 3px; rotate:1.4deg; } }
+  body.dragging-ch .free-slot { animation-play-state:paused; }
   .mgr.carrying { z-index:5; box-shadow:0 2px 0 var(--c1d), 0 22px 50px rgb(0 0 0 / .28); scale:1.015; }
   .hat { position:relative; padding:12px 12px 10px 0; cursor:grab; touch-action:none; }
   .hat-name { display:block; font-size:15px; font-weight:800; letter-spacing:-.01em;
@@ -111,7 +118,7 @@
                      50% { box-shadow:0 0 0 4px rgb(240 104 90 / .6); } }
 
   /* Dragging: every place a block can go glows; the one under it lights up. */
-  body.dragging-ch .slot { outline:2px dashed color-mix(in srgb, #fff 55%, var(--c3)); outline-offset:-2px; }
+  body.dragging-ch .slot:not(.free-slot) { outline:2px dashed color-mix(in srgb, #fff 55%, var(--c3)); outline-offset:-2px; }
   body.dragging-ch .slot:has(.ghost) { outline:2px solid #fff; box-shadow:0 0 0 4px color-mix(in srgb, var(--c3) 70%, transparent), inset 0 0 0 999px rgb(255 255 255 / .06); }
   body.dragging-mem .members { outline:2px dashed color-mix(in srgb, #fff 55%, var(--c2)); outline-offset:-2px; }
   body.dragging-mem .members:has(.ghost) { outline:2px solid #fff; }
@@ -147,7 +154,7 @@
   .confetti { position:fixed; z-index:80; width:8px; height:12px; border-radius:2px; pointer-events:none; }
 
   @media (prefers-reduced-motion: reduce) {
-    .ch.alarm, .landed { animation:none; }
+    .ch.alarm, .landed, .free-slot { animation:none; }
     .lifted { rotate:0deg; scale:1; }
     .board-canvas.tidying .mgr { transition:none; }
   }
@@ -557,23 +564,26 @@ function memberBlock(m) {
 }
 
 function managerBlock(g) {
-  const none = g.id === NO_MGR;
-  const members = none ? [] : B.members.filter(m => m.manager_id === g.id && (showOff || m.is_active));
-  const owned = B.channels.filter(c => none ? c.manager_id == null : c.manager_id === g.id);
+  const members = B.members.filter(m => m.manager_id === g.id && (showOff || m.is_active));
+  const owned = B.channels.filter(c => c.manager_id === g.id);
   const loose = owned.filter(c => c.holder_id == null);
   const active = members.filter(m => m.is_active).length;
-  const meta = none ? `${owned.length} channel${owned.length === 1 ? '' : 's'}`
-    : `${active} member${active === 1 ? '' : 's'} · ${owned.length} channel${owned.length === 1 ? '' : 's'}`;
-  const canAdd = canEdit() && !none && (isAdmin() || g.id === me.id);
-  return `<div class="mgr${none ? ' nomgr' : ''}" data-mgr="${g.id}" style="--h:${none ? 220 : hueOf(g.id)}">
+  const meta = `${active} member${active === 1 ? '' : 's'} · ${owned.length} channel${owned.length === 1 ? '' : 's'}`;
+  const canAdd = canEdit() && (isAdmin() || g.id === me.id);
+  return `<div class="mgr" data-mgr="${g.id}" style="--h:${hueOf(g.id)}">
     <div class="hat" title="Drag to move this block"><span class="hat-name">${esc(g.name)}</span>
       <span class="hat-meta">${meta}</span></div>
-    ${none ? '' : `<div class="members" data-mgr="${g.id}">${members.map(memberBlock).join('')}</div>
-      ${canAdd ? `<button type="button" class="add-mem" data-mgr="${g.id}">+ Add member</button>` : ''}`}
-    <div class="mgr-foot"><div class="tray-label">${none ? 'Channels with no manager' : 'Loose channels'}</div>
+    <div class="members" data-mgr="${g.id}">${members.map(memberBlock).join('')}</div>
+      ${canAdd ? `<button type="button" class="add-mem" data-mgr="${g.id}">+ Add member</button>` : ''}
+    <div class="mgr-foot"><div class="tray-label">Loose channels</div>
       <div class="slot tray-slot" data-tray="${g.id}">${loose.map(chBlock).join('')}</div></div>
   </div>`;
 }
+
+// A channel with no manager: a lone grey chip on the canvas. Its slot takes
+// nothing dropped on it; the chip itself drags onto a member or a tray.
+const freeBlock = (c, i) => `<div class="slot free-slot" data-tray="${NO_MGR}"
+    style="animation-delay:${-(i * 1.7) % 7}s">${chBlock(c)}</div>`;
 
 // ── Layout: blocks float; positions live in this browser ──────────────
 const posKey = () => `midas:board:pos:${me ? me.id : 0}`;
@@ -594,13 +604,39 @@ function placeBlocks() {
     el.style.top = heights[i] + 'px';
     heights[i] += el.offsetHeight + GAP;
   });
+  placeFree(PAD);
   sizeCanvas();
+}
+
+// Free chips scatter over open canvas: in the space right of the cards when
+// the view has room for it, else in a band below them. A small jitter per
+// channel id keeps them from lining up like a list, the same every paint.
+function placeFree(PAD) {
+  const canvas = $('board-canvas');
+  const free = canvas.querySelectorAll('.free-slot');
+  if (!free.length) return;
+  let right = 0, bottom = 0;
+  canvas.querySelectorAll('.mgr').forEach(el => {
+    right = Math.max(right, el.offsetLeft + el.offsetWidth);
+    bottom = Math.max(bottom, el.offsetTop + el.offsetHeight);
+  });
+  const view = $('board').clientWidth / zoom;
+  const W = 200, STEP_X = 250, STEP_Y = 64;
+  const beside = view - right - 2 * PAD >= W + 40;
+  const x0 = beside ? right + 60 : PAD, y0 = beside ? PAD + 18 : bottom + 60;
+  const across = Math.max(1, Math.floor(((beside ? view - x0 : view) - PAD) / STEP_X));
+  const jitter = (id, n) => { let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) % n; };
+  free.forEach((el, i) => {
+    const id = el.querySelector('.ch').dataset.channel;
+    el.style.left = (x0 + (i % across) * STEP_X + jitter(id, 36)) + 'px';
+    el.style.top = (y0 + Math.floor(i / across) * STEP_Y + jitter(id + '.', 22)) + 'px';
+  });
 }
 
 function sizeCanvas() {
   const canvas = $('board-canvas');
   let w = 0, h = 0;
-  canvas.querySelectorAll('.mgr').forEach(el => {
+  canvas.querySelectorAll('.mgr, .free-slot').forEach(el => {
     w = Math.max(w, el.offsetLeft + el.offsetWidth);
     h = Math.max(h, el.offsetTop + el.offsetHeight);
   });
@@ -713,13 +749,11 @@ function paintBoard() {
   buildLabels(B.channels);
   document.body.classList.toggle('is-admin', !!isAdmin());
   document.body.classList.toggle('is-exec', !canEdit());
-  const groups = B.managers.slice();
-  if (isAdmin() || (seesAll() && B.channels.some(c => c.manager_id == null))) {
-    groups.unshift({ id: NO_MGR, name: 'No manager' });
-  }
+  const groups = B.managers;
+  const free = B.channels.filter(c => c.manager_id == null);
   const canvas = $('board-canvas');
-  canvas.innerHTML = groups.length ? groups.map(managerBlock).join('')
-    : '<div class="muted" style="padding:2rem">No managers yet.</div>';
+  canvas.innerHTML = (groups.length ? groups.map(managerBlock).join('')
+    : '<div class="muted" style="padding:2rem">No managers yet.</div>') + free.map(freeBlock).join('');
   placeBlocks();
   wireSortables();
   $('show-off').checked = showOff;
@@ -763,7 +797,8 @@ function wireSortables() {
     const m = el.dataset.member ? memberOf(Number(el.dataset.member)) : null;
     sortables.push(Sortable.create(el, {
       ...common,
-      group: { name: 'ch', pull: true, put: !m || m.is_active },
+      group: { name: 'ch', pull: true,
+               put: !el.classList.contains('free-slot') && (!m || m.is_active) },
       onStart: () => document.body.classList.add('dragging-ch'),
       onEnd: onChannelDrop,
     }));
