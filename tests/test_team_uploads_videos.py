@@ -289,3 +289,37 @@ def test_admins_manager_filter_narrows_the_channel_drill_down_too(use):
         "day": "2026-11-10", "channel_id": CH_B, "manager_id": MANAGER_A})
 
     assert r.status_code == 404
+
+
+# ── a channel row inside a member's section ──────────────────────────────────
+
+def test_by_member_lists_only_the_channels_uploads_credited_to_that_member(use):
+    use(_busy())
+
+    pranav = _videos(ADMIN, day="2026-11-12", channel_id=CH_A, member_id=PRANAV, by_member=True)
+    meet = _videos(ADMIN, day="2026-11-14", channel_id=CH_A, member_id=MEET, by_member=True)
+    not_pranav = _videos(ADMIN, day="2026-11-14", channel_id=CH_A, member_id=PRANAV,
+                         by_member=True)
+    # Telugu is nobody's: by_member without member_id is Unassigned's.
+    unassigned = _videos(ADMIN, day="2026-11-13", channel_id=CH_NONE, by_member=True)
+
+    assert _ids(pranav) == ["a-12-late"]
+    assert (pranav["member_id"], pranav["channel_id"]) == (PRANAV, CH_A)
+    assert _ids(meet) == ["a-14"]
+    assert _ids(not_pranav) == []
+    assert _ids(unassigned) == ["n-13"]
+
+
+def test_by_member_cells_match_the_sections_channel_cells(use):
+    use(_busy())
+
+    grid = _grid(ADMIN, **WINDOW)
+    for row in grid["rows"]:
+        for ch in row["channels"]:
+            for day, cell in ch["days"].items():
+                if not cell or not cell["total"]:
+                    continue
+                params = {"day": day, "channel_id": ch["channel_id"], "by_member": True}
+                if row["member_id"] is not None:
+                    params["member_id"] = row["member_id"]
+                assert len(_videos(ADMIN, **params)["videos"]) == cell["total"]

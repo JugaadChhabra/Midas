@@ -14,36 +14,144 @@
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
 
-  .add-row { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin:0 0 1.2rem; }
-  .add-row input, .dt-row input.rename {
-    font:inherit; font-size:13px; padding:.45rem .6rem; border-radius:var(--radius-sm);
-    border:1px solid var(--border); background:var(--panel-bg); color:inherit; min-width:14rem;
+  /* ── The Board (the Roster, rebuilt 2026-11-20) ─────────────────────────
+     Scratch-like blocks: hat blocks for managers, C-blocks for members wrapping
+     their channels, puzzle-piece channel blocks. One hue per manager (--h). */
+  .board-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1.1rem; margin:0 0 .9rem;
+               font-size:12.5px; color:var(--ink-3); }
+  .board-bar .grow { flex:1 1 0; }
+  .board-bar .key { display:inline-flex; align-items:center; gap:.35rem; }
+  .board-bar .key i { display:inline-block; width:12px; height:12px; border-radius:3px; }
+  .board-bar .key .k-gold { background:#f5c542; box-shadow:0 0 6px #f5c542; }
+  .board-bar .key .k-alarm { background:#f0685a; }
+  .board { position:relative; height:calc(100vh - 170px); min-height:420px; overflow:auto;
+           border:1px solid var(--border); border-radius:var(--radius);
+           background-color:var(--ground);
+           background-image:radial-gradient(color-mix(in srgb, var(--ink-4) 45%, transparent) 1px, transparent 1.2px);
+           background-size:22px 22px; cursor:grab; }
+  .board.panning { cursor:grabbing; }
+  .board-canvas { position:relative; min-width:100%; min-height:100%; }
+  .board-canvas.tidying .mgr { transition:left .45s cubic-bezier(.2,.8,.2,1), top .45s cubic-bezier(.2,.8,.2,1); }
+
+  .mgr { --c1:hsl(var(--h) 58% 50%); --c1d:hsl(var(--h) 52% 38%);
+         --c2:hsl(var(--h) 62% 58%); --c2d:hsl(var(--h) 50% 44%);
+         --c3:hsl(var(--h) 70% 64%); --c3d:hsl(var(--h) 52% 48%);
+         --slot:color-mix(in srgb, var(--panel-bg) 86%, hsl(var(--h) 70% 50%));
+         position:absolute; z-index:0; width:318px; box-sizing:border-box; padding:0 0 0 16px;
+         background:var(--c1); border:1px solid var(--c1d); border-radius:6px 12px 12px 12px;
+         color:#fff; cursor:default;
+         box-shadow:0 2px 0 var(--c1d), 0 10px 28px rgb(0 0 0 / .14); }
+  .mgr.nomgr { --c1:hsl(220 9% 52%); --c1d:hsl(220 9% 40%); --c3:hsl(220 10% 62%); --c3d:hsl(220 9% 46%);
+               --c2:hsl(220 9% 58%); --c2d:hsl(220 9% 44%); }
+  .mgr.carrying { z-index:5; box-shadow:0 2px 0 var(--c1d), 0 22px 50px rgb(0 0 0 / .28); scale:1.015; }
+  .hat { position:relative; padding:14px 12px 10px 0; cursor:grab; touch-action:none; }
+  .hat::before { content:''; position:absolute; z-index:-1; left:-17px; top:-17px; width:136px; height:44px;
+                 background:var(--c1); border:1px solid var(--c1d); border-bottom:0;
+                 border-radius:50% 50% 0 0 / 100% 100% 0 0; }
+  .hat-name { display:block; font-size:15px; font-weight:800; letter-spacing:-.01em;
+              text-shadow:0 1px 0 rgb(0 0 0 / .18); }
+  .hat-meta { display:block; font-size:11.5px; opacity:.88; margin-top:1px; }
+
+  .members { background:var(--slot); border:1px solid var(--c1d); border-right:0; border-radius:8px 0 0 8px;
+             padding:10px; min-height:44px; display:flex; flex-direction:column; gap:12px; }
+  .members:empty::after { content:'No members yet'; color:var(--ink-3); font-size:12px; padding:4px 2px; }
+  .add-mem { all:unset; display:block; font-size:12px; font-weight:600; opacity:.85; padding:7px 0 0; cursor:pointer; }
+  .add-mem:hover, .add-mem:focus-visible { opacity:1; text-decoration:underline; }
+  .add-mem-form { display:flex; gap:.35rem; padding:7px 10px 0 0; }
+  .add-mem-form input { flex:1; min-width:0; font:inherit; font-size:12.5px; padding:.3rem .5rem; border-radius:5px;
+                        border:1px solid var(--c1d); background:#fff; color:#222; }
+  .add-mem-form button { font-size:12px; }
+  .mgr-foot { padding:10px 12px 12px 0; }
+  .tray-label { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; opacity:.85;
+                margin:0 0 6px; }
+  .tray-slot { --slot:color-mix(in srgb, var(--c1d) 70%, #000); background:var(--slot); border-radius:6px;
+               min-height:36px; padding:6px; box-shadow:inset 0 1px 3px rgb(0 0 0 / .25); }
+  .tray-slot:empty::after { content:'Nothing loose'; display:block; font-size:11.5px; opacity:.7; padding:4px; }
+
+  .mem { position:relative; background:var(--c2); border:1px solid var(--c2d); border-radius:4px 8px 8px 8px;
+         padding:0 0 0 14px; color:#fff; }
+  .mem::after { content:''; position:absolute; z-index:2; left:16px; top:100%; width:24px; height:6px;
+                background:var(--c2); clip-path:polygon(0 0,100% 0,78% 100%,22% 100%); }
+  .mem-top { display:flex; align-items:center; gap:.45rem; padding:8px 10px 7px 0; font-size:13px;
+             font-weight:750; cursor:pointer; text-shadow:0 1px 0 rgb(0 0 0 / .15); }
+  .is-admin .mem-top { cursor:grab; }
+  .mem-top:focus-visible, .ch:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .mem-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mem-sum { margin-left:auto; font-size:11.5px; font-weight:600; opacity:.9; font-variant-numeric:tabular-nums;
+             white-space:nowrap; }
+  .mem-slot { background:var(--slot); border:1px solid var(--c2d); border-right:0; border-radius:6px 0 0 6px;
+              min-height:34px; padding:6px 8px 9px; }
+  .mem-slot:empty::after { content:'Drop channels here'; display:block; color:var(--ink-3); font-size:11.5px;
+                           padding:6px 2px; }
+  .mem-foot { height:11px; }
+  .mem .star { color:#ffe680; filter:drop-shadow(0 0 4px #ffcf33); }
+  .mem.gold { border-color:#f2b705; box-shadow:0 0 0 2px #f5c542, 0 0 22px rgb(245 197 66 / .6); }
+  .mem.off { filter:grayscale(.85); opacity:.65; }
+
+  .ch { position:relative; display:flex; align-items:center; gap:.5rem; min-height:32px; box-sizing:border-box;
+        padding:6px 9px 6px 11px; background:var(--c3); border:1px solid var(--c3d); border-radius:5px;
+        color:#fff; font-size:12.5px; font-weight:650; cursor:grab; user-select:none; touch-action:none;
+        text-shadow:0 1px 0 rgb(0 0 0 / .16); transition:filter .15s, translate .15s; }
+  .ch + .ch { margin-top:2px; }
+  .ch::before { content:''; position:absolute; left:15px; top:-1px; width:22px; height:6px; background:var(--slot);
+                clip-path:polygon(0 0,100% 0,78% 100%,22% 100%); }
+  .ch::after { content:''; position:absolute; z-index:2; left:15px; top:100%; width:22px; height:6px;
+               background:var(--c3); clip-path:polygon(0 0,100% 0,78% 100%,22% 100%); }
+  .ch:hover { filter:brightness(1.07); translate:0 -1px; }
+  .is-exec .ch { cursor:pointer; }
+  .ch-name { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ch.no-target .ch-name { flex:1 1 auto; }
+  .ch-bar { flex:1 1 auto; min-width:28px; height:6px; border-radius:3px; background:rgb(0 0 0 / .2); overflow:hidden; }
+  .ch-bar i { display:block; height:100%; border-radius:3px; background:#fff; transition:width .7s cubic-bezier(.2,.8,.2,1); }
+  .ch-n { flex:0 0 auto; font-size:11.5px; font-variant-numeric:tabular-nums; }
+  .ch-n.dim { opacity:.8; font-weight:550; }
+  .ch-tick { flex:0 0 auto; display:grid; place-items:center; width:16px; height:16px; border-radius:50%;
+             background:#fff; color:var(--c3d); font-size:10px; font-weight:900; text-shadow:none; }
+  .ch.alarm { border-color:#f0685a; animation:alarm 1.6s ease-in-out infinite; }
+  @keyframes alarm { 0%,100% { box-shadow:0 0 0 0 rgb(240 104 90 / 0); }
+                     50% { box-shadow:0 0 0 4px rgb(240 104 90 / .6); } }
+
+  /* Dragging: every place a block can go glows; the one under it lights up. */
+  body.dragging-ch .slot { outline:2px dashed color-mix(in srgb, #fff 55%, var(--c3)); outline-offset:-2px; }
+  body.dragging-ch .slot:has(.ghost) { outline:2px solid #fff; box-shadow:0 0 0 4px color-mix(in srgb, var(--c3) 70%, transparent), inset 0 0 0 999px rgb(255 255 255 / .06); }
+  body.dragging-mem .members { outline:2px dashed color-mix(in srgb, #fff 55%, var(--c2)); outline-offset:-2px; }
+  body.dragging-mem .members:has(.ghost) { outline:2px solid #fff; }
+  .ghost { opacity:.35; }
+  .lifted { rotate:-3deg; scale:1.06; opacity:1 !important; cursor:grabbing !important;
+            box-shadow:0 16px 34px rgb(0 0 0 / .32) !important; }
+  .landed { animation:land .55s cubic-bezier(.2,.8,.2,1); }
+  @keyframes land { 0% { scale:1.14; } 35% { scale:.94; } 65% { scale:1.04; } 100% { scale:1; } }
+
+  /* Cards: a channel's targets and move, a member's name and state. */
+  .modal.blk { --c2:hsl(var(--h) 62% 52%); --c3:hsl(var(--h) 66% 56%);
+               max-width:400px; padding:0; overflow:hidden; }
+  .modal.blk.grey { --c2:hsl(220 9% 52%); --c3:hsl(220 9% 52%); }
+  .blk-head { padding:1rem 1.1rem .85rem; color:#fff; background:var(--c3, #888);
+              text-shadow:0 1px 0 rgb(0 0 0 / .18); }
+  .blk-head.mem-head { background:var(--c2, #888); }
+  .blk-head h2 { margin:0; font-size:16px; }
+  .blk-head .sub { font-size:12px; opacity:.92; margin-top:.2rem; }
+  .blk-body { padding:1rem 1.1rem 1.1rem; }
+  .blk-body h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+                 color:var(--ink-3); margin:0 0 .55rem; }
+  .blk-body section + section { margin-top:1.1rem; }
+  .blk-row { display:flex; gap:.45rem; align-items:center; }
+  .blk-row select, .blk-row input[type="text"] { flex:1; min-width:0; font:inherit; font-size:13px;
+      padding:.4rem .55rem; border-radius:var(--radius-sm); border:1px solid var(--border);
+      background:var(--panel-bg); color:inherit; }
+  .blk-today { font-size:13px; font-variant-numeric:tabular-nums; }
+  .blk-today .met { color:var(--color-ok); font-weight:600; }
+  .blk-today .short { color:var(--color-err); font-weight:600; }
+  .blk-chs { display:flex; flex-wrap:wrap; gap:.3rem; }
+  .blk .modal-actions { margin-top:1rem; }
+
+  .confetti { position:fixed; z-index:80; width:8px; height:12px; border-radius:2px; pointer-events:none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ch.alarm, .landed { animation:none; }
+    .lifted { rotate:0deg; scale:1; }
+    .board-canvas.tidying .mgr { transition:none; }
   }
-  .dt { --dt-cols: minmax(9rem, 14rem) minmax(10rem, 1fr) 7rem 22rem; }
-  .dt-row .acts { display:flex; gap:.35rem; justify-content:flex-end; }
-  .dt-row .chs { display:flex; flex-wrap:wrap; gap:.3rem; }
-  .dt-row .chs .none { color:var(--ink-4); }
-  .dt-row.off .name { color:var(--ink-4); }
-  .show-off { margin:0 0 1rem; }
-  .show-off[hidden], #add-manager[hidden] { display:none; }
-
-  .group-head .mgr-chs { font-size:12px; font-weight:400; color:var(--ink-3); text-transform:none;
-                         letter-spacing:0; }
-  .group-head button { font-size:12px; }
-  .group .dt-empty { padding:.6rem .9rem; }
-
-  /* The channel picker: a member's channels, or (admin) a manager's. */
-  .modal.pick { max-width:460px; max-height:85vh; display:flex; flex-direction:column; }
-  .pick h2 { font-size:15px; margin:0 0 .8rem; }
-  .pick-list { overflow-y:auto; margin:0 0 1rem; border:1px solid var(--border-soft);
-               border-radius:var(--radius-sm); }
-  .pick-row { display:flex; align-items:center; gap:.6rem; padding:.55rem .75rem; font-size:13px;
-              cursor:pointer; border-bottom:1px solid var(--border-soft); }
-  .pick-row:last-child { border-bottom:0; }
-  .pick-row:hover { background:var(--surface-faint); }
-  .pick-row .note { margin-left:auto; font-size:11.5px; color:var(--ink-4); }
-  .pick-row .note.move { color:var(--color-warn); }
-  .pick-empty { padding:1rem; font-size:13px; color:var(--ink-3); }
 
   /* Uploads grid (#151): rows × IST days, one number per cell, shaded by
      how busy the cell is; the Shorts / long-form split is a filter, and a
@@ -153,6 +261,26 @@
                           font-size:12px; color:var(--ink-3); }
   .hovercard .hc-target b { color:var(--color-err); font-weight:600; }
   .hovercard .hc-target .met { color:var(--color-ok); }
+  /* The grid's member sections (2026-11-20): a head row per member with their
+     totals, their channels under it; a gap row between sections. */
+  table.up tbody.gap td { height:12px; padding:0; border:0; background:var(--ground); }
+  table.up tbody.gap td.name { background:var(--ground); }
+  table.up tr.sec-head td { background:var(--surface-faint); border-top:1px solid var(--border); }
+  table.up tr.sec-head td.name { background:color-mix(in srgb, var(--panel-bg) 94%, var(--ink-4)); }
+  table.up tr.sec-head td.name .label { font-weight:650; }
+  table.up tr.sec-head .tog { all:unset; cursor:pointer; display:inline-grid; place-items:center; width:16px;
+    height:18px; margin:0 .3rem 0 -.3rem; border-radius:3px; color:var(--ink-3); font-size:13px;
+    transition:rotate .15s; }
+  table.up tr.sec-head .tog:hover { background:var(--surface-tint); }
+  table.up tbody.collapsed tr.sec-head .tog { rotate:-90deg; }
+  table.up tbody.collapsed tr.sec-ch { display:none; }
+  table.up tr.sec-head .n { font-size:11px; color:var(--ink-4); font-weight:500; margin-left:.35rem; }
+  table.up tr.sec-ch td.name { padding-left:2.1rem; }
+  table.up tr.sec-ch td.name .label { color:var(--ink-2); }
+  table.up tr.sec-ch td.none { text-align:left; padding:.5rem .9rem; color:var(--ink-4); font-size:12px; }
+  /* A day the channel was someone else's. */
+  table.up td.day.not-held > span { background:repeating-linear-gradient(90deg, var(--border-soft) 0 1px, transparent 1px 6px);
+    opacity:.6; }
   .hc-shorts { background:var(--color-accent); }
   .hc-long { background:var(--color-ok); }
   .up-legend { display:flex; flex-wrap:wrap; gap:.4rem 1.2rem; font-size:11.5px; color:var(--ink-4);
@@ -231,31 +359,23 @@
           <button type="button" class="chip" data-kind="shorts">Shorts</button>
           <button type="button" class="chip" data-kind="long">Long-form</button>
         </div>
-        <span class="up-sep" aria-hidden="true"></span>
-        <div class="chip-bar" id="up-view" role="group" aria-label="Rows">
-          <button type="button" class="chip" data-view="member">By member</button>
-          <button type="button" class="chip" data-view="channel">By channel</button>
-        </div>
       </div>
       <div class="up-summary" id="up-summary"></div>
       <div id="up-grid"><div class="skel" data-skeleton data-rows="4"></div></div>
     </section>
 
-    <!-- ─── ROSTER ─── -->
-    <section class="tab-panel" data-panel="roster" aria-label="Roster">
-      <form class="add-row" id="add-form" autocomplete="off">
-        <input id="add-name" type="text" maxlength="100" placeholder="Name"
-               aria-label="New member's name" required />
-        <div id="add-manager" hidden></div>
-        <button class="btn-primary" type="submit" id="add-btn">Add member</button>
-      </form>
-
-      <label class="field-check show-off">
-        <input type="checkbox" id="show-off" />
-        <span>Show deactivated members</span>
-      </label>
-
-      <div id="roster"><div class="skel" data-skeleton data-rows="4"></div></div>
+    <!-- ─── BOARD (the Roster) ─── -->
+    <section class="tab-panel" data-panel="roster" aria-label="Board">
+      <div class="board-bar" id="board-bar">
+        <span id="board-hint"></span>
+        <span class="grow"></span>
+        <span class="key"><i class="k-gold"></i>Every target met today</span>
+        <span class="key"><i class="k-alarm"></i>Loose channel with a target</span>
+        <label class="field-check" id="show-off-wrap"><input type="checkbox" id="show-off" /><span>Show deactivated</span></label>
+        <button type="button" class="btn" id="tidy">Tidy up</button>
+      </div>
+      <div class="board" id="board"><div class="board-canvas" id="board-canvas">
+        <div class="skel" data-skeleton data-rows="4" style="margin:2rem;max-width:420px"></div></div></div>
     </section>
   </main>
   </div>
@@ -266,6 +386,7 @@
 <script src="/static/swr.js"></script>
 <script src="/static/components.js"></script>
 <script src="/static/sidebar.js"></script>
+<script src="/static/vendor/Sortable.min.js"></script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -341,373 +462,585 @@ document.querySelectorAll('.tab-panel').forEach(p =>
 $('page-title').textContent = PAGE === 'uploads' ? 'Uploads' : 'Roster';
 document.title = `Midas · ${PAGE === 'uploads' ? 'Uploads' : 'Roster'}`;
 
-// ── Roster ────────────────────────────────────────────────────────────
-// GET /team/members is already scoped: a manager gets their own members,
-// admin and exec every member plus the managers to choose from.
-let state = { members: [], managers: [] };
+// ── Who is looking ────────────────────────────────────────────────────
 let me = null;
-let editing = null;          // the member id whose name is being edited
-let addManager = '';         // admin/exec: the manager a new member goes under
-
 const seesAll = () => me && (me.role === 'admin' || me.role === 'exec');
-
-function paintAddForm() {
-  const holder = $('add-manager');
-  if (!seesAll()) { holder.hidden = true; return; }
-  const opts = [{ value: '', label: 'Choose a manager' }]
-    .concat(state.managers.map(m => ({ value: String(m.id), label: m.name })));
-  holder.hidden = false;
-  holder.innerHTML = '';
-  holder.dataset.dropdown = '';
-  holder.dataset.label = 'Manager';
-  holder.dataset.value = addManager;
-  holder.dataset.options = JSON.stringify(opts);
-  delete holder.dataset.cmpWired;
-  Components.init(holder.parentNode);
-}
-
-// Channels each member holds today, from GET /team/assignments.
-function heldBy(memberId) {
-  return assign.assignments
-    .filter(a => a.ends_on == null && a.team_member_id === memberId)
-    .map(a => a.channel_id)
-    .sort((a, b) => chLabel(a).localeCompare(chLabel(b)));
-}
-
-function chipList(ids) {
-  return ids.length
-    ? ids.map(id => {
-        const ch = assign.channels.find(c => c.id === id);
-        return `<span class="tag" title="${esc(ch ? ch.name : id)}">${esc(chLabel(id, ch && ch.name))}</span>`;
-      }).join('')
-    : '<span class="none">None</span>';
-}
-
-function memberRow(m) {
-  const name = editing === m.id
-    ? `<input class="rename" data-id="${m.id}" maxlength="100" value="${esc(m.name)}"
-              aria-label="New name for ${esc(m.name)}" />`
-    : `<span class="name">${esc(m.name)}</span>`;
-  const acts = editing === m.id
-    ? `<button class="btn-primary" data-act="save" data-id="${m.id}">Save</button>
-       <button class="btn-link" data-act="cancel">Cancel</button>`
-    : (m.is_active ? `<button data-act="channels" data-id="${m.id}">Channels</button>` : '') +
-      (m.is_active && canSetTargets() ? `<button data-act="targets" data-id="${m.id}">Targets</button>` : '') +
-      `<button data-act="rename" data-id="${m.id}">Rename</button>` +
-      (m.is_active
-        ? `<button data-act="deactivate" data-id="${m.id}">Deactivate</button>`
-        : `<button data-act="reactivate" data-id="${m.id}">Reactivate</button>`);
-  const status = m.is_active
-    ? '<span class="pill pill--ok pill--sm">Active</span>'
-    : '<span class="tag tag--off">Deactivated</span>';
-  return `<div class="dt-row${m.is_active ? '' : ' off'}">
-      <div>${name}</div><div class="chs">${m.is_active ? chipList(heldBy(m.id)) : ''}</div>
-      <div>${status}</div><div class="acts">${acts}</div></div>`;
-}
-
-function table(members) {
-  return `<div class="dt"><div class="dt-scroll"><div class="dt-body">
-    <div class="dt-head"><div>Name</div><div>Channels</div><div>Status</div><div></div></div>
-    ${members.map(memberRow).join('')}
-  </div></div></div>`;
-}
-
-const managedBy = (managerId) => assign.channels.filter(c => c.manager_id === managerId);
-
-function paintRoster() {
-  const showOff = $('show-off').checked;
-  const members = state.members.filter(m => showOff || m.is_active);
-  const off = state.members.length - state.members.filter(m => m.is_active).length;
-  $('show-off').parentNode.hidden = off === 0;
-  if (!seesAll()) {
-    $('roster').innerHTML = members.length ? table(members)
-      : `<div class="dt"><div class="dt-empty muted">${state.members.length
-          ? 'Everyone on the roster is deactivated.' : 'No team members yet.'}</div></div>`;
-    return;
-  }
-  // Admin and exec: one group per manager (every active one, members or not),
-  // with the channels mapped to them; the admin changes that mapping here.
-  const groups = new Map(state.managers.map(m => [m.id, { name: m.name, ms: [] }]));
-  members.forEach(m => {
-    if (!groups.has(m.manager_id)) {
-      groups.set(m.manager_id, { name: m.manager_name || `Manager ${m.manager_id}`, ms: [] });
-    }
-    groups.get(m.manager_id).ms.push(m);
-  });
-  if (!groups.size) {
-    $('roster').innerHTML = '<div class="dt"><div class="dt-empty muted">No managers yet.</div></div>';
-    return;
-  }
-  $('roster').innerHTML = Array.from(groups, ([id, g]) => {
-    const chs = managedBy(id).map(c => chLabel(c.id, c.name));
-    return `<div class="group">
-      <div class="group-head"><span>${esc(g.name)}</span><span class="n">${g.ms.length}</span>
-        <span class="mgr-chs">${chs.length ? esc(chs.join(', ')) : 'No channels'}</span>
-        <span class="rule"></span>${isAdmin() && state.managers.some(m => m.id === id)
-          ? `<button data-act="mgr-channels" data-id="${id}">Channels</button>` : ''}</div>
-      ${g.ms.length ? table(g.ms) : '<div class="dt"><div class="dt-empty muted">No members yet.</div></div>'}
-    </div>`;
-  }).join('');
-}
-
-async function load() {
-  try {
-    const [meR, listR, asR] = await Promise.all(
-      [fetch('/session/me'), fetch('/team/members'), fetch('/team/assignments')]);
-    if (!listR.ok) throw new Error(listR.statusText);
-    me = meR.ok ? await meR.json() : null;
-    state = await listR.json();
-    assign = asR.ok ? await asR.json() : { channels: [], assignments: [] };
-    buildLabels(assign.channels);
-    paintAddForm();
-    paintRoster();
-  } catch (err) {
-    $('roster').innerHTML = '<em class="muted">Could not load the roster.</em>';
-  }
-}
-
-// ── Channel picker ────────────────────────────────────────────────────
-// A checklist of channels in a modal; resolves to the ticked ids, or null.
-function pickChannels(title, options, empty) {
-  return new Promise(resolve => {
-    const back = document.createElement('div');
-    back.className = 'modal-backdrop';
-    back.innerHTML = `<div class="modal pick" role="dialog" aria-modal="true" aria-labelledby="pick-title">
-      <h2 id="pick-title"></h2>
-      <div class="pick-list">${options.length ? options.map(o => `
-        <label class="pick-row" title="${esc(o.name)}">
-          <input type="checkbox" value="${esc(o.id)}"${o.checked ? ' checked' : ''} />
-          <span>${esc(o.label)}</span>
-          ${o.note ? `<span class="note${o.move ? ' move' : ''}">${esc(o.note)}</span>` : ''}
-        </label>`).join('') : `<div class="pick-empty">${esc(empty)}</div>`}</div>
-      <div class="modal-actions">
-        <button class="btn modal-cancel">Cancel</button>
-        <button class="btn btn-primary modal-ok"${options.length ? '' : ' disabled'}>Save</button>
-      </div></div>`;
-    back.querySelector('#pick-title').textContent = title;
-    const close = (val) => { back.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
-    back.querySelector('.modal-cancel').onclick = () => close(null);
-    back.querySelector('.modal-ok').onclick = () => close(
-      Array.from(back.querySelectorAll('input:checked'), i => i.value));
-    back.onclick = (e) => { if (e.target === back) close(null); };
-    function onKey(e) { if (e.key === 'Escape') close(null); }
-    document.addEventListener('keydown', onKey);
-    document.body.appendChild(back);
-    (back.querySelector('input') || back.querySelector('.modal-cancel')).focus();
-  });
-}
-
-const byLabel = (a, b) => a.label.localeCompare(b.label);
-
-// ── Targets ───────────────────────────────────────────────────────────
-// Each member's daily target per ISO weekday (1 = Monday), Shorts and
-// long-form apart. Managers set their own members', the admin anyone's.
-const canSetTargets = () => me && me.role !== 'exec';
+const isAdmin = () => me && me.role === 'admin';
+const canEdit = () => me && me.role !== 'exec';
+const fmtDay = (d) => d ? String(d).slice(0, 10) : '';
 const WEEK = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [7, 'Sun']];
 
-function editTargets(member) {
-  const t = member.targets || {};
-  const val = (d, k) => (t[d] && t[d][k]) || '';
-  return new Promise(resolve => {
-    const back = document.createElement('div');
-    back.className = 'modal-backdrop';
-    back.innerHTML = `<div class="modal tgt" role="dialog" aria-modal="true" aria-labelledby="tgt-title">
-      <h2 id="tgt-title"></h2>
-      <div class="tgt-grid"><span></span><span class="hd">Shorts</span><span class="hd">Long-form</span>
-        ${WEEK.map(([d, w]) => `<span class="wk">${w}</span>
-          <input type="number" min="0" max="500" inputmode="numeric" data-d="${d}" data-k="shorts"
-                 value="${val(d, 'shorts')}" placeholder="0" aria-label="${w} Shorts" />
-          <input type="number" min="0" max="500" inputmode="numeric" data-d="${d}" data-k="long_form"
-                 value="${val(d, 'long_form')}" placeholder="0" aria-label="${w} long-form" />`).join('')}
-      </div>
-      <button type="button" class="btn-link copy">Copy Monday to every day</button>
-      <div class="modal-actions">
-        <button class="btn modal-cancel">Cancel</button>
-        <button class="btn btn-primary modal-ok">Save</button>
-      </div></div>`;
-    back.querySelector('#tgt-title').textContent = `${member.name}'s daily targets`;
-    const inputs = (d, k) => back.querySelector(`input[data-d="${d}"][data-k="${k}"]`);
-    back.querySelector('.copy').onclick = () => WEEK.forEach(([d]) => ['shorts', 'long_form']
-      .forEach(k => { inputs(d, k).value = inputs(1, k).value; }));
-    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); resolve(); };
-    async function save() {
-      const days = {};
-      for (const [d] of WEEK) {
-        const day = {};
-        for (const k of ['shorts', 'long_form']) {
-          const n = inputs(d, k).value.trim() === '' ? 0 : Number(inputs(d, k).value);
-          if (!Number.isInteger(n) || n < 0 || n > 500) {
-            toast('Targets are whole numbers from 0 to 500.', 'warn'); inputs(d, k).focus(); return;
-          }
-          day[k] = n;
-        }
-        days[d] = day;
-      }
-      try {
-        const res = await send('PUT', `/team/members/${member.id}/targets`, { days });
-        toast(res.targets ? `${member.name}'s targets saved.` : `${member.name} has no targets now.`);
-        close();
-        await load();
-      } catch (err) {
-        toast('Could not save the targets: ' + err.message, 'err');
-      }
+// GET /team/assignments (Uploads page): the user's visible channels and every
+// assignment on them, for the drill-down's "Nothing from …" line.
+let assign = { channels: [], assignments: [] };
+
+// A toast with one action button (Undo).
+function toastAction(msg, label, action, timeout = 7000) {
+  const el = document.createElement('div');
+  el.className = 'toast ok';
+  el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.gap = '.8rem';
+  el.innerHTML = `<span></span><button type="button" class="btn-link"></button>`;
+  el.firstChild.textContent = msg;
+  const b = el.querySelector('button');
+  b.textContent = label;
+  let done = false;
+  const go = () => { el.style.opacity = 0; el.style.transition = '.3s'; setTimeout(() => el.remove(), 300); };
+  b.onclick = () => { if (done) return; done = true; go(); action(); };
+  $('toasts').appendChild(el);
+  setTimeout(go, timeout);
+}
+
+// ── The Board ─────────────────────────────────────────────────────────
+// GET /team/board: managers, members and channels (holder, targets, today's
+// uploads). Managers are hat blocks floating on a pannable canvas (positions
+// kept in this browser); members are C-blocks; channels are puzzle pieces.
+// SortableJS moves the pieces; every move is one POST and a fresh read.
+let B = { managers: [], members: [], channels: [], today: '' };
+const NO_MGR = 'none';
+const HUES = [217, 266, 24, 158, 330, 44, 192, 2, 96, 288];
+const sortables = [];
+let landed = null;            // the block to bounce after the next paint
+let showOff = false;
+try { showOff = localStorage.getItem('midas:board:showOff') === '1'; } catch {}
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const hueOf = (id) => HUES[Math.max(0, B.managers.findIndex(m => m.id === id)) % HUES.length];
+const mgrName = (id) => id == null ? 'No manager'
+  : (B.managers.find(m => m.id === id) || {}).name || `Manager ${id}`;
+const memberOf = (id) => B.members.find(m => m.id === id);
+const want = (t) => t ? t.shorts + t.long_form : 0;
+const metToday = (c) => c.today_target
+  ? c.today.shorts >= c.today_target.shorts && c.today.long_form >= c.today_target.long_form : null;
+// Uploads counted toward today's target: extra Shorts don't cover missing long-form.
+const gotToday = (c) => c.today_target
+  ? Math.min(c.today.shorts, c.today_target.shorts) + Math.min(c.today.long_form, c.today_target.long_form) : 0;
+
+function chBlock(c) {
+  const w = want(c.today_target), met = metToday(c);
+  const alarm = c.holder_id == null && w && !met;
+  const cls = `ch${met ? ' met' : ''}${alarm ? ' alarm' : ''}${w ? '' : ' no-target'}`;
+  const pct = w ? Math.round(100 * gotToday(c) / w) : 0;
+  const body = w
+    ? `<span class="ch-bar"><i style="width:${pct}%"></i></span><span class="ch-n">${c.today.total}/${w}</span>`
+    : `<span class="ch-n dim">${c.today.total ? `${c.today.total} today` : 'no target'}</span>`;
+  return `<div class="${cls}" data-channel="${esc(c.id)}" tabindex="0" role="button"
+      title="${esc(c.name || c.id)}" aria-label="${esc(chLabel(c.id, c.name))}: ${c.today.total} today${
+      w ? ` of ${w}` : ''}. Open">
+    <span class="ch-name">${esc(chLabel(c.id, c.name))}</span>${body}${
+    met ? '<span class="ch-tick" aria-hidden="true">✓</span>' : ''}</div>`;
+}
+
+function memberStats(m) {
+  const chans = B.channels.filter(c => c.holder_id === m.id);
+  const targeted = chans.filter(c => c.today_target);
+  return {
+    chans,
+    gold: m.is_active && targeted.length > 0 && targeted.every(metToday),
+    want: targeted.reduce((a, c) => a + want(c.today_target), 0),
+    got: chans.reduce((a, c) => a + c.today.total, 0),
+  };
+}
+
+function memberBlock(m) {
+  const s = memberStats(m);
+  const sum = !m.is_active ? 'Deactivated'
+    : s.want ? `${s.got}/${s.want} today` : s.chans.length ? `${s.got} today` : '';
+  return `<div class="mem${m.is_active ? '' : ' off'}${s.gold ? ' gold' : ''}" data-member="${m.id}">
+    <div class="mem-top" tabindex="0" role="button" aria-label="${esc(m.name)}. Open">
+      <span class="mem-name">${esc(m.name)}</span>${s.gold ? '<span class="star" aria-label="every target met">★</span>' : ''}
+      <span class="mem-sum">${esc(sum)}</span></div>
+    <div class="slot mem-slot" data-member="${m.id}">${s.chans.map(chBlock).join('')}</div>
+    <div class="mem-foot"></div></div>`;
+}
+
+function managerBlock(g) {
+  const none = g.id === NO_MGR;
+  const members = none ? [] : B.members.filter(m => m.manager_id === g.id && (showOff || m.is_active));
+  const owned = B.channels.filter(c => none ? c.manager_id == null : c.manager_id === g.id);
+  const loose = owned.filter(c => c.holder_id == null);
+  const active = members.filter(m => m.is_active).length;
+  const meta = none ? `${owned.length} channel${owned.length === 1 ? '' : 's'}`
+    : `${active} member${active === 1 ? '' : 's'} · ${owned.length} channel${owned.length === 1 ? '' : 's'}`;
+  const canAdd = canEdit() && !none && (isAdmin() || g.id === me.id);
+  return `<div class="mgr${none ? ' nomgr' : ''}" data-mgr="${g.id}" style="--h:${none ? 220 : hueOf(g.id)}">
+    <div class="hat" title="Drag to move this block"><span class="hat-name">${esc(g.name)}</span>
+      <span class="hat-meta">${meta}</span></div>
+    ${none ? '' : `<div class="members" data-mgr="${g.id}">${members.map(memberBlock).join('')}</div>
+      ${canAdd ? `<button type="button" class="add-mem" data-mgr="${g.id}">+ Add member</button>` : ''}`}
+    <div class="mgr-foot"><div class="tray-label">${none ? 'Channels with no manager' : 'Loose channels'}</div>
+      <div class="slot tray-slot" data-tray="${g.id}">${loose.map(chBlock).join('')}</div></div>
+  </div>`;
+}
+
+// ── Layout: blocks float; positions live in this browser ──────────────
+const posKey = () => `midas:board:pos:${me ? me.id : 0}`;
+function savedPos() { try { return JSON.parse(localStorage.getItem(posKey()) || '{}'); } catch { return {}; } }
+function savePos(pos) { try { localStorage.setItem(posKey(), JSON.stringify(pos)); } catch {} }
+
+function placeBlocks() {
+  const canvas = $('board-canvas');
+  const pos = savedPos();
+  const COL = 318 + 40, GAP = 46, PAD = 36;
+  const cols = Math.max(1, Math.floor(($('board').clientWidth - PAD) / COL));
+  const heights = Array(cols).fill(PAD + 18);
+  canvas.querySelectorAll('.mgr').forEach(el => {
+    const p = pos[el.dataset.mgr];
+    if (p) { el.style.left = p.x + 'px'; el.style.top = p.y + 'px'; return; }
+    const i = heights.indexOf(Math.min(...heights));
+    el.style.left = (PAD + i * COL) + 'px';
+    el.style.top = heights[i] + 'px';
+    heights[i] += el.offsetHeight + GAP;
+  });
+  sizeCanvas();
+}
+
+function sizeCanvas() {
+  const canvas = $('board-canvas');
+  let w = 0, h = 0;
+  canvas.querySelectorAll('.mgr').forEach(el => {
+    w = Math.max(w, el.offsetLeft + el.offsetWidth);
+    h = Math.max(h, el.offsetTop + el.offsetHeight);
+  });
+  canvas.style.width = (w + 400) + 'px';
+  canvas.style.height = (h + 300) + 'px';
+}
+
+// Drag a block by its hat; drag the empty canvas to pan.
+(function wireCanvas() {
+  const board = $('board');
+  board.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const hat = e.target.closest('.hat');
+    if (hat) {
+      const block = hat.closest('.mgr');
+      const sx = e.clientX, sy = e.clientY, ox = block.offsetLeft, oy = block.offsetTop;
+      let moved = false;
+      hat.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const dx = ev.clientX - sx, dy = ev.clientY - sy;
+        if (!moved && Math.hypot(dx, dy) < 4) return;
+        moved = true;
+        block.classList.add('carrying');
+        block.style.left = Math.max(0, ox + dx) + 'px';
+        block.style.top = Math.max(18, oy + dy) + 'px';
+      };
+      const up = () => {
+        hat.removeEventListener('pointermove', move);
+        hat.removeEventListener('pointerup', up);
+        block.classList.remove('carrying');
+        if (!moved) return;
+        const pos = savedPos();
+        pos[block.dataset.mgr] = { x: block.offsetLeft, y: block.offsetTop };
+        savePos(pos);
+        sizeCanvas();
+      };
+      hat.addEventListener('pointermove', move);
+      hat.addEventListener('pointerup', up);
+      return;
     }
-    back.querySelector('.modal-cancel').onclick = close;
-    back.querySelector('.modal-ok').onclick = save;
-    back.onclick = (e) => { if (e.target === back) close(); };
-    function onKey(e) { if (e.key === 'Escape') close(); else if (e.key === 'Enter') save(); }
-    document.addEventListener('keydown', onKey);
-    document.body.appendChild(back);
-    inputs(1, 'shorts').focus();
+    if (e.target !== board && e.target !== $('board-canvas')) return;
+    const sx = e.clientX, sy = e.clientY, sl = board.scrollLeft, st = board.scrollTop;
+    board.classList.add('panning');
+    board.setPointerCapture(e.pointerId);
+    const move = (ev) => { board.scrollLeft = sl - (ev.clientX - sx); board.scrollTop = st - (ev.clientY - sy); };
+    const up = () => {
+      board.classList.remove('panning');
+      board.removeEventListener('pointermove', move);
+      board.removeEventListener('pointerup', up);
+    };
+    board.addEventListener('pointermove', move);
+    board.addEventListener('pointerup', up);
+  });
+})();
+
+$('tidy').onclick = () => {
+  savePos({});
+  const canvas = $('board-canvas');
+  canvas.classList.add('tidying');
+  placeBlocks();
+  setTimeout(() => canvas.classList.remove('tidying'), 500);
+};
+
+// ── Paint ─────────────────────────────────────────────────────────────
+function paintBoard() {
+  sortables.splice(0).forEach(s => s.destroy());
+  buildLabels(B.channels);
+  document.body.classList.toggle('is-admin', !!isAdmin());
+  document.body.classList.toggle('is-exec', !canEdit());
+  const groups = B.managers.slice();
+  if (isAdmin() || (seesAll() && B.channels.some(c => c.manager_id == null))) {
+    groups.unshift({ id: NO_MGR, name: 'No manager' });
+  }
+  const canvas = $('board-canvas');
+  canvas.innerHTML = groups.length ? groups.map(managerBlock).join('')
+    : '<div class="muted" style="padding:2rem">No managers yet.</div>';
+  placeBlocks();
+  wireSortables();
+  $('show-off').checked = showOff;
+  $('show-off-wrap').hidden = !B.members.some(m => !m.is_active);
+  $('board-hint').textContent = !canEdit() ? 'Read only. Click a block to see it.'
+    : isAdmin() ? 'Drag channels onto people, people onto managers. Click any block to edit it.'
+      : 'Drag channels onto your people. Click a block to edit it.';
+  if (landed) {
+    const el = canvas.querySelector(landed);
+    if (el && !reduceMotion) {
+      el.classList.add('landed');
+      el.addEventListener('animationend', () => el.classList.remove('landed'), { once: true });
+    }
+    landed = null;
+  }
+  celebrate();
+}
+
+function wireSortables() {
+  if (!canEdit() || typeof Sortable === 'undefined') return;
+  const common = {
+    sort: false, animation: 220, easing: 'cubic-bezier(.2,.8,.2,1.15)',
+    forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4,
+    ghostClass: 'ghost', chosenClass: 'chosen', dragClass: 'lifted', fallbackClass: 'lifted',
+  };
+  document.querySelectorAll('#board-canvas .slot').forEach(el => {
+    const m = el.dataset.member ? memberOf(Number(el.dataset.member)) : null;
+    sortables.push(Sortable.create(el, {
+      ...common,
+      group: { name: 'ch', pull: true, put: !m || m.is_active },
+      onStart: () => document.body.classList.add('dragging-ch'),
+      onEnd: onChannelDrop,
+    }));
+  });
+  if (!isAdmin()) return;
+  document.querySelectorAll('#board-canvas .members').forEach(el => {
+    sortables.push(Sortable.create(el, {
+      ...common, group: { name: 'mem', pull: true, put: true }, handle: '.mem-top',
+      draggable: '.mem',
+      onStart: () => document.body.classList.add('dragging-mem'),
+      onEnd: onMemberDrop,
+    }));
   });
 }
 
-async function editMemberChannels(member) {
-  const held = new Set(heldBy(member.id));
-  // A manager picks from their own channels; admin and exec from the
-  // member's manager's channels. Whatever the member holds is always listed,
-  // so it can be taken away.
-  const pool = assign.channels.filter(c =>
-    held.has(c.id) || !seesAll() || c.manager_id === member.manager_id);
-  const options = pool.map(c => {
-    const open = assign.assignments.find(a => a.channel_id === c.id && a.ends_on == null);
-    const mine = open && open.team_member_id === member.id;
-    return {
-      id: c.id, name: c.name || c.id, label: chLabel(c.id, c.name), checked: mine,
-      note: mine ? `since ${fmtDay(open.starts_on)}`
-        : open ? `held by ${open.member_name || 'another member'}` : '',
-      move: !mine && !!open,
-    };
-  }).sort(byLabel);
-  const picked = await pickChannels(`${member.name}'s channels`, options,
-    seesAll() ? `No channels are mapped to ${member.manager_name || 'their manager'} yet.`
-              : 'No channels are mapped to you yet; ask the admin.');
-  if (!picked) return;
-  const same = picked.length === held.size && picked.every(id => held.has(id));
-  if (same) return;
-  try {
-    const res = await send('PUT', `/team/members/${member.id}/channels`, { channel_ids: picked });
-    const parts = [];
-    if (res.added.length) parts.push(`${res.added.length} added`);
-    if (res.ended.length) parts.push(`${res.ended.length} removed`);
-    toast(`${member.name}: ${parts.join(', ') || 'no change'}.`);
-  } catch (err) {
-    toast('Could not save the channels: ' + err.message, 'err');
-  }
-  await load();
+// ── Moves ─────────────────────────────────────────────────────────────
+async function onChannelDrop(evt) {
+  document.body.classList.remove('dragging-ch');
+  if (evt.from === evt.to) return;
+  const id = evt.item.dataset.channel;
+  const to = evt.to.dataset.member
+    ? { team_member_id: Number(evt.to.dataset.member) }
+    : { manager_id: evt.to.dataset.tray === NO_MGR ? null : Number(evt.to.dataset.tray) };
+  await moveChannel(id, to);
 }
 
-async function editManagerChannels(managerId) {
-  const manager = state.managers.find(m => m.id === managerId);
-  const options = assign.channels.map(c => ({
-    id: c.id, name: c.name || c.id, label: chLabel(c.id, c.name), checked: c.manager_id === managerId,
-    note: c.manager_id && c.manager_id !== managerId ? `with ${c.manager_name || 'another manager'}` : '',
-    move: !!c.manager_id && c.manager_id !== managerId,
-  })).sort(byLabel);
-  const picked = await pickChannels(`${manager.name}'s channels`, options, 'No channels yet.');
-  if (!picked) return;
-  const want = new Set(picked);
-  const changes = assign.channels.filter(c => want.has(c.id) !== (c.manager_id === managerId));
-  let failed = 0;
-  for (const c of changes) {
+const whereTo = (after) => after.team_member_id != null
+  ? (memberOf(after.team_member_id) || {}).name || 'a member'
+  : after.manager_id == null ? 'No manager' : `${mgrName(after.manager_id)}'s loose channels`;
+const backTo = (before) => before.team_member_id != null
+  ? { team_member_id: before.team_member_id } : { manager_id: before.manager_id };
+
+async function moveChannel(id, body, undo = false) {
+  const c = B.channels.find(x => x.id === id);
+  const label = chLabel(id, c && c.name);
+  try {
+    const res = await send('POST', `/channels/${encodeURIComponent(id)}/move`, body);
+    landed = `.ch[data-channel="${CSS.escape(id)}"]`;
+    await loadBoard();
+    if (!res.changed) return;
+    if (undo) { toast(`${label} is back with ${whereTo(res.after)}.`); return; }
+    toastAction(`${label} → ${whereTo(res.after)}`, 'Undo', () => moveChannel(id, backTo(res.before), true));
+  } catch (err) {
+    toast(`Could not move ${label}: ${err.message}`, 'err');
+    await loadBoard();
+  }
+}
+
+async function onMemberDrop(evt) {
+  document.body.classList.remove('dragging-mem');
+  if (evt.from === evt.to) return;
+  await moveMember(Number(evt.item.dataset.member), Number(evt.to.dataset.mgr));
+}
+
+// Moving a member leaves their channels with their manager, unheld from
+// today; undo moves them back and hands the same channels back.
+async function moveMember(id, toManager, giveBack = null) {
+  const m = memberOf(id);
+  const from = m.manager_id;
+  if (from === toManager) { await loadBoard(); return; }
+  const held = B.channels.filter(c => c.holder_id === id);
+  if (!giveBack && held.length) {
+    const names = held.map(c => chLabel(c.id, c.name)).join(', ');
+    const ok = await confirmDialog(
+      `Move ${m.name} to ${mgrName(toManager)}? Their ${held.length === 1 ? 'channel' : `${held.length} channels`} (${names}) ` +
+      `stay${held.length === 1 ? 's' : ''} with ${mgrName(from)}, unassigned from today.`, 'Move');
+    if (!ok) { await loadBoard(); return; }
+  }
+  try {
+    await send('PATCH', `/team/members/${id}`, { manager_id: toManager });
+    for (const cid of giveBack || []) {
+      await send('POST', `/channels/${encodeURIComponent(cid)}/move`, { team_member_id: id }).catch(() => {});
+    }
+    landed = `.mem[data-member="${id}"]`;
+    await loadBoard();
+    if (giveBack) { toast(`${m.name} is back with ${mgrName(toManager)}.`); return; }
+    toastAction(`${m.name} → ${mgrName(toManager)}`, 'Undo',
+      () => moveMember(id, from, held.map(c => c.id)));
+  } catch (err) {
+    toast(`Could not move ${m.name}: ${err.message}`, 'err');
+    await loadBoard();
+  }
+}
+
+// ── Gold and confetti ─────────────────────────────────────────────────
+// A member who meets every target today turns gold; the first time a day in
+// this browser, confetti.
+function celebrate() {
+  const key = `midas:board:gold:${B.today}`;
+  let seen = [];
+  try { seen = JSON.parse(localStorage.getItem(key) || '[]'); } catch {}
+  const fresh = Array.from(document.querySelectorAll('#board-canvas .mem.gold'))
+    .filter(el => !seen.includes(el.dataset.member));
+  if (!fresh.length) return;
+  try { localStorage.setItem(key, JSON.stringify(seen.concat(fresh.map(el => el.dataset.member)))); } catch {}
+  if (reduceMotion) return;
+  fresh.forEach((el, i) => setTimeout(() => confetti(el), 250 + i * 180));
+}
+
+function confetti(el) {
+  const r = el.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight) return;
+  const colors = ['#f5c542', '#4c97ff', '#9966ff', '#59c059', '#ff8c1a', '#ff6680', '#5cb1d6'];
+  for (let i = 0; i < 34; i++) {
+    const bit = document.createElement('span');
+    bit.className = 'confetti';
+    bit.style.background = colors[i % colors.length];
+    bit.style.left = (r.left + r.width / 2) + 'px';
+    bit.style.top = (r.top + 18) + 'px';
+    document.body.appendChild(bit);
+    const angle = -Math.PI / 2 + (Math.random() - .5) * 2.2;
+    const speed = 140 + Math.random() * 180;
+    const dx = Math.cos(angle) * speed, dy = Math.sin(angle) * speed;
+    const spin = (Math.random() - .5) * 900;
+    bit.animate([
+      { transform: 'translate(0,0) rotate(0deg)', opacity: 1 },
+      { transform: `translate(${dx * .7}px, ${dy * .7}px) rotate(${spin / 2}deg)`, opacity: 1, offset: .45 },
+      { transform: `translate(${dx}px, ${dy + 260}px) rotate(${spin}deg)`, opacity: 0 },
+    ], { duration: 1300 + Math.random() * 500, easing: 'cubic-bezier(.2,.6,.4,1)' })
+      .onfinish = () => bit.remove();
+  }
+}
+
+// ── Cards ─────────────────────────────────────────────────────────────
+// ``hue`` null: the grey of "No manager".
+function card(html, hue, onKey) {
+  const back = document.createElement('div');
+  back.className = 'modal-backdrop';
+  back.innerHTML = `<div class="modal blk${hue == null ? ' grey' : ''}" role="dialog" aria-modal="true"
+    style="--h:${hue ?? 220}">${html}</div>`;
+  const box = back.firstChild;
+  const close = () => { back.remove(); document.removeEventListener('keydown', key); };
+  function key(e) { if (e.key === 'Escape') close(); else if (onKey) onKey(e); }
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.addEventListener('keydown', key);
+  document.body.appendChild(back);
+  return { box, close };
+}
+
+function openChannel(id) {
+  const c = B.channels.find(x => x.id === id);
+  if (!c) return;
+  const holder = c.holder_id != null ? memberOf(c.holder_id) : null;
+  const where = holder ? `Held by ${holder.name} since ${fmtDay(c.since)}`
+    : c.manager_id == null ? 'No manager · nobody holds it' : `Loose · ${mgrName(c.manager_id)}'s`;
+  const t = c.today_target;
+  const part = (got, w, word) => !w ? '' : `<span class="${got >= w ? 'met' : 'short'}">${got}/${w} ${word}</span>`;
+  const today = t ? [part(c.today.shorts, t.shorts, 'Shorts'), part(c.today.long_form, t.long_form, 'long-form')]
+      .filter(Boolean).join(' · ')
+    : `${c.today.shorts} Shorts · ${c.today.long_form} long-form · no target today`;
+  const val = (d, k) => (c.targets && c.targets[d] && c.targets[d][k]) || '';
+  const dis = canEdit() ? '' : ' disabled';
+  // Where it can go: a manager's own members and tray; the admin anywhere.
+  const groups = (isAdmin() ? B.managers : B.managers.filter(m => m.id === me.id)).map(g => {
+    const ms = B.members.filter(m => m.manager_id === g.id && m.is_active);
+    return `<optgroup label="${esc(g.name)}">${ms.map(m =>
+      `<option value="m:${m.id}"${m.id === c.holder_id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}
+      <option value="t:${g.id}"${c.holder_id == null && c.manager_id === g.id ? ' selected' : ''}>${
+        esc(g.name)}'s loose channels</option></optgroup>`;
+  }).join('') + (isAdmin() ? `<option value="t:"${c.holder_id == null && c.manager_id == null ? ' selected' : ''}>No manager</option>` : '');
+  const { box, close } = card(`
+    <div class="blk-head"><h2>${esc(c.name || c.id)}</h2><div class="sub">${esc(where)}</div></div>
+    <div class="blk-body">
+      <section><h3>Today</h3><div class="blk-today">${today}</div></section>
+      <section><h3>Daily target</h3>
+        <div class="tgt-grid"><span></span><span class="hd">Shorts</span><span class="hd">Long-form</span>
+          ${WEEK.map(([d, w]) => `<span class="wk">${w}</span>
+            <input type="number" min="0" max="500" inputmode="numeric" data-d="${d}" data-k="shorts"
+                   value="${val(d, 'shorts')}" placeholder="0" aria-label="${w} Shorts"${dis} />
+            <input type="number" min="0" max="500" inputmode="numeric" data-d="${d}" data-k="long_form"
+                   value="${val(d, 'long_form')}" placeholder="0" aria-label="${w} long-form"${dis} />`).join('')}
+        </div>
+        ${canEdit() ? '<button type="button" class="btn-link copy">Copy Monday to every day</button>' : ''}
+      </section>
+      ${canEdit() ? `<section><h3>Move to</h3><div class="blk-row">
+        <select class="move-to" aria-label="Move ${esc(chLabel(c.id, c.name))} to">${groups}</select>
+        <button type="button" class="btn move-go">Move</button></div></section>` : ''}
+      <div class="modal-actions"><button class="btn modal-cancel">Close</button>${
+        canEdit() ? '<button class="btn btn-primary modal-ok">Save target</button>' : ''}</div>
+    </div>`, c.manager_id == null ? null : hueOf(c.manager_id),
+    (e) => { if (e.key === 'Enter' && e.target.matches('.tgt-grid input')) save(); });
+  const inputs = (d, k) => box.querySelector(`input[data-d="${d}"][data-k="${k}"]`);
+  box.querySelector('.modal-cancel').onclick = close;
+  if (!canEdit()) { box.querySelector('.modal-cancel').focus(); return; }
+  box.querySelector('.copy').onclick = () => WEEK.forEach(([d]) => ['shorts', 'long_form']
+    .forEach(k => { inputs(d, k).value = inputs(1, k).value; }));
+  async function save() {
+    const days = {};
+    for (const [d] of WEEK) {
+      const day = {};
+      for (const k of ['shorts', 'long_form']) {
+        const n = inputs(d, k).value.trim() === '' ? 0 : Number(inputs(d, k).value);
+        if (!Number.isInteger(n) || n < 0 || n > 500) {
+          toast('Targets are whole numbers from 0 to 500.', 'warn'); inputs(d, k).focus(); return;
+        }
+        day[k] = n;
+      }
+      days[d] = day;
+    }
     try {
-      await send('PATCH', `/channels/${encodeURIComponent(c.id)}/manager`,
-                 { manager_id: want.has(c.id) ? managerId : null });
+      const res = await send('PUT', `/channels/${encodeURIComponent(c.id)}/targets`, { days });
+      const label = chLabel(c.id, c.name);
+      toast(res.targets ? `${label}'s target saved.` : `${label} has no target now.`);
+      close();
+      landed = `.ch[data-channel="${CSS.escape(c.id)}"]`;
+      await loadBoard();
     } catch (err) {
-      failed++;
+      toast('Could not save the target: ' + err.message, 'err');
     }
   }
-  if (failed) toast(`Could not save ${failed} of ${changes.length} channel${changes.length > 1 ? 's' : ''}.`, 'err');
-  else if (changes.length) toast(`${manager.name}'s channels saved.`);
-  await load();
+  box.querySelector('.modal-ok').onclick = save;
+  box.querySelector('.move-go').onclick = async () => {
+    const v = box.querySelector('.move-to').value;
+    close();
+    await moveChannel(c.id, v.startsWith('m:') ? { team_member_id: Number(v.slice(2)) }
+      : { manager_id: v === 't:' ? null : Number(v.slice(2)) });
+  };
+  inputs(1, 'shorts').focus();
 }
 
-$('add-manager').addEventListener('change', (e) => {
-  if (e.detail && 'value' in e.detail) addManager = e.detail.value;
-});
-$('show-off').onchange = paintRoster;
+function openMember(id) {
+  const m = memberOf(id);
+  if (!m) return;
+  const s = memberStats(m);
+  const chs = s.chans.length
+    ? s.chans.map(c => `<span class="tag">${esc(chLabel(c.id, c.name))} ${c.today.total}${
+        c.today_target ? '/' + want(c.today_target) : ''}</span>`).join('')
+    : '<span class="muted">No channels: drag some onto them.</span>';
+  const mgrs = isAdmin() ? B.managers.filter(g => g.is_active).map(g =>
+    `<option value="${g.id}"${g.id === m.manager_id ? ' selected' : ''}>${esc(g.name)}</option>`).join('') : '';
+  const { box, close } = card(`
+    <div class="blk-head mem-head"><h2>${esc(m.name)}</h2><div class="sub">${esc(mgrName(m.manager_id))}${
+      m.is_active ? '' : ' · deactivated'}${s.gold ? ' · ★ every target met today' : ''}</div></div>
+    <div class="blk-body">
+      <section><h3>Today</h3><div class="blk-chs">${chs}</div></section>
+      ${canEdit() ? `<section><h3>Name</h3><div class="blk-row">
+          <input type="text" class="rename" maxlength="100" value="${esc(m.name)}" aria-label="Name" />
+          <button type="button" class="btn rename-go">Rename</button></div></section>` : ''}
+      ${isAdmin() && m.is_active ? `<section><h3>Manager</h3><div class="blk-row">
+          <select class="mgr-to" aria-label="Manager">${mgrs}</select>
+          <button type="button" class="btn mgr-go">Move</button></div></section>` : ''}
+      <div class="modal-actions"><button class="btn modal-cancel">Close</button>${!canEdit() ? ''
+        : m.is_active ? '<button class="btn act-off">Deactivate</button>'
+          : '<button class="btn act-on">Reactivate</button>'}</div>
+    </div>`, hueOf(m.manager_id),
+    (e) => { if (e.key === 'Enter' && e.target.matches('input.rename')) rename(); });
+  box.querySelector('.modal-cancel').onclick = close;
+  const patchMember = async (change, done) => {
+    try {
+      const r = await send('PATCH', `/team/members/${id}`, change);
+      toast(done(r)); close();
+      landed = `.mem[data-member="${id}"]`;
+      await loadBoard();
+    } catch (err) { toast('Could not save: ' + err.message, 'err'); }
+  };
+  async function rename() {
+    const name = box.querySelector('input.rename').value.trim();
+    if (!name || name === m.name) return;
+    await patchMember({ name }, r => `Renamed to ${r.name}.`);
+  }
+  if (canEdit()) {
+    box.querySelector('.rename-go').onclick = rename;
+    const off = box.querySelector('.act-off'), on = box.querySelector('.act-on');
+    if (off) off.onclick = async () => {
+      const ok = await confirmDialog(`Deactivate ${m.name}? Their channels go loose from today; ` +
+        'the uploads already credited to them stay credited.', 'Deactivate');
+      if (ok) await patchMember({ is_active: false }, r => `${r.name} deactivated.`);
+    };
+    if (on) on.onclick = () => patchMember({ is_active: true }, r => `${r.name} is back.`);
+  }
+  const go = box.querySelector('.mgr-go');
+  if (go) go.onclick = async () => {
+    const to = Number(box.querySelector('.mgr-to').value);
+    close();
+    await moveMember(id, to);
+  };
+  (box.querySelector('input.rename') || box.querySelector('.modal-cancel')).focus();
+}
 
-$('add-form').onsubmit = async (e) => {
+function addMember(managerId, button) {
+  const form = document.createElement('form');
+  form.className = 'add-mem-form';
+  form.innerHTML = `<input type="text" maxlength="100" placeholder="Name" aria-label="New member's name" required />
+    <button class="btn btn-primary" type="submit">Add</button>`;
+  button.replaceWith(form);
+  const input = form.querySelector('input');
+  input.focus();
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') paintBoard(); });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      const body = { name };
+      if (seesAll()) body.manager_id = managerId;
+      const m = await send('POST', '/team/members', body);
+      toast(`${m.name} joined ${mgrName(managerId)}.`);
+      landed = `.mem[data-member="${m.id}"]`;
+      await loadBoard();
+    } catch (err) {
+      toast('Could not add: ' + err.message, 'err');
+    }
+  };
+}
+
+// Clicks (a drag doesn't click: SortableJS swallows it).
+$('board-canvas').addEventListener('click', (e) => {
+  const add = e.target.closest('.add-mem');
+  if (add) { addMember(Number(add.dataset.mgr), add); return; }
+  const ch = e.target.closest('.ch');
+  if (ch) { openChannel(ch.dataset.channel); return; }
+  const top = e.target.closest('.mem-top');
+  if (top) openMember(Number(top.closest('.mem').dataset.member));
+});
+$('board-canvas').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  if (!e.target.matches('.ch, .mem-top')) return;
   e.preventDefault();
-  const name = $('add-name').value.trim();
-  if (!name) return;
-  const body = { name };
-  if (seesAll()) {
-    if (!addManager) { toast('Choose the manager this member works for.', 'warn'); return; }
-    body.manager_id = Number(addManager);
-  }
-  const btn = $('add-btn');
-  btn.disabled = true;
-  try {
-    const m = await send('POST', '/team/members', body);
-    $('add-name').value = '';
-    toast(`${m.name} added.`);
-    await load();
-  } catch (err) {
-    toast('Could not add: ' + err.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
+  e.target.click();
+});
+$('show-off').onchange = () => {
+  showOff = $('show-off').checked;
+  try { localStorage.setItem('midas:board:showOff', showOff ? '1' : '0'); } catch {}
+  paintBoard();
 };
 
-async function patch(id, change, done) {
+async function loadBoard() {
   try {
-    const m = await send('PATCH', `/team/members/${id}`, change);
-    toast(done(m));
-    editing = null;
-    await load();
+    const r = await fetch('/team/board');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    B = j;
+    paintBoard();
   } catch (err) {
-    toast('Could not save: ' + err.message, 'err');
+    $('board-canvas').innerHTML = `<em class="muted" style="display:block;padding:2rem">Could not load the board: ${esc(err.message)}</em>`;
   }
 }
-
-$('roster').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const id = Number(btn.dataset.id);
-  const member = state.members.find(m => m.id === id);
-  const act = btn.dataset.act;
-  if (act === 'channels') {
-    await editMemberChannels(member);
-  } else if (act === 'targets') {
-    await editTargets(member);
-  } else if (act === 'mgr-channels') {
-    await editManagerChannels(id);
-  } else if (act === 'rename') {
-    editing = id; paintRoster();
-    const input = document.querySelector(`input.rename[data-id="${id}"]`);
-    input && (input.focus(), input.select());
-  } else if (act === 'cancel') {
-    editing = null; paintRoster();
-  } else if (act === 'save') {
-    const name = document.querySelector(`input.rename[data-id="${id}"]`).value.trim();
-    if (!name || name === member.name) { editing = null; paintRoster(); return; }
-    await patch(id, { name }, m => `Renamed to ${m.name}.`);
-  } else if (act === 'deactivate') {
-    const ok = await confirmDialog(
-      `Deactivate ${member.name}? They drop off the roster; the uploads already ` +
-      'credited to them stay credited.', 'Deactivate');
-    if (ok) await patch(id, { is_active: false }, m => `${m.name} deactivated.`);
-  } else if (act === 'reactivate') {
-    await patch(id, { is_active: true }, m => `${m.name} is back on the roster.`);
-  }
-});
-
-$('roster').addEventListener('keydown', (e) => {
-  if (!e.target.matches('input.rename')) return;
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    document.querySelector(`button[data-act="save"][data-id="${e.target.dataset.id}"]`).click();
-  } else if (e.key === 'Escape') {
-    editing = null; paintRoster();
-  }
-});
-
-// GET /team/assignments: the user's visible channels and every assignment on
-// them; the roster's channel chips and pickers, and the drill-down's grouping.
-let assign = { channels: [], assignments: [] };
-const isAdmin = () => me && me.role === 'admin';
-const fmtDay = (d) => d ? String(d).slice(0, 10) : '';
 
 // ── Uploads grid (#151) ───────────────────────────────────────────────
 // GET /team/uploads is scoped: a manager gets their own channels and members;
@@ -715,9 +1048,9 @@ const fmtDay = (d) => d ? String(d).slice(0, 10) : '';
 const MAX_DAYS = 92;
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let upManager = '';          // admin/exec: '' = every manager
-// Rows per member (who uploaded) or per channel (where); remembered per browser.
-let upView = 'member';
-try { if (localStorage.getItem('midas:team:upView') === 'channel') upView = 'channel'; } catch {}
+// Member sections folded shut, remembered per browser.
+let upCollapsed = new Set();
+try { upCollapsed = new Set(JSON.parse(localStorage.getItem('midas:team:upCollapsed') || '[]')); } catch {}
 
 function istToday() {
   // en-CA formats as YYYY-MM-DD.
@@ -788,12 +1121,6 @@ function fmtRange(from, to) {
   return a.mon === b.mon ? `${a.day}–${b.day} ${b.mon}` : `${a.day} ${a.mon} – ${b.day} ${b.mon}`;
 }
 
-// A day's target for a row: { shorts, long_form } or null.
-const isoWeekday = (iso) => new Date(iso + 'T00:00:00Z').getUTCDay() || 7;
-const targetOn = (targets, d) => {
-  const t = targets && targets[String(isoWeekday(d))];
-  return t && (t.shorts || t.long_form) ? t : null;
-};
 // How far below target a finished day is, for the count in view: the
 // shortfall's share of the target (0..1), or 0 when met / no target. "All"
 // misses when either type does.
@@ -867,11 +1194,12 @@ function hv(c, head, extra = {}) {
 }
 const dayLabel = (d) => { const p = dayParts(d); return `${p.dow}, ${p.mon} ${p.day}`; };
 
-function dayCell(c, d, max, today, open, rowName, targets) {
+// ``target``: that day's { shorts, long_form } for the row, or null.
+function dayCell(c, d, max, today, open, rowName, target) {
   const v = count(c);
   const cls = `day${d > today ? ' future' : ''}`;
   // Only a finished day can miss: today is still filling up.
-  const t = d < today ? targetOn(targets, d) : null;
+  const t = d < today && target && (target.shorts || target.long_form) ? target : null;
   const m = shortfall(c, t);
   const miss = m > 0 ? ` miss" style="--m:${m.toFixed(2)}` : '';
   if (!v) {
@@ -882,7 +1210,7 @@ function dayCell(c, d, max, today, open, rowName, targets) {
   const h = max ? (v / max).toFixed(2) : 0;
   const i = hv(c, `${rowName} · ${dayLabel(d)}`, { future: d > today, click: true, target: t });
   return `<td class="${cls}"><button type="button" class="hit${miss}" style="--h:${h}" data-hv="${i}"
-      data-${open.kind}="${esc(open.id)}" data-day="${d}"
+      data-member="${esc(open.member)}"${open.channel ? ` data-channel="${esc(open.channel)}"` : ''} data-day="${d}"
       aria-label="${c.total} videos on ${d}: ${c.shorts} Shorts, ${c.long_form} long-form. Show them">${v}</button></td>`;
 }
 
@@ -951,36 +1279,27 @@ function paintGrid(data) {
       ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`;
     return;
   }
-  // The full visible set, so the roster, grid and drill-down share labels.
+  // The full visible set, so the grid and drill-down share labels.
   buildLabels(assign.channels.length ? assign.channels : data.channels);
   hoverData = [];
   $('hovercard').classList.remove('on');
   const showMgr = seesAll() && !data.manager_id;
-  const byChannel = upView === 'channel';
   const today = istToday();
   const staleIds = new Set(data.channels.filter(isStale).map(c => c.id));
-  const rows = byChannel
-    ? (data.channel_rows || []).map(r => ({
-        r, open: { kind: 'channel', id: r.channel_id }, label: chLabel(r.channel_id, r.name),
-        cls: r.total.total ? '' : 'idle',
-        name: `<span class="label" title="${esc(r.name || r.channel_id)}">${esc(chLabel(r.channel_id, r.name))}</span>${
-          staleIds.has(r.channel_id) ? '<span class="warn-dot" title="Not synced for 6h+: recent uploads may be missing"></span>' : ''}${
-          showMgr ? `<span class="sub">${esc(r.manager_name || 'No manager')}</span>` : ''}`,
-      }))
-    : data.rows
-        // Unassigned with nothing in it is noise; show it only when it counts something.
-        .filter(r => r.member_id != null || r.total.total)
-        .map(r => ({
-          r, open: { kind: 'member', id: r.member_id ?? '' }, label: r.name, targets: r.targets,
-          cls: `${r.member_id == null ? 'unassigned' : ''}${r.is_active ? '' : ' off'}${r.total.total ? '' : ' idle'}`,
-          name: `<span class="label">${esc(r.name)}</span>${r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}${
-            showMgr && r.manager_name ? `<span class="sub">${esc(r.manager_name)}</span>` : ''}`,
-        }));
-  const sumRows = byChannel ? (data.channel_rows || []) : data.rows;
-  paintSummary(data, sumRows);
+  const hasTarget = (ch) => Object.values(ch.targets).some(Boolean);
+  // A section per member: active ones always; others when they count or hold
+  // something. Unassigned only when a channel in it counts or has a target.
+  const sections = data.rows.map(r => ({
+    r, channels: r.member_id == null ? r.channels.filter(ch => ch.total.total || hasTarget(ch)) : r.channels,
+  })).filter(({ r, channels }) => r.member_id == null ? channels.length > 0
+    : r.is_active || r.total.total || channels.length);
+  paintSummary(data, data.rows);
 
-  let max = 0;
-  rows.forEach(({ r }) => data.days.forEach(d => { max = Math.max(max, count(r.days[d])); }));
+  let maxM = 0, maxC = 0;
+  sections.forEach(({ r, channels }) => data.days.forEach(d => {
+    maxM = Math.max(maxM, count(r.days[d]));
+    channels.forEach(ch => { if (ch.days[d]) maxC = Math.max(maxC, count(ch.days[d])); });
+  }));
   const head = data.days.map(d => {
     const p = dayParts(d);
     const cls = d === today ? 'today' : d > today ? 'future' : '';
@@ -990,26 +1309,56 @@ function paintGrid(data) {
     shorts: a.shorts + (c?.shorts || 0), long_form: a.long_form + (c?.long_form || 0) }),
     { total: 0, shorts: 0, long_form: 0 });
   const foot = data.days.map(d => {
-    const c = add(sumRows.map(r => r.days[d]));
+    const c = add(data.rows.map(r => r.days[d]));
     const v = count(c);
     return v ? `<td class="day" data-hv="${hv(c, `All · ${dayLabel(d)}`, { future: d > today })}">${v}</td>`
       : '<td class="day"><span class="nil">·</span></td>';
   }).join('');
-  const all = add(sumRows.map(r => r.total));
+  const all = add(data.rows.map(r => r.total));
   const grand = count(all);
   const hasFuture = data.days.some(d => d > today);
-  const hasTargets = !byChannel && rows.some(({ targets }) => targets);
+  const hasTargets = sections.some(({ r }) => Object.values(r.targets || {}).some(Boolean));
+  const hasGaps = sections.some(({ channels }) => channels.some(ch => Object.values(ch.days).some(v => v === null)));
+  const cols = data.days.length + 2;
+
+  const body = sections.map(({ r, channels }, i) => {
+    const key = String(r.member_id ?? 'u');
+    const shut = upCollapsed.has(key);
+    const mem = r.member_id ?? '';
+    const n = channels.length;
+    const name = `<button type="button" class="tog" data-toggle="${esc(key)}" aria-expanded="${!shut}"
+        aria-label="${shut ? 'Show' : 'Hide'} ${esc(r.name)}'s channels">▾</button><span class="label">${esc(r.name)}</span>${
+      r.is_active ? '' : ' <span class="tag tag--off">Deactivated</span>'}<span class="n">${
+      n ? `${n} channel${n === 1 ? '' : 's'}` : ''}</span>${
+      showMgr && r.manager_name ? `<span class="sub">${esc(r.manager_name)}</span>` : ''}`;
+    const memberRow = `<tr class="sec-head${r.member_id == null ? ' unassigned' : ''}${r.is_active ? '' : ' off'}">
+      <td class="name">${name}</td>${data.days.map(d => dayCell(r.days[d], d, maxM, today,
+        { member: mem }, r.name, r.targets && r.targets[d])).join('')}${sumCell(r.total, r.name)}</tr>`;
+    const chRows = channels.length ? channels.map(ch => {
+      const label = chLabel(ch.channel_id, ch.name);
+      return `<tr class="sec-ch"><td class="name"><span class="label" title="${esc(ch.name || ch.channel_id)}">${esc(label)}</span>${
+        staleIds.has(ch.channel_id) ? '<span class="warn-dot" title="Not synced for 6h+: recent uploads may be missing"></span>' : ''}</td>${
+        data.days.map(d => ch.days[d] === null
+          ? '<td class="day not-held" title="Someone else held this channel that day"><span></span></td>'
+          : dayCell(ch.days[d], d, maxC, today, { member: mem, channel: ch.channel_id },
+                    `${label} · ${r.name}`, ch.targets[d])).join('')}${sumCell(ch.total, `${label} · ${r.name}`)}</tr>`;
+    }).join('') : `<tr class="sec-ch"><td class="none" colspan="${cols}">No channels${
+      canEdit() ? ' (drag some onto them on the Roster board)' : ''}</td></tr>`;
+    return `${i ? `<tbody class="gap" aria-hidden="true"><tr><td class="name"></td><td colspan="${cols - 1}"></td></tr></tbody>` : ''}
+      <tbody class="sec${shut ? ' collapsed' : ''}">${memberRow}${chRows}</tbody>`;
+  }).join('');
+
   $('up-grid').innerHTML = `<div class="grid-wrap"><table class="up">
-      <thead><tr><th scope="col" class="name">${byChannel ? 'Channel' : 'Member'}</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
-      <tbody>${rows.map(({ r, open, cls, name, label, targets }) => `<tr class="${cls}"><td class="name">${name}</td>${
-        data.days.map(d => dayCell(r.days[d], d, max, today, open, label, targets)).join('')}${sumCell(r.total, label)}</tr>`).join('')}</tbody>
+      <thead><tr><th scope="col" class="name">Member · channel</th>${head}<th scope="col" class="sum">Total</th></tr></thead>
+      ${body}
       <tfoot><tr><td class="name">All</td>${foot}<td class="sum"${all.total
         ? ` data-hv="${hv(all, `All · ${fmtRange(data.from, data.to)}`)}"` : ''}><b>${grand}</b></td></tr></tfoot>
     </table></div>
     <div class="up-legend"><span><span class="sw" style="background:color-mix(in srgb, var(--color-accent) 48%, transparent)"></span>Darker = more ${
       KIND_WORD[upKind]}</span>${hasFuture ? `<span><span class="sw" style="background:repeating-linear-gradient(135deg, transparent 0 3px, var(--surface-tint) 3px 6px)"></span>Hatched = scheduled, not live yet</span>` : ''}${
-      hasTargets ? '<span><span class="sw" style="background:color-mix(in srgb, var(--color-err) 50%, transparent)"></span>Red = below target (darker = further off)</span>' : ''}${
-      byChannel && staleIds.size ? '<span><span class="sw" style="background:var(--color-warn);border-radius:50%"></span>Not synced for 6h+</span>' : ''}<span>Hover for the Shorts / long-form split, click for the videos</span></div>`;
+      hasTargets ? '<span><span class="sw" style="background:color-mix(in srgb, var(--color-err) 50%, transparent)"></span>Red = below the channel\'s target (darker = further off)</span>' : ''}${
+      hasGaps ? '<span><span class="sw" style="background:repeating-linear-gradient(90deg, var(--border) 0 1px, transparent 1px 4px)"></span>Lined = someone else held the channel that day</span>' : ''}${
+      staleIds.size ? '<span><span class="sw" style="background:var(--color-warn);border-radius:50%"></span>Not synced for 6h+</span>' : ''}<span>Hover for the Shorts / long-form split, click for the videos</span></div>`;
 }
 
 // ── Drill-down (#152) ─────────────────────────────────────────────────
@@ -1046,16 +1395,15 @@ function drillModal() {
 }
 
 async function openDrill({ member, channel }, day) {
-  const row = channel != null
-    ? (upShown?.channel_rows || []).find(r => r.channel_id === channel)
-    : (upShown?.rows || []).find(r => String(r.member_id ?? '') === member);
+  const row = (upShown?.rows || []).find(r => String(r.member_id ?? '') === member);
+  const ch = channel != null && row ? row.channels.find(c => c.channel_id === channel) : null;
   const back = drillModal();
   const p = dayParts(day);
-  const rowName = !row ? 'Uploads' : channel != null ? chLabel(row.channel_id, row.name) : row.name;
+  const rowName = !row ? 'Uploads' : ch ? `${chLabel(ch.channel_id, ch.name)} · ${row.name}` : row.name;
   back.querySelector('#drill-title').textContent = `${rowName} · ${p.dow} ${p.day} ${p.mon}`;
   const q = new URLSearchParams({ day });
-  if (channel != null) q.set('channel_id', channel);
-  else if (member) q.set('member_id', member);
+  if (member) q.set('member_id', member);
+  if (channel != null) { q.set('channel_id', channel); q.set('by_member', 'true'); }
   if (seesAll() && upShown?.manager_id) q.set('manager_id', upShown.manager_id);
   const list = back.querySelector('.drill-list');
   try {
@@ -1064,7 +1412,8 @@ async function openDrill({ member, channel }, day) {
     if (!r.ok) throw new Error(j.detail || r.statusText);
     const shorts = j.videos.filter(v => v.is_short === true).length;
     const c = { total: j.videos.length, shorts, long_form: j.videos.length - shorts };
-    const t = channel == null && row && day < istToday() ? targetOn(row.targets, day) : null;
+    const dayT = day < istToday() ? (ch ? ch.targets[day] : row && row.targets && row.targets[day]) : null;
+    const t = dayT && (dayT.shorts || dayT.long_form) ? dayT : null;
     const tgt = (got, want, word) => !want ? ''
       : ` · <span class="${got >= want ? 'met' : 'short'}">${got}/${want} ${word}</span>`;
     back.querySelector('.sub').innerHTML = `${c.total} video${c.total === 1 ? '' : 's'} · ${
@@ -1104,23 +1453,19 @@ function drillGroups(videos, memberId, day) {
 }
 
 $('up-grid').addEventListener('click', (e) => {
+  const tog = e.target.closest('button.tog');
+  if (tog) {
+    const key = tog.dataset.toggle;
+    if (upCollapsed.has(key)) upCollapsed.delete(key); else upCollapsed.add(key);
+    try { localStorage.setItem('midas:team:upCollapsed', JSON.stringify([...upCollapsed])); } catch {}
+    const sec = tog.closest('tbody');
+    sec.classList.toggle('collapsed', upCollapsed.has(key));
+    tog.setAttribute('aria-expanded', String(!upCollapsed.has(key)));
+    return;
+  }
   const b = e.target.closest('button.hit');
   if (b) openDrill({ member: b.dataset.member, channel: b.dataset.channel }, b.dataset.day);
 });
-
-function paintView() {
-  document.querySelectorAll('#up-view .chip').forEach(c =>
-    c.setAttribute('aria-pressed', String(c.dataset.view === upView)));
-}
-$('up-view').addEventListener('click', (e) => {
-  const c = e.target.closest('.chip');
-  if (!c || c.dataset.view === upView) return;
-  upView = c.dataset.view;
-  try { localStorage.setItem('midas:team:upView', upView); } catch {}
-  paintView();
-  if (upShown) paintGrid(upShown);
-});
-paintView();
 
 function paintManagerFilter(managers) {
   const holder = $('up-manager');
@@ -1185,7 +1530,18 @@ $('up-manager').addEventListener('change', (e) => {
 });
 
 setRange('7');
-load().then(() => { if (PAGE === 'uploads') loadUploads(); });
+(async () => {
+  const r = await fetch('/session/me').catch(() => null);
+  me = r && r.ok ? await r.json() : null;
+  if (PAGE === 'uploads') {
+    const a = await fetch('/team/assignments').catch(() => null);
+    assign = a && a.ok ? await a.json() : assign;
+    buildLabels(assign.channels);
+    loadUploads();
+  } else {
+    loadBoard();
+  }
+})();
 </script>
 </body>
 </html>

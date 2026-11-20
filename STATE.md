@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-20 (the channel page rebuilt around interventions, `GET /channels/{id}/seo`; an unlisted video counts on the day a sync saw it go public: `channel_uploads.public_at`, the 2-hourly `upload_recheck` job; member targets: `member_targets`, `PUT /team/members/{id}/targets`, red grid cells; the drill-down is a card grid; Roster: per-member channel picker (`PUT /team/members/{id}/channels`) and the admin's per-manager picker replace the Channels list; the drill-down groups by channel; Team page's Uploads tab redesigned; a channel whose `channel_uploads` history is missing gets a full sync; earlier: the host moved to a Mac mini; the logo `app/static/midas.png` in the rail, the login page and the tab icon, and added to `session.PUBLIC_PATHS`) ·
-**Commit:** on top of `62d437b` · **Branch:** `unlisted-public-at`
+**Generated:** 2026-11-20 (targets moved from members to channels: `channel_targets`, `PUT /channels/{id}/targets`, `member_targets` dropped; the Roster is a Scratch-like board, `GET /team/board`, `POST /channels/{id}/move` (the `move_channel` SQL function), the admin moves members between managers; the Uploads grid is a section per member with their channels, no By member / By channel switch; the channel page rebuilt around interventions, `GET /channels/{id}/seo`; an unlisted video counts on the day a sync saw it go public: `channel_uploads.public_at`, the 2-hourly `upload_recheck` job; member targets: `member_targets`, `PUT /team/members/{id}/targets`, red grid cells; the drill-down is a card grid; Roster: per-member channel picker (`PUT /team/members/{id}/channels`) and the admin's per-manager picker replace the Channels list; the drill-down groups by channel; Team page's Uploads tab redesigned; a channel whose `channel_uploads` history is missing gets a full sync; earlier: the host moved to a Mac mini; the logo `app/static/midas.png` in the rail, the login page and the tab icon, and added to `session.PUBLIC_PATHS`) ·
+**Commit:** on top of `112c0c3` · **Branch:** `channel-targets-board`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -154,8 +154,9 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261118020000_team_members.sql                 team_members, team_members_manager_idx (team tracker #148)
 20261118030000_channel_assignments.sql          channel_assignments, assign_channel() (team tracker #149)
 20261118040000_channel_uploads.sql              channel_uploads + its freeze trigger (team tracker #150)
-20261120000000_member_targets.sql               member_targets (team tracker: daily upload targets)
+20261120000000_member_targets.sql               member_targets (team tracker: daily upload targets; dropped by 20261121000000)
 20261120010000_channel_uploads_public_at.sql    channel_uploads.public_at (unlisted → public seen by a sync)
+20261121000000_channel_targets.sql              channel_targets, drop member_targets, move_channel() (the Board)
 ```
 
 **Tables** (columns are the union across the migrations):
@@ -475,22 +476,74 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
   videos public before the column existed. A private video made public needs none (YouTube moves its
   `publishedAt`).
 
-- **`member_targets`** (`20261120000000`), verbatim without the header comment. Each team member's daily upload
-  target per ISO weekday (1 = Monday), Shorts and long-form apart; the current target only, no history, so a change
-  recolours past days on the grid. Written only by `PUT /team/members/{id}/targets` (`app/team.py`), read by
-  `team.targets_for` (`GET /team/members`, `GET /team/uploads`):
+- **`channel_targets`** (`20261121000000`; replaces `member_targets` of `20261120000000`, dropped there), verbatim
+  without the header comment. Each channel's daily upload target per ISO weekday (1 = Monday), Shorts and long-form
+  apart; the current target only, no history, so a change recolours past days on the grid. Whoever is credited with
+  the channel on a day (`team_uploads._holder`, the grid's crediting rule, backfill included) carries that day's
+  target. Written only by `PUT /channels/{id}/targets` (`app/team.py`), read by `team.targets_for`
+  (`GET /team/uploads`, `GET /team/board`):
   ```sql
-  create table if not exists member_targets (
-      team_member_id  bigint       not null references team_members(id),
-      weekday         smallint     not null check (weekday between 1 and 7),
-      shorts          int          not null default 0 check (shorts >= 0),
-      long_form       int          not null default 0 check (long_form >= 0),
-      updated_by      bigint       references app_users(id),
-      updated_at      timestamptz  not null default now(),
-      primary key (team_member_id, weekday)
+  create table if not exists channel_targets (
+      channel_id   text         not null references channels(id) on delete cascade,
+      weekday      smallint     not null check (weekday between 1 and 7),
+      shorts       int          not null default 0 check (shorts >= 0),
+      long_form    int          not null default 0 check (long_form >= 0),
+      updated_by   bigint       references app_users(id),
+      updated_at   timestamptz  not null default now(),
+      primary key (channel_id, weekday)
   );
 
-  grant all on member_targets to service_role;
+  grant all on channel_targets to service_role;
+  ```
+
+- **`move_channel()`** (`20261121000000`), verbatim without its header comment. The Board's channel move in one
+  transaction: to a member, the channel's `manager_id` becomes the member's and `assign_channel()` runs; to a tray
+  (`p_team_member_id` null), `manager_id` = `p_manager_id` and the open assignment ends at `p_starts_on` (or its own
+  start if later). Called only by `POST /channels/{id}/move`; guarded by `tests/test_team_board.py`:
+  ```sql
+  create or replace function move_channel(
+      p_channel_id      text,
+      p_team_member_id  bigint,
+      p_manager_id      bigint,
+      p_starts_on       date,
+      p_moved_by        bigint
+  )
+  returns jsonb
+  language plpgsql
+  as $$
+  declare
+      v_manager  bigint;
+      v_open     channel_assignments;
+      v_row      channel_assignments;
+  begin
+      if p_team_member_id is not null then
+          select manager_id into v_manager from team_members where id = p_team_member_id;
+          if not found then
+              raise exception 'team member % not found', p_team_member_id using errcode = '22023';
+          end if;
+          update channels set manager_id = v_manager where id = p_channel_id;
+          v_row := assign_channel(p_channel_id, p_team_member_id, p_starts_on, p_moved_by);
+          return jsonb_build_object('manager_id', v_manager, 'team_member_id', p_team_member_id,
+                                    'assignment_id', v_row.id);
+      end if;
+
+      update channels set manager_id = p_manager_id where id = p_channel_id;
+      select * into v_open
+        from channel_assignments
+       where channel_id = p_channel_id and ends_on is null
+         for update;
+      if found then
+          update channel_assignments
+             set ends_on = greatest(p_starts_on, v_open.starts_on)
+           where id = v_open.id;
+      end if;
+      return jsonb_build_object('manager_id', p_manager_id, 'team_member_id', null,
+                                'assignment_id', null);
+  end;
+  $$;
+
+  revoke execute on function move_channel(text, bigint, bigint, date, bigint) from public;
+  grant  execute on function move_channel(text, bigint, bigint, date, bigint) to service_role;
   ```
 
 - **Other tables:** `audit_configs` (`raw_insights, generated_prompt, shorts_prompt, niche_queries jsonb, reflection_mode default 'shadow'`), `prompt_versions`, `threshold_history`, `playlist_assignments`, `playlist_proposals`, `video_keyframes`, `video_transcripts`, `quota_log`, `shorts_jobs`, `shorts_clips`. SQL functions: `dashboard_summary()`, `playlist_video_sims()`, `discover_orphan_clusters()`, `next_audit_candidate()`, `warm_pool()`, `assign_channel()` (above).
@@ -894,9 +947,10 @@ other route is scoped, and a new unscoped route fails CI.
   characters (`NAME_MAX`, else 422); a manager adds under themselves (`manager_id` omitted or their own, another
   → 403 `forbidden`); admin and exec must give `manager_id` (400 `"manager_id is required"`), an active `manager`
   (400 `"manager_id must be an active manager"`). `PATCH /team/members/{id}` (`require_team_member`) body
-  `{name?, is_active?}`: rename, deactivate or reactivate; an empty body 400 `"nothing to change"`; no field
-  moves a member to another manager. Deactivating a member ends their open channel assignments (§2
-  `channel_assignments`).
+  `{name?, is_active?, manager_id?}`: rename, deactivate or reactivate; an empty body 400 `"nothing to change"`;
+  `manager_id` moves the member to another manager, admin only (else 403 `forbidden`), an active `manager` (else
+  400 `"manager_id must be an active manager"`). Deactivating or moving a member ends their open channel assignments
+  (§2 `channel_assignments`); the channels keep their manager.
   `POST /channels/{id}/assign` (`current_user`, `require_channel`; #149) body `{team_member_id, starts_on?}` →
   `{"assignment": {id, channel_id, team_member_id, starts_on, ends_on, assigned_by, created_at, member_name,
   assigned_by_name}, "changed"}`: `starts_on` defaults to today in IST (`team.ist_day`); before the open row's
@@ -916,11 +970,25 @@ other route is scoped, and a new unscoped route fails CI.
   user can't see → 404 `channel_not_found`, nothing written; a deactivated member with any channel listed → 400
   `"team member is deactivated"`; an RPC `APIError` → 409, channels already done stay done (one transaction per
   channel, not per request).
-  `GET /team/members` carries each member's `targets`: `{"1": {shorts, long_form}, … "7": …}` (every ISO weekday),
-  null when none is set. `PUT /team/members/{id}/targets` (`current_user`, `require_team_member`) body `{"days":
-  {"<1-7>": {shorts?, long_form?}}}` → `{"targets"}`: a weekday or type left out is 0, each 0–500 (`TARGET_MAX`,
-  else 422); all zero deletes the member's rows (`targets` null), else the seven rows are upserted with
-  `updated_by`; exec → 403 `forbidden`; a manager's other-team member → 404 `team_member_not_found`.
+  `PUT /channels/{id}/targets` (`current_user`, `require_channel`) body `{"days": {"<1-7>": {shorts?,
+  long_form?}}}` → `{"targets"}`: a weekday or type left out is 0, each 0–500 (`TARGET_MAX`, else 422); all zero
+  deletes the channel's rows (`targets` null), else the seven `channel_targets` rows are upserted with `updated_by`;
+  exec → 403 `forbidden`; another team's or an unknown channel → 404 `channel_not_found`.
+  `POST /channels/{id}/move` (`current_user`, `require_channel`) body `{team_member_id}` (to that member, and to
+  their manager) or `{manager_id?}` with `team_member_id` null/omitted (into a tray: unheld; `manager_id` omitted =
+  the channel's current manager, null = no manager) → `{"before", "after", "changed"}`, each `{team_member_id,
+  manager_id}`: from today IST (or the open row's start if later) through the `move_channel` RPC; `after` equal to
+  `before` → `changed` false, nothing written. Exec → 403; a manager: only their own channels (404), their own
+  active members (another's 404 `team_member_not_found`, deactivated 400 `"team member is deactivated"`), their own
+  tray (another manager's or none → 403); the admin anything, a tray's `manager_id` an active manager (else 400);
+  an RPC `APIError` → 409. The page undoes a move by moving back to `before`.
+
+- **Board** (`app/team_board.py` `router`): `GET /team/board` (`current_user`) → `{"today", "me": {id, role},
+  "managers": [{id, name, is_active}], "members": [{id, name, manager_id, is_active}], "channels": [{id, name,
+  manager_id, holder_id, since, targets, today_target, today}]}`: managers = every active manager plus any still
+  owning a channel or member (admin and exec), or the user (a manager); their members, deactivated included; the
+  user's visible channels with the open assignment's member and `starts_on`, the weekly targets, today's (IST)
+  weekday target and the uploads live today, credited by `team_uploads._credited`. Read-only.
 
 - **Team uploads** (`app/team_uploads.py` `router`, team tracker #151): `GET /team/uploads?from=&to=&manager_id=`
   (`current_user`) → `{"from", "to", "days", "manager_id", "managers", "channels", "rows"}`. The window is IST days
@@ -940,18 +1008,23 @@ other route is scoped, and a new unscoped route fails CI.
   assignee (backfill, owner 2026-11-19); else Unassigned (never assigned, or a gap between assignments). `rows`: the in-scope
   managers' active members plus anyone credited or assigned in the window, by manager name then member name, then
   Unassigned (`member_id` null, name `"Unassigned"`, always present); each `{member_id, name, manager_id,
-  manager_name, is_active, days: {<day>: {total, shorts, long_form}}, total, targets}`, every day present (zeros
-  included); a NULL `is_short` counts as long-form. `managers` = the active `manager` users for admin and exec
-  (the filter), `[]` for a manager. `channel_rows` (the "By channel" view): one row per entry of `channels`, in its
+  manager_name, is_active, days: {<day>: {total, shorts, long_form}}, total, targets, channels}`, every day present
+  (zeros included); a NULL `is_short` counts as long-form. `channels`: one row per channel credited to the member on
+  any day of the window (`_holder`, backfill included), by name, each `{channel_id, name, days, total, targets}`, a
+  day the member didn't hold it null in both, a held day's `targets` that weekday's `channel_targets` `{shorts,
+  long_form}` (null when none); the member's `targets` per day = the sum over those channels (null when none).
+  Unassigned's channels are the days nobody held them. `managers` = the active `manager` users for admin and exec
+  (the filter), `[]` for a manager. `channel_rows` (read by the page's summary): one row per entry of `channels`, in its
   order, each `{channel_id, name, manager_id, manager_name, days, total}`, counting every upload on the channel
   whoever was credited (zeros included), so it totals the same as `rows`. Computed in Python, no SQL function. Its IST conversion (`ist_day`,
   `ist_midnight`) is its own, not the quota day.
-  `GET /team/uploads/videos?day=&member_id=&manager_id=&channel_id=` (`current_user`, #152) → `{"day", "member_id",
+  `GET /team/uploads/videos?day=&member_id=&manager_id=&channel_id=&by_member=` (`current_user`, #152) → `{"day", "member_id",
   "channel_id", "name", "manager_id", "videos"}`: the uploads behind one grid cell, read and credited by the grid's own code (`_scope`,
   `_credited`), so a cell's count equals its list's. `day` (IST, `YYYY-MM-DD`) required, else 422; `member_id`
   omitted = Unassigned (`name` `"Unassigned"`); `manager_id` honoured for admin and exec only, as the grid. An
-  `channel_id` (a "By channel" cell) lists that
-  channel's uploads that day whoever was credited, `member_id` ignored (returned null), `name` the channel's; a
+  `channel_id` lists that channel's uploads that day whoever was credited, `member_id` ignored (returned null),
+  `name` the channel's; with `by_member=true` (a channel row in a member's section) only those credited to
+  `member_id` (omitted = Unassigned); a
   channel outside the scope (`channels` above, `manager_id` included) → 404 `channel_not_found`. An
   unknown `member_id` → 404 `team_member_not_found` for everyone; for a manager, also a member who is neither theirs
   nor ever assigned to one of their channels (the same 404). `videos`, by go-live time: `{video_id, title,
@@ -1008,9 +1081,10 @@ other route is scoped, and a new unscoped route fails CI.
 | `auth.py` | OAuth + channel flag PATCH |
 | `access.py` | visibility rules (team tracker #145): `current_user`, `sees_all`, `filter_channels`, `visible_channel_ids`, `can_see_channel`, `require_channel` (404 `CHANNEL_NOT_FOUND`), the object resolvers (#146: `require_video`, `require_audit`, `require_intervention`, `require_short_link`, `require_shorts_job`, `require_shorts_clip`, each 404 with its own `*_NOT_FOUND`), `check_channel` and `scope_to_visible` for list and global routes (#147), `require_team_member` (#148, 404 `TEAM_MEMBER_NOT_FOUND`), `require_role` (403 `FORBIDDEN`), `require_admin`, the `access_rule` marker the route guard reads, and `PATCH /channels/{id}/manager` (Routes) |
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
-| `team.py` | the Team page, the roster (team tracker #148) and channel assignments (#149): `GET /team`, `GET /uploads`, `GET/POST /team/members`, `PATCH /team/members/{id}` (deactivating ends open assignments, `_end_assignments`), `POST /channels/{id}/assign` and `PUT /team/members/{id}/channels` (both through `_assign`, the `assign_channel` RPC), `GET /team/assignments` (Routes); `IST` (`Asia/Kolkata`, deliberately not `quota.QUOTA_TZ`), `ist_day`; `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE`, `MEMBER_INACTIVE`, `ASSIGN_CONFLICT` |
+| `team.py` | the Team page, the roster (team tracker #148) and channel assignments (#149): `GET /team`, `GET /uploads`, `GET/POST /team/members`, `PATCH /team/members/{id}` (deactivating ends open assignments, `_end_assignments`), `POST /channels/{id}/assign` and `PUT /team/members/{id}/channels` (both through `_assign`, the `assign_channel` RPC), `GET /team/assignments`, the channel targets (`PUT /channels/{id}/targets`, `targets_for`, `TARGET_MAX` 500) and the Board's moves (`POST /channels/{id}/move`, the `move_channel` RPC; `PATCH /team/members/{id}` `manager_id`) (Routes); `IST` (`Asia/Kolkata`, deliberately not `quota.QUOTA_TZ`), `ist_day`; `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE`, `MEMBER_INACTIVE`, `ASSIGN_CONFLICT` |
 | `channel_seo.py` | `GET /channels/{id}/seo` (Routes), the channel page's read: lever states, today's writes, latest verdicts, trimmed interventions |
-| `team_uploads.py` | the uploads grid (team tracker #151) and its drill-down (#152): `GET /team/uploads`, `GET /team/uploads/videos` (Routes), one crediting rule for both (`_scope`, `_credited`); `SCHEDULED` (the drill-down's status pill); `IST` (`Asia/Kolkata`, its own, not `quota.QUOTA_TZ`), `ist_day`, `ist_midnight`, `window` (defaults and the 422s), `DEFAULT_DAYS` (7), `MAX_DAYS` (92), `UNASSIGNED` |
+| `team_board.py` | the Board's read, `GET /team/board` (Routes) |
+| `team_uploads.py` | the uploads grid (team tracker #151) and its drill-down (#152): `GET /team/uploads`, `GET /team/uploads/videos` (Routes), one crediting rule for both (`_scope`, `_credited`), which also places each channel's target (`_holder`, `_weekday_target`, member rows' `channels`); `SCHEDULED` (the drill-down's status pill); `IST` (`Asia/Kolkata`, its own, not `quota.QUOTA_TZ`), `ist_day`, `ist_midnight`, `window` (defaults and the 422s), `DEFAULT_DAYS` (7), `MAX_DAYS` (92), `UNASSIGNED` |
 | `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`: a full pass when `needs_full_sync` or `uploads_need_backfill`, true while every `channel_uploads` row of the channel was first seen after `last_full_synced_at`, i.e. its upload history predates capture; a failed read answers false); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger. Upload capture (team tracker #150): the playlist walk carries each item's `snippet.publishedAt`; every fetched video goes to `channel_uploads` (§2) before the opted-out-Shorts and private skips (`_upload_row`, `_record_uploads`; `_stored_uploads` reads the stored rows first). A stored `channel_uploads` `is_short` is reused unless the row is still `private` or NULL (`_settled_is_short`), else re-probed inside `MAX_SHORTS_PROBES_PER_SYNC`. A `channel_uploads` read or write failure is logged and never fails the sync. `recheck_uploads` (the `upload_recheck` job, §4) re-reads unsettled uploads; `_went_public` stamps `public_at` |
 | `content_type.py` | `is_episode` classifier |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
@@ -1057,7 +1131,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `backup.py` / `provision.py` / `services/nas_service.py` | NAS snapshot, restore-on-empty, SMB client |
 | `keyframes.py` | dead: not imported anywhere in `app/` or `scripts/` |
 | `shorts/*` | Shorts cutter (NAS source), dispatcher, worker, upload. `shorts/cutter/download.py` gated off (`SHORTS_YT_DOWNLOAD_ENABLED=false`) |
-| `static/*` | vanilla-JS dashboard. `midas.png` is the logo: the rail's brand (`sidebar.js` `ICONS.brand`), the login heading, and every page's tab and touch icon. `login.html` (the sign-in form, inline script, loads only `theme.css` and `midas.png`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` heads the rail with `TOP_ITEMS` (Running `/`, Uploads `/uploads`, Roster `/team`) on every page, shows the signed-in user's name and role (`GET /session/me`) above the channel switcher (whose "Add channel" link, `/auth/login`, only the admin sees: `.not-admin .admin-only`, `theme.css`), with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `team.html` (#148, served at `/team` as Roster and at `/uploads` as Uploads, one panel per path, no tabs): Uploads (#151): one bar of chips, the range ("Last 7 days" (default), "Last 30 days", "Next 7 days" (today onwards: what is scheduled), "Custom", which shows `From`/`To` date inputs that load on change; over 92 days refused before asking), for admin and exec a manager `data-dropdown` ("All managers" or one, sent as `manager_id`), a count filter "All" / "Shorts" / "Long-form" (remembered in `localStorage` `midas:team:upKind`) and a "By member" / "By channel" pair (remembered in `localStorage` `midas:team:upView`; "By channel" paints `channel_rows`, each channel with its manager's name, "No manager" when it has none, for admin and exec unfiltered, and a cell opens `GET /team/uploads/videos?channel_id=`). A summary line over the grid, computed in the page from the response: the window's count, Shorts and long-form (filter "All" only), the daily average and busiest day over whole days before today, channels that posted ("n/m", the idle ones in its tooltip), and freshness from `channels[].last_synced_at` ("Synced <age> ago", or the number of channels not synced for 6 h, named in its tooltip). Channel rows show the name minus the words every visible channel shares and the generic words (`GENERIC`: Baalgeet, Balgeet, Rhymes, Nursery), full name in the tooltip (`buildLabels`, `chLabel`; also the drill-down). The grid from `GET /team/uploads`: a row per member (the manager's name under it when unfiltered for admin and exec; deactivated tagged; Unassigned only when it counts something) or per channel (an amber dot when not synced for 6 h), a column per IST day headed "<Mon> <d> <Dow>" on one line (today underlined, future days hatched as scheduled) plus Total, and an "All" footer of day totals; each day cell is one number for the filter, tinted by its share of the busiest cell in view; zeros are a dot. Hovering a day, Total or footer count shows a card (`#hovercard`, `hoverCard`; gone when the pointer leaves): the row and day or range, the total, a Shorts / long-form bar and counts with shares. A legend under the grid; a non-zero day cell opens the drill-down (#152): a `.modal` from `GET /team/uploads/videos` (the grid's `manager_id` sent along), headed by the count, its Shorts / long-form split and, on a member's finished day with a target, "got/target" per type (green met, red short); then a card grid per channel (`drillGroups`, `drillCard`), each channel headed by its label and counts, each card a thumbnail with a Short / Long-form / "?" badge (and "Scheduled" while scheduled) and the title, linking to YouTube; no times or status. For a member, the channels they held that day per `GET /team/assignments` with no uploads are named in one line, "Nothing from …". Escape, Close or the backdrop closes it. Targets on the grid ("By member" only): a finished day (before today IST) of a row with `targets` is red when the count in view falls short (`shortfall`: Shorts or long-form alone under those filters, under "All" either type short, the gaps summed over the summed target), its strength the shortfall's share of the target (`--m`); a zero under target shows a red 0; the hover card adds "Target: got/want" per type; the legend adds the red swatch when any row has targets. Roster (no explanatory text): the members from `GET /team/members` with the channels each holds today as tags (from `GET /team/assignments`), add (admin and exec pick the manager in a `data-dropdown`), "Channels", "Targets" (not for exec: a modal of seven weekdays × Shorts and long-form number inputs, prefilled, with "Copy Monday to every day", saved by `PUT /team/members/{id}/targets`), rename, deactivate (after a confirm) and reactivate, and a "Show deactivated members" toggle. "Channels" opens a checklist modal (`pickChannels`): a manager's own channels, for admin and exec the member's manager's channels, plus whatever the member holds; each held channel notes "since <date>", one held by someone else "held by <name>"; Save sends `PUT /team/members/{id}/channels`. For admin and exec the roster is grouped by manager, every active manager listed (with "No members yet." when empty) and its channels named in the group head; the admin gets a "Channels" button there, a checklist of every channel ("with <manager>" on another manager's), saved as one `PATCH /channels/{id}/manager` per changed channel (unticked → no manager). There is no per-channel list or assignment history on the page. `channel.html` (the channel page, rebuilt 2026-11-20 around interventions; no audit, prompt, reflection, reconcile or playlist-health UI): Autopilot = state pill and line (`Running.stateOf`, its audit-based `bad` state ignored), Start/Stop/Resume and "Get latest from YouTube", tiles (changes today / cap, titles changed, videos given backlinks, waiting on results, last change), each lever on/off with its reason and latest verdict, and "Recent changes" (the newest 30 `midas` rows, holdouts and declines behind a checkbox), all from `GET /channels/{id}/seo`, re-read every 60 s while shown. Videos = `GET /channels/{id}/videos` joined in the page to the `/seo` rows: chips All / Changed by Midas / Title changed / Backlinks added / Held back / Team edits / Untouched, a row per video with its last change and result; a row expands to every intervention on the video (title before → after, linked targets, result, "Hold to undo" → `POST /interventions/{id}/revert` on a live title or backlinks row). Playlists = the playlist test's figures (`GET /channels/{id}/playlist-test`), its pending additions only (`arm_id` set) to approve or reject, and the "Short links" card (`#sl-card`, `loadShortLinks`, "Mark set" after a `confirmDialog`, "Dismiss", "Download CSV"). Settings = one Save (`PATCH /auth/channels/{id}`: autopilot on, changes per day, language, track Shorts, NAS folder, auto-cut), "Cut Shorts now", and the levers read-only |
+| `static/*` | vanilla-JS dashboard. `midas.png` is the logo: the rail's brand (`sidebar.js` `ICONS.brand`), the login heading, and every page's tab and touch icon. `login.html` (the sign-in form, inline script, loads only `theme.css` and `midas.png`; follows `?next=` only to a same-site path; clears the `midas:swr:` localStorage cache on sign-in). `swr.js` wraps `window.fetch`: a 401 from Midas (not `/session/login`) sends the page to `/login?next=<page>`; every page loads it, `autoshorts.html` included. `sidebar.js` heads the rail with `TOP_ITEMS` (Running `/`, Uploads `/uploads`, Roster `/team`) on every page, shows the signed-in user's name and role (`GET /session/me`) above the channel switcher (whose "Add channel" link, `/auth/login`, only the admin sees: `.not-admin .admin-only`, `theme.css`), with a logout button (`POST /session/logout`, clears the SWR cache, goes to `/login`). `team.html` (#148, served at `/team` as Roster and at `/uploads` as Uploads, one panel per path, no tabs): Uploads (#151): one bar of chips, the range ("Last 7 days" (default), "Last 30 days", "Next 7 days" (today onwards: what is scheduled), "Custom", which shows `From`/`To` date inputs that load on change; over 92 days refused before asking), for admin and exec a manager `data-dropdown` ("All managers" or one, sent as `manager_id`), and a count filter "All" / "Shorts" / "Long-form" (remembered in `localStorage` `midas:team:upKind`). A summary line over the grid, computed in the page from the response: the window's count, Shorts and long-form (filter "All" only), the daily average and busiest day over whole days before today, channels that posted ("n/m", the idle ones in its tooltip), and freshness from `channels[].last_synced_at`. Channel names show minus the words every visible channel shares and the generic words (`GENERIC`: Baalgeet, Balgeet, Rhymes, Nursery), full name in the tooltip (`buildLabels`, `chLabel`). The grid from `GET /team/uploads` is one table of sections (2026-11-20; no By member / By channel switch): per member a head row (name, "n channels", the manager's name when unfiltered for admin and exec, deactivated tagged) with their day counts and summed targets, then a row per channel they held (`rows[].channels`; a day someone else held it is lined, an amber dot when not synced for 6 h); Unassigned last, only when one of its channels counts something or has a target; a section folds shut from its caret (remembered in `localStorage` `midas:team:upCollapsed`). Columns per IST day headed "<Mon> <d> <Dow>" (today underlined, future days hatched as scheduled) plus Total, and an "All" footer of day totals; each day cell is one number for the filter, tinted by its share of the busiest cell of its kind (member rows, channel rows); zeros are a dot. A finished day (before today IST) is red when the count in view falls short of that row's target (`shortfall`), its strength the shortfall's share, a zero under target a red 0. Hovering a count shows a card (`#hovercard`): the row and day or range, the total, a Shorts / long-form bar and counts, "Target: got/want" per type. A non-zero cell opens the drill-down (#152): a `.modal` from `GET /team/uploads/videos` (a member's head row by `member_id`; a channel row with `channel_id` and `by_member=true`), headed by the count, its split and, on a finished day with a target, "got/target" per type; then a card grid per channel, each card a thumbnail with a Short / Long-form / "?" badge (and "Scheduled") and the title, linking to YouTube; for a member, their channels with no uploads that day named in "Nothing from …" (from `GET /team/assignments`). Roster: the Board (2026-11-20, `GET /team/board`; docs/superpowers/specs/2026-11-20-channel-targets-board-design.md): Scratch-like blocks on a dot-grid canvas that pans by dragging its background; a hat block per manager (one hue each; the admin also gets a grey "No manager" block), dragged by its hat, positions kept per user in `localStorage` `midas:board:pos:<user id>` ("Tidy up" clears them and re-flows the blocks); C-shaped member blocks inside, wrapping puzzle-piece channel blocks; each manager block ends in a "Loose channels" tray. Each channel shows today's uploads against today's target as a bar and "got/want" (a tick when met; "no target" otherwise); a loose channel with an unmet target today pulses red; a member who meets every target today turns gold with a star, with confetti the first time that day in the browser (`midas:board:gold:<day>`). Dragging (SortableJS 1.15.6, vendored at `static/vendor/Sortable.min.js`; drop zones glow, the dragged block lifts and tilts, a dropped block bounces) a channel onto a member or into a tray is `POST /channels/{id}/move`; the admin also drags members between managers (`PATCH /team/members/{id}` `manager_id`, confirmed first when they hold channels); each move shows a toast with Undo. A manager drags within their own block; exec gets the board read-only. Clicking a channel opens its card: today vs target, the weekly targets (seven weekdays × Shorts and long-form, "Copy Monday to every day", `PUT /channels/{id}/targets`) and a "Move to…" select (the keyboard path); clicking a member opens rename, deactivate (confirmed) or reactivate and, for the admin, a manager select. "+ Add member" at the foot of a manager's members (`POST /team/members`); "Show deactivated" (`midas:board:showOff`). `channel.html` (the channel page, rebuilt 2026-11-20 around interventions; no audit, prompt, reflection, reconcile or playlist-health UI): Autopilot = state pill and line (`Running.stateOf`, its audit-based `bad` state ignored), Start/Stop/Resume and "Get latest from YouTube", tiles (changes today / cap, titles changed, videos given backlinks, waiting on results, last change), each lever on/off with its reason and latest verdict, and "Recent changes" (the newest 30 `midas` rows, holdouts and declines behind a checkbox), all from `GET /channels/{id}/seo`, re-read every 60 s while shown. Videos = `GET /channels/{id}/videos` joined in the page to the `/seo` rows: chips All / Changed by Midas / Title changed / Backlinks added / Held back / Team edits / Untouched, a row per video with its last change and result; a row expands to every intervention on the video (title before → after, linked targets, result, "Hold to undo" → `POST /interventions/{id}/revert` on a live title or backlinks row). Playlists = the playlist test's figures (`GET /channels/{id}/playlist-test`), its pending additions only (`arm_id` set) to approve or reject, and the "Short links" card (`#sl-card`, `loadShortLinks`, "Mark set" after a `confirmDialog`, "Dismiss", "Download CSV"). Settings = one Save (`PATCH /auth/channels/{id}`: autopilot on, changes per day, language, track Shorts, NAS folder, auto-cut), "Cut Shorts now", and the levers read-only |
 
 **Scripts:** `scripts/manage_users.py` (`create --email --name --role admin|exec|manager`, `reset-password --email`,
 `deactivate --email`; the password is typed twice at a `getpass` prompt, never an argument; reset and deactivate end

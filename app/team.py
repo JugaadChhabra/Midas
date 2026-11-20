@@ -14,10 +14,10 @@ exec see every member and choose the manager when they add one.
   * ``POST /team/members`` ``{name, manager_id?}`` → 201 with the member. A
     manager adds under themselves (naming another manager is 403); admin and
     exec must name an active ``manager`` (400 otherwise).
-  * ``PATCH /team/members/{id}`` ``{name?, is_active?}``: rename, deactivate
-    or reactivate. Another manager's member is a 404, the same as an unknown
-    one (``access.require_team_member``). A member never moves to another
-    manager here.
+  * ``PATCH /team/members/{id}`` ``{name?, is_active?, manager_id?}``:
+    rename, deactivate or reactivate. Another manager's member is a 404, the
+    same as an unknown one (``access.require_team_member``). Only the admin
+    moves a member to another manager (below).
 
 Members are deactivated, never deleted, so their past uploads stay credited.
 Deactivating a member ends their open channel assignments.
@@ -45,15 +45,28 @@ Channel assignments (team tracker 08, #149): one member holds a channel over
     see is a 404 (``channel_not_found``) and is never ended, so a channel that
     moved to another team stays as it is. A deactivated member is 400.
 
-Targets: each member's daily upload target, Shorts and long-form apart, per ISO
-weekday (1 = Monday … 7 = Sunday), in ``member_targets``.
+Targets (2026-11-20, docs/superpowers/specs/2026-11-20-channel-targets-board-design.md):
+each channel's daily upload target, Shorts and long-form apart, per ISO weekday
+(1 = Monday … 7 = Sunday), in ``channel_targets``. Whoever is credited with the
+channel on a day carries that day's target (``team_uploads``).
 
-  * ``GET /team/members`` carries each member's ``targets``:
-    ``{"1": {"shorts", "long_form"}, … "7": …}``, or null when none is set.
-  * ``PUT /team/members/{id}/targets`` ``{"days": {"1": {"shorts",
-    "long_form"}, …}}`` → ``{"targets"}``: a weekday left out is 0; all zero
-    clears the target (null). A manager sets their own members' (another's:
-    404), the admin anyone's; exec is 403.
+  * ``PUT /channels/{id}/targets`` ``{"days": {"1": {"shorts", "long_form"},
+    …}}`` → ``{"targets"}``: a weekday left out is 0; all zero clears the
+    target (null). A manager sets their own channels' (another's: 404), the
+    admin anyone's; exec is 403.
+
+The Board's moves:
+
+  * ``POST /channels/{id}/move`` ``{team_member_id}`` → the channel goes to that
+    member from today (IST), and to the member's manager; or ``{manager_id}``
+    (``team_member_id`` null or omitted) → into that manager's tray: unheld from
+    today, owned by ``manager_id`` (omitted: its current manager; null: no
+    manager, admin only). A manager moves only their own channels to their own
+    members or tray; exec is 403. One transaction (the ``move_channel`` SQL
+    function). → ``{"before", "after", "changed"}``, each ``{team_member_id,
+    manager_id}``, so the page can undo by moving back to ``before``.
+  * ``PATCH /team/members/{id}`` ``{manager_id}`` (admin only) moves a member to
+    another manager; their channels stay where they are, unheld from today.
 """
 from __future__ import annotations
 
@@ -107,6 +120,16 @@ class NewMember(BaseModel):
 class MemberChange(BaseModel):
     name: Name | None = None
     is_active: bool | None = None
+    #: Admin only: move the member to this manager.
+    manager_id: int | None = None
+
+
+class Move(BaseModel):
+    #: The member taking the channel; null or omitted = into a tray.
+    team_member_id: int | None = None
+    #: The tray's manager (``team_member_id`` null). Omitted: the channel's
+    #: current manager; null: no manager (admin only).
+    manager_id: int | None = None
 
 
 #: The most a day's target may ask, per type: a typo guard.
@@ -178,8 +201,7 @@ def list_members(user: dict = Depends(access.current_user)):
         query = query.eq("manager_id", user["id"])
     members = all_rows(query)
     users = _users()
-    targets = targets_for([m["id"] for m in members])
-    shaped = sorted(({**_shaped(m, users), "targets": targets.get(m["id"])} for m in members),
+    shaped = sorted((_shaped(m, users) for m in members),
                     key=lambda m: ((m["manager_name"] or "").lower(), m["name"].lower(), m["id"]))
     if access.sees_all(user):
         managers = sorted(
@@ -213,64 +235,131 @@ def create_member(body: NewMember, user: dict = Depends(access.current_user)):
 
 @router.patch("/team/members/{member_id}")
 def update_member(member_id: int, body: MemberChange,
+                  user: dict = Depends(access.current_user),
                   _: int = Depends(access.require_team_member)):
     change = body.model_dump(exclude_none=True)
     if not change:
         raise HTTPException(400, NOTHING_TO_CHANGE)
+    moving = "manager_id" in change
+    if moving:
+        if user.get("role") != UserRole.ADMIN:
+            raise HTTPException(403, access.FORBIDDEN)
+        if _active_manager(change["manager_id"]) is None:
+            raise HTTPException(400, NOT_A_MANAGER)
+        current = (supabase().table("team_members").select("manager_id")
+                   .eq("id", member_id).limit(1).execute().data) or []
+        if current and current[0].get("manager_id") == change["manager_id"]:
+            moving = False
     rows = (supabase().table("team_members").update(change)
             .eq("id", member_id).execute().data) or []
     if not rows:
         raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
-    if change.get("is_active") is False:
+    # Deactivated, or moved to another manager: their channels stay with the
+    # channels' manager, unheld from today.
+    if change.get("is_active") is False or moving:
         _end_assignments(member_id)
     return _shaped(rows[0], _users())
 
 
 # ── targets ──────────────────────────────────────────────────────────────
 
-def targets_for(member_ids) -> dict[int, dict]:
-    """Each member's targets, ``{"1": {"shorts", "long_form"}, … "7"}`` (every
-    weekday present); a member with none set is left out."""
-    ids = sorted({i for i in member_ids if i is not None})
+def targets_for(channel_ids) -> dict[str, dict]:
+    """Each channel's targets, ``{"1": {"shorts", "long_form"}, … "7"}`` (every
+    weekday present); a channel with none set is left out."""
+    ids = sorted({i for i in channel_ids if i is not None})
     if not ids:
         return {}
-    # member_targets has no `id` column (its key is team_member_id, weekday), so
+    # channel_targets has no `id` column (its key is channel_id, weekday), so
     # the paging sort can't be rows.ORDER_KEY: order by the primary key instead.
-    rows = rows_for_ids(lambda chunk: supabase().table("member_targets")
-                        .select("team_member_id,weekday,shorts,long_form")
-                        .in_("team_member_id", chunk)
-                        .order("team_member_id"), ids, order_by="weekday")
-    out: dict[int, dict] = {}
+    rows = rows_for_ids(lambda chunk: supabase().table("channel_targets")
+                        .select("channel_id,weekday,shorts,long_form")
+                        .in_("channel_id", chunk)
+                        .order("channel_id"), ids, order_by="weekday")
+    out: dict[str, dict] = {}
     for r in rows:
-        week = out.setdefault(r["team_member_id"],
+        week = out.setdefault(r["channel_id"],
                               {str(d): {"shorts": 0, "long_form": 0} for d in WEEKDAYS})
         week[str(r["weekday"])] = {"shorts": r["shorts"] or 0, "long_form": r["long_form"] or 0}
-    return {m: w for m, w in out.items()
+    return {c: w for c, w in out.items()
             if any(d["shorts"] or d["long_form"] for d in w.values())}
 
 
-@router.put("/team/members/{member_id}/targets")
-def set_targets(member_id: int, body: Targets,
-                user: dict = Depends(access.current_user),
-                _: int = Depends(access.require_team_member)):
+def _channel(channel_id: str) -> dict:
+    rows = (supabase().table("channels").select("id,name,manager_id")
+            .eq("id", channel_id).limit(1).execute().data) or []
+    if not rows:
+        raise HTTPException(404, access.CHANNEL_NOT_FOUND)
+    return rows[0]
+
+
+@router.put("/channels/{channel_id}/targets")
+def set_channel_targets(channel_id: str, body: Targets,
+                        user: dict = Depends(access.current_user),
+                        _: str = Depends(access.require_channel)):
     if user.get("role") == UserRole.EXEC:
         raise HTTPException(403, access.FORBIDDEN)
+    _channel(channel_id)
     db = supabase()
-    known = (db.table("team_members").select("id").eq("id", member_id)
-             .limit(1).execute().data) or []
-    if not known:
-        raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
     days = {d: body.days.get(d, DayTarget()) for d in WEEKDAYS}
     if not any(t.shorts or t.long_form for t in days.values()):
-        db.table("member_targets").delete().eq("team_member_id", member_id).execute()
+        db.table("channel_targets").delete().eq("channel_id", channel_id).execute()
         return {"targets": None}
     now = datetime.now(timezone.utc).isoformat()
-    db.table("member_targets").upsert(
-        [{"team_member_id": member_id, "weekday": d, "shorts": t.shorts,
+    db.table("channel_targets").upsert(
+        [{"channel_id": channel_id, "weekday": d, "shorts": t.shorts,
           "long_form": t.long_form, "updated_by": user["id"], "updated_at": now}
          for d, t in days.items()],
-        on_conflict="team_member_id,weekday").execute()
-    return {"targets": targets_for([member_id]).get(member_id)}
+        on_conflict="channel_id,weekday").execute()
+    return {"targets": targets_for([channel_id]).get(channel_id)}
+
+
+# ── the Board's channel move ─────────────────────────────────────────────
+
+@router.post("/channels/{channel_id}/move")
+def move_channel(channel_id: str, body: Move,
+                 user: dict = Depends(access.current_user),
+                 _: str = Depends(access.require_channel)):
+    role = user.get("role")
+    if role == UserRole.EXEC:
+        raise HTTPException(403, access.FORBIDDEN)
+    is_admin = role == UserRole.ADMIN
+    channel = _channel(channel_id)
+    current = _open_assignment(channel_id)
+    before = {"team_member_id": current["team_member_id"] if current else None,
+              "manager_id": channel.get("manager_id")}
+
+    if body.team_member_id is not None:
+        rows = (supabase().table("team_members").select(MEMBER_COLUMNS)
+                .eq("id", body.team_member_id).limit(1).execute().data) or []
+        member = rows[0] if rows else None
+        if member is None or not (is_admin or member.get("manager_id") == user["id"]):
+            raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
+        if not member.get("is_active"):
+            raise HTTPException(400, MEMBER_INACTIVE)
+        after = {"team_member_id": member["id"], "manager_id": member.get("manager_id")}
+    else:
+        manager_id = (body.manager_id if "manager_id" in body.model_fields_set
+                      else channel.get("manager_id"))
+        if not is_admin and manager_id != user["id"]:
+            raise HTTPException(403, access.FORBIDDEN)
+        if is_admin and manager_id is not None and _active_manager(manager_id) is None:
+            raise HTTPException(400, NOT_A_MANAGER)
+        after = {"team_member_id": None, "manager_id": manager_id}
+
+    if after == before:
+        return {"before": before, "after": after, "changed": False}
+    today = ist_day()
+    starts_on = (max(today, date.fromisoformat(str(current["starts_on"])[:10]))
+                 if current else today)
+    try:
+        supabase().rpc("move_channel", {
+            "p_channel_id": channel_id, "p_team_member_id": after["team_member_id"],
+            "p_manager_id": after["manager_id"], "p_starts_on": starts_on.isoformat(),
+            "p_moved_by": user["id"],
+        }).execute()
+    except APIError as exc:
+        raise HTTPException(409, ASSIGN_CONFLICT) from exc
+    return {"before": before, "after": after, "changed": True}
 
 
 # ── channel assignments (#149) ───────────────────────────────────────────

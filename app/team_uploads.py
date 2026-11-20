@@ -24,20 +24,27 @@
     end, it runs 7 days from or to it. Longer than ``MAX_DAYS`` (92), or
     backwards, is 422.
 
-``GET /team/uploads/videos?member_id=&day=&manager_id=`` (#152) → the uploads
-behind one cell, credited by the same code (``_scope``, ``_credited``), so a
+``GET /team/uploads/videos?member_id=&day=&manager_id=&channel_id=&by_member=``
+(#152) → the uploads behind one cell, credited by the same code (``_scope``, ``_credited``), so a
 cell's count and its list can't disagree.
 
 Computed in Python, not by a SQL RPC, so the whole grid is testable offline
 (decided in #142).
 
-``channel_rows`` (the "By channel" view) holds the same uploads by channel: one
-row per in-scope channel, every day, zeros included, whoever was credited. The
-drill-down takes ``channel_id`` for one of its cells.
+``channel_rows`` holds the same uploads by channel: one row per in-scope
+channel, every day, zeros included, whoever was credited (the page's summary
+reads it).
 
-Each member row carries ``targets`` (``team.targets_for``: per ISO weekday,
-``{shorts, long_form}``, or null when none is set); the page colours a
-finished day red when it falls short.
+Targets are the channels' (``team.targets_for``, ``channel_targets``). Each
+member row carries ``channels``: one row per channel credited to the member on
+any day of the window (``_holder``, the crediting rule, so a target goes with
+the channel), each ``{channel_id, name, days, total, targets}`` where a day the
+member didn't hold the channel is null in ``days`` and ``targets``, and a held
+day's target is that weekday's ``{shorts, long_form}`` (null when none). The
+member's own ``targets`` per day = the sum over those channels (null when none).
+Unassigned's channels are the days nobody held them. The page shows a section
+per member, its channels under it, and colours a finished day red when it
+falls short.
 
 Rows: every active member of the managers in scope, plus anyone credited or
 assigned on an in-scope channel in the window (a deactivated member keeps the
@@ -229,7 +236,12 @@ def _credited(db, channels: list[dict], first: date, last: date,
         if first <= day <= last:
             credited.append((_holder(by_channel.get(u["channel_id"], []), day,
                                      earliest.get(u["channel_id"])), day, u))
-    return credited, by_channel
+    return credited, by_channel, earliest
+
+
+def _weekday_target(targets: dict | None, day: date) -> dict | None:
+    t = (targets or {}).get(str(day.isoweekday()))
+    return t if t and (t["shorts"] or t["long_form"]) else None
 
 
 @router.get("/team/uploads")
@@ -245,11 +257,14 @@ def uploads_grid(
     sees_all = access.sees_all(user)
     db = supabase()
     channels, manager_id = _scope(db, user, manager_id)
-    credited, by_channel = _credited(db, channels, first, last)
+    credited, by_channel, earliest = _credited(db, channels, first, last)
 
     cells: dict[int | None, dict[str, dict]] = {}
     channel_cells: dict[str, dict[str, dict]] = {}
+    member_channel_cells: dict[tuple, dict[str, dict]] = {}
     for member, day, u in credited:
+        _count(member_channel_cells.setdefault((member, u["channel_id"]), {})
+               .setdefault(day.isoformat(), _zero()), u.get("is_short"))
         row = cells.setdefault(member, {})
         _count(row.setdefault(day.isoformat(), _zero()), u.get("is_short"))
         by_ch = channel_cells.setdefault(u["channel_id"], {})
@@ -272,8 +287,13 @@ def uploads_grid(
     members = {m["id"]: m for m in rows_for_ids(
         lambda ids: member_query().in_("manager_id", ids), managers_in_scope)
         if m.get("is_active")}
+    # Who holds each channel on each day (the crediting rule, backfill
+    # included): that member carries the channel's target that day.
+    holders = {(c["id"], d): _holder(by_channel.get(c["id"], []), d, earliest.get(c["id"]))
+               for c in channels for d in days}
     wanted = ({m for m in cells if m is not None}
-              | {a["team_member_id"] for rows in by_channel.values() for a in rows}) - set(members)
+              | {a["team_member_id"] for rows in by_channel.values() for a in rows}
+              | {m for m in holders.values() if m is not None}) - set(members)
     for m in rows_for_ids(lambda ids: member_query().in_("id", ids), sorted(wanted)):
         members[m["id"]] = m
 
@@ -298,10 +318,35 @@ def uploads_grid(
          for m in members.values()),
         key=lambda r: ((r["manager_name"] or "").lower(), (r["name"] or "").lower(),
                        r["member_id"]))
-    targets = team.targets_for(members)
+    rows.append(shaped(None, UNASSIGNED, None, True))
+
+    targets = team.targets_for(c["id"] for c in channels)
+    names = {c["id"]: c.get("name") for c in channels}
     for row in rows:
-        row["targets"] = targets.get(row["member_id"])
-    rows.append({**shaped(None, UNASSIGNED, None, True), "targets": None})
+        member = row["member_id"]
+        held = sorted({ch for (ch, _d), m in holders.items() if m == member},
+                      key=lambda ch: ((names.get(ch) or "").lower(), ch))
+        row_channels = []
+        for ch in held:
+            ch_days, ch_targets, total = {}, {}, _zero()
+            for d, key in zip(days, day_keys):
+                if holders[(ch, d)] != member:
+                    ch_days[key] = ch_targets[key] = None
+                    continue
+                cell = member_channel_cells.get((member, ch), {}).get(key, _zero())
+                ch_days[key] = cell
+                ch_targets[key] = _weekday_target(targets.get(ch), d)
+                for k in total:
+                    total[k] += cell[k]
+            row_channels.append({"channel_id": ch, "name": names.get(ch), "days": ch_days,
+                                 "total": total, "targets": ch_targets})
+        summed = {}
+        for key in day_keys:
+            ts = [c["targets"][key] for c in row_channels if c["targets"][key]]
+            summed[key] = ({"shorts": sum(t["shorts"] for t in ts),
+                            "long_form": sum(t["long_form"] for t in ts)} if ts else None)
+        row["channels"] = row_channels
+        row["targets"] = summed
 
     managers = sorted(
         ({"id": u["id"], "name": u["name"]} for u in users.values()
@@ -369,6 +414,7 @@ def uploads_videos(
     member_id: int | None = Query(None),
     manager_id: int | None = Query(None),
     channel_id: str | None = Query(None),
+    by_member: bool = Query(False),
     user: dict = Depends(access.current_user),
 ):
     """The uploads behind one grid cell: on the user's visible channels (and
@@ -376,7 +422,10 @@ def uploads_videos(
     credited to ``member_id`` (omitted = Unassigned) by the grid's own rule.
     With ``channel_id`` (the "By channel" view), that channel's uploads that
     day instead, whoever was credited; ``member_id`` is then ignored, and a
-    channel outside the scope is 404 ``channel_not_found``. Oldest first."""
+    channel outside the scope is 404 ``channel_not_found``. With ``channel_id``
+    and ``by_member`` (a channel row inside a member's section), only that
+    channel's uploads credited to ``member_id`` (omitted = Unassigned). Oldest
+    first."""
     the_day = _parse_day(day, "day")
     if the_day is None:
         raise HTTPException(422, "day must be a date (YYYY-MM-DD)")
@@ -386,17 +435,22 @@ def uploads_videos(
     if channel_id is not None:
         if channel_id not in names:
             raise HTTPException(404, access.CHANNEL_NOT_FOUND)
-        member_id = None
         name = names[channel_id] or channel_id
         channels = [c for c in channels if c["id"] == channel_id]
-        wanted = lambda member: True  # noqa: E731
+        if by_member:
+            if member_id is not None:
+                _member(db, user, member_id, channels)
+            wanted = lambda member: member == member_id  # noqa: E731
+        else:
+            member_id = None
+            wanted = lambda member: True  # noqa: E731
     else:
         name = UNASSIGNED
         if member_id is not None:
             name = _member(db, user, member_id, channels)["name"]
         wanted = lambda member: member == member_id  # noqa: E731
 
-    credited, _ = _credited(db, channels, the_day, the_day, VIDEO_COLUMNS)
+    credited, _, _ = _credited(db, channels, the_day, the_day, VIDEO_COLUMNS)
     uploads = sorted((u for member, _, u in credited if wanted(member)),
                      key=lambda u: (_ist_time(live_at(u)), u["video_id"]))
     videos = [{

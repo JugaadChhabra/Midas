@@ -78,7 +78,7 @@ def _store(uploads=(), assignments=None):
              "last_synced_at": "2026-11-16T09:00:00+00:00"},
             {"id": CH_NONE, "name": "Telugu", "manager_id": None, "last_synced_at": None},
         ],
-        "member_targets": [],
+        "channel_targets": [],
         "team_members": [_member(PRANAV, "Pranav", MANAGER_A),
                          _member(MEET, "Meet", MANAGER_A),
                          _member(RACHEL, "Rachel", MANAGER_B),
@@ -477,18 +477,86 @@ def test_the_ist_day_is_not_the_utc_or_pacific_day():
         == date(2026, 11, 18)
 
 
-# ── targets on the grid ──────────────────────────────────────────────────────
+# ── member sections: their channels and the channels' targets ───────────────
 
-def test_member_rows_carry_their_targets(use):
-    sb = _store()
-    sb._tables["member_targets"].append(
-        {"team_member_id": PRANAV, "weekday": 1, "shorts": 3, "long_form": 1})
+def _section_channel(body, member_id, channel_id):
+    [ch] = [c for c in _row(body, member_id)["channels"] if c["channel_id"] == channel_id]
+    return ch
+
+
+def _week(sb, channel_id, shorts=0, long_form=0):
+    sb._tables["channel_targets"].extend(
+        {"channel_id": channel_id, "weekday": d, "shorts": shorts, "long_form": long_form}
+        for d in range(1, 8))
+
+
+def test_each_member_row_lists_the_channels_they_held_with_their_uploads(use):
+    use(_store([_upload("v1", CH_A, "2026-11-12 10:00"),
+                _upload("v2", CH_A, "2026-11-12 11:00", is_short=True),
+                _upload("v3", CH_A2, "2026-11-12 11:00")]))
+
+    body = _grid(ADMIN, **WINDOW)
+
+    assert [c["channel_id"] for c in _row(body, PRANAV)["channels"]] == [CH_A]
+    ch = _section_channel(body, PRANAV, CH_A)
+    assert ch["name"] == "Marathi"
+    assert ch["days"]["2026-11-12"] == {"total": 2, "shorts": 1, "long_form": 1}
+    assert ch["total"]["total"] == 2
+    # Never assigned: Unassigned's, every day.
+    assert [c["channel_id"] for c in _row(body, None)["channels"]] == [CH_A2, CH_NONE]
+    assert _section_channel(body, None, CH_A2)["days"]["2026-11-12"]["total"] == 1
+    assert _row(body, MEET)["channels"] == []
+    # The channel rows add up to the member's.
+    assert _row(body, PRANAV)["total"] == ch["total"]
+
+
+def test_a_channels_target_goes_with_whoever_held_it_that_day(use):
+    sb = _store([_upload("v1", CH_A, "2026-11-11 10:00", is_short=True),
+                 _upload("v2", CH_A, "2026-11-14 10:00")],
+                assignments=[_assignment(1, CH_A, MEET, "2026-10-01", "2026-11-13"),
+                             _assignment(2, CH_A, PRANAV, "2026-11-13"),
+                             _assignment(3, CH_B, RACHEL, "2026-11-01")])
+    _week(sb, CH_A, shorts=2, long_form=1)
     use(sb)
 
     body = _grid(ADMIN, **WINDOW)
 
-    week = _row(body, PRANAV)["targets"]
-    assert week["1"] == {"shorts": 3, "long_form": 1}
-    assert week["7"] == {"shorts": 0, "long_form": 0}
-    assert _row(body, RACHEL)["targets"] is None
-    assert _row(body, None)["targets"] is None
+    meet = _section_channel(body, MEET, CH_A)
+    pranav = _section_channel(body, PRANAV, CH_A)
+    want = {"shorts": 2, "long_form": 1}
+    assert meet["targets"]["2026-11-12"] == want
+    assert meet["targets"]["2026-11-13"] is None and meet["days"]["2026-11-13"] is None
+    assert pranav["targets"]["2026-11-12"] is None and pranav["days"]["2026-11-12"] is None
+    assert pranav["targets"]["2026-11-13"] == want
+    assert meet["days"]["2026-11-11"]["shorts"] == 1
+    assert pranav["days"]["2026-11-14"]["long_form"] == 1
+    # The member's target is the sum of their channels' on that day.
+    assert _row(body, MEET)["targets"]["2026-11-12"] == want
+    assert _row(body, MEET)["targets"]["2026-11-14"] is None
+    assert _row(body, PRANAV)["targets"]["2026-11-14"] == want
+    # No target set: null.
+    assert _section_channel(body, RACHEL, CH_B)["targets"]["2026-11-12"] is None
+    assert _row(body, RACHEL)["targets"]["2026-11-12"] is None
+
+
+def test_a_members_target_sums_their_channels(use):
+    sb = _store(assignments=[_assignment(1, CH_A, PRANAV, "2026-11-01"),
+                             _assignment(2, CH_A2, PRANAV, "2026-11-01")])
+    _week(sb, CH_A, shorts=2)
+    _week(sb, CH_A2, shorts=1, long_form=3)
+    use(sb)
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert _row(body, PRANAV)["targets"]["2026-11-10"] == {"shorts": 3, "long_form": 3}
+
+
+def test_before_a_channels_first_assignment_its_first_assignee_carries_the_target(use):
+    sb = _store(assignments=[_assignment(1, CH_A, PRANAV, "2026-11-14")])
+    _week(sb, CH_A, shorts=1)
+    use(sb)
+
+    body = _grid(ADMIN, **WINDOW)
+
+    assert _section_channel(body, PRANAV, CH_A)["targets"]["2026-11-10"] == {"shorts": 1, "long_form": 0}
+    assert CH_A not in [c["channel_id"] for c in _row(body, None)["channels"]]

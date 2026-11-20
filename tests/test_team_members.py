@@ -40,7 +40,6 @@ def store():
         "app_sessions": [{"token_hash": session.hash_token(t), "user_id": uid,
                           "expires_at": "2999-01-01T00:00:00+00:00"}
                          for uid, t in TOKENS.items()],
-        "member_targets": [],
         "team_members": [_member(PRANAV, "Pranav", MANAGER_A),
                          _member(MEET, "Meet", MANAGER_A),
                          _member(RACHEL, "Rachel", MANAGER_B),
@@ -122,7 +121,7 @@ def test_members_carry_their_state_and_manager(store):
     [left] = [m for m in _listed(MANAGER_A)["members"] if m["id"] == LEFT]
     assert left == {"id": LEFT, "name": "Left", "manager_id": MANAGER_A,
                     "manager_name": "Justin", "is_active": False,
-                    "created_at": "2026-11-18T00:00:00+00:00", "targets": None}
+                    "created_at": "2026-11-18T00:00:00+00:00"}
 
 
 @pytest.mark.parametrize("uid", [ADMIN, EXEC])
@@ -256,10 +255,33 @@ def test_admin_and_exec_edit_any_member(store, uid):
     assert _row(store, RACHEL)["manager_id"] == MANAGER_B
 
 
-def test_patch_cannot_move_a_member_to_another_manager(store):
-    _as(MANAGER_A).patch(f"/team/members/{PRANAV}", json={"manager_id": MANAGER_B})
-    _as(ADMIN).patch(f"/team/members/{PRANAV}", json={"manager_id": MANAGER_B, "name": "P"})
+@pytest.mark.parametrize("uid", [MANAGER_A, EXEC])
+def test_only_the_admin_moves_a_member_to_another_manager(store, uid):
+    r = _as(uid).patch(f"/team/members/{PRANAV}", json={"manager_id": MANAGER_B})
 
+    assert r.status_code == 403
+    assert _row(store, PRANAV)["manager_id"] == MANAGER_A
+
+
+def test_the_admin_moves_a_member_and_their_channels_stay_behind_unheld(store):
+    store._tables["channel_assignments"].append(
+        {"id": 1, "channel_id": "UCa", "team_member_id": PRANAV,
+         "starts_on": "2026-11-01", "ends_on": None})
+
+    r = _as(ADMIN).patch(f"/team/members/{PRANAV}", json={"manager_id": MANAGER_B})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["manager_name"] == "Ishwari"
+    assert _row(store, PRANAV)["manager_id"] == MANAGER_B
+    [a] = store.rows("channel_assignments")
+    assert a["ends_on"] == team.ist_day().isoformat()
+
+
+@pytest.mark.parametrize("manager_id", [INACTIVE_MANAGER, ADMIN, 999])
+def test_a_member_moves_only_to_an_active_manager(store, manager_id):
+    r = _as(ADMIN).patch(f"/team/members/{PRANAV}", json={"manager_id": manager_id})
+
+    assert r.status_code == 400
     assert _row(store, PRANAV)["manager_id"] == MANAGER_A
 
 
@@ -287,91 +309,3 @@ def test_the_member_patch_uses_the_member_resolver():
     [route] = [r for r in _api_routes()
                if r.path == "/team/members/{member_id}" and "PATCH" in r.methods]
     assert access.require_team_member in list(_calls(route.dependant))
-
-
-# ── targets ──────────────────────────────────────────────────────────────────
-
-def _targets(uid, member_id, days):
-    return _as(uid).put(f"/team/members/{member_id}/targets", json={"days": days})
-
-
-def _member_targets(uid, member_id):
-    return next(m for m in _listed(uid)["members"] if m["id"] == member_id)["targets"]
-
-
-def test_a_manager_sets_a_members_weekly_targets(store):
-    r = _targets(MANAGER_A, PRANAV, {"1": {"shorts": 3, "long_form": 1},
-                                     "6": {"shorts": 2}})
-
-    assert r.status_code == 200, r.text
-    week = r.json()["targets"]
-    # Every weekday is present; one left out is 0.
-    assert set(week) == {str(d) for d in range(1, 8)}
-    assert week["1"] == {"shorts": 3, "long_form": 1}
-    assert week["6"] == {"shorts": 2, "long_form": 0}
-    assert week["2"] == {"shorts": 0, "long_form": 0}
-    assert _member_targets(MANAGER_A, PRANAV) == week
-    assert {r["updated_by"] for r in store.rows("member_targets")} == {MANAGER_A}
-
-
-def test_setting_targets_again_replaces_them(store):
-    _targets(MANAGER_A, PRANAV, {"1": {"shorts": 3}})
-    _targets(MANAGER_A, PRANAV, {"2": {"long_form": 4}})
-
-    week = _member_targets(MANAGER_A, PRANAV)
-    assert week["1"] == {"shorts": 0, "long_form": 0}
-    assert week["2"] == {"shorts": 0, "long_form": 4}
-    assert len(store.rows("member_targets")) == 7
-
-
-def test_all_zero_clears_the_target(store):
-    _targets(MANAGER_A, PRANAV, {"1": {"shorts": 3}})
-    r = _targets(MANAGER_A, PRANAV, {})
-
-    assert r.status_code == 200, r.text
-    assert r.json() == {"targets": None}
-    assert store.rows("member_targets") == []
-    assert _member_targets(MANAGER_A, PRANAV) is None
-
-
-def test_the_admin_sets_anyones_targets(store):
-    assert _targets(ADMIN, RACHEL, {"3": {"shorts": 1}}).status_code == 200
-
-
-def test_exec_cannot_set_targets(store):
-    r = _targets(EXEC, RACHEL, {"3": {"shorts": 1}})
-    assert r.status_code == 403
-    assert store.rows("member_targets") == []
-
-
-def test_a_manager_cannot_set_another_managers_members_targets(store):
-    r = _targets(MANAGER_A, RACHEL, {"3": {"shorts": 1}})
-    assert r.status_code == 404
-    assert store.rows("member_targets") == []
-
-
-@pytest.mark.parametrize("days", [{"0": {"shorts": 1}}, {"8": {"shorts": 1}},
-                                  {"1": {"shorts": -1}}, {"1": {"long_form": 501}}])
-def test_a_bad_target_is_422(store, days):
-    assert _targets(MANAGER_A, PRANAV, days).status_code == 422
-
-
-def test_targets_read_sorts_only_by_columns_the_table_has(monkeypatch):
-    """member_targets has no `id`; sorting by it is a 500 on every page that
-    reads targets (the fake doesn't know column names, so check them here)."""
-    from tests import fakes
-    columns = {"team_member_id", "weekday", "shorts", "long_form", "updated_by", "updated_at"}
-    sorted_by = []
-    real_order = fakes.FakeQuery.order
-
-    def spy(self, column, desc=False, **kw):
-        if self._table == "member_targets":
-            sorted_by.append(column)
-        return real_order(self, column, desc, **kw)
-
-    monkeypatch.setattr(fakes.FakeQuery, "order", spy)
-    sb = FakeSupabase({"member_targets": [
-        {"team_member_id": 1, "weekday": 1, "shorts": 2, "long_form": 1}]})
-    with patch.object(team, "supabase", return_value=sb):
-        assert team.targets_for([1])[1]["1"] == {"shorts": 2, "long_form": 1}
-    assert sorted_by and set(sorted_by) <= columns
