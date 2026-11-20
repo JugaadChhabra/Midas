@@ -389,3 +389,88 @@ def test_assign_uses_the_channel_resolver():
     [route] = [r for r in _api_routes()
                if r.path == "/channels/{channel_id}/assign" and "POST" in r.methods]
     assert access.require_channel in list(_calls(route.dependant))
+
+
+# ── PUT /team/members/{id}/channels (the Roster's channel picker) ────────────
+
+def _put(uid, member_id, channel_ids):
+    return _as(uid).put(f"/team/members/{member_id}/channels", json={"channel_ids": channel_ids})
+
+
+def test_the_picker_assigns_the_listed_channels_from_today(store):
+    r = _put(MANAGER_A, MEET, [CH_A, CH_A2])
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"channel_ids": [CH_A, CH_A2], "added": [CH_A, CH_A2], "ended": []}
+    today = _today_ist()
+    assert [(o["team_member_id"], o["starts_on"]) for o in _open(store, CH_A)] == [(MEET, today)]
+    assert [(o["team_member_id"], o["starts_on"]) for o in _open(store, CH_A2)] == [(MEET, today)]
+    # Marathi moved from Pranav: his row closes where Meet's starts.
+    assert next(r for r in _rows(store) if r["id"] == OPEN_A)["ends_on"] == today
+
+
+def test_the_picker_ends_a_channel_left_unticked(store):
+    r = _put(MANAGER_A, PRANAV, [])
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"channel_ids": [], "added": [], "ended": [CH_A]}
+    assert _open(store, CH_A) == []
+    assert next(r for r in _rows(store) if r["id"] == OPEN_A)["ends_on"] == _today_ist()
+
+
+def test_the_picker_leaves_held_and_listed_channels_alone(store):
+    before = _rows(store)
+    r = _put(MANAGER_A, PRANAV, [CH_A])
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"channel_ids": [CH_A], "added": [], "ended": []}
+    assert _rows(store) == before
+    assert store.rpc_calls == []
+
+
+def test_the_picker_never_ends_a_channel_the_user_cannot_see(store):
+    # Pranav still holds Hindi, which belongs to the other team now.
+    store._tables["channel_assignments"].append(_assignment(102, CH_B, PRANAV, "2026-11-10"))
+    store._tables["channel_assignments"][:] = [
+        r for r in store._tables["channel_assignments"] if r["id"] != 101]
+
+    r = _put(MANAGER_A, PRANAV, [CH_A])
+
+    assert r.status_code == 200, r.text
+    assert _open(store, CH_B)[0]["team_member_id"] == PRANAV
+
+
+def test_the_picker_refuses_a_channel_the_user_cannot_see(store):
+    before = _rows(store)
+    r = _put(MANAGER_A, PRANAV, [CH_A, CH_B])
+    assert r.status_code == 404
+    assert r.json()["detail"] == access.CHANNEL_NOT_FOUND
+    assert _rows(store) == before
+
+
+def test_the_picker_refuses_another_managers_member(store):
+    r = _put(MANAGER_A, RACHEL, [CH_A])
+    assert r.status_code == 404
+    assert r.json()["detail"] == access.TEAM_MEMBER_NOT_FOUND
+
+
+def test_the_picker_refuses_a_deactivated_member(store):
+    r = _put(MANAGER_A, LEFT, [CH_A2])
+    assert r.status_code == 400
+    assert _open(store, CH_A2) == []
+
+
+@pytest.mark.parametrize("uid", [ADMIN, EXEC])
+def test_admin_and_exec_pick_any_channel(store, uid):
+    r = _put(uid, RACHEL, [CH_B, CH_NONE])
+    assert r.status_code == 200, r.text
+    assert r.json()["added"] == [CH_NONE]
+    assert _open(store, CH_NONE)[0]["team_member_id"] == RACHEL
+
+
+def test_the_picker_uses_the_member_resolver():
+    from tests.test_route_access import _api_routes, _calls
+
+    [route] = [r for r in _api_routes()
+               if r.path == "/team/members/{member_id}/channels" and "PUT" in r.methods]
+    assert access.require_team_member in list(_calls(route.dependant))

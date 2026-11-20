@@ -19,19 +19,31 @@
     font:inherit; font-size:13px; padding:.45rem .6rem; border-radius:var(--radius-sm);
     border:1px solid var(--border); background:var(--panel-bg); color:inherit; min-width:14rem;
   }
-  .dt { --dt-cols: minmax(10rem, 1fr) 7rem 13rem; }
+  .dt { --dt-cols: minmax(9rem, 14rem) minmax(10rem, 1fr) 7rem 17rem; }
   .dt-row .acts { display:flex; gap:.35rem; justify-content:flex-end; }
+  .dt-row .chs { display:flex; flex-wrap:wrap; gap:.3rem; }
+  .dt-row .chs .none { color:var(--ink-4); }
   .dt-row.off .name { color:var(--ink-4); }
   .show-off { margin:0 0 1rem; }
   .show-off[hidden], #add-manager[hidden] { display:none; }
 
-  #ch-title { font-size:15px; margin:2rem 0 .4rem; }
-  .ch { --dt-cols: minmax(10rem, 1fr) minmax(12rem, 16rem) minmax(12rem, 16rem); }
-  .ch .since { font-size:12px; color:var(--ink-3); }
-  .ch .history { grid-column:1 / -1; font-size:12.5px; color:var(--ink-3); margin:.2rem 0 0; }
-  .ch .history summary { cursor:pointer; width:max-content; }
-  .ch .history ol { margin:.35rem 0 0; padding-left:1.2rem; }
-  .ch .history li { margin:.15rem 0; }
+  .group-head .mgr-chs { font-size:12px; font-weight:400; color:var(--ink-3); text-transform:none;
+                         letter-spacing:0; }
+  .group-head button { font-size:12px; }
+  .group .dt-empty { padding:.6rem .9rem; }
+
+  /* The channel picker: a member's channels, or (admin) a manager's. */
+  .modal.pick { max-width:460px; max-height:85vh; display:flex; flex-direction:column; }
+  .pick h2 { font-size:15px; margin:0 0 .8rem; }
+  .pick-list { overflow-y:auto; margin:0 0 1rem; border:1px solid var(--border-soft);
+               border-radius:var(--radius-sm); }
+  .pick-row { display:flex; align-items:center; gap:.6rem; padding:.55rem .75rem; font-size:13px;
+              cursor:pointer; border-bottom:1px solid var(--border-soft); }
+  .pick-row:last-child { border-bottom:0; }
+  .pick-row:hover { background:var(--surface-faint); }
+  .pick-row .note { margin-left:auto; font-size:11.5px; color:var(--ink-4); }
+  .pick-row .note.move { color:var(--color-warn); }
+  .pick-empty { padding:1rem; font-size:13px; color:var(--ink-3); }
 
   /* Uploads grid (#151): rows × IST days, one number per cell, shaded by
      how busy the cell is; the Shorts / long-form split is a filter, and a
@@ -147,6 +159,11 @@
   .drill-head h2 { font-size:15px; margin:0; }
   .drill-head .sub { font-size:12px; color:var(--ink-3); }
   .drill-list { overflow-y:auto; margin:0 0 1rem; }
+  .drill-group + .drill-group { margin-top:1rem; }
+  .drill-group h3 { display:flex; align-items:baseline; gap:.5rem; margin:0; padding:.35rem 0;
+                    font-size:13px; font-weight:650; border-bottom:1px solid var(--border); }
+  .drill-group h3 .n { font-size:12px; font-weight:500; color:var(--ink-3); }
+  .drill-group .empty { padding:.5rem 0; font-size:12.5px; color:var(--ink-4); }
   .drill-row { display:grid; grid-template-columns:88px 1fr auto; gap:.75rem; align-items:center;
                padding:.5rem 0; border-bottom:1px solid var(--border-soft); font-size:13px; }
   .drill-row img, .drill-row .no-thumb { width:88px; height:50px; object-fit:cover; border-radius:4px;
@@ -199,11 +216,6 @@
 
     <!-- ─── ROSTER ─── -->
     <section class="tab-panel" data-panel="roster" aria-label="Roster">
-      <p class="note">Your team members. They have no login: the roster is what
-        channels are assigned to, so each upload is credited to whoever held the
-        channel that day. Deactivate someone who has left; their past uploads
-        stay credited.</p>
-
       <form class="add-row" id="add-form" autocomplete="off">
         <input id="add-name" type="text" maxlength="100" placeholder="Name"
                aria-label="New member's name" required />
@@ -217,15 +229,6 @@
       </label>
 
       <div id="roster"><div class="skel" data-skeleton data-rows="4"></div></div>
-
-      <!-- Channel assignments (#149): a member dropdown per visible channel,
-           its assignment history, and (admin only) its manager. -->
-      <h2 class="section-title" id="ch-title">Channels</h2>
-      <p class="note">Who uploads to each channel. Picking someone assigns the
-        channel to them from today (IST). The first person given a channel is also
-        credited with its earlier uploads; after a change, uploads before today
-        stay credited to whoever held it then.</p>
-      <div id="channels"><div class="skel" data-skeleton data-rows="4"></div></div>
     </section>
   </main>
   </div>
@@ -336,6 +339,23 @@ function paintAddForm() {
   Components.init(holder.parentNode);
 }
 
+// Channels each member holds today, from GET /team/assignments.
+function heldBy(memberId) {
+  return assign.assignments
+    .filter(a => a.ends_on == null && a.team_member_id === memberId)
+    .map(a => a.channel_id)
+    .sort((a, b) => chLabel(a).localeCompare(chLabel(b)));
+}
+
+function chipList(ids) {
+  return ids.length
+    ? ids.map(id => {
+        const ch = assign.channels.find(c => c.id === id);
+        return `<span class="tag" title="${esc(ch ? ch.name : id)}">${esc(chLabel(id, ch && ch.name))}</span>`;
+      }).join('')
+    : '<span class="none">None</span>';
+}
+
 function memberRow(m) {
   const name = editing === m.id
     ? `<input class="rename" data-id="${m.id}" maxlength="100" value="${esc(m.name)}"
@@ -344,7 +364,8 @@ function memberRow(m) {
   const acts = editing === m.id
     ? `<button class="btn-primary" data-act="save" data-id="${m.id}">Save</button>
        <button class="btn-link" data-act="cancel">Cancel</button>`
-    : `<button data-act="rename" data-id="${m.id}">Rename</button>` +
+    : (m.is_active ? `<button data-act="channels" data-id="${m.id}">Channels</button>` : '') +
+      `<button data-act="rename" data-id="${m.id}">Rename</button>` +
       (m.is_active
         ? `<button data-act="deactivate" data-id="${m.id}">Deactivate</button>`
         : `<button data-act="reactivate" data-id="${m.id}">Reactivate</button>`);
@@ -352,55 +373,162 @@ function memberRow(m) {
     ? '<span class="pill pill--ok pill--sm">Active</span>'
     : '<span class="tag tag--off">Deactivated</span>';
   return `<div class="dt-row${m.is_active ? '' : ' off'}">
-      <div>${name}</div><div>${status}</div><div class="acts">${acts}</div></div>`;
+      <div>${name}</div><div class="chs">${m.is_active ? chipList(heldBy(m.id)) : ''}</div>
+      <div>${status}</div><div class="acts">${acts}</div></div>`;
 }
 
 function table(members) {
   return `<div class="dt"><div class="dt-scroll"><div class="dt-body">
-    <div class="dt-head"><div>Name</div><div>Status</div><div></div></div>
+    <div class="dt-head"><div>Name</div><div>Channels</div><div>Status</div><div></div></div>
     ${members.map(memberRow).join('')}
   </div></div></div>`;
 }
+
+const managedBy = (managerId) => assign.channels.filter(c => c.manager_id === managerId);
 
 function paintRoster() {
   const showOff = $('show-off').checked;
   const members = state.members.filter(m => showOff || m.is_active);
   const off = state.members.length - state.members.filter(m => m.is_active).length;
   $('show-off').parentNode.hidden = off === 0;
-  if (!members.length) {
-    $('roster').innerHTML = `<div class="dt"><div class="dt-empty muted">${
-      state.members.length ? 'Everyone on the roster is deactivated.'
-                           : 'No team members yet. Add the first one above.'}</div></div>`;
+  if (!seesAll()) {
+    $('roster').innerHTML = members.length ? table(members)
+      : `<div class="dt"><div class="dt-empty muted">${state.members.length
+          ? 'Everyone on the roster is deactivated.' : 'No team members yet.'}</div></div>`;
     return;
   }
-  if (!seesAll()) { $('roster').innerHTML = table(members); return; }
-  // Admin and exec: one group per manager, in the order the server sent.
-  const groups = new Map();
+  // Admin and exec: one group per manager (every active one, members or not),
+  // with the channels mapped to them; the admin changes that mapping here.
+  const groups = new Map(state.managers.map(m => [m.id, { name: m.name, ms: [] }]));
   members.forEach(m => {
-    const key = m.manager_name || `Manager ${m.manager_id}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(m);
+    if (!groups.has(m.manager_id)) {
+      groups.set(m.manager_id, { name: m.manager_name || `Manager ${m.manager_id}`, ms: [] });
+    }
+    groups.get(m.manager_id).ms.push(m);
   });
-  $('roster').innerHTML = Array.from(groups, ([name, ms]) => `
-    <div class="group">
-      <div class="group-head"><span>${esc(name)}</span><span class="n">${ms.length}</span>
-        <span class="rule"></span></div>
-      ${table(ms)}
-    </div>`).join('');
+  if (!groups.size) {
+    $('roster').innerHTML = '<div class="dt"><div class="dt-empty muted">No managers yet.</div></div>';
+    return;
+  }
+  $('roster').innerHTML = Array.from(groups, ([id, g]) => {
+    const chs = managedBy(id).map(c => chLabel(c.id, c.name));
+    return `<div class="group">
+      <div class="group-head"><span>${esc(g.name)}</span><span class="n">${g.ms.length}</span>
+        <span class="mgr-chs">${chs.length ? esc(chs.join(', ')) : 'No channels'}</span>
+        <span class="rule"></span>${isAdmin() && state.managers.some(m => m.id === id)
+          ? `<button data-act="mgr-channels" data-id="${id}">Channels</button>` : ''}</div>
+      ${g.ms.length ? table(g.ms) : '<div class="dt"><div class="dt-empty muted">No members yet.</div></div>'}
+    </div>`;
+  }).join('');
 }
 
 async function load() {
   try {
-    const [meR, listR] = await Promise.all([fetch('/session/me'), fetch('/team/members')]);
+    const [meR, listR, asR] = await Promise.all(
+      [fetch('/session/me'), fetch('/team/members'), fetch('/team/assignments')]);
     if (!listR.ok) throw new Error(listR.statusText);
     me = meR.ok ? await meR.json() : null;
     state = await listR.json();
+    assign = asR.ok ? await asR.json() : { channels: [], assignments: [] };
+    buildLabels(assign.channels);
     paintAddForm();
     paintRoster();
   } catch (err) {
     $('roster').innerHTML = '<em class="muted">Could not load the roster.</em>';
   }
-  await loadAssignments();
+}
+
+// ── Channel picker ────────────────────────────────────────────────────
+// A checklist of channels in a modal; resolves to the ticked ids, or null.
+function pickChannels(title, options, empty) {
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.innerHTML = `<div class="modal pick" role="dialog" aria-modal="true" aria-labelledby="pick-title">
+      <h2 id="pick-title"></h2>
+      <div class="pick-list">${options.length ? options.map(o => `
+        <label class="pick-row" title="${esc(o.name)}">
+          <input type="checkbox" value="${esc(o.id)}"${o.checked ? ' checked' : ''} />
+          <span>${esc(o.label)}</span>
+          ${o.note ? `<span class="note${o.move ? ' move' : ''}">${esc(o.note)}</span>` : ''}
+        </label>`).join('') : `<div class="pick-empty">${esc(empty)}</div>`}</div>
+      <div class="modal-actions">
+        <button class="btn modal-cancel">Cancel</button>
+        <button class="btn btn-primary modal-ok"${options.length ? '' : ' disabled'}>Save</button>
+      </div></div>`;
+    back.querySelector('#pick-title').textContent = title;
+    const close = (val) => { back.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    back.querySelector('.modal-cancel').onclick = () => close(null);
+    back.querySelector('.modal-ok').onclick = () => close(
+      Array.from(back.querySelectorAll('input:checked'), i => i.value));
+    back.onclick = (e) => { if (e.target === back) close(null); };
+    function onKey(e) { if (e.key === 'Escape') close(null); }
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(back);
+    (back.querySelector('input') || back.querySelector('.modal-cancel')).focus();
+  });
+}
+
+const byLabel = (a, b) => a.label.localeCompare(b.label);
+
+async function editMemberChannels(member) {
+  const held = new Set(heldBy(member.id));
+  // A manager picks from their own channels; admin and exec from the
+  // member's manager's channels. Whatever the member holds is always listed,
+  // so it can be taken away.
+  const pool = assign.channels.filter(c =>
+    held.has(c.id) || !seesAll() || c.manager_id === member.manager_id);
+  const options = pool.map(c => {
+    const open = assign.assignments.find(a => a.channel_id === c.id && a.ends_on == null);
+    const mine = open && open.team_member_id === member.id;
+    return {
+      id: c.id, name: c.name || c.id, label: chLabel(c.id, c.name), checked: mine,
+      note: mine ? `since ${fmtDay(open.starts_on)}`
+        : open ? `held by ${open.member_name || 'another member'}` : '',
+      move: !mine && !!open,
+    };
+  }).sort(byLabel);
+  const picked = await pickChannels(`${member.name}'s channels`, options,
+    seesAll() ? `No channels are mapped to ${member.manager_name || 'their manager'} yet.`
+              : 'No channels are mapped to you yet; ask the admin.');
+  if (!picked) return;
+  const same = picked.length === held.size && picked.every(id => held.has(id));
+  if (same) return;
+  try {
+    const res = await send('PUT', `/team/members/${member.id}/channels`, { channel_ids: picked });
+    const parts = [];
+    if (res.added.length) parts.push(`${res.added.length} added`);
+    if (res.ended.length) parts.push(`${res.ended.length} removed`);
+    toast(`${member.name}: ${parts.join(', ') || 'no change'}.`);
+  } catch (err) {
+    toast('Could not save the channels: ' + err.message, 'err');
+  }
+  await load();
+}
+
+async function editManagerChannels(managerId) {
+  const manager = state.managers.find(m => m.id === managerId);
+  const options = assign.channels.map(c => ({
+    id: c.id, name: c.name || c.id, label: chLabel(c.id, c.name), checked: c.manager_id === managerId,
+    note: c.manager_id && c.manager_id !== managerId ? `with ${c.manager_name || 'another manager'}` : '',
+    move: !!c.manager_id && c.manager_id !== managerId,
+  })).sort(byLabel);
+  const picked = await pickChannels(`${manager.name}'s channels`, options, 'No channels yet.');
+  if (!picked) return;
+  const want = new Set(picked);
+  const changes = assign.channels.filter(c => want.has(c.id) !== (c.manager_id === managerId));
+  let failed = 0;
+  for (const c of changes) {
+    try {
+      await send('PATCH', `/channels/${encodeURIComponent(c.id)}/manager`,
+                 { manager_id: want.has(c.id) ? managerId : null });
+    } catch (err) {
+      failed++;
+    }
+  }
+  if (failed) toast(`Could not save ${failed} of ${changes.length} channel${changes.length > 1 ? 's' : ''}.`, 'err');
+  else if (changes.length) toast(`${manager.name}'s channels saved.`);
+  await load();
 }
 
 $('add-manager').addEventListener('change', (e) => {
@@ -448,7 +576,11 @@ $('roster').addEventListener('click', async (e) => {
   const id = Number(btn.dataset.id);
   const member = state.members.find(m => m.id === id);
   const act = btn.dataset.act;
-  if (act === 'rename') {
+  if (act === 'channels') {
+    await editMemberChannels(member);
+  } else if (act === 'mgr-channels') {
+    await editManagerChannels(id);
+  } else if (act === 'rename') {
     editing = id; paintRoster();
     const input = document.querySelector(`input.rename[data-id="${id}"]`);
     input && (input.focus(), input.select());
@@ -478,121 +610,11 @@ $('roster').addEventListener('keydown', (e) => {
   }
 });
 
-// ── Channel assignments (#149) ────────────────────────────────────────
-// GET /team/assignments is scoped: the user's visible channels and every
-// assignment on them. A manager picks from their own active members; admin
-// and exec from the channel's manager's members (every active member when the
-// channel has no manager). Only the admin gets the channel → manager control
-// (PATCH /channels/{id}/manager is admin-only).
+// GET /team/assignments: the user's visible channels and every assignment on
+// them; the roster's channel chips and pickers, and the drill-down's grouping.
 let assign = { channels: [], assignments: [] };
 const isAdmin = () => me && me.role === 'admin';
 const fmtDay = (d) => d ? String(d).slice(0, 10) : '';
-
-function memberChoices(ch) {
-  const active = state.members.filter(m => m.is_active);
-  if (!seesAll()) return active;
-  return ch.manager_id ? active.filter(m => m.manager_id === ch.manager_id) : active;
-}
-
-function historyOf(chId) {
-  return assign.assignments.filter(a => a.channel_id === chId);   // newest first
-}
-
-function channelRow(ch) {
-  const rows = historyOf(ch.id);
-  const open = rows.find(a => a.ends_on == null);
-  const choices = memberChoices(ch);
-  // No "Unassigned" choice once someone holds it: v1 has no unassign, only
-  // reassign (and deactivating the holder).
-  const opts = (open ? [] : [{ value: '', label: 'Unassigned' }])
-    .concat(choices.map(m => ({ value: String(m.id), label: m.name })));
-  if (open && !choices.some(m => m.id === open.team_member_id)) {
-    opts.push({ value: String(open.team_member_id), label: open.member_name || `Member ${open.team_member_id}` });
-  }
-  const memberDd = `<div data-dropdown data-assign="${esc(ch.id)}" data-label="Member"
-      data-value="${open ? open.team_member_id : ''}"
-      data-options='${esc(JSON.stringify(opts))}'></div>
-      ${open ? `<div class="since">since ${esc(fmtDay(open.starts_on))}</div>` : ''}`;
-  const mgrOpts = [{ value: '', label: 'No manager' }]
-    .concat(state.managers.map(m => ({ value: String(m.id), label: m.name })));
-  if (ch.manager_id && !state.managers.some(m => m.id === ch.manager_id)) {
-    mgrOpts.push({ value: String(ch.manager_id), label: ch.manager_name || `Manager ${ch.manager_id}` });
-  }
-  const mgr = isAdmin()
-    ? `<div data-dropdown data-manager="${esc(ch.id)}" data-label="Manager"
-          data-value="${ch.manager_id ?? ''}" data-options='${esc(JSON.stringify(mgrOpts))}'></div>`
-    : `<span class="muted">${esc(ch.manager_name || 'No manager')}</span>`;
-  const history = rows.length ? `<details class="history"><summary>History (${rows.length})</summary><ol>${
-    rows.map(a => `<li>${esc(a.member_name || `Member ${a.team_member_id}`)}: ${esc(fmtDay(a.starts_on))}
-      → ${a.ends_on == null ? 'now' : esc(fmtDay(a.ends_on))}${a.assigned_by_name
-        ? ` <span class="muted">(by ${esc(a.assigned_by_name)})</span>` : ''}</li>`).join('')
-  }</ol></details>` : '';
-  return `<div class="dt-row"><div class="name">${esc(ch.name || ch.id)}</div>
-    <div>${memberDd}</div><div>${mgr}</div>${history}</div>`;
-}
-
-function paintChannels() {
-  const holder = $('channels');
-  if (!assign.channels.length) {
-    holder.innerHTML = `<div class="dt"><div class="dt-empty muted">${
-      seesAll() ? 'No channels yet.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`;
-    return;
-  }
-  holder.innerHTML = `<div class="dt ch"><div class="dt-scroll"><div class="dt-body">
-    <div class="dt-head"><div>Channel</div><div>Assigned to</div><div>Manager</div></div>
-    ${assign.channels.map(channelRow).join('')}
-  </div></div></div>`;
-  Components.init(holder);
-}
-
-async function loadAssignments() {
-  try {
-    const r = await fetch('/team/assignments');
-    if (!r.ok) throw new Error(r.statusText);
-    assign = await r.json();
-    paintChannels();
-  } catch (err) {
-    $('channels').innerHTML = '<em class="muted">Could not load the channels.</em>';
-  }
-}
-
-$('channels').addEventListener('change', async (e) => {
-  const el = e.target.closest('[data-dropdown]');
-  if (!el || !e.detail || !('value' in e.detail)) return;
-  const value = e.detail.value;
-  if (el.dataset.assign) {
-    const ch = assign.channels.find(c => c.id === el.dataset.assign);
-    const member = state.members.find(m => String(m.id) === value);
-    if (!value || !member) return;
-    const ok = await confirmDialog(
-      `Assign ${ch.name || ch.id} to ${member.name} from today? ` +
-      (!(assign.assignments || []).some(a => a.channel_id === ch.id)
-        ? 'As its first assignee, they are also credited with its earlier uploads.'
-        : 'Uploads before today stay credited to whoever held it then.'), 'Assign');
-    if (!ok) { paintChannels(); return; }
-    try {
-      const res = await send('POST', `/channels/${encodeURIComponent(ch.id)}/assign`,
-                             { team_member_id: member.id });
-      toast(res.changed ? `${ch.name || ch.id} assigned to ${member.name}.`
-                        : `${member.name} already holds ${ch.name || ch.id}.`);
-    } catch (err) {
-      toast('Could not assign: ' + err.message, 'err');
-    }
-    await loadAssignments();
-  } else if (el.dataset.manager) {
-    const ch = assign.channels.find(c => c.id === el.dataset.manager);
-    try {
-      await send('PATCH', `/channels/${encodeURIComponent(ch.id)}/manager`,
-                 { manager_id: value ? Number(value) : null });
-      toast(value ? `${ch.name || ch.id} is now managed by ${
-        (state.managers.find(m => String(m.id) === value) || {}).name || 'that manager'}.`
-        : `${ch.name || ch.id} has no manager now.`);
-    } catch (err) {
-      toast('Could not change the manager: ' + err.message, 'err');
-    }
-    await loadAssignments();
-  }
-});
 
 // ── Uploads grid (#151) ───────────────────────────────────────────────
 // GET /team/uploads is scoped: a manager gets their own channels and members;
@@ -798,7 +820,8 @@ function paintGrid(data) {
       ? 'No channels for this filter.' : 'No channels are mapped to you yet; ask the admin.'}</div></div>`;
     return;
   }
-  buildLabels(data.channels);
+  // The full visible set, so the roster, grid and drill-down share labels.
+  buildLabels(assign.channels.length ? assign.channels : data.channels);
   hoverData = [];
   $('hovercard').classList.remove('on');
   const showMgr = seesAll() && !data.manager_id;
@@ -893,7 +916,7 @@ function drillRow(v) {
   return `<div class="drill-row">${thumb}
     <div><div class="title"><a href="${href}" target="_blank" rel="noopener">${
       esc(v.title || v.video_id)}</a></div>
-      <div class="meta">${esc(chLabel(v.channel_id, v.channel_name))} · ${kind(v)}</div></div>
+      <div class="meta">${kind(v)}</div></div>
     <div class="side">${statusPill(v)}<span class="when">${
       v.status === 'scheduled' ? 'Goes live' : 'Live'} ${esc(istTime(v.live_at || v.uploaded_at))} IST</span>
       <span class="when">Uploaded ${esc(istTime(v.uploaded_at, true))} IST</span></div></div>`;
@@ -937,11 +960,38 @@ async function openDrill({ member, channel }, day) {
     back.querySelector('.sub').textContent =
       `${j.videos.length} video${j.videos.length === 1 ? '' : 's'} · ${shorts} Shorts / ${
         j.videos.length - shorts} long-form · times in IST`;
-    list.innerHTML = j.videos.length ? j.videos.map(drillRow).join('')
-      : '<em class="muted">No uploads.</em>';
+    list.innerHTML = drillGroups(j.videos, channel == null && member ? Number(member) : null, day);
   } catch (err) {
     list.innerHTML = `<em class="muted">Could not load the videos: ${esc(err.message)}</em>`;
   }
+}
+
+// The videos grouped by channel. For a member, every channel they held that
+// day is listed, the ones with nothing in it too, so a quiet channel shows.
+function drillGroups(videos, memberId, day) {
+  const groups = new Map();
+  if (memberId != null) {
+    assign.assignments
+      .filter(a => a.team_member_id === memberId && String(a.starts_on) <= day
+                   && (a.ends_on == null || day < String(a.ends_on)))
+      .forEach(a => groups.set(a.channel_id, { name: null, videos: [] }));
+  }
+  videos.forEach(v => {
+    if (!groups.has(v.channel_id)) groups.set(v.channel_id, { name: v.channel_name, videos: [] });
+    groups.get(v.channel_id).videos.push(v);
+  });
+  if (!groups.size) return '<em class="muted">No uploads.</em>';
+  const named = Array.from(groups, ([id, g]) => {
+    const ch = assign.channels.find(c => c.id === id);
+    return { id, label: chLabel(id, g.name || (ch && ch.name)), videos: g.videos };
+  }).sort((a, b) => (b.videos.length > 0) - (a.videos.length > 0) || a.label.localeCompare(b.label));
+  return named.map(g => {
+    const shorts = g.videos.filter(v => v.is_short === true).length;
+    const n = g.videos.length;
+    return `<div class="drill-group"><h3>${esc(g.label)}<span class="n">${n
+      ? `${n} · ${shorts} Shorts / ${n - shorts} long-form` : 'nothing'}</span></h3>${n
+      ? g.videos.map(drillRow).join('') : '<div class="empty">No uploads this day.</div>'}</div>`;
+  }).join('');
 }
 
 $('up-grid').addEventListener('click', (e) => {

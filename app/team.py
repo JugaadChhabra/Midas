@@ -37,6 +37,13 @@ Channel assignments (team tracker 08, #149): one member holds a channel over
   * ``GET /team/assignments`` → ``{"channels", "assignments"}``: the user's
     visible channels (with their manager, for the admin's channel → manager
     control) and every assignment on them, current and past.
+  * ``PUT /team/members/{id}/channels`` ``{channel_ids}`` → ``{"channel_ids",
+    "added", "ended"}``: the Roster's channel picker. Sets the channels the
+    member holds from today (IST): each listed channel they don't hold is
+    assigned to them (from whoever held it), and each visible channel they hold
+    but isn't listed is ended today, left unassigned. A channel the user can't
+    see is a 404 (``channel_not_found``) and is never ended, so a channel that
+    moved to another team stays as it is. A deactivated member is 400.
 """
 from __future__ import annotations
 
@@ -90,6 +97,10 @@ class NewMember(BaseModel):
 class MemberChange(BaseModel):
     name: Name | None = None
     is_active: bool | None = None
+
+
+class MemberChannels(BaseModel):
+    channel_ids: list[str]
 
 
 class Assign(BaseModel):
@@ -190,15 +201,18 @@ def update_member(member_id: int, body: MemberChange,
 
 # ── channel assignments (#149) ───────────────────────────────────────────
 
-def _end_assignments(member_id: int) -> None:
-    """End a deactivated member's open assignments today (IST), so their
-    channels show as unassigned from today. A row starting later than today
-    ends where it starts: an empty range, crediting nothing."""
+def _end_assignments(member_id: int, channel_ids: set[str] | None = None) -> None:
+    """End a member's open assignments today (IST), so their channels show as
+    unassigned from today: all of them (deactivation), or those on
+    ``channel_ids``. A row starting later than today ends where it starts: an
+    empty range, crediting nothing."""
     today = ist_day()
     db = supabase()
-    open_rows = all_rows(db.table("channel_assignments").select("id,starts_on")
+    open_rows = all_rows(db.table("channel_assignments").select("id,channel_id,starts_on")
                          .eq("team_member_id", member_id).is_("ends_on", "null"))
     for row in open_rows:
+        if channel_ids is not None and row["channel_id"] not in channel_ids:
+            continue
         ends_on = max(today, date.fromisoformat(str(row["starts_on"])[:10]))
         (db.table("channel_assignments").update({"ends_on": ends_on.isoformat()})
          .eq("id", row["id"]).is_("ends_on", "null").execute())
@@ -258,10 +272,18 @@ def assign_channel(channel_id: str, body: Assign,
             return {"assignment": _shaped_assignment(current, {member["id"]: member}, _users()),
                     "changed": False}
 
+    row = _assign(channel_id, member["id"], starts_on, user["id"])
+    return {"assignment": _shaped_assignment(row, {member["id"]: member}, _users()),
+            "changed": True}
+
+
+def _assign(channel_id: str, member_id: int, starts_on: date, by: int) -> dict:
+    """The ``assign_channel`` RPC: close the channel's open row and open the
+    member's, in one transaction."""
     try:
-        result = db.rpc("assign_channel", {
-            "p_channel_id": channel_id, "p_team_member_id": member["id"],
-            "p_starts_on": starts_on.isoformat(), "p_assigned_by": user["id"],
+        result = supabase().rpc("assign_channel", {
+            "p_channel_id": channel_id, "p_team_member_id": member_id,
+            "p_starts_on": starts_on.isoformat(), "p_assigned_by": by,
         }).execute().data
     except APIError as exc:
         # A concurrent assign got in first (the one-open-row index, or the
@@ -270,8 +292,47 @@ def assign_channel(channel_id: str, body: Assign,
     row = result[0] if isinstance(result, list) else result
     if not row:
         raise HTTPException(500, "assignment not stored")
-    return {"assignment": _shaped_assignment(row, {member["id"]: member}, _users()),
-            "changed": True}
+    return row
+
+
+@router.put("/team/members/{member_id}/channels")
+def set_member_channels(member_id: int, body: MemberChannels,
+                        user: dict = Depends(access.current_user),
+                        _: int = Depends(access.require_team_member)):
+    db = supabase()
+    members = (db.table("team_members").select(MEMBER_COLUMNS)
+               .eq("id", member_id).limit(1).execute().data) or []
+    if not members:
+        raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
+    member = members[0]
+    wanted = set(body.channel_ids)
+    visible = access.visible_channel_ids(user)
+    if wanted - visible:
+        raise HTTPException(404, access.CHANNEL_NOT_FOUND)
+    if wanted and not member.get("is_active"):
+        raise HTTPException(400, MEMBER_INACTIVE)
+
+    held = {r["channel_id"] for r in all_rows(
+        db.table("channel_assignments").select("channel_id")
+        .eq("team_member_id", member_id).is_("ends_on", "null"))}
+    # Only channels the user can see are ended: one that moved to another
+    # team isn't in the picker, so its absence from the list says nothing.
+    ended = sorted((held - wanted) & visible)
+    added = sorted(wanted - held)
+    if ended:
+        _end_assignments(member_id, set(ended))
+    today = ist_day()
+    for channel_id in added:
+        current = _open_assignment(channel_id)
+        if current is not None:
+            # Today, or the open row's own start if that is later (a
+            # future-dated assignment): the RPC refuses a back-date.
+            current_start = date.fromisoformat(str(current["starts_on"])[:10])
+            _assign(channel_id, member_id, max(today, current_start), user["id"])
+        else:
+            _assign(channel_id, member_id, today, user["id"])
+    return {"channel_ids": sorted((held - set(ended)) | wanted),
+            "added": added, "ended": ended}
 
 
 @router.get("/team/assignments")
