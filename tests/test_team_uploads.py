@@ -78,6 +78,7 @@ def _store(uploads=(), assignments=None):
              "last_synced_at": "2026-11-16T09:00:00+00:00"},
             {"id": CH_NONE, "name": "Telugu", "manager_id": None, "last_synced_at": None},
         ],
+        "member_targets": [],
         "team_members": [_member(PRANAV, "Pranav", MANAGER_A),
                          _member(MEET, "Meet", MANAGER_A),
                          _member(RACHEL, "Rachel", MANAGER_B),
@@ -453,3 +454,20 @@ def test_the_ist_day_is_not_the_utc_or_pacific_day():
     assert team_uploads.ist_day(at) == date(2026, 11, 19)
     assert team_uploads.ist_day(datetime(2026, 11, 18, 18, 29, tzinfo=ZoneInfo("UTC"))) \
         == date(2026, 11, 18)
+
+
+# ── targets on the grid ──────────────────────────────────────────────────────
+
+def test_member_rows_carry_their_targets(use):
+    sb = _store()
+    sb._tables["member_targets"].append(
+        {"team_member_id": PRANAV, "weekday": 1, "shorts": 3, "long_form": 1})
+    use(sb)
+
+    body = _grid(ADMIN, **WINDOW)
+
+    week = _row(body, PRANAV)["targets"]
+    assert week["1"] == {"shorts": 3, "long_form": 1}
+    assert week["7"] == {"shorts": 0, "long_form": 0}
+    assert _row(body, RACHEL)["targets"] is None
+    assert _row(body, None)["targets"] is None

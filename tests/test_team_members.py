@@ -40,6 +40,7 @@ def store():
         "app_sessions": [{"token_hash": session.hash_token(t), "user_id": uid,
                           "expires_at": "2999-01-01T00:00:00+00:00"}
                          for uid, t in TOKENS.items()],
+        "member_targets": [],
         "team_members": [_member(PRANAV, "Pranav", MANAGER_A),
                          _member(MEET, "Meet", MANAGER_A),
                          _member(RACHEL, "Rachel", MANAGER_B),
@@ -121,7 +122,7 @@ def test_members_carry_their_state_and_manager(store):
     [left] = [m for m in _listed(MANAGER_A)["members"] if m["id"] == LEFT]
     assert left == {"id": LEFT, "name": "Left", "manager_id": MANAGER_A,
                     "manager_name": "Justin", "is_active": False,
-                    "created_at": "2026-11-18T00:00:00+00:00"}
+                    "created_at": "2026-11-18T00:00:00+00:00", "targets": None}
 
 
 @pytest.mark.parametrize("uid", [ADMIN, EXEC])
@@ -286,3 +287,70 @@ def test_the_member_patch_uses_the_member_resolver():
     [route] = [r for r in _api_routes()
                if r.path == "/team/members/{member_id}" and "PATCH" in r.methods]
     assert access.require_team_member in list(_calls(route.dependant))
+
+
+# ── targets ──────────────────────────────────────────────────────────────────
+
+def _targets(uid, member_id, days):
+    return _as(uid).put(f"/team/members/{member_id}/targets", json={"days": days})
+
+
+def _member_targets(uid, member_id):
+    return next(m for m in _listed(uid)["members"] if m["id"] == member_id)["targets"]
+
+
+def test_a_manager_sets_a_members_weekly_targets(store):
+    r = _targets(MANAGER_A, PRANAV, {"1": {"shorts": 3, "long_form": 1},
+                                     "6": {"shorts": 2}})
+
+    assert r.status_code == 200, r.text
+    week = r.json()["targets"]
+    # Every weekday is present; one left out is 0.
+    assert set(week) == {str(d) for d in range(1, 8)}
+    assert week["1"] == {"shorts": 3, "long_form": 1}
+    assert week["6"] == {"shorts": 2, "long_form": 0}
+    assert week["2"] == {"shorts": 0, "long_form": 0}
+    assert _member_targets(MANAGER_A, PRANAV) == week
+    assert {r["updated_by"] for r in store.rows("member_targets")} == {MANAGER_A}
+
+
+def test_setting_targets_again_replaces_them(store):
+    _targets(MANAGER_A, PRANAV, {"1": {"shorts": 3}})
+    _targets(MANAGER_A, PRANAV, {"2": {"long_form": 4}})
+
+    week = _member_targets(MANAGER_A, PRANAV)
+    assert week["1"] == {"shorts": 0, "long_form": 0}
+    assert week["2"] == {"shorts": 0, "long_form": 4}
+    assert len(store.rows("member_targets")) == 7
+
+
+def test_all_zero_clears_the_target(store):
+    _targets(MANAGER_A, PRANAV, {"1": {"shorts": 3}})
+    r = _targets(MANAGER_A, PRANAV, {})
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"targets": None}
+    assert store.rows("member_targets") == []
+    assert _member_targets(MANAGER_A, PRANAV) is None
+
+
+def test_the_admin_sets_anyones_targets(store):
+    assert _targets(ADMIN, RACHEL, {"3": {"shorts": 1}}).status_code == 200
+
+
+def test_exec_cannot_set_targets(store):
+    r = _targets(EXEC, RACHEL, {"3": {"shorts": 1}})
+    assert r.status_code == 403
+    assert store.rows("member_targets") == []
+
+
+def test_a_manager_cannot_set_another_managers_members_targets(store):
+    r = _targets(MANAGER_A, RACHEL, {"3": {"shorts": 1}})
+    assert r.status_code == 404
+    assert store.rows("member_targets") == []
+
+
+@pytest.mark.parametrize("days", [{"0": {"shorts": 1}}, {"8": {"shorts": 1}},
+                                  {"1": {"shorts": -1}}, {"1": {"long_form": 501}}])
+def test_a_bad_target_is_422(store, days):
+    assert _targets(MANAGER_A, PRANAV, days).status_code == 422

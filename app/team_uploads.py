@@ -35,6 +35,10 @@ Computed in Python, not by a SQL RPC, so the whole grid is testable offline
 row per in-scope channel, every day, zeros included, whoever was credited. The
 drill-down takes ``channel_id`` for one of its cells.
 
+Each member row carries ``targets`` (``team.targets_for``: per ISO weekday,
+``{shorts, long_form}``, or null when none is set); the page colours a
+finished day red when it falls short.
+
 Rows: every active member of the managers in scope, plus anyone credited or
 assigned on an in-scope channel in the window (a deactivated member keeps the
 row their uploads need), ordered by manager name then member name; then
@@ -52,7 +56,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app import access
+from app import access, team
 from app.db import supabase
 from app.rows import all_rows, rows_for_ids
 from app.status_vocab import UserRole
@@ -290,7 +294,10 @@ def uploads_grid(
          for m in members.values()),
         key=lambda r: ((r["manager_name"] or "").lower(), (r["name"] or "").lower(),
                        r["member_id"]))
-    rows.append(shaped(None, UNASSIGNED, None, True))
+    targets = team.targets_for(members)
+    for row in rows:
+        row["targets"] = targets.get(row["member_id"])
+    rows.append({**shaped(None, UNASSIGNED, None, True), "targets": None})
 
     managers = sorted(
         ({"id": u["id"], "name": u["name"]} for u in users.values()

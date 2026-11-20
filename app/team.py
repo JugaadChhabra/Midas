@@ -44,6 +44,16 @@ Channel assignments (team tracker 08, #149): one member holds a channel over
     but isn't listed is ended today, left unassigned. A channel the user can't
     see is a 404 (``channel_not_found``) and is never ended, so a channel that
     moved to another team stays as it is. A deactivated member is 400.
+
+Targets: each member's daily upload target, Shorts and long-form apart, per ISO
+weekday (1 = Monday … 7 = Sunday), in ``member_targets``.
+
+  * ``GET /team/members`` carries each member's ``targets``:
+    ``{"1": {"shorts", "long_form"}, … "7": …}``, or null when none is set.
+  * ``PUT /team/members/{id}/targets`` ``{"days": {"1": {"shorts",
+    "long_form"}, …}}`` → ``{"targets"}``: a weekday left out is 0; all zero
+    clears the target (null). A manager sets their own members' (another's:
+    404), the admin anyone's; exec is 403.
 """
 from __future__ import annotations
 
@@ -55,11 +65,11 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from postgrest.exceptions import APIError
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
 from app import access
 from app.db import supabase
-from app.rows import all_rows
+from app.rows import all_rows, rows_for_ids
 from app.status_vocab import UserRole
 
 router = APIRouter(tags=["team"])
@@ -97,6 +107,22 @@ class NewMember(BaseModel):
 class MemberChange(BaseModel):
     name: Name | None = None
     is_active: bool | None = None
+
+
+#: The most a day's target may ask, per type: a typo guard.
+TARGET_MAX = 500
+
+WEEKDAYS = range(1, 8)
+
+
+class DayTarget(BaseModel):
+    shorts: Annotated[int, Field(ge=0, le=TARGET_MAX)] = 0
+    long_form: Annotated[int, Field(ge=0, le=TARGET_MAX)] = 0
+
+
+class Targets(BaseModel):
+    #: ISO weekday (1 = Monday) → that day's target.
+    days: dict[Annotated[int, Field(ge=1, le=7)], DayTarget]
 
 
 class MemberChannels(BaseModel):
@@ -152,7 +178,8 @@ def list_members(user: dict = Depends(access.current_user)):
         query = query.eq("manager_id", user["id"])
     members = all_rows(query)
     users = _users()
-    shaped = sorted((_shaped(m, users) for m in members),
+    targets = targets_for([m["id"] for m in members])
+    shaped = sorted(({**_shaped(m, users), "targets": targets.get(m["id"])} for m in members),
                     key=lambda m: ((m["manager_name"] or "").lower(), m["name"].lower(), m["id"]))
     if access.sees_all(user):
         managers = sorted(
@@ -197,6 +224,50 @@ def update_member(member_id: int, body: MemberChange,
     if change.get("is_active") is False:
         _end_assignments(member_id)
     return _shaped(rows[0], _users())
+
+
+# ── targets ──────────────────────────────────────────────────────────────
+
+def targets_for(member_ids) -> dict[int, dict]:
+    """Each member's targets, ``{"1": {"shorts", "long_form"}, … "7"}`` (every
+    weekday present); a member with none set is left out."""
+    ids = sorted({i for i in member_ids if i is not None})
+    if not ids:
+        return {}
+    rows = rows_for_ids(lambda chunk: supabase().table("member_targets")
+                        .select("team_member_id,weekday,shorts,long_form")
+                        .in_("team_member_id", chunk), ids)
+    out: dict[int, dict] = {}
+    for r in rows:
+        week = out.setdefault(r["team_member_id"],
+                              {str(d): {"shorts": 0, "long_form": 0} for d in WEEKDAYS})
+        week[str(r["weekday"])] = {"shorts": r["shorts"] or 0, "long_form": r["long_form"] or 0}
+    return {m: w for m, w in out.items()
+            if any(d["shorts"] or d["long_form"] for d in w.values())}
+
+
+@router.put("/team/members/{member_id}/targets")
+def set_targets(member_id: int, body: Targets,
+                user: dict = Depends(access.current_user),
+                _: int = Depends(access.require_team_member)):
+    if user.get("role") == UserRole.EXEC:
+        raise HTTPException(403, access.FORBIDDEN)
+    db = supabase()
+    known = (db.table("team_members").select("id").eq("id", member_id)
+             .limit(1).execute().data) or []
+    if not known:
+        raise HTTPException(404, access.TEAM_MEMBER_NOT_FOUND)
+    days = {d: body.days.get(d, DayTarget()) for d in WEEKDAYS}
+    if not any(t.shorts or t.long_form for t in days.values()):
+        db.table("member_targets").delete().eq("team_member_id", member_id).execute()
+        return {"targets": None}
+    now = datetime.now(timezone.utc).isoformat()
+    db.table("member_targets").upsert(
+        [{"team_member_id": member_id, "weekday": d, "shorts": t.shorts,
+          "long_form": t.long_form, "updated_by": user["id"], "updated_at": now}
+         for d, t in days.items()],
+        on_conflict="team_member_id,weekday").execute()
+    return {"targets": targets_for([member_id]).get(member_id)}
 
 
 # ── channel assignments (#149) ───────────────────────────────────────────

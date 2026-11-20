@@ -80,6 +80,7 @@ def store():
                      {"id": CH_A2, "name": "Gujarati", "manager_id": MANAGER_A},
                      {"id": CH_B, "name": "Hindi", "manager_id": MANAGER_B},
                      {"id": CH_NONE, "name": "Telugu", "manager_id": None}],
+        "member_targets": [],
         "team_members": [_member(PRANAV, "Pranav", MANAGER_A),
                          _member(MEET, "Meet", MANAGER_A),
                          _member(RACHEL, "Rachel", MANAGER_B),
