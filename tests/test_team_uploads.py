@@ -292,6 +292,27 @@ def test_a_published_video_from_before_the_window_counts_when_it_went_live(use):
     assert _cell(_grid(MANAGER_A, **WINDOW), PRANAV, "2026-11-12")["total"] == 1
 
 
+def test_an_unlisted_video_made_public_counts_on_the_day_it_went_public(use):
+    # Uploaded unlisted on the 12th (YouTube's publish time stays there), seen
+    # public on the 14th: the 14th (owner, 2026-11-20).
+    flip = _upload("unl", CH_A, "2026-11-12 13:28", published="2026-11-12 13:28")
+    flip["public_at"] = _utc("2026-11-14 11:00")
+    use(_store([flip]))
+
+    body = _grid(MANAGER_A, **WINDOW)
+
+    assert _cell(body, PRANAV, "2026-11-12")["total"] == 0
+    assert _cell(body, PRANAV, "2026-11-14")["total"] == 1
+
+
+def test_a_video_gone_public_this_window_counts_though_it_went_up_before_it(use):
+    flip = _upload("unl", CH_A, "2026-10-01 09:00", published="2026-10-01 09:00")
+    flip["public_at"] = _utc("2026-11-13 10:00")
+    use(_store([flip]))
+
+    assert _cell(_grid(MANAGER_A, **WINDOW), PRANAV, "2026-11-13")["total"] == 1
+
+
 def test_a_private_unscheduled_video_never_went_live_and_isnt_counted(use):
     use(_store([_upload("draft", CH_A, "2026-11-12 09:00", privacy="private")]))
 

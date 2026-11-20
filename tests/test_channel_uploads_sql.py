@@ -47,3 +47,9 @@ def test_a_before_update_trigger_freezes_uploaded_at_and_first_seen_at():
 
 def test_service_role_can_write_it():
     assert "grant all on channel_uploads to service_role" in _code()
+
+
+def test_public_at_is_added():
+    sql = "\n".join(p.read_text() for p in sorted(MIGRATIONS.glob("*.sql")))
+    assert re.search(r"alter table channel_uploads add column if not exists public_at timestamptz",
+                     sql, re.I)

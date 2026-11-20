@@ -330,6 +330,10 @@ UPLOAD_MUTABLE = ("title", "privacy_status", "scheduled_publish_at", "is_short",
 
 _UPLOAD_TIMESTAMPS = ("scheduled_publish_at", "video_published_at")
 
+#: How far back recheck_uploads looks: the uploads grid's longest window
+#: (team_uploads.MAX_DAYS).
+RECHECK_DAYS = 92
+
 #: Rows per channel_uploads insert, as for the videos upsert.
 _UPLOAD_BATCH = 100
 
@@ -340,7 +344,7 @@ def _stored_uploads(channel_id: str, video_ids: list[str]) -> dict[str, dict]:
         stored = rows_for_ids(
             lambda chunk: (
                 supabase().table("channel_uploads")
-                .select("video_id,channel_id," + ",".join(UPLOAD_MUTABLE))
+                .select("video_id,channel_id,public_at," + ",".join(UPLOAD_MUTABLE))
                 .in_("video_id", chunk)
             ),
             list(dict.fromkeys(video_ids)),
@@ -419,6 +423,8 @@ def _record_uploads(channel_id: str, fetched: list[dict], stored: dict[str, dict
             if old is None:
                 continue
             changed = {c: r[c] for c in UPLOAD_MUTABLE if not _same(c, old.get(c), r[c])}
+            if _went_public(old, r):
+                changed["public_at"] = r["last_seen_at"]
             if not changed:
                 unchanged.append(r["video_id"])
                 continue
@@ -432,6 +438,50 @@ def _record_uploads(channel_id: str, fetched: list[dict], stored: dict[str, dict
     except Exception as e:
         log.exception("sync %s: recording channel_uploads failed; sync continues: %s",
                       channel_id, e)
+
+
+def _went_public(stored: dict, fetched: dict) -> bool:
+    """An upload stored unlisted that YouTube now reports public, not stamped
+    yet. YouTube keeps snippet.publishedAt at the unlisted upload's time, so the
+    switch is only seen by watching for it; a private video made public gets a
+    new publishedAt from YouTube and needs no stamp."""
+    return (stored.get("privacy_status") == "unlisted"
+            and fetched.get("privacy_status") == "public"
+            and not stored.get("public_at"))
+
+
+def recheck_uploads(channel_id: str) -> int:
+    """Re-read from YouTube the channel's uploads that can still change how the
+    grid counts them: private, unlisted or scheduled, uploaded within
+    RECHECK_DAYS. The playlist walk stops at the first video already in `videos`,
+    so a video uploaded unlisted or private and published days later is
+    otherwise seen again only by the 3-day full sync. 1 quota unit per 50
+    videos; writes channel_uploads only (`videos` is the sync's). Returns the
+    number re-read."""
+    since = (datetime.now(timezone.utc) - timedelta(days=RECHECK_DAYS)).isoformat()
+    rows = all_rows(
+        supabase().table("channel_uploads")
+        .select("video_id,channel_id,duration_seconds,playlist_published_at,public_at,"
+                + ",".join(UPLOAD_MUTABLE))
+        .eq("channel_id", channel_id).gte("uploaded_at", since),
+        order_by="video_id",
+    )
+    stored = {r["video_id"]: r for r in rows
+              if r.get("privacy_status") in ("private", "unlisted")
+              or r.get("scheduled_publish_at")}
+    if not stored:
+        return 0
+    yt = youtube_for_channel(channel_id)
+    ids = sorted(stored)
+    fetched: list[dict] = []
+    for i in range(0, len(ids), 50):
+        for item in yt_videos_list_full(yt, channel_id, ids[i:i + 50]):
+            old = stored[item["id"]]
+            duration = _iso8601_to_seconds((item.get("contentDetails") or {}).get("duration", ""))
+            fetched.append(_upload_row(channel_id, item, old.get("is_short"), duration,
+                                       old.get("playlist_published_at")))
+    _record_uploads(channel_id, fetched, stored)
+    return len(fetched)
 
 
 def _refresh_stats_for_ids(channel_id: str, yt, target_ids: list[str]) -> int:
@@ -725,4 +775,10 @@ def routine_sync(channel: dict) -> str:
     # Incremental finds only new uploads, so refresh stored counts + privacy too.
     sync_channel(channel["id"])
     refresh_stats(channel["id"])
+    try:
+        recheck_uploads(channel["id"])
+    except TokenExpiredError:
+        raise
+    except Exception as e:             # upload capture never fails the sync
+        log.exception("sync %s: upload re-check failed; sync continues: %s", channel["id"], e)
     return "incremental"

@@ -75,7 +75,7 @@ MAX_DAYS = 92
 UNASSIGNED = "Unassigned"
 
 UPLOAD_COLUMNS = ("video_id,channel_id,is_short,uploaded_at,privacy_status,"
-                  "scheduled_publish_at,video_published_at")
+                  "scheduled_publish_at,video_published_at,public_at")
 
 
 def live_at(upload: dict) -> str | None:
@@ -84,13 +84,16 @@ def live_at(upload: dict) -> str | None:
     the day viewers get it). A scheduled video: its go-live time
     (``scheduled_publish_at``, still set until a sync sees it live; equal to
     the go-live time either way). Else a private video never went live: None,
-    left out. Else (public, unlisted) YouTube's publish time
+    left out. Else a video seen going from unlisted to public: when a sync saw
+    it go public (``public_at``, owner 2026-11-20: YouTube's publish time stays
+    at the unlisted upload). Else (public, unlisted) YouTube's publish time
     (``video_published_at``), falling back to ``uploaded_at`` when unknown."""
     if upload.get("scheduled_publish_at"):
         return upload["scheduled_publish_at"]
     if upload.get("privacy_status") == "private":
         return None
-    return upload.get("video_published_at") or upload.get("uploaded_at")
+    return (upload.get("public_at") or upload.get("video_published_at")
+            or upload.get("uploaded_at"))
 ASSIGNMENT_COLUMNS = "id,channel_id,team_member_id,starts_on,ends_on"
 CHANNEL_COLUMNS = "id,name,manager_id,last_synced_at"
 
@@ -187,7 +190,7 @@ def _credited(db, channels: list[dict], first: date, last: date,
     start = ist_midnight(first).isoformat()
     end = ist_midnight(last + timedelta(days=1)).isoformat()
 
-    # live_at reads one of three columns; one plain range read per column (no
+    # live_at reads one of four columns; one plain range read per column (no
     # PostgREST or-filter), merged by video id, the exact day decided below.
     def in_window(column, null_column=None):
         def query(ids):
@@ -197,7 +200,8 @@ def _credited(db, channels: list[dict], first: date, last: date,
         return rows_for_ids(query, channel_ids, order_by="video_id")
 
     merged: dict[str, dict] = {}
-    for u in (in_window("scheduled_publish_at") + in_window("video_published_at")
+    for u in (in_window("scheduled_publish_at") + in_window("public_at")
+              + in_window("video_published_at")
               + in_window("uploaded_at", null_column="video_published_at")):
         merged[u["video_id"]] = u
     uploads = [merged[k] for k in sorted(merged)]
@@ -321,7 +325,7 @@ def uploads_grid(
 # ── the drill-down (#152) ─────────────────────────────────────────────────────
 
 VIDEO_COLUMNS = ("video_id,channel_id,title,thumbnail_url,is_short,privacy_status,"
-                 "scheduled_publish_at,uploaded_at,video_published_at")
+                 "scheduled_publish_at,uploaded_at,video_published_at,public_at")
 
 #: The status pill: ``scheduled`` while a go-live time is set (YouTube clears
 #: ``status.publishAt`` once the video is live), else the privacy status. Shown

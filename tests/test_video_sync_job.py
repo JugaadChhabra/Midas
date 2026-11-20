@@ -43,10 +43,20 @@ def test_routine_sync_full_when_due():
 def test_routine_sync_incremental_otherwise():
     ch = {"id": "c", "last_synced_at": _ago(days=2), "last_full_synced_at": _ago(days=1)}
     with patch.object(sync, "sync_channel") as sc, patch.object(sync, "refresh_stats") as rs, \
+         patch.object(sync, "recheck_uploads") as rc, \
          patch.object(sync, "uploads_need_backfill", return_value=False):
         assert sync.routine_sync(ch) == "incremental"
     sc.assert_called_once_with("c")
     rs.assert_called_once_with("c")
+    rc.assert_called_once_with("c")
+
+
+def test_a_failing_upload_recheck_never_fails_the_sync():
+    ch = {"id": "c", "last_synced_at": _ago(days=2), "last_full_synced_at": _ago(days=1)}
+    with patch.object(sync, "sync_channel"), patch.object(sync, "refresh_stats"), \
+         patch.object(sync, "recheck_uploads", side_effect=RuntimeError("db down")), \
+         patch.object(sync, "uploads_need_backfill", return_value=False):
+        assert sync.routine_sync(ch) == "incremental"
 
 
 def test_routine_sync_full_when_upload_history_missing():
@@ -143,3 +153,31 @@ def test_job_is_registered_at_04_utc_regardless_of_freeze_flags():
     fields = {f.name: str(f) for f in job.trigger.fields}
     assert fields["hour"] == "4" and fields["minute"] == "0"
     assert str(job.trigger.timezone) == "UTC"
+
+
+def test_upload_recheck_is_registered_every_few_hours():
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from app import main
+    sched = BackgroundScheduler()
+    main._register_jobs(sched)
+    job = sched.get_job("upload_recheck")
+    assert job is not None
+    assert job.trigger.interval.total_seconds() == main.UPLOAD_RECHECK_HOURS * 3600
+
+
+def test_upload_recheck_skips_an_expired_token_and_rechecks_the_rest():
+    from app import main
+    from app.youtube_client import TokenExpiredError
+    seen = []
+
+    def recheck(cid):
+        if cid == "bad":
+            raise TokenExpiredError("expired")
+        seen.append(cid)
+        return 1
+
+    with patch.object(main.eligibility, "channel_ids_for", return_value=["bad", "ok"]), \
+         patch.object(sync, "recheck_uploads", side_effect=recheck):
+        result = main._upload_recheck()
+    assert seen == ["ok"]
+    assert result == {"partial_errors": {"bad": "token_expired: re-consent needed"}}

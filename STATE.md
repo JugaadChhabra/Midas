@@ -14,8 +14,8 @@
 >
 > **Regenerate with:** Claude Code, prompt in §9.
 
-**Generated:** 2026-11-20 (member targets: `member_targets`, `PUT /team/members/{id}/targets`, red grid cells; the drill-down is a card grid; Roster: per-member channel picker (`PUT /team/members/{id}/channels`) and the admin's per-manager picker replace the Channels list; the drill-down groups by channel; Team page's Uploads tab redesigned; a channel whose `channel_uploads` history is missing gets a full sync; earlier: the host moved to a Mac mini; the logo `app/static/midas.png` in the rail, the login page and the tab icon, and added to `session.PUBLIC_PATHS`) ·
-**Commit:** on top of `710244e` · **Branch:** `member-targets`
+**Generated:** 2026-11-20 (an unlisted video counts on the day a sync saw it go public: `channel_uploads.public_at`, the 2-hourly `upload_recheck` job; member targets: `member_targets`, `PUT /team/members/{id}/targets`, red grid cells; the drill-down is a card grid; Roster: per-member channel picker (`PUT /team/members/{id}/channels`) and the admin's per-manager picker replace the Channels list; the drill-down groups by channel; Team page's Uploads tab redesigned; a channel whose `channel_uploads` history is missing gets a full sync; earlier: the host moved to a Mac mini; the logo `app/static/midas.png` in the rail, the login page and the tab icon, and added to `session.PUBLIC_PATHS`) ·
+**Commit:** on top of `62d437b` · **Branch:** `unlisted-public-at`
 
 **The spec**, cited below as **spec**: `docs/superpowers/specs/2026-09-23-midas-implementation-spec.md`. Part 1
 (Phase A) and Part 3 (Phase B) are done; Parts 4–6 (Slices 1–3) are built and live; Part 2 is the approved design,
@@ -155,6 +155,7 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 20261118030000_channel_assignments.sql          channel_assignments, assign_channel() (team tracker #149)
 20261118040000_channel_uploads.sql              channel_uploads + its freeze trigger (team tracker #150)
 20261120000000_member_targets.sql               member_targets (team tracker: daily upload targets)
+20261120010000_channel_uploads_public_at.sql    channel_uploads.public_at (unlisted → public seen by a sync)
 ```
 
 **Tables** (columns are the union across the migrations):
@@ -467,6 +468,12 @@ Flags that exist on `channels`: `analytics_authorized`, `measurement_enabled`, `
 
   grant all on channel_uploads to service_role;
   ```
+  Added by `20261120010000`, verbatim without its header comment:
+  `alter table channel_uploads add column if not exists public_at timestamptz;`. When a sync or `upload_recheck`
+  first found a row stored `unlisted` now `public` (`sync._went_public`; owner 2026-11-20: YouTube keeps
+  `snippet.publishedAt` at the unlisted upload and records no switch); stamped once, NULL otherwise, including
+  videos public before the column existed. A private video made public needs none (YouTube moves its
+  `publishedAt`).
 
 - **`member_targets`** (`20261120000000`), verbatim without the header comment. Each team member's daily upload
   target per ISO weekday (1 = Monday), Shorts and long-form apart; the current target only, no history, so a change
@@ -796,7 +803,8 @@ startup. All four flags default false (§3); confirmed at the office 2026-09-29.
 | `playlist_discovery` | cron Sun 03:00 local | `main._weekly_discovery` → `app/playlist_discovery.py` `discover_playlists` | **frozen** (`PLAYLIST_DISCOVERY_ENABLED`). When on: every channel; **creates playlists** (≤2/run), skipped under `DRY_RUN` |
 | `reflection` | cron Mon 04:00 local | `app/reflection.py` `reflect` | **frozen** (`REFLECTION_ENABLED`). When on: every channel |
 | `playlist_tuning` | cron Mon 03:30 local | `app/playlists.py` `tune_thresholds` | **frozen** (`PLAYLIST_TUNING_ENABLED`). When on: writes `settings.PLAYLIST_JOIN_HIGH` process-globally |
-| `video_sync` | cron 04:00 UTC | `main._daily_video_sync` → `app/sync.py` `routine_sync` per channel | registered, every channel. Read-only: full pass if last full sync >3 days or the channel's `channel_uploads` history is missing (`sync.uploads_need_backfill`), else incremental + `refresh_stats`. Expired/revoked token is a skip recorded `degraded`; any other error fails the channel. Full passes feed `human_edits.record_description_edits` |
+| `video_sync` | cron 04:00 UTC | `main._daily_video_sync` → `app/sync.py` `routine_sync` per channel | registered, every channel. Read-only: full pass if last full sync >3 days or the channel's `channel_uploads` history is missing (`sync.uploads_need_backfill`), else incremental + `refresh_stats` + `recheck_uploads` (a failure there is logged, never fails the sync). Expired/revoked token is a skip recorded `degraded`; any other error fails the channel. Full passes feed `human_edits.record_description_edits` |
+| `upload_recheck` | interval `main.UPLOAD_RECHECK_HOURS` (2 h) | `main._upload_recheck` → `app/sync.py` `recheck_uploads` per channel | registered, every channel (not in the spec; not caught up). Read-only: re-reads the channel's `channel_uploads` rows uploaded within `sync.RECHECK_DAYS` (92) that are `private`, `unlisted` or scheduled (1u per 50), writes `channel_uploads` only, stamping `public_at` on unlisted → public. Expired token: a skip, `degraded`, as `video_sync` |
 | `metrics_poll` | cron 05:00 UTC | `app/metrics_poll.py:poll_metrics` | registered; `analytics_authorized` channels; videos only in a measurement window (`METRICS_POLL_MEASURED_ONLY`). Standard failure model |
 | `reporting_poll` | cron 06:00 UTC | `app/reporting_poll.py:poll_reporting` | registered; `analytics_authorized AND (measurement_enabled OR reach_warmup)`. Ingests only `channel_reach_basic_a1`. Standard failure model |
 | `traffic_poll` | cron 06:30 UTC | `app/traffic_poll.py` `poll_traffic` | registered; `analytics_authorized` channels in `TRAFFIC_INGEST_CHANNELS`. Two isolated feeds: `channel_traffic_source_a3` → `video_traffic_source_daily`, `playlist_traffic_source_a2` → `playlist_traffic_daily`, restatements replace the day. Standard failure model; categories `video reports`, `playlist reports` |
@@ -921,8 +929,9 @@ other route is scoped, and a new unscoped route fails CI.
   (`access.filter_channels`), narrowed to `manager_id`'s for admin and exec only (a manager's `manager_id` is ignored
   and echoed as null), each `{id, name, manager_id, last_synced_at}` by name. Places each video on its go-live IST day
   (`team_uploads.live_at`, owner 2026-11-19: the team schedules weekend videos ahead): `scheduled_publish_at` when
-  set, else nothing for a `private` video (never went live, not counted), else `video_published_at` (YouTube's
-  publish time), else `uploaded_at`. Reads `channel_uploads` for those channels with any of those three in `[from
+  set, else nothing for a `private` video (never went live, not counted), else `public_at` (an unlisted video seen
+  going public, owner 2026-11-20), else `video_published_at` (YouTube's publish time; an unlisted video counts there
+  until it goes public), else `uploaded_at`. Reads `channel_uploads` for those channels with any of those four in `[from
   00:00 IST, to + 1 00:00 IST)` (one range read per column, `uploaded_at` only where `video_published_at` is NULL,
   merged by `video_id`), and their `channel_assignments`, all through `rows.rows_for_ids` (paged past the 1000-row
   cap); a future day holds what is already scheduled for it. Credits each video to the member whose assignment covered its
@@ -1000,7 +1009,7 @@ other route is scoped, and a new unscoped route fails CI.
 | `session.py` | logins (team tracker #144): the global gate (`gate`, `PUBLIC_PATHS`, `PAGES`; Routes), the `/login` page and `/session/login|logout|me`, sessions (`start_session`, `user_for_token`, `end_session`; only `hash_token`'s sha256 stored), argon2id passwords (`hash_password`, `authenticate`, rehashed on login when argon2's parameters move), and the user admin `scripts/manage_users.py` calls: `create_user`, `set_password` (also ends the user's sessions), `deactivate_user` (sets `is_active` false, ends sessions), refusing with `UserError` |
 | `team.py` | the Team page, the roster (team tracker #148) and channel assignments (#149): `GET /team`, `GET /uploads`, `GET/POST /team/members`, `PATCH /team/members/{id}` (deactivating ends open assignments, `_end_assignments`), `POST /channels/{id}/assign` and `PUT /team/members/{id}/channels` (both through `_assign`, the `assign_channel` RPC), `GET /team/assignments` (Routes); `IST` (`Asia/Kolkata`, deliberately not `quota.QUOTA_TZ`), `ist_day`; `NAME_MAX` (100), `MANAGER_REQUIRED`, `NOT_A_MANAGER`, `NOTHING_TO_CHANGE`, `MEMBER_INACTIVE`, `ASSIGN_CONFLICT` |
 | `team_uploads.py` | the uploads grid (team tracker #151) and its drill-down (#152): `GET /team/uploads`, `GET /team/uploads/videos` (Routes), one crediting rule for both (`_scope`, `_credited`); `SCHEDULED` (the drill-down's status pill); `IST` (`Asia/Kolkata`, its own, not `quota.QUOTA_TZ`), `ist_day`, `ist_midnight`, `window` (defaults and the 422s), `DEFAULT_DAYS` (7), `MAX_DAYS` (92), `UNASSIGNED` |
-| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`: a full pass when `needs_full_sync` or `uploads_need_backfill`, true while every `channel_uploads` row of the channel was first seen after `last_full_synced_at`, i.e. its upload history predates capture; a failed read answers false); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger. Upload capture (team tracker #150): the playlist walk carries each item's `snippet.publishedAt`; every fetched video goes to `channel_uploads` (§2) before the opted-out-Shorts and private skips (`_upload_row`, `_record_uploads`; `_stored_uploads` reads the stored rows first). A stored `channel_uploads` `is_short` is reused unless the row is still `private` or NULL (`_settled_is_short`), else re-probed inside `MAX_SHORTS_PROBES_PER_SYNC`. A `channel_uploads` read or write failure is logged and never fails the sync |
+| `sync.py` | video sync, `is_short` probe, stats refresh, routine-sync rules (`routine_sync`: a full pass when `needs_full_sync` or `uploads_need_backfill`, true while every `channel_uploads` row of the channel was first seen after `last_full_synced_at`, i.e. its upload history predates capture; a failed read answers false); token failures → `TokenExpired` (401 `token_expired`); full syncs feed the human-edit ledger. Upload capture (team tracker #150): the playlist walk carries each item's `snippet.publishedAt`; every fetched video goes to `channel_uploads` (§2) before the opted-out-Shorts and private skips (`_upload_row`, `_record_uploads`; `_stored_uploads` reads the stored rows first). A stored `channel_uploads` `is_short` is reused unless the row is still `private` or NULL (`_settled_is_short`), else re-probed inside `MAX_SHORTS_PROBES_PER_SYNC`. A `channel_uploads` read or write failure is logged and never fails the sync. `recheck_uploads` (the `upload_recheck` job, §4) re-reads unsettled uploads; `_went_public` stamps `public_at` |
 | `content_type.py` | `is_episode` classifier |
 | `audits.py` | `DEFAULT_PROMPT`, `_build_user_block`, strategy stamp, `audit_video`, apply, revert, bulk ops; called only from routes; `_refuse_on_agent_channel(channel, force=)` guard (Routes) |
 | `audit_suggestion.py` | LLM output contract: decode, 15-hashtag cap, `rejection()`, `house_format_spec()` |

@@ -246,3 +246,103 @@ def test_a_channel_uploads_failure_never_fails_the_sync(caplog):
     assert "channel_uploads is down" in caplog.text
     channel = sb.rows("channels")[0]
     assert channel.get("last_synced_at")         # the sync ran to the end
+
+
+# ── unlisted → public (owner, 2026-11-20) ────────────────────────────────
+#
+# YouTube keeps snippet.publishedAt at the time an unlisted video went up, so
+# the switch to public is stamped by whichever pass first sees it: public_at.
+
+def _row(vid: str, *, privacy, uploaded="2026-11-12T07:58:49+00:00", **extra) -> dict:
+    return {"video_id": vid, "channel_id": CH, "title": vid, "is_short": False,
+            "privacy_status": privacy, "scheduled_publish_at": None,
+            "thumbnail_url": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            "duration_seconds": 300, "uploaded_at": uploaded,
+            "playlist_published_at": uploaded, "video_published_at": uploaded,
+            "public_at": None, "first_seen_at": uploaded, "last_seen_at": uploaded,
+            **extra}
+
+
+def _recheck(sb, items: list[dict]):
+    asked: list[str] = []
+
+    def videos_list(yt, cid, ids):
+        asked.extend(ids)
+        return [i for i in items if i["id"] in ids]
+
+    with patch.object(sync, "supabase", return_value=sb), \
+         patch.object(sync, "youtube_for_channel", return_value=MagicMock()), \
+         patch.object(sync, "yt_videos_list_full", side_effect=videos_list):
+        n = sync.recheck_uploads(CH)
+    return n, asked
+
+
+def _recent(days_ago: float) -> str:
+    from datetime import timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+
+def test_recheck_stamps_public_at_when_an_unlisted_video_goes_public():
+    up = _recent(8)
+    sb = _sb(uploads=[_row("unl01", privacy="unlisted", uploaded=up)])
+    n, _ = _recheck(sb, [_video("unl01", privacy="public", published=up)])
+
+    row = _uploads(sb)["unl01"]
+    assert n == 1
+    assert row["privacy_status"] == "public"
+    assert row["public_at"] is not None
+    assert _ts(row["public_at"]) > _ts(up)
+    assert _ts(row["video_published_at"]) == _ts(up)     # YouTube's, unchanged
+    assert row["uploaded_at"] == up
+
+
+def test_recheck_reads_only_unsettled_recent_uploads_and_never_writes_videos():
+    sb = _sb(uploads=[
+        _row("pub01", privacy="public", uploaded=_recent(3)),
+        _row("unl01", privacy="unlisted", uploaded=_recent(3)),
+        _row("prv01", privacy="private", uploaded=_recent(3)),
+        _row("sch01", privacy="private", uploaded=_recent(3),
+             scheduled_publish_at=_recent(-1)),
+        _row("old01", privacy="unlisted", uploaded=_recent(sync.RECHECK_DAYS + 5)),
+    ])
+    _, asked = _recheck(sb, [_video(v, privacy="unlisted") for v in ("unl01", "prv01", "sch01")])
+    assert sorted(asked) == ["prv01", "sch01", "unl01"]
+    assert not [w for w in sb.writes if w[0] == "videos"]
+
+
+def test_recheck_with_nothing_unsettled_calls_no_youtube():
+    sb = _sb(uploads=[_row("pub01", privacy="public", uploaded=_recent(3))])
+    with patch.object(sync, "supabase", return_value=sb), \
+         patch.object(sync, "youtube_for_channel") as yt:
+        assert sync.recheck_uploads(CH) == 0
+    yt.assert_not_called()
+
+
+def test_a_private_video_made_public_gets_youtubes_time_not_a_stamp():
+    up = _recent(5)
+    published = _recent(1)                   # YouTube moves publishedAt for private → public
+    sb = _sb(uploads=[_row("prv01", privacy="private", uploaded=up)])
+    _recheck(sb, [_video("prv01", privacy="public", published=published)])
+
+    row = _uploads(sb)["prv01"]
+    assert row["public_at"] is None
+    assert _ts(row["video_published_at"]) == _ts(published)
+
+
+def test_public_at_is_stamped_once():
+    """Public, back to unlisted, public again: the first go-live day stands."""
+    first = "2026-11-14T06:00:00+00:00"
+    up = _recent(8)
+    sb = _sb(uploads=[_row("unl01", privacy="unlisted", uploaded=up, public_at=first)])
+    _recheck(sb, [_video("unl01", privacy="public", published=up)])
+    row = _uploads(sb)["unl01"]
+    assert row["privacy_status"] == "public"
+    assert row["public_at"] == first
+
+
+def test_a_full_sync_stamps_the_switch_too():
+    up = "2026-11-12T07:58:49Z"
+    sb = _sb(uploads=[_row("unl01", privacy="unlisted", uploaded="2026-11-12T07:58:49+00:00")])
+    _sync(sb, _page([("unl01", up)]), [_video("unl01", privacy="public", published=up)],
+          full=True)
+    assert _uploads(sb)["unl01"]["public_at"] is not None

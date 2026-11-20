@@ -248,6 +248,33 @@ def _daily_playlist_health_score():
                      job_id="playlist_health_score")
 
 
+#: How often upload_recheck runs: how late, at most, an unlisted video's switch
+#: to public is stamped (sync.recheck_uploads), so how often it lands a day late.
+UPLOAD_RECHECK_HOURS = 2
+
+
+def _upload_recheck():
+    """Re-read every channel's unsettled uploads (private, unlisted, scheduled)
+    so the uploads grid sees a video go public within UPLOAD_RECHECK_HOURS
+    (sync.recheck_uploads). An expired token is an expected skip, as in
+    video_sync; anything else fails the run for that channel."""
+    ids = eligibility.channel_ids_for(eligibility.Job.EVERY)
+    skipped: dict[str, str] = {}
+
+    def _one(channel_id: str) -> None:
+        try:
+            n = sync.recheck_uploads(channel_id)
+        except TokenExpiredError:
+            skipped[channel_id] = "token_expired: re-consent needed"
+            return
+        if n:
+            _main_log.info("upload_recheck %s: %d re-read", channel_id, n)
+
+    _run_per_channel(_one, "Upload re-check", channel_ids=ids, job_id="upload_recheck")
+    if skipped:                       # recorded degraded, as video_sync
+        return {"partial_errors": skipped}
+
+
 def _daily_video_sync():
     """Sync every channel's video list once a day, independent of autopilot.
 
@@ -387,6 +414,15 @@ def _register_jobs(sched) -> None:
         # of the A4 frozen writers.
         timezone="UTC",
         id="video_sync",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        _upload_recheck,
+        "interval",
+        hours=UPLOAD_RECHECK_HOURS,
+        # Read-only; ~1 unit per 50 unsettled uploads per channel a run.
+        id="upload_recheck",
         max_instances=1,
         coalesce=True,
     )
