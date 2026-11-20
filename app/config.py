@@ -97,6 +97,9 @@ class Settings:
 
     # Working/cache dir for locally cut shorts.
     SHORTS_CACHE_DIR    = os.getenv("SHORTS_CACHE_DIR", "./shorts_cache")
+    # app/shorts/cache_cleanup.py: how long a YouTube-URL/AutoShorts job's
+    # local clips are kept (NAS jobs' folders go as soon as the job ends).
+    SHORTS_CACHE_KEEP_DAYS = float(os.getenv("SHORTS_CACHE_KEEP_DAYS") or "7")
 
     # Where to write rotating log files (in addition to stdout). Bind-mounted to
     # the host in docker-compose so a quota-failed run is still traceable after

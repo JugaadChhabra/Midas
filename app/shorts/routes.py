@@ -28,7 +28,7 @@ router = APIRouter(prefix="/shorts", tags=["shorts"])
 class CreateJob(BaseModel):
     channel_id: str
     source_url: str
-    cut_mode: str = "highlights"        # highlights | coverage
+    cut_mode: str = "highlights"        # highlights | coverage | episode
     camera_motion: str = "calm"         # locked | calm | follow
 
 
@@ -216,7 +216,7 @@ video_router = APIRouter(tags=["shorts"])
 
 
 class MakeShort(BaseModel):
-    cut_mode: str = "highlights"        # highlights | coverage
+    cut_mode: str = "highlights"        # highlights | coverage | episode
     camera_motion: str = "calm"         # locked | calm | follow
 
 

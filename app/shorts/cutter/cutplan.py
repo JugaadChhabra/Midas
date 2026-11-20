@@ -348,3 +348,100 @@ def pad_clip(
     take_back = min(back_room, deficit - take_front)
     take_front = min(front_room, deficit - take_back)  # rebalance leftovers
     return round(start - take_front, 3), round(end + take_back, 3)
+
+
+# --- episode mode: animated series episodes, cut front to back -------------
+# A rhyme gets its best moments picked (highlights); an episode is a story, so
+# it is walked sequentially and every stretch becomes a Short of 45-50 s, each
+# cut placed in a dialogue pause (preferably on a scene change) inside that band.
+EPISODE_MIN_SECONDS = 45.0
+EPISODE_MAX_SECONDS = 50.0
+EPISODE_TARGET_SECONDS = 47.5
+# A remainder shorter than this after the last full clip (end card, credits)
+# is dropped rather than shipped as a tiny Short.
+EPISODE_MIN_TAIL_SECONDS = 20.0
+
+
+def _episode_cut(
+    cursor: float,
+    duration: float,
+    silence: list[tuple[float, float]] | None,
+    scene_times: list[float],
+    short_silence: list[tuple[float, float]] | None,
+    envelope: np.ndarray | None,
+    hop: float,
+    min_seconds: float,
+    max_seconds: float,
+    target_seconds: float,
+) -> tuple[float, str]:
+    """The next cut after `cursor`, inside [cursor + min, cursor + max]."""
+    earliest = cursor + min_seconds
+    latest = min(cursor + max_seconds, duration)
+    ideal = clamp(cursor + target_seconds, earliest, latest)
+    if silence:
+        candidates = _silent_candidates(silence, scene_times, ideal,
+                                        earliest, latest, True)
+        if candidates:
+            _score, chosen, kind = min(candidates,
+                                       key=lambda c: (c[0], abs(c[1] - ideal)))
+            return chosen, kind
+    if short_silence:
+        candidates = _silent_candidates(short_silence, [], ideal,
+                                        earliest, latest, False)
+        if candidates:
+            _score, chosen, _kind = min(candidates,
+                                        key=lambda c: (c[0], abs(c[1] - ideal)))
+            return chosen, "short-pause"
+    if envelope is not None and len(envelope):
+        lo = max(0, int(math.ceil(earliest / hop)))
+        hi = min(len(envelope), int(latest / hop) + 1)
+        if lo < hi:
+            chosen = (lo + int(np.argmin(envelope[lo:hi]))) * hop
+            return clamp(chosen, earliest, latest), "quietest"
+    scenes = [t for t in scene_times if earliest <= t <= latest]
+    if scenes:
+        return min(scenes, key=lambda t: abs(t - ideal)), "scene"
+    return ideal, "forced"
+
+
+def episode_stanzas(
+    units: list[TranscriptSegment],
+    duration: float,
+    silence: list[tuple[float, float]] | None = None,
+    scene_times: list[float] | tuple = (),
+    short_silence: list[tuple[float, float]] | None = None,
+    envelope: np.ndarray | None = None,
+    hop: float = 0.05,
+    min_seconds: float = EPISODE_MIN_SECONDS,
+    max_seconds: float = EPISODE_MAX_SECONDS,
+    target_seconds: float = EPISODE_TARGET_SECONDS,
+    min_tail_seconds: float = EPISODE_MIN_TAIL_SECONDS,
+) -> list[Stanza]:
+    """Walk an episode start to end and cut it into consecutive clips of
+    min_seconds..max_seconds, as many as the episode holds. Only the last clip
+    may be shorter; one under min_tail_seconds is dropped. A video no longer
+    than max_seconds is one clip."""
+    if duration <= 0:
+        return []
+    scenes = sorted(float(t) for t in scene_times)
+    bounds: list[tuple[float, str]] = [(0.0, "start")]
+    cursor = 0.0
+    while duration - cursor > max_seconds:
+        cut, kind = _episode_cut(cursor, duration, silence, scenes, short_silence,
+                                 envelope, hop, min_seconds, max_seconds,
+                                 target_seconds)
+        bounds.append((cut, kind))
+        cursor = cut
+    tail = duration - cursor
+    if len(bounds) == 1 or tail >= min_tail_seconds:
+        bounds.append((duration, "end"))
+
+    stanzas: list[Stanza] = []
+    for index in range(len(bounds) - 1):
+        start, end = bounds[index][0], bounds[index + 1][0]
+        stanzas.append(Stanza(
+            round(start, 3), round(end, 3),
+            text_for_interval(units, start, end, f"Episode Short {index + 1}"),
+            bounds[index + 1][1],
+        ))
+    return stanzas

@@ -60,7 +60,33 @@ def test_nas_job_cuts_pushes_clips_and_moves_source(tmp_path):
     clip_inserts = [f for (tbl, op, f) in recorder if tbl == "shorts_clips" and op == "insert"]
     assert clip_inserts and clip_inserts[0]["nas_path"] == "COMPLETED/HINDI/song/c1.mp4"
     assert clip_inserts[0]["upload_status"] == "SAVED"
+    assert clip_inserts[0]["local_path"] is None               # the NAS copy is the clip
     assert any(op == "update" and f.get("status") == "DONE" for (_, op, f) in recorder)
+
+
+def test_nas_job_leaves_no_cache_behind(tmp_path):
+    """Clips are on the NAS: the job's whole cache folder goes when it ends."""
+    recorder = []
+    job_dir = tmp_path / "cache" / "9"
+    clip = job_dir / "clips" / "c1.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.write_bytes(b"clip")
+    clips = [{"path": str(clip), "rank": 1, "start_s": 0.0, "end_s": 47.0, "verdict": "PASS"}]
+    nas = MagicMock()
+    nas.copy_to_local.return_value = job_dir / "src" / "song.mp4"
+    with patch("app.shorts.runner.supabase", return_value=_fake_sb(NAS_JOB, recorder)), \
+         patch("app.shorts.runner.nas_service", nas), \
+         patch("app.shorts.runner._cut_video",
+               return_value={"clips": clips, "message": "ok", "language": "hi", "cut_mode": "episode"}), \
+         patch("app.shorts.runner._notify_macos"), \
+         patch("app.shorts.runner.settings") as st:
+        st.SHORTS_CACHE_DIR = str(tmp_path / "cache")
+        st.NAS_SOURCE_ROOT_PATH = "RHYMES"
+        st.NAS_DESTINATION_ROOT_PATH = "COMPLETED"
+        from app.shorts.runner import run_shorts_job
+        run_shorts_job(9)
+    nas.copy_from_local.assert_called_once()
+    assert not job_dir.exists()
 
 
 def test_nas_job_leaves_source_on_cut_failure(tmp_path):

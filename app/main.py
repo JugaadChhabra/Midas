@@ -355,6 +355,17 @@ def _register_jobs(sched) -> None:
         max_instances=1,
         coalesce=True,
     )
+    from app.shorts.cache_cleanup import run_daily as shorts_cache_cleanup
+    sched.add_job(
+        shorts_cache_cleanup,
+        "cron",
+        hour=3,
+        minute=15,
+        # server-local, like the other overnight housekeeping
+        id="shorts_cache_cleanup",
+        max_instances=1,
+        coalesce=True,
+    )
     sched.add_job(
         _daily_reconcile,
         "cron",

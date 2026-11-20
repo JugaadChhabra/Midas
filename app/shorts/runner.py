@@ -204,7 +204,9 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
                 "title": f"{title.replace('_', ' ')} — Part {clip['rank']}"[:100],
                 "description": "", "hashtags": ["shorts"],
                 "start_s": clip["start_s"], "end_s": clip["end_s"],
-                "local_path": clip["path"], "nas_path": nas_path,
+                # The NAS copy is the clip; the local one is deleted when the
+                # job ends (below), so no local_path points at a missing file.
+                "local_path": None, "nas_path": nas_path,
                 "upload_status": CLIP_SAVED,
             }).execute()
 
@@ -220,8 +222,10 @@ def _run_nas_shorts_job(job_id: int, job: dict) -> None:
         _set_job(job_id, status=FAILED, error_message=str(exc)[:1000])
         _notify_macos("Midas Shorts", f"Job {job_id} failed: {exc}"[:120])
     finally:
-        shutil.rmtree(job_dir / "src", ignore_errors=True)
-        shutil.rmtree(job_dir / "tmp", ignore_errors=True)
+        # Everything local goes: the clips were copied to the NAS (or the job
+        # failed, and a retry is a new job with its own folder). Keeping them
+        # filled the Mac's disk with copies of what the NAS already holds.
+        shutil.rmtree(job_dir, ignore_errors=True)
 
 
 def reap_stuck_jobs() -> int:

@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Callable
 
 from app.shorts.cutter.cutplan import (
-    MAX_CLIP_SECONDS, Stanza, full_coverage_stanzas, lyric_pause_candidates,
+    MAX_CLIP_SECONDS, Stanza, episode_stanzas, full_coverage_stanzas,
+    lyric_pause_candidates,
 )
 from app.shorts.cutter.grading import grade_clips
 from app.shorts.cutter.render import (
@@ -21,9 +22,14 @@ from app.shorts.cutter.util import safe_name
 from app.shorts.cutter.vocals import load_mix_mono, vocal_silence_analysis
 
 
+# highlights: a rhyme's best moments; coverage: the whole video in <=58 s
+# pieces; episode: an animated episode walked front to back in 45-50 s pieces.
+CUT_MODES = ("highlights", "coverage", "episode")
+
+
 def _normalise_cut_mode(value: str | None) -> str:
     value = str(value or "highlights").strip().lower()
-    return value if value in {"highlights", "coverage"} else "highlights"
+    return value if value in CUT_MODES else "highlights"
 
 
 def cut_video(
@@ -100,6 +106,16 @@ def cut_video(
                     json.dumps(all_candidates, ensure_ascii=False, indent=2),
                     encoding="utf-8")
 
+        if cut_mode == "episode":
+            stanzas = episode_stanzas(
+                timing_units, duration,
+                silence=vocal["windows"] if vocal else None,
+                scene_times=scene_times,
+                short_silence=vocal.get("short_windows") if vocal else None,
+                envelope=vocal["envelope"] if vocal else None,
+                hop=vocal["hop"] if vocal else 0.05,
+            )
+
         if not stanzas:
             # coverage mode, degraded mode, or highlights found nothing usable
             selection_diag = None
@@ -154,10 +170,15 @@ def cut_video(
             })
 
         passed = sum(1 for g in grades if g["verdict"] == "PASS")
-        mode_word = "highlight" if selection_diag is not None else "full-coverage"
+        if cut_mode == "episode" and stanzas:
+            used_mode, mode_word = "episode", "episode"
+        elif selection_diag is not None:
+            used_mode, mode_word = "highlights", "highlight"
+        else:
+            used_mode, mode_word = "coverage", "full-coverage"
         return {
             "clips": clip_records,
-            "cut_mode": "highlights" if selection_diag is not None else "coverage",
+            "cut_mode": used_mode,
             "language": language,
             "message": (
                 f"{crop_info.get('mode', 'Smart Follow')}: {len(clip_records)} {mode_word} Shorts created. "

@@ -75,6 +75,17 @@ def resolve_folder(name: str, folders: list[str] | None = None) -> str | None:
     return next((f for f in folders if _folder_key(f) == key), None)
 
 
+# A source folder whose name has one of these words holds animated series
+# episodes (e.g. "3D Series Hindi"), not rhymes: its videos are cut in
+# "episode" mode, front to back into 45-50 s Shorts, whatever the caller asked.
+EPISODE_FOLDER_WORDS = ("series",)
+
+
+def is_episode_folder(name: str) -> bool:
+    key = _folder_key(name)
+    return any(word in key for word in EPISODE_FOLDER_WORDS)
+
+
 def uncut_source_paths(language: str) -> list[str]:
     """`<LANG>/<file>` paths with no in-flight job and under the FAILED cap."""
     files = nas_service.list_video_files(f"{settings.NAS_SOURCE_ROOT_PATH}/{language}")
@@ -115,6 +126,8 @@ def enqueue_language_jobs(language: str, *, channel_id: str | None = None,
         raise ValueError(f"Unknown NAS language folder: {language!r} "
                          f"(folders on the NAS: {', '.join(map(repr, folders)) or 'none'})")
     language = resolved
+    if is_episode_folder(language):
+        cut_mode = "episode"
     todo = uncut_source_paths(language)
     if limit is not None:
         todo = todo[:limit]

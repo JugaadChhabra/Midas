@@ -189,7 +189,7 @@ def update_channel(channel_id: str, body: ChannelSettings):
         patch["measurement_enabled"] = body.measurement_enabled
     if body.autopilot_shorts_enabled is not None:
         patch["autopilot_shorts_enabled"] = body.autopilot_shorts_enabled
-    if body.shorts_cut_mode in ("highlights", "coverage"):
+    if body.shorts_cut_mode in ("highlights", "coverage", "episode"):
         patch["shorts_cut_mode"] = body.shorts_cut_mode
     if body.shorts_camera_motion in ("locked", "calm", "follow"):
         patch["shorts_camera_motion"] = body.shorts_camera_motion

@@ -110,3 +110,16 @@ def test_enqueue_respects_limit():
         n = nas_source.enqueue_language_jobs("HINDI", limit=2)
     assert n == 2
     assert len(recorder) == 2
+
+
+def test_series_folder_is_cut_in_episode_mode_rhymes_are_not():
+    from app.shorts import nas_source
+    assert nas_source.is_episode_folder("3D Series Hindi")
+    assert not nas_source.is_episode_folder("HINDI")
+    for folder, want in (("3D Series Hindi", "episode"), ("HINDI", "highlights")):
+        inserted = []
+        with patch.object(nas_source, "list_source_languages", return_value=[folder]), \
+             patch.object(nas_source.nas_service, "list_video_files", return_value=["ep1.mp4"]), \
+             patch.object(nas_source, "supabase", return_value=_sb_with_jobs([], inserted)):
+            nas_source.enqueue_language_jobs(folder, cut_mode="highlights")
+        assert inserted[0]["cut_mode"] == want

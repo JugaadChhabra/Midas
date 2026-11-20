@@ -42,3 +42,26 @@ def test_cut_video_returns_clip_records(tmp_path, monkeypatch):
     assert result["clips"][1]["verdict"] == "PASS"
     assert not (tmp_path / "job" / "tmp").exists()       # scratch cleaned up
     assert any("render" in s for s, _ in stages)         # progress reported
+
+
+def test_episode_mode_uses_episode_planner(tmp_path, monkeypatch):
+    import app.shorts.cutter.pipeline as pipeline
+
+    source = tmp_path / "ep.mp4"
+    source.write_bytes(b"fake")
+    monkeypatch.setattr(pipeline, "render_vertical", lambda *a: (Path(a[1]).write_bytes(b"m"), {
+        "mode": "Smart Follow", "scene_cut_times": [], "crop_size": [None]})[1])
+    monkeypatch.setattr(pipeline, "source_metadata", lambda s: (1200.0, 1920, 1080))
+    monkeypatch.setattr(pipeline, "vocal_silence_analysis",
+                        lambda s, t: (_ for _ in ()).throw(RuntimeError("no demucs")))
+    monkeypatch.setattr(pipeline, "transcribe_multilingual", lambda *a, **k: ("hi", 0.9, [], []))
+    monkeypatch.setattr(pipeline, "grade_clips", lambda stanzas, *a, **k: [
+        {"verdict": "PASS", "reasons": []} for _ in stanzas])
+    monkeypatch.setattr(pipeline, "save_transcript", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "export_clip", lambda m, d, s, e: Path(d).write_bytes(b"c"))
+
+    result = pipeline.cut_video(source, tmp_path / "job", "Ep_1", cut_mode="episode")
+    assert result["cut_mode"] == "episode"
+    assert 24 <= len(result["clips"]) <= 26
+    for c in result["clips"][:-1]:
+        assert 45.0 <= c["end_s"] - c["start_s"] <= 50.0
