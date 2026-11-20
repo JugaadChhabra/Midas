@@ -354,3 +354,24 @@ def test_a_manager_cannot_set_another_managers_members_targets(store):
                                   {"1": {"shorts": -1}}, {"1": {"long_form": 501}}])
 def test_a_bad_target_is_422(store, days):
     assert _targets(MANAGER_A, PRANAV, days).status_code == 422
+
+
+def test_targets_read_sorts_only_by_columns_the_table_has(monkeypatch):
+    """member_targets has no `id`; sorting by it is a 500 on every page that
+    reads targets (the fake doesn't know column names, so check them here)."""
+    from tests import fakes
+    columns = {"team_member_id", "weekday", "shorts", "long_form", "updated_by", "updated_at"}
+    sorted_by = []
+    real_order = fakes.FakeQuery.order
+
+    def spy(self, column, desc=False, **kw):
+        if self._table == "member_targets":
+            sorted_by.append(column)
+        return real_order(self, column, desc, **kw)
+
+    monkeypatch.setattr(fakes.FakeQuery, "order", spy)
+    sb = FakeSupabase({"member_targets": [
+        {"team_member_id": 1, "weekday": 1, "shorts": 2, "long_form": 1}]})
+    with patch.object(team, "supabase", return_value=sb):
+        assert team.targets_for([1])[1]["1"] == {"shorts": 2, "long_form": 1}
+    assert sorted_by and set(sorted_by) <= columns

@@ -234,9 +234,12 @@ def targets_for(member_ids) -> dict[int, dict]:
     ids = sorted({i for i in member_ids if i is not None})
     if not ids:
         return {}
+    # member_targets has no `id` column (its key is team_member_id, weekday), so
+    # the paging sort can't be rows.ORDER_KEY: order by the primary key instead.
     rows = rows_for_ids(lambda chunk: supabase().table("member_targets")
                         .select("team_member_id,weekday,shorts,long_form")
-                        .in_("team_member_id", chunk), ids)
+                        .in_("team_member_id", chunk)
+                        .order("team_member_id"), ids, order_by="weekday")
     out: dict[int, dict] = {}
     for r in rows:
         week = out.setdefault(r["team_member_id"],
