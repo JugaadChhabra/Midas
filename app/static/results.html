@@ -126,6 +126,28 @@
   .chg-row .res .up { color:var(--color-ok); } .chg-row .res .down { color:var(--color-err); }
   .chg-row .res .sm { display:block; color:var(--ink-4); font-size:11.5px; margin-top:.15rem; }
   .chg-more { text-align:center; margin:.8rem 0 0; }
+
+  /* This week: what happened lately, by day, with a count per kind. */
+  .week { border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
+          margin:0 0 1rem; padding:.7rem .9rem; }
+  .week-head { display:flex; align-items:baseline; gap:.8rem; flex-wrap:wrap; }
+  .week-head h2 { font-size:13.5px; font-weight:650; margin:0; }
+  .week-day { border-top:1px solid var(--border-soft); margin-top:.5rem; padding-top:.4rem; }
+  .week-day:first-of-type { border-top:0; margin-top:.3rem; }
+  .week-day > summary { cursor:pointer; display:flex; gap:.9rem; align-items:baseline; font-size:13px;
+                        flex-wrap:wrap; }
+  .week-day .d { font-weight:600; min-width:7rem; }
+  .week-day .kc { color:var(--ink-3); font-variant-numeric:tabular-nums; }
+  .week-day .kc b { color:var(--ink-1); font-weight:650; }
+  .week-day ul { list-style:none; margin:.4rem 0 .2rem; padding:0; font-size:12.5px; }
+  .week-day li { display:flex; gap:.7rem; padding:.18rem 0; align-items:baseline; }
+  .week-day li .t { color:var(--ink-4); width:3rem; flex:none; font-variant-numeric:tabular-nums; }
+  .week-day li .k { width:5.2rem; flex:none; font-weight:600; }
+  .week-day li .k-written { color:var(--color-ok); } .week-day li .k-judged { color:var(--ink-2); }
+  .week-day li .k-reverted, .week-day li .k-stopped, .week-day li .k-cancelled { color:var(--color-err); }
+  table.sb td.name .cap { font-weight:400; font-size:11px; color:var(--ink-4); margin-left:.4rem;
+                          font-variant-numeric:tabular-nums; }
+  table.sb td.name .cap.full { color:var(--color-ok); }
 </style>
 </head>
 <body>
@@ -155,6 +177,8 @@
         early, not a verdict. Changes still inside their window, read from the post days already
         in, against the held-back videos over the same days. It never stops or reverts anything.</span>
     </p>
+
+    <section class="week" id="week" aria-label="This week" hidden></section>
 
     <div id="board"><div class="skel" data-skeleton data-rows="5"></div></div>
   </main>
@@ -535,6 +559,13 @@ $('board').addEventListener('keydown', (e) => {
   if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
 });
 
+// Today's writes against the daily cap, the figure the channel page shows.
+function todayCap(t) {
+  if (!t) return '';
+  const full = t.cap != null && t.written >= t.cap;
+  return `<span class="cap${full ? ' full' : ''}" title="Changes Midas wrote today, against the channel's daily cap">${num(t.written)}/${t.cap == null ? '–' : num(t.cap)} today</span>`;
+}
+
 function paint(data) {
   shown = data;
   cards.length = 0;
@@ -556,7 +587,7 @@ function paint(data) {
   const fleetRow = `<tbody class="fleet"><tr><td class="name">All channels<span class="sub">pooled over every judged change</span></td>
     ${levers.map(l => (CELLS[l.id] || cells)('All channels', l, data.fleet.levers[l.id], true, null)).join('')}</tr></tbody>`;
   const rows = data.channels.map(ch => `<tr><td class="name">
-      <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a></td>
+      <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a>${todayCap(ch.today)}</td>
       ${levers.map(l => (CELLS[l.id] || cells)(ch.name || ch.id, l, ch.levers[l.id], false, ch.id)).join('')}</tr>`).join('');
   $('board').innerHTML = `<div class="grid-wrap"><table class="sb">
     <thead><tr><th class="name" rowspan="2" style="vertical-align:bottom">Channel</th>${head1}</tr>
@@ -614,6 +645,59 @@ $('ch-filter').addEventListener('change', (e) => {
   if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; load(); }
 });
 
+
+// ── This week (#174) ──────────────────────────────────────────────────
+const KINDS = ['written', 'judged', 'reverted', 'stopped', 'cancelled'];
+const KIND_LABEL = { written: 'written', judged: 'judged', reverted: 'reverted',
+                     stopped: 'stopped', cancelled: 'cancelled' };
+let weekData = null;
+
+function eventText(e, names) {
+  const d = e.detail || {};
+  const ch = names[e.channel_id] || e.channel_id;
+  const vid = e.video_id ? (d.video_title || e.video_id) : '';
+  const lever = (LEVERS.find(l => l.id === e.lever) || {}).label || e.lever;
+  const tail = e.kind === 'judged' ? ` (${d.status || 'judged'}${d.delta != null ? ', ' + signed(d.delta, 2) : ''})`
+    : e.kind === 'reverted' ? ` (by ${d.by === 'midas' ? 'Midas' : 'a person'})`
+    : e.kind === 'cancelled' ? ` (${d.reason})`
+    : e.kind === 'stopped' ? ` (week of ${wk(d.week_start)}, ${d.windows_judged ?? '?'} windows)` : '';
+  const link = e.video_id ? `<a href="https://youtu.be/${encodeURIComponent(e.video_id)}" target="_blank" rel="noopener">${esc(vid)}</a>` : 'the lever';
+  return `${esc(ch)} · ${esc(lever)} · ${link}${esc(tail)}`;
+}
+
+function paintWeek() {
+  const box = $('week');
+  if (!weekData) { box.hidden = true; return; }
+  const names = Object.fromEntries(allChannels.map(c => [c.id, c.name || c.id]));
+  const events = weekData.events.filter(e => !channelFilter || e.channel_id === channelFilter);
+  const days = new Map();
+  for (const e of events) {
+    const day = e.at.slice(0, 10);
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(e);
+  }
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const totals = KINDS.map(k => `<b>${events.filter(e => e.kind === k).length}</b> ${KIND_LABEL[k]}`).join(' · ');
+  box.hidden = false;
+  box.innerHTML = `<div class="week-head"><h2>This week</h2>
+      <span class="muted">last ${weekData.days} days (UTC) · ${totals}</span></div>` +
+    (days.size ? [...days].map(([day, evs], i) => {
+      const label = day === todayIso ? 'Today' : new Date(day + 'T00:00:00Z').toLocaleDateString(undefined,
+        { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+      const counts = KINDS.filter(k => evs.some(e => e.kind === k))
+        .map(k => `<span class="kc"><b>${evs.filter(e => e.kind === k).length}</b> ${KIND_LABEL[k]}</span>`).join('');
+      return `<details class="week-day"${i === 0 ? ' open' : ''}><summary><span class="d">${esc(label)}</span>${counts}</summary>
+        <ul>${evs.map(e => `<li><span class="t">${esc(e.at.slice(11, 16))}</span>
+          <span class="k k-${esc(e.kind)}">${esc(KIND_LABEL[e.kind])}</span><span>${eventText(e, names)}</span></li>`).join('')}</ul>
+        </details>`;
+    }).join('') : '<p class="muted" style="margin:.4rem 0 0">Nothing happened in this window.</p>');
+}
+
+function loadWeek() {
+  SWR.swr('/seo/results/timeline?days=7', (data) => { weekData = data; paintWeek(); },
+          { onError: () => { weekData = null; paintWeek(); } });
+}
+
 function load() {
   const q = new URLSearchParams();
   if (channelFilter) q.set('channel_id', channelFilter);
@@ -624,6 +708,7 @@ function load() {
       paintChannelFilter();
     }
     paint(data);
+    paintWeek();
   }, {
     onError: (err) => {
       if (!shown) $('board').innerHTML = `<em class="muted">Could not load the results: ${esc(err && err.message || err)}</em>`;
@@ -633,6 +718,7 @@ function load() {
 
 Components.init();
 load();
+loadWeek();
 </script>
 </body>
 </html>
