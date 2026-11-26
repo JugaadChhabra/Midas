@@ -31,6 +31,7 @@
   const ICONS = {
     running:     () => stroke('<path d="M3 12h4l2.5-6 4 12L16 12h5"/>'),
     uploads:     () => stroke('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9h17M8 3v3M16 3v3M8 13h2M14 13h2M8 16.5h2"/>'),
+    results:     () => stroke('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
     team:        () => stroke('<circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.8.6 3 2.2 3.4 4.7"/>'),
     videos:      () => stroke('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8.5 5.5 3.5L10 15.5z"/>'),
     autopilot:   () => stroke('<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/>'),
@@ -336,6 +337,7 @@
     { id: 'running', label: 'Running', icon: 'running', href: '/' },
     { id: 'uploads', label: 'Uploads', icon: 'uploads', href: '/uploads' },
     { id: 'roster',  label: 'Roster',  icon: 'team',    href: '/team' },
+    { id: 'results', label: 'Results', icon: 'results', href: '/results' },
   ];
 
   // The four channel sections, in order. The rail is identical on every screen

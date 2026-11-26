@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Midas · Results</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="icon" type="image/png" href="/static/midas.png" />
+<link rel="apple-touch-icon" href="/static/midas.png" />
+<style>
+  body { margin:0; background:var(--ground); }
+
+  .res-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem 1rem; margin:0 0 .8rem; }
+  .res-bar .grow { flex:1 1 0; }
+  .legend { font-size:12.5px; color:var(--ink-3); margin:0 0 .9rem; line-height:1.5; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:3px; vertical-align:-1px;
+              margin:0 .25rem 0 .55rem; }
+  .legend .k-helped { background:color-mix(in srgb, var(--color-ok) 38%, transparent); }
+  .legend .k-no_change { background:color-mix(in srgb, var(--color-neutral) 30%, transparent); }
+  .legend .k-worse { background:color-mix(in srgb, var(--color-err) 38%, transparent); }
+  .legend .k-none { box-shadow:inset 0 0 0 1px var(--border); }
+
+  /* The scoreboard: a row per channel, a column group per lever, the fleet on top. */
+  .grid-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius);
+               background:var(--panel-bg); }
+  table.sb { border-collapse:separate; border-spacing:0; font-size:13px;
+             font-variant-numeric:tabular-nums; width:100%; }
+  table.sb th, table.sb td { padding:.5rem .7rem; text-align:right; white-space:nowrap;
+                             border-bottom:1px solid var(--border-soft); }
+  table.sb tbody tr:last-child td { border-bottom:0; }
+  table.sb thead th { font-size:11px; font-weight:500; color:var(--ink-4);
+                      border-bottom:1px solid var(--border); vertical-align:bottom; }
+  table.sb thead th.grp { text-align:left; font-size:12.5px; font-weight:650; color:var(--ink-2);
+                          border-left:1px solid var(--border); padding-bottom:.2rem; border-bottom:0; }
+  table.sb thead th.grp .what { font-weight:400; color:var(--ink-4); margin-left:.5rem; font-size:11.5px; }
+  table.sb .first { border-left:1px solid var(--border); }
+  table.sb th.name, table.sb td.name {
+    text-align:left; position:sticky; left:0; z-index:1; background:var(--panel-bg);
+    min-width:10rem; border-right:1px solid var(--border-soft); }
+  table.sb td.name a { color:inherit; text-decoration:none; font-weight:600; }
+  table.sb td.name a:hover { text-decoration:underline; }
+  table.sb tbody.fleet td { background:var(--surface-faint); font-weight:600;
+                            border-bottom:1px solid var(--border); }
+  table.sb tbody.fleet td.name { background:var(--surface-faint); }
+  table.sb tbody.fleet td.name .sub { display:block; font-size:11px; font-weight:400; color:var(--ink-4); }
+  table.sb .of { color:var(--ink-4); font-weight:400; }
+  table.sb .zero { color:var(--ink-4); }
+
+  /* The lift, coloured by the latest verdict; blank while there is none. */
+  table.sb td.lift { padding:3px 4px; }
+  table.sb td.lift > span { display:flex; align-items:center; justify-content:flex-end; gap:.3rem;
+                            min-width:4.6rem; height:2rem; padding:0 .55rem; box-sizing:border-box;
+                            border-radius:5px; font-weight:650; cursor:default; }
+  table.sb td.lift .v-helped { background:color-mix(in srgb, var(--color-ok) 22%, transparent); color:var(--color-ok); }
+  table.sb td.lift .v-no_change { background:color-mix(in srgb, var(--color-neutral) 16%, transparent); }
+  table.sb td.lift .v-worse { background:color-mix(in srgb, var(--color-err) 22%, transparent); color:var(--color-err); }
+  table.sb td.lift .u { font-size:10.5px; font-weight:500; color:var(--ink-4); }
+
+  table.sb td.trend { padding:.3rem .6rem; }
+  .spark-svg { display:block; margin-left:auto; overflow:visible; }
+  .spark-svg .zl { stroke:var(--border); stroke-dasharray:2 2; }
+  .spark-svg .ln { fill:none; stroke:var(--ink-3); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
+  .spark-svg .pt { fill:var(--ink-3); }
+  .spark-svg.v-helped .ln { stroke:var(--color-ok); } .spark-svg.v-helped .pt { fill:var(--color-ok); }
+  .spark-svg.v-worse .ln { stroke:var(--color-err); } .spark-svg.v-worse .pt { fill:var(--color-err); }
+
+  table.sb td.status { text-align:left; min-width:11rem; }
+  table.sb td.status .off { color:var(--ink-4); font-style:italic; white-space:normal; font-size:12px; }
+  .tag.stop { color:var(--color-err); box-shadow:inset 0 0 0 1px var(--color-err-border);
+              background:var(--color-err-bg); font-weight:600; }
+
+  .hovercard { position:fixed; z-index:50; pointer-events:none; min-width:14rem;
+    padding:.75rem .85rem; border-radius:var(--radius-md); background:var(--panel-bg);
+    border:1px solid var(--border); box-shadow:var(--shadow-2); font-size:12.5px;
+    font-variant-numeric:tabular-nums; opacity:0; transform:translateY(4px);
+    transition:opacity .12s ease-out, transform .12s ease-out; }
+  .hovercard.on { opacity:1; transform:none; }
+  .hovercard .hc-head { font-size:11.5px; color:var(--ink-3); margin:0 0 .35rem; }
+  .hovercard .hc-total { font-size:22px; font-weight:700; letter-spacing:-.01em; line-height:1.1; }
+  .hovercard .hc-total small { font-size:12px; font-weight:500; color:var(--ink-3); margin-left:.3rem; }
+  .hovercard .hc-row { display:flex; align-items:center; gap:.45rem; margin:.2rem 0; }
+  .hovercard .hc-row b { margin-left:auto; font-weight:600; }
+  .hovercard .hc-foot { margin:.5rem 0 0; padding:.45rem 0 0; border-top:1px solid var(--border-soft);
+                        color:var(--ink-3); }
+</style>
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+  <main class="app-main">
+    <header class="page-head">
+      <h1 class="page-title">Results</h1>
+    </header>
+    <p class="page-meta" id="meta"></p>
+
+    <div class="res-bar">
+      <div id="ch-filter"></div>
+      <div class="chip-bar" id="lever-bar" role="group" aria-label="Lever">
+        <button type="button" class="chip" data-lever="backlinks" aria-pressed="true">Backlinks</button>
+      </div>
+      <span class="grow"></span>
+    </div>
+    <p class="legend" id="legend">
+      <b>Lift</b> = the mean change in a changed video's views per week, minus the same for the
+      held-back videos Midas left alone (backlinks: views arriving from the linking video).
+      <i class="k-helped"></i>helped<i class="k-no_change"></i>no change<i class="k-worse"></i>worse<i class="k-none"></i>no verdict yet
+    </p>
+
+    <div id="board"><div class="skel" data-skeleton data-rows="5"></div></div>
+  </main>
+  </div>
+
+  <div class="hovercard" id="hovercard" role="tooltip" aria-hidden="true"></div>
+
+<script src="/static/swr.js"></script>
+<script src="/static/components.js"></script>
+<script src="/static/sidebar.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ── Rail ──────────────────────────────────────────────────────────────
+const railChannel = Sidebar.lastChannel();
+const railHref = (section) => railChannel
+  ? `/channel?id=${encodeURIComponent(railChannel)}#${section}` : '/';
+Sidebar.mount({
+  items: Sidebar.TOP_ITEMS
+    .concat([{ section: '' }])
+    .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
+  activeId: 'results',
+});
+fetch('/auth/channels').then(r => r.ok ? r.json() : []).then(chs => {
+  Sidebar.setChannels(chs, chs.some(c => c.id === railChannel) ? railChannel : null,
+                      { open: false });
+}).catch(() => {});
+
+// ── The levers the board shows, in column order ───────────────────────
+const LEVERS = [
+  { id: 'backlinks', label: 'Backlinks', what: 'related-video links in the description' },
+];
+
+let channelFilter = '';
+let allChannels = [];        // from the unfiltered read: the filter's options
+let shown = null;
+const cards = [];            // hover-card bodies, by index
+
+const num = (n) => Number(n || 0).toLocaleString();
+const signed = (x, d = 1) => x == null ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+const wk = (iso) => iso ? new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined,
+  { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+
+// A sparkline of the weekly lift, oldest to newest, with a zero line.
+function spark(weeks, verdict) {
+  const vals = weeks.map(w => w.lift).filter(v => v != null);
+  if (!vals.length) return '<span class="zero">·</span>';
+  const W = 72, H = 22, pad = 3;
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  const span = hi - lo || 1;
+  const x = (i) => vals.length === 1 ? W / 2 : pad + i * (W - 2 * pad) / (vals.length - 1);
+  const y = (v) => pad + (hi - v) * (H - 2 * pad) / span;
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const last = vals.length - 1;
+  return `<svg class="spark-svg v-${esc(verdict || 'none')}" width="${W}" height="${H}"
+      viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly lift: ${vals.map(v => signed(v)).join(', ')}">
+    <line class="zl" x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}"/>
+    ${vals.length > 1 ? `<polyline class="ln" points="${pts}"/>` : ''}
+    <circle class="pt" cx="${x(last).toFixed(1)}" cy="${y(vals[last]).toFixed(1)}" r="2.4"/></svg>`;
+}
+
+function hoverBody(name, lever, c, fleet) {
+  const k = c.counts;
+  const cancelled = Object.entries(k.cancelled).map(([r, n]) => `${esc(r)} ${n}`).join(', ');
+  const row = (label, v) => `<div class="hc-row">${label}<b>${v}</b></div>`;
+  return `<div class="hc-head">${esc(name)} · ${esc(lever.label)}</div>
+    <div class="hc-total">${c.lift == null ? '—' : signed(c.lift, 2)}<small>lift, views / week</small></div>
+    ${row('Changed videos, mean', c.treated_mean_delta == null ? '—' : `${signed(c.treated_mean_delta, 2)} <span class="of">(${c.n_treated})</span>`)}
+    ${row('Held back, mean', c.holdout_mean_delta == null ? '—' : `${signed(c.holdout_mean_delta, 2)} <span class="of">(${c.n_holdout})</span>`)}
+    ${fleet ? '' : row('Cumulative lift (stop rule)', c.cumulative_lift == null ? '—' : signed(c.cumulative_lift, 2))}
+    ${row('Weeks judged', c.windows_judged)}
+    <div class="hc-foot">
+      ${row('Held back', num(k.holdout))}
+      ${row('Declined', num(k.declined))}
+      ${cancelled ? row('Cancelled', cancelled) : ''}
+      ${k.reverted.manual + k.reverted.auto ? row('Reverted', `${k.reverted.manual} by hand, ${k.reverted.auto} auto`) : ''}
+      ${row('Not enough data', num(k.insufficient_data))}
+      ${k.shorts_excluded ? row('On Shorts, left out', num(k.shorts_excluded)) : ''}
+      ${k.team ? row('Team edits (never in the lift)', `${num(k.team)}, ${num(k.team_judged)} judged`) : ''}
+    </div>`;
+}
+
+function cells(name, lever, c, fleet) {
+  const k = c.counts;
+  cards.push(hoverBody(name, lever, c, fleet));
+  const hv = cards.length - 1;
+  const verdict = c.verdict || 'none';
+  const lift = c.lift == null ? '<span class="zero">—</span>'
+    : `${signed(c.lift)}<span class="u">/wk</span>`;
+  let status;
+  if (fleet) {
+    status = `${c.state.channels_on} of ${c.state.channels} on` +
+      (c.stopped_channels ? ` · <span class="tag stop">${c.stopped_channels} stopped</span>` : '');
+  } else if (c.stop_rule_triggered) {
+    status = `<span class="tag stop" title="The stop rule fired: it didn't help here. Restarting it is an owner decision.">stopped wk ${esc(wk(c.stopped_week))}</span>`;
+  } else if (!c.state.on) {
+    status = `<span class="off">${esc(c.state.reason || 'off')}</span>`;
+  } else {
+    status = c.verdict ? `<span class="pill pill--sm ${{ helped: 'pill--ok', worse: 'pill--err' }[c.verdict] || 'pill--neutral'}">${esc(c.verdict.replace('_', ' '))}</span>`
+                       : '<span class="zero">on, no verdict yet</span>';
+  }
+  return `<td class="first ${k.written ? '' : 'zero'}">${num(k.written)}</td>
+    <td>${num(k.judged)} <span class="of">/ ${num(k.awaiting)}</span></td>
+    <td class="lift"><span class="v-${esc(fleet ? 'none' : verdict)}" data-hv="${hv}" tabindex="0">${lift}</span></td>
+    <td class="trend">${spark(c.weeks, fleet ? null : c.verdict)}</td>
+    <td class="status">${status}</td>`;
+}
+
+function paint(data) {
+  shown = data;
+  cards.length = 0;
+  $('hovercard').classList.remove('on');
+  const next = new Date(data.next_judgement);
+  $('meta').textContent = `Next weekly judgement ${next.toLocaleString(undefined,
+    { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      hour12: false, timeZone: 'UTC' })} UTC` +
+    ` · read ${new Date(data.generated_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  if (!data.channels.length) {
+    $('board').innerHTML = '<div class="dt"><div class="dt-empty muted">No channels are mapped to you yet; ask the admin.</div></div>';
+    return;
+  }
+  const levers = LEVERS.filter(l => data.fleet.levers[l.id]);
+  const head1 = levers.map(l => `<th class="grp" colspan="5">${esc(l.label)}<span class="what">${esc(l.what)}</span></th>`).join('');
+  const head2 = levers.map(() => `<th class="first" title="Changes Midas wrote to YouTube">Written</th>
+    <th title="Changes judged / still in their measurement window">Judged / pending</th>
+    <th>Lift</th><th>Weekly lift</th><th class="status" style="text-align:left">Verdict</th>`).join('');
+  const fleetRow = `<tbody class="fleet"><tr><td class="name">All channels<span class="sub">pooled over every judged change</span></td>
+    ${levers.map(l => cells('All channels', l, data.fleet.levers[l.id], true)).join('')}</tr></tbody>`;
+  const rows = data.channels.map(ch => `<tr><td class="name">
+      <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a></td>
+      ${levers.map(l => cells(ch.name || ch.id, l, ch.levers[l.id], false)).join('')}</tr>`).join('');
+  $('board').innerHTML = `<div class="grid-wrap"><table class="sb">
+    <thead><tr><th class="name" rowspan="2" style="vertical-align:bottom">Channel</th>${head1}</tr>
+      <tr>${head2}</tr></thead>
+    ${fleetRow}<tbody>${rows}</tbody></table></div>`;
+}
+
+(function wireHoverCard() {
+  const card = $('hovercard');
+  let on = null;
+  const hide = () => { on = null; card.classList.remove('on'); card.setAttribute('aria-hidden', 'true'); };
+  const show = (el) => {
+    if (on === el) return;
+    on = el;
+    card.innerHTML = cards[Number(el.dataset.hv)] || '';
+    const r = el.getBoundingClientRect();
+    const w = card.offsetWidth, h = card.offsetHeight;
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
+    const top = r.top - h - 8 >= 8 ? r.top - h - 8 : r.bottom + 8;
+    card.style.left = left + 'px';
+    card.style.top = top + 'px';
+    card.classList.add('on');
+    card.setAttribute('aria-hidden', 'false');
+  };
+  const board = $('board');
+  board.addEventListener('mouseover', (e) => { const el = e.target.closest('[data-hv]'); if (el) show(el); else hide(); });
+  board.addEventListener('mouseleave', hide);
+  board.addEventListener('focusin', (e) => { const el = e.target.closest('[data-hv]'); if (el) show(el); });
+  board.addEventListener('focusout', hide);
+  window.addEventListener('scroll', hide, true);
+})();
+
+function paintChannelFilter() {
+  const holder = $('ch-filter');
+  const opts = [{ value: '', label: 'All channels' }]
+    .concat(allChannels.map(c => ({ value: c.id, label: c.name || c.id })));
+  holder.innerHTML = '';
+  holder.dataset.dropdown = '';
+  holder.dataset.label = 'Channel';
+  holder.dataset.value = channelFilter;
+  holder.dataset.options = JSON.stringify(opts);
+  delete holder.dataset.cmpWired;
+  Components.init(holder.parentNode);
+}
+$('ch-filter').addEventListener('change', (e) => {
+  if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; load(); }
+});
+
+function load() {
+  const q = new URLSearchParams();
+  if (channelFilter) q.set('channel_id', channelFilter);
+  const url = '/seo/results' + (q.toString() ? '?' + q : '');
+  SWR.swr(url, (data) => {
+    if (!channelFilter && data.channels.length !== allChannels.length) {
+      allChannels = data.channels.map(c => ({ id: c.id, name: c.name }));
+      paintChannelFilter();
+    }
+    paint(data);
+  }, {
+    onError: (err) => {
+      if (!shown) $('board').innerHTML = `<em class="muted">Could not load the results: ${esc(err && err.message || err)}</em>`;
+    },
+  });
+}
+
+Components.init();
+load();
+</script>
+</body>
+</html>
