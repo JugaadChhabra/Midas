@@ -65,14 +65,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from app import access, early_read, lever_verdicts, playlist_test, title_measurement
-from app.channel_seo import lever_states
+from app import access, early_read, lever_verdicts, playlist_test, reach, title_measurement
+from app.channel_seo import lever_states, trim
 from app.config import settings
 from app.db import supabase
-from app.rows import all_rows
+from app.rows import all_rows, rows_for_ids
 from app.status_vocab import (
     ACTIVE_INTERVENTION_STATUSES,
     ALL_INTERVENTION_LEVERS,
@@ -566,3 +566,191 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
     first = fleet["levers"].get(InterventionLever.TITLE, {}).get("first_verdict")
     return {"generated_at": now.isoformat(), "next_judgement": next_judgement(now).isoformat(),
             "first_title_verdicts": first, "channels": out_channels, "fleet": fleet}
+
+
+# ── The changes drill-down (#173) ───────────────────────────────────────────
+
+ORDERS = ("delta", "recent")
+CHANGE_ARMS = (InterventionArm.TREATED, InterventionArm.HOLDOUT, InterventionArm.NOT_APPLICABLE)
+CHANGES_MAX = 1000
+CHANGES_DEFAULT = 100
+
+CHANGE_COLUMNS = ("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,"
+                  "detected_at,created_at,measurement_status,measurement_result")
+ARM_COLUMNS = ("id,channel_id,playlist_id,arm,status,eligible_members,first_applied_at,"
+               "last_applied_at,measurement_status,measurement_result,drawn_at")
+REC_DETAIL_COLUMNS = ("id,channel_id,short_id,target_video_id,rank,similarity,impressions,"
+                      "feed_views,status,decided_at,seen_at,created_at")
+VIDEO_COLUMNS = "id,title,thumbnail_url,is_short"
+
+
+def _video_info(videos: dict, video_id: str | None) -> dict | None:
+    v = videos.get(video_id)
+    return None if v is None else {k: v.get(k) for k in ("title", "thumbnail_url", "is_short")}
+
+
+def _read_videos(ids: set) -> dict:
+    ids = sorted(i for i in ids if i)
+    if not ids:
+        return {}
+    return {v["id"]: v for v in rows_for_ids(
+        lambda chunk: supabase().table("videos").select(VIDEO_COLUMNS).in_("id", chunk), ids)}
+
+
+def _measured(row: dict) -> float | None:
+    """The delta a row is ordered by: its measurement's, unless the window
+    lacked data (`insufficient_data` is never judged)."""
+    if row.get("status") == InterventionStatus.INSUFFICIENT_DATA:
+        return None
+    return _delta(row)
+
+
+def _arm_delta(row: dict) -> float | None:
+    """A playlist arm's latest weekly delta."""
+    weeks = (row.get("measurement_result") or {}).get("weeks") or []
+    return next((w["delta"] for w in reversed(weeks) if w.get("delta") is not None), None)
+
+
+def _delta_order(rows: list[dict], delta, stamp: str) -> list[dict]:
+    """Judged rows first: the gains best first, then the losses worst first;
+    the rest (still open, no data) newest first."""
+    def key(r):
+        d = delta(r)
+        if d is None:
+            return (2, 0.0, _newest(r, stamp))
+        return (0, -d, _newest(r, stamp)) if d >= 0 else (1, d, _newest(r, stamp))
+    return sorted(rows, key=key)
+
+
+def _newest(row: dict, stamp: str):
+    """A (stamp, id) pair that sorts newest first inside an ascending key."""
+    return _Rev((row.get(stamp) or "", row["id"]))
+
+
+class _Rev:
+    __slots__ = ("v",)
+
+    def __init__(self, v):
+        self.v = v
+
+    def __lt__(self, other):
+        return self.v > other.v
+
+    def __eq__(self, other):
+        return self.v == other.v
+
+
+def _early_for(rows: list[dict], lever: str) -> dict:
+    """{id: early} for the page's open rows, from `early_read` (read-only)."""
+    title = lever == InterventionLever.TITLE
+    reads = early_read.titles(rows) if title else early_read.backlinks(rows)
+    out = {}
+    for rid, x in reads.items():
+        e = {"post_days": x["post_days"], "delta": x["delta"]}
+        if title:
+            e["impressions"] = {s: x["impressions"][s] for s in ("pre", "post")}
+            e["ctr"] = {s: reach.weighted_ctr(x["reach"][s])[1] for s in ("pre", "post")}
+        out[rid] = e
+    return out
+
+
+def _intervention_changes(channel_id: str, lever: str, arm: str | None, order: str,
+                          limit: int, offset: int) -> list[dict]:
+    query = (supabase().table("interventions").select(CHANGE_COLUMNS)
+             .eq("channel_id", channel_id).eq("lever", lever))
+    if arm:
+        query = query.eq("arm", arm)
+    rows = all_rows(query)
+    if order == "recent":
+        rows.sort(key=lambda r: (r.get("created_at") or "", r["id"]), reverse=True)
+    else:
+        rows = _delta_order(rows, _measured, "created_at")
+    page = rows[offset:offset + limit]
+    early = _early_for(page, lever)
+    videos = _read_videos({r["video_id"] for r in page}
+                          | {t.get("video_id") for r in page
+                             for t in (r.get("payload") or {}).get("targets") or []
+                             if isinstance(t, dict)})
+    out = []
+    for r in page:
+        revert = (r.get("payload") or {}).get("revert")
+        out.append({**trim(r), "video": _video_info(videos, r["video_id"]),
+                    "early": early.get(r["id"]),
+                    "reverted_by": None if not revert
+                    else "midas" if revert.get("auto") is True else "person"})
+    return out
+
+
+def _arm_changes(channel_id: str, arm: str | None, order: str, limit: int,
+                 offset: int) -> list[dict]:
+    query = supabase().table("playlist_arms").select(ARM_COLUMNS).eq("channel_id", channel_id)
+    if arm:
+        query = query.eq("arm", arm)
+    rows = all_rows(query)
+    if order == "recent":
+        rows.sort(key=lambda r: (r.get("drawn_at") or "", r["id"]), reverse=True)
+    else:
+        rows = _delta_order(rows, _arm_delta, "drawn_at")
+    page = rows[offset:offset + limit]
+    playlists = {}
+    if page:
+        playlists = {p["id"]: p for p in rows_for_ids(
+            lambda chunk: supabase().table("playlists").select("id,title").in_("id", chunk),
+            sorted({r["playlist_id"] for r in page}))}
+    return [{**r, "delta": _arm_delta(r),
+             "playlist": {"id": r["playlist_id"],
+                          "title": (playlists.get(r["playlist_id"]) or {}).get("title")}}
+            for r in page]
+
+
+def _recommendation_changes(channel_id: str, order: str, limit: int, offset: int) -> list[dict]:
+    rows = all_rows(supabase().table("short_link_recommendations")
+                    .select(REC_DETAIL_COLUMNS).eq("channel_id", channel_id))
+    # Pending first, the way the channel's card lists them, then the newest.
+    rows.sort(key=lambda r: (r.get("created_at") or "", r["id"]), reverse=True)
+    if order == "delta":
+        rows.sort(key=lambda r: r.get("status") != ShortLinkStatus.PENDING)
+    page = rows[offset:offset + limit]
+    videos = _read_videos({r["short_id"] for r in page} | {r["target_video_id"] for r in page})
+    return [{**r, "video": _video_info(videos, r["short_id"]),
+             "target": _video_info(videos, r["target_video_id"])} for r in page]
+
+
+@router.get("/seo/results/changes")
+def seo_results_changes(channel_id: str, lever: str, arm: str | None = None,
+                        order: str = "delta",
+                        limit: int = Query(CHANGES_DEFAULT, ge=1, le=CHANGES_MAX),
+                        offset: int = Query(0, ge=0),
+                        user: dict = Depends(access.current_user)):
+    """One cell's rows for one channel (the Results page's modal): the channel
+    page's trimmed interventions with the video behind each and, for a row
+    still in its window, its early read; the playlist test's arms; the Short
+    links' recommendations. `arm` filters interventions and playlist arms
+    (`treated|holdout|n/a`) and is ignored for Short links. `order=delta` puts
+    the judged rows first, gains best first then losses worst first, the rest
+    newest first; `recent` is newest first. `next_offset` is set when the page
+    is full."""
+    if lever not in ALL_INTERVENTION_LEVERS:
+        raise HTTPException(400, f"unknown lever: {lever}")
+    if arm is not None and arm not in CHANGE_ARMS:
+        raise HTTPException(400, f"unknown arm: {arm}")
+    if order not in ORDERS:
+        raise HTTPException(400, f"unknown order: {order}")
+    access.check_channel(user, channel_id)
+    channel = (supabase().table("channels").select("id").eq("id", channel_id)
+               .execute().data or [None])[0]
+    if channel is None:
+        raise HTTPException(404, access.CHANNEL_NOT_FOUND)
+
+    if lever == InterventionLever.PLAYLIST:
+        kind, changes = "arms", _arm_changes(channel_id, arm, order, limit, offset)
+    elif lever == InterventionLever.SHORT_LINK:
+        kind, changes = "recommendations", _recommendation_changes(channel_id, order, limit,
+                                                                   offset)
+    else:
+        kind, changes = "interventions", _intervention_changes(channel_id, lever, arm, order,
+                                                               limit, offset)
+    return {"channel_id": channel_id, "lever": lever, "kind": kind, "arm": arm, "order": order,
+            "limit": limit, "offset": offset,
+            "next_offset": offset + limit if len(changes) == limit else None,
+            "changes": changes}
