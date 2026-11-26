@@ -64,9 +64,7 @@ Sidebar.mount({
 });
 
 function railHref(section) {
-  return railChannel
-    ? `/channel?id=${encodeURIComponent(railChannel)}#${section}`
-    : '/';
+  return Sidebar.channelItemHref(section, railChannel);
 }
 
 // Re-point the channel links once we know the channels. Until a channel has
