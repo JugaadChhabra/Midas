@@ -61,7 +61,8 @@ def _verdict(channel_id, week, *, lift=1.0, cumulative=1.0, windows=1, verdict="
             "computed_at": f"{week}T09:00:00+00:00"}
 
 
-def _store(interventions=(), verdicts=(), videos=None, channels=None):
+def _store(interventions=(), verdicts=(), videos=None, channels=None, *, traffic=(),
+           reach=(), ingested=()):
     return FakeSupabase({
         "app_users": [_user(ADMIN, "admin", "Jugaad"), _user(EXEC, "exec", "Akshay"),
                       _user(MANAGER_A, "manager", "Justin"),
@@ -86,6 +87,9 @@ def _store(interventions=(), verdicts=(), videos=None, channels=None):
         "audits": [],
         "playlist_arms": [],
         "short_link_recommendations": [],
+        "video_traffic_source_daily": list(traffic),
+        "video_reach_daily": list(reach),
+        "reporting_reports_ingested": list(ingested),
     })
 
 
