@@ -56,6 +56,13 @@
   table.sb td.lift .v-worse { background:color-mix(in srgb, var(--color-err) 22%, transparent); color:var(--color-err); }
   table.sb td.lift .u { font-size:10.5px; font-weight:500; color:var(--ink-4); }
 
+  /* The early read: changes still in their window. Italic, never coloured as a verdict. */
+  table.sb td.lift .early { display:flex; align-items:center; justify-content:flex-end; gap:.3rem;
+                            padding:0 .55rem .15rem; font-size:11.5px; white-space:nowrap; }
+  table.sb td.lift .early i { font-weight:600; color:var(--ink-2); }
+  .legend .early-key { display:block; margin-top:.2rem; }
+  .legend .early-key i { display:inline; width:auto; height:auto; margin:0; box-shadow:none; }
+
   table.sb td.trend { padding:.3rem .6rem; }
   .spark-svg { display:block; margin-left:auto; overflow:visible; }
   .spark-svg .zl { stroke:var(--border); stroke-dasharray:2 2; }
@@ -107,6 +114,9 @@
       held-back videos Midas left alone (backlinks: views arriving from the linking video; titles:
       the change in the video's browse, search and suggested views, shown as a percentage).
       <i class="k-helped"></i>helped<i class="k-no_change"></i>no change<i class="k-worse"></i>worse<i class="k-none"></i>no verdict yet
+      <span class="early-key"><span class="pill pill--sm pill--info">early</span> <i>in italics</i>:
+        early, not a verdict. Changes still inside their window, read from the post days already
+        in, against the held-back videos over the same days. It never stops or reverts anything.</span>
     </p>
 
     <div id="board"><div class="skel" data-skeleton data-rows="5"></div></div>
@@ -182,6 +192,31 @@ function spark(weeks, verdict) {
     <circle class="pt" cx="${x(last).toFixed(1)}" cy="${y(vals[last]).toFixed(1)}" r="2.4"/></svg>`;
 }
 
+// The early read (#172): changes still inside their window, never a verdict.
+const postDays = (e) => e.post_days_min === e.post_days_max
+  ? `${e.post_days_max} post day${e.post_days_max === 1 ? '' : 's'}`
+  : `${e.post_days_min}–${e.post_days_max} post days`;
+const ctrPct = (x) => x == null ? '—' : (100 * x).toFixed(1) + '%';
+function earlyLine(lever, e) {
+  if (!e) return '';
+  const v = e.lift == null ? '—' : `${lever.fmt(e.lift, 1)}${esc(lever.per)}`;
+  return `<div class="early" title="Early, not a verdict: ${esc(postDays(e))} so far">
+    <span class="pill pill--sm pill--info">early</span><i>${v}</i><span class="of">${esc(postDays(e))}</span></div>`;
+}
+function earlyCard(lever, e) {
+  if (!e) return '';
+  const row = (label, v) => `<div class="hc-row">${label}<b>${v}</b></div>`;
+  const mean = (x, n) => x == null ? '—' : `<i>${lever.fmt(x, 2)}</i> <span class="of">(${n})</span>`;
+  return `<div class="hc-foot"><span class="pill pill--sm pill--info">early</span> <i>Early, not a verdict</i>, ${esc(postDays(e))}
+    ${row('Early lift', e.lift == null ? '—' : `<i>${lever.fmt(e.lift, 2)}</i>`)}
+    ${row('Changed videos, mean', mean(e.treated_mean_delta, e.n_treated))}
+    ${row('Held back, mean', mean(e.holdout_mean_delta, e.n_holdout))}
+    ${e.impressions ? row('Impressions / day, before → after',
+        `${num(Math.round(e.impressions.pre))} → ${num(Math.round(e.impressions.post))}`) : ''}
+    ${e.ctr ? row('CTR, before → after', `${ctrPct(e.ctr.pre)} → ${ctrPct(e.ctr.post)}`) : ''}
+  </div>`;
+}
+
 // A title cell with no weekly verdict yet, and a row still inside its window.
 const noVerdict = (c) => c.first_verdict && !c.weeks.length;
 
@@ -199,6 +234,7 @@ function hoverBody(name, lever, c, fleet) {
         `${esc(p[0].toUpperCase() + p.slice(1))} <span class="of">${num(v.treated)} written, ${num(v.n_treated)} judged vs ${num(v.n_holdout)} held back${v.stopped ? ', stopped' : ''}</span>`,
         v.lift == null ? '—' : lever.fmt(v.lift, 2))).join('')}</div>` : ''}
     ${noVerdict(c) ? `<div class="hc-foot">First verdicts ~${esc(wk(c.first_verdict))}</div>` : ''}
+    ${earlyCard(lever, c.early)}
     <div class="hc-foot">
       ${row('Held back', num(k.holdout))}
       ${row('Declined', num(k.declined))}
@@ -233,7 +269,7 @@ function cells(name, lever, c, fleet) {
   }
   return `<td class="first ${k.written ? '' : 'zero'}">${num(k.written)}</td>
     <td>${num(k.judged)} <span class="of">/ ${num(k.awaiting)}</span></td>
-    <td class="lift"><span class="v-${esc(fleet ? 'none' : verdict)}" data-hv="${hv}" tabindex="0">${lift}</span></td>
+    <td class="lift"><span class="v-${esc(fleet ? 'none' : verdict)}" data-hv="${hv}" tabindex="0">${lift}</span>${earlyLine(lever, c.early)}</td>
     <td class="trend">${spark(c.weeks, fleet ? null : c.verdict)}</td>
     <td class="status">${status}</td>`;
 }
