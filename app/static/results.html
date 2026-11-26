@@ -10,60 +10,74 @@
 <style>
   body { margin:0; background:var(--ground); }
 
-  .res-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem 1rem; margin:0 0 .8rem; }
-  .res-bar .grow { flex:1 1 0; }
-  .legend { font-size:12.5px; color:var(--ink-3); margin:0 0 .9rem; line-height:1.5; }
-  .legend i { display:inline-block; width:10px; height:10px; border-radius:3px; vertical-align:-1px;
-              margin:0 .25rem 0 .55rem; }
-  .legend .k-helped { background:color-mix(in srgb, var(--color-ok) 38%, transparent); }
-  .legend .k-no_change { background:color-mix(in srgb, var(--color-neutral) 30%, transparent); }
-  .legend .k-worse { background:color-mix(in srgb, var(--color-err) 38%, transparent); }
-  .legend .k-none { box-shadow:inset 0 0 0 1px var(--border); }
+  /* At a glance: one card per lever, each the tab for its table. */
+  .glance { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.75rem;
+            margin:0 0 1.1rem; }
+  .gl { text-align:left; font:inherit; color:inherit; cursor:pointer; padding:.85rem 1rem .9rem;
+        border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
+        display:flex; flex-direction:column; gap:.3rem; transition:border-color .12s, box-shadow .12s; }
+  .gl:hover { border-color:var(--ink-4); }
+  .gl[aria-pressed="true"] { border-color:var(--color-accent); box-shadow:inset 0 0 0 1px var(--color-accent); }
+  .gl .gl-top { display:flex; align-items:center; justify-content:space-between; gap:.5rem;
+                font-size:12.5px; font-weight:650; color:var(--ink-2); }
+  .gl .gl-big { font-size:19px; font-weight:700; letter-spacing:-.01em; line-height:1.2; }
+  .gl .gl-big.ok { color:var(--color-ok); } .gl .gl-big.err { color:var(--color-err); }
+  .gl .gl-big.muted { color:var(--ink-3); }
+  .gl .gl-line { font-size:12.5px; color:var(--ink-3); line-height:1.45; }
+  .gl .gl-line b { color:var(--ink-1); font-weight:600; font-variant-numeric:tabular-nums; }
 
-  /* The scoreboard: a row per channel, a column group per lever, the fleet on top. */
+  .res-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem 1rem; margin:0 0 .6rem; }
+  .res-bar .grow { flex:1 1 0; }
+  .res-bar h2 { font-size:15px; margin:0; }
+  .res-bar .what { font-size:12.5px; color:var(--ink-3); }
+
+  .howto { font-size:12.5px; color:var(--ink-3); margin:0 0 .8rem; line-height:1.55; }
+  .howto summary { cursor:pointer; color:var(--color-accent); width:max-content; }
+  .howto ul { margin:.4rem 0 0; padding-left:1.1rem; }
+  .howto li { margin:.15rem 0; }
+
+  /* The table: one lever, a row per channel, the whole fleet on top. */
   .grid-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius);
                background:var(--panel-bg); }
   table.sb { border-collapse:separate; border-spacing:0; font-size:13px;
              font-variant-numeric:tabular-nums; width:100%; }
-  table.sb th, table.sb td { padding:.5rem .7rem; text-align:right; white-space:nowrap;
-                             border-bottom:1px solid var(--border-soft); }
+  table.sb th, table.sb td { padding:.55rem .8rem; text-align:right; white-space:nowrap;
+                             border-bottom:1px solid var(--border-soft); vertical-align:middle; }
   table.sb tbody tr:last-child td { border-bottom:0; }
-  table.sb thead th { font-size:11px; font-weight:500; color:var(--ink-4);
-                      border-bottom:1px solid var(--border); vertical-align:bottom; }
-  table.sb thead th.grp { text-align:left; font-size:12.5px; font-weight:650; color:var(--ink-2);
-                          border-left:1px solid var(--border); padding-bottom:.2rem; border-bottom:0; }
-  table.sb thead th.grp .what { font-weight:400; color:var(--ink-4); margin-left:.5rem; font-size:11.5px; }
-  table.sb .first { border-left:1px solid var(--border); }
-  table.sb th.name, table.sb td.name {
-    text-align:left; position:sticky; left:0; z-index:1; background:var(--panel-bg);
-    min-width:10rem; border-right:1px solid var(--border-soft); }
+  table.sb thead th { font-size:11.5px; font-weight:500; color:var(--ink-3);
+                      border-bottom:1px solid var(--border); }
+  table.sb th.l, table.sb td.l { text-align:left; }
+  table.sb td.name { min-width:9rem; }
   table.sb td.name a { color:inherit; text-decoration:none; font-weight:600; }
   table.sb td.name a:hover { text-decoration:underline; }
-  table.sb tbody.fleet td { background:var(--surface-faint); font-weight:600;
-                            border-bottom:1px solid var(--border); }
-  table.sb tbody.fleet td.name { background:var(--surface-faint); }
-  table.sb tbody.fleet td.name .sub { display:block; font-size:11px; font-weight:400; color:var(--ink-4); }
+  table.sb td.name .cap { display:block; font-weight:400; font-size:11px; color:var(--ink-4); margin-top:.1rem; }
+  table.sb td.name .cap.full { color:var(--color-ok); }
+  table.sb tbody.fleet td { background:var(--surface-faint); font-weight:600; border-bottom:1px solid var(--border); }
+  table.sb tbody.fleet td.name .cap { color:var(--ink-4); }
+  table.sb tr.is-off td { color:var(--ink-4); }
+  table.sb tr.is-off td.name a { color:var(--ink-3); font-weight:500; }
+  table.sb tbody.off-head td { font-size:11px; color:var(--ink-4); text-transform:uppercase;
+                               letter-spacing:.04em; padding:.6rem .8rem .3rem; background:var(--surface-faint); }
   table.sb .of { color:var(--ink-4); font-weight:400; }
   table.sb .zero { color:var(--ink-4); }
 
-  /* The lift, coloured by the latest verdict; blank while there is none. */
-  table.sb td.lift { padding:3px 4px; }
-  table.sb td.lift > span { display:flex; align-items:center; justify-content:flex-end; gap:.3rem;
-                            min-width:4.6rem; height:2rem; padding:0 .55rem; box-sizing:border-box;
-                            border-radius:5px; font-weight:650; cursor:default; }
-  table.sb td.lift .v-helped { background:color-mix(in srgb, var(--color-ok) 22%, transparent); color:var(--color-ok); }
-  table.sb td.lift .v-no_change { background:color-mix(in srgb, var(--color-neutral) 16%, transparent); }
-  table.sb td.lift .v-worse { background:color-mix(in srgb, var(--color-err) 22%, transparent); color:var(--color-err); }
-  table.sb td.lift .u { font-size:10.5px; font-weight:500; color:var(--ink-4); }
+  /* The result: a plain word, then why. */
+  .st { display:flex; flex-direction:column; align-items:flex-start; gap:.15rem; }
+  .st .why { font-size:11.5px; color:var(--ink-4); white-space:normal; max-width:16rem; }
 
-  /* The early read: changes still in their window. Italic, never coloured as a verdict. */
-  table.sb td.lift .early { display:flex; align-items:center; justify-content:flex-end; gap:.3rem;
-                            padding:0 .55rem .15rem; font-size:11.5px; white-space:nowrap; }
-  table.sb td.lift .early i { font-weight:600; color:var(--ink-2); }
-  .legend .early-key { display:block; margin-top:.2rem; }
-  .legend .early-key i { display:inline; width:auto; height:auto; margin:0; box-shadow:none; }
+  /* The lift: coloured only once there is a verdict. */
+  table.sb td.lift { min-width:6rem; }
+  table.sb td.lift .n { font-weight:650; font-size:13.5px; }
+  table.sb td.lift .n.ok { color:var(--color-ok); } table.sb td.lift .n.err { color:var(--color-err); }
+  table.sb td.lift .u { font-size:10.5px; font-weight:500; color:var(--ink-4); margin-left:.15rem; }
+  table.sb td.lift .early { display:block; font-size:11.5px; color:var(--ink-3); margin-top:.1rem; }
+  table.sb td.lift .early i { color:var(--ink-2); font-weight:600; }
+  table.sb [data-open] { cursor:pointer; border-radius:5px; padding:.2rem .35rem; margin:-.2rem -.35rem; display:inline-block; }
+  table.sb [data-open]:hover, table.sb [data-open]:focus-visible { background:var(--surface-tint); outline:none; }
+  table.sb [data-hv] { cursor:default; }
+  table.sb [data-open][data-hv] { cursor:pointer; }
 
-  table.sb td.trend { padding:.3rem .6rem; }
+  table.sb td.trend { padding:.3rem .8rem; }
   .spark-svg { display:block; margin-left:auto; overflow:visible; }
   .spark-svg .zl { stroke:var(--border); stroke-dasharray:2 2; }
   .spark-svg .ln { fill:none; stroke:var(--ink-3); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
@@ -71,10 +85,22 @@
   .spark-svg.v-helped .ln { stroke:var(--color-ok); } .spark-svg.v-helped .pt { fill:var(--color-ok); }
   .spark-svg.v-worse .ln { stroke:var(--color-err); } .spark-svg.v-worse .pt { fill:var(--color-err); }
 
-  table.sb td.status { text-align:left; min-width:11rem; }
-  table.sb td.status .off { color:var(--ink-4); font-style:italic; white-space:normal; font-size:12px; }
-  .tag.stop { color:var(--color-err); box-shadow:inset 0 0 0 1px var(--color-err-border);
-              background:var(--color-err-bg); font-weight:600; }
+  /* What happened lately: folded to one line until opened. */
+  .week { border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
+          margin:1rem 0 0; padding:.65rem .9rem; }
+  .week > summary { cursor:pointer; display:flex; gap:.8rem; align-items:baseline; flex-wrap:wrap; font-size:13px; }
+  .week > summary h2 { font-size:13.5px; font-weight:650; margin:0; display:inline; }
+  .week .tot { color:var(--ink-3); } .week .tot b { color:var(--ink-1); font-weight:650; }
+  .week-day { border-top:1px solid var(--border-soft); margin-top:.5rem; padding-top:.4rem; }
+  .week-day > summary { cursor:pointer; display:flex; gap:.9rem; align-items:baseline; font-size:13px; flex-wrap:wrap; }
+  .week-day .d { font-weight:600; min-width:7rem; }
+  .week-day .kc { color:var(--ink-3); } .week-day .kc b { color:var(--ink-1); font-weight:650; }
+  .week-day ul { list-style:none; margin:.4rem 0 .2rem; padding:0; font-size:12.5px; }
+  .week-day li { display:flex; gap:.7rem; padding:.18rem 0; align-items:baseline; }
+  .week-day li .t { color:var(--ink-4); width:3rem; flex:none; font-variant-numeric:tabular-nums; }
+  .week-day li .k { width:5.2rem; flex:none; font-weight:600; }
+  .week-day li .k-written { color:var(--color-ok); } .week-day li .k-judged { color:var(--ink-2); }
+  .week-day li .k-reverted, .week-day li .k-stopped, .week-day li .k-cancelled { color:var(--color-err); }
 
   .hovercard { position:fixed; z-index:50; pointer-events:none; min-width:14rem;
     padding:.75rem .85rem; border-radius:var(--radius-md); background:var(--panel-bg);
@@ -91,8 +117,6 @@
                         color:var(--ink-3); }
 
   /* The changes modal (#173): a cell opens the rows behind it. */
-  table.sb [data-open] { cursor:pointer; }
-  table.sb td.lift > span[data-open]:hover { box-shadow:inset 0 0 0 1px var(--ink-4); }
   .modal.chg { max-width:960px; width:calc(100vw - 2rem); max-height:88vh;
                display:flex; flex-direction:column; }
   .chg-head { margin:0 0 .8rem; }
@@ -127,27 +151,6 @@
   .chg-row .res .sm { display:block; color:var(--ink-4); font-size:11.5px; margin-top:.15rem; }
   .chg-more { text-align:center; margin:.8rem 0 0; }
 
-  /* This week: what happened lately, by day, with a count per kind. */
-  .week { border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
-          margin:0 0 1rem; padding:.7rem .9rem; }
-  .week-head { display:flex; align-items:baseline; gap:.8rem; flex-wrap:wrap; }
-  .week-head h2 { font-size:13.5px; font-weight:650; margin:0; }
-  .week-day { border-top:1px solid var(--border-soft); margin-top:.5rem; padding-top:.4rem; }
-  .week-day:first-of-type { border-top:0; margin-top:.3rem; }
-  .week-day > summary { cursor:pointer; display:flex; gap:.9rem; align-items:baseline; font-size:13px;
-                        flex-wrap:wrap; }
-  .week-day .d { font-weight:600; min-width:7rem; }
-  .week-day .kc { color:var(--ink-3); font-variant-numeric:tabular-nums; }
-  .week-day .kc b { color:var(--ink-1); font-weight:650; }
-  .week-day ul { list-style:none; margin:.4rem 0 .2rem; padding:0; font-size:12.5px; }
-  .week-day li { display:flex; gap:.7rem; padding:.18rem 0; align-items:baseline; }
-  .week-day li .t { color:var(--ink-4); width:3rem; flex:none; font-variant-numeric:tabular-nums; }
-  .week-day li .k { width:5.2rem; flex:none; font-weight:600; }
-  .week-day li .k-written { color:var(--color-ok); } .week-day li .k-judged { color:var(--ink-2); }
-  .week-day li .k-reverted, .week-day li .k-stopped, .week-day li .k-cancelled { color:var(--color-err); }
-  table.sb td.name .cap { font-weight:400; font-size:11px; color:var(--ink-4); margin-left:.4rem;
-                          font-variant-numeric:tabular-nums; }
-  table.sb td.name .cap.full { color:var(--color-ok); }
 </style>
 </head>
 <body>
@@ -156,33 +159,35 @@
     <header class="page-head">
       <h1 class="page-title">Results</h1>
     </header>
-    <p class="page-meta" id="meta"></p>
+    <p class="page-meta" id="meta">Is Midas helping? One card per kind of change; pick one to see it per channel.</p>
+
+    <div class="glance" id="glance" role="group" aria-label="What Midas changes"></div>
 
     <div class="res-bar">
-      <div id="ch-filter"></div>
-      <div class="chip-bar" id="lever-bar" role="group" aria-label="Lever">
-        <button type="button" class="chip" data-lever="backlinks" aria-pressed="true">Backlinks</button>
-        <button type="button" class="chip" data-lever="title" aria-pressed="true">Titles</button>
-        <button type="button" class="chip" data-lever="playlist" aria-pressed="true">Playlist test</button>
-        <button type="button" class="chip" data-lever="short_link" aria-pressed="true">Short links</button>
-      </div>
+      <h2 id="lever-title"></h2><span class="what" id="lever-what"></span>
       <span class="grow"></span>
-      <a class="btn btn-link" id="csv-results" href="/seo/results.csv" download>Download CSV</a>
-      <a class="btn btn-link" id="csv-changes" href="/seo/results/changes.csv" download>Download changes CSV</a>
+      <div id="ch-filter"></div>
+      <a class="btn btn-link" id="csv-results" href="/seo/results.csv" download title="A line per channel and lever">Download CSV</a>
+      <a class="btn btn-link" id="csv-changes" href="/seo/results/changes.csv" download title="Every change, one per line">Changes CSV</a>
     </div>
-    <p class="legend" id="legend">
-      <b>Lift</b> = the mean change in a changed video's views per week, minus the same for the
-      held-back videos Midas left alone (backlinks: views arriving from the linking video; titles:
-      the change in the video's browse, search and suggested views, shown as a percentage).
-      <i class="k-helped"></i>helped<i class="k-no_change"></i>no change<i class="k-worse"></i>worse<i class="k-none"></i>no verdict yet
-      <span class="early-key"><span class="pill pill--sm pill--info">early</span> <i>in italics</i>:
-        early, not a verdict. Changes still inside their window, read from the post days already
-        in, against the held-back videos over the same days. It never stops or reverts anything.</span>
-    </p>
-
-    <section class="week" id="week" aria-label="This week" hidden></section>
+    <details class="howto">
+      <summary>How to read this</summary>
+      <ul>
+        <li><b>Result</b> is the answer: <b>Helping</b>, <b>No clear effect</b> or <b>Hurting</b> comes from
+          the weekly judgement (Mondays). <b>Stopped</b> means it didn't help there, so Midas switched it off on
+          that channel.</li>
+        <li><b>Lift</b> is how much more a changed video gained than the videos Midas deliberately left
+          alone (1 in 5 is held back for comparison). Backlinks: extra views per week arriving from the
+          linking video. Titles: the extra change in browse, search and suggested views, as a %.</li>
+        <li><span class="pill pill--sm pill--info">early</span> <i>in italics</i> is a first look at changes
+          still being measured. It is not a verdict and never stops or undoes anything.</li>
+        <li>Click a lift to see the videos behind it; hover it for the detail.</li>
+      </ul>
+    </details>
 
     <div id="board"><div class="skel" data-skeleton data-rows="5"></div></div>
+
+    <details class="week" id="week" hidden></details>
   </main>
   </div>
 
@@ -212,34 +217,39 @@ fetch('/auth/channels').then(r => r.ok ? r.json() : []).then(chs => {
                       { open: false });
 }).catch(() => {});
 
-// ── The levers the board shows, in column order ───────────────────────
-// `fmt` writes a lift: backlinks in views per week, titles as the % a log-ratio is.
+// ── Formatting ────────────────────────────────────────────────────────
+const num = (n) => Number(n || 0).toLocaleString();
+const signed = (x, d = 1) => x == null ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
 const pct = (x, d = 0) => x == null ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(100 * (Math.exp(x) - 1)).toFixed(d) + '%';
+const wk = (iso) => iso ? new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined,
+  { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+const plural = (n, w) => `${num(n)} ${w}${n === 1 ? '' : 's'}`;
+
+// ── The levers, in card order ─────────────────────────────────────────
+// `fmt` writes a lift: backlinks and playlists per week, titles as the % a log-ratio is.
 const LEVERS = [
-  { id: 'backlinks', label: 'Backlinks', what: 'related-video links in the description',
+  { id: 'backlinks', label: 'Backlinks', what: 'Midas adds up to 3 links to related videos in the description',
     unit: 'views / week', per: '/wk', fmt: (x, d) => signed(x, d) },
-  { id: 'title', label: 'Titles', what: 'rewritten titles', unit: 'change in views vs held back',
-    per: '', fmt: (x, d) => pct(x, d === 2 ? 1 : 0), paths: true },
-  { id: 'playlist', label: 'Playlist test', what: 'curated playlist additions, one test per channel',
+  { id: 'title', label: 'Titles', what: "Midas rewrites the title in the SEO team's structure",
+    unit: 'change in views vs held back', per: '', fmt: (x, d) => pct(x, d === 2 ? 1 : 0), paths: true },
+  { id: 'playlist', label: 'Playlist test', what: 'Midas added related videos to half the playlists, one test per channel',
     unit: 'playlist starts / week', per: '/wk', fmt: (x, d) => signed(x, d), kind: 'playlist' },
-  { id: 'short_link', label: 'Short links', what: "the team's work: Midas only recommends",
+  { id: 'short_link', label: 'Short links', what: 'Midas recommends a video to link from each Short; the team sets it in Studio',
     kind: 'short_link' },
 ];
-const active = new Set(LEVERS.map(l => l.id));   // the lever chips: which groups show
+const LEVER_KEY = 'midas:results:lever';
+let current = new URLSearchParams(location.search).get('lever')
+  || (() => { try { return localStorage.getItem(LEVER_KEY) || 'backlinks'; } catch { return 'backlinks'; } })();
+if (!LEVERS.some(l => l.id === current)) current = 'backlinks';
 
 let channelFilter = '';
 let allChannels = [];        // from the unfiltered read: the filter's options
 let shown = null;
 const cards = [];            // hover-card bodies, by index
 
-const num = (n) => Number(n || 0).toLocaleString();
-const signed = (x, d = 1) => x == null ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
-const wk = (iso) => iso ? new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined,
-  { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
-
 // A sparkline of the weekly lift, oldest to newest, with a zero line.
 function spark(weeks, verdict) {
-  const vals = weeks.map(w => w.lift).filter(v => v != null);
+  const vals = (weeks || []).map(w => w.lift).filter(v => v != null);
   if (!vals.length) return '<span class="zero">·</span>';
   const W = 72, H = 22, pad = 3;
   const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
@@ -257,14 +267,13 @@ function spark(weeks, verdict) {
 
 // The early read (#172): changes still inside their window, never a verdict.
 const postDays = (e) => e.post_days_min === e.post_days_max
-  ? `${e.post_days_max} post day${e.post_days_max === 1 ? '' : 's'}`
-  : `${e.post_days_min}–${e.post_days_max} post days`;
+  ? `${e.post_days_max} day${e.post_days_max === 1 ? '' : 's'} in`
+  : `${e.post_days_min}–${e.post_days_max} days in`;
 const ctrPct = (x) => x == null ? '—' : (100 * x).toFixed(1) + '%';
 function earlyLine(lever, e) {
-  if (!e) return '';
-  const v = e.lift == null ? '—' : `${lever.fmt(e.lift, 1)}${esc(lever.per)}`;
-  return `<div class="early" title="Early, not a verdict: ${esc(postDays(e))} so far">
-    <span class="pill pill--sm pill--info">early</span><i>${v}</i><span class="of">${esc(postDays(e))}</span></div>`;
+  if (!e || e.lift == null) return '';
+  return `<span class="early" title="Early, not a verdict">
+    <span class="pill pill--sm pill--info">early</span> <i>${lever.fmt(e.lift, 1)}${esc(lever.per)}</i> · ${esc(postDays(e))}</span>`;
 }
 function earlyCard(lever, e) {
   if (!e) return '';
@@ -280,8 +289,23 @@ function earlyCard(lever, e) {
   </div>`;
 }
 
-// A title cell with no weekly verdict yet, and a row still inside its window.
-const noVerdict = (c) => c.first_verdict && !c.weeks.length;
+// ── The answer per channel, in plain words ────────────────────────────
+const VERDICT = { helped: ['Helping', 'pill--ok'], no_change: ['No clear effect', 'pill--neutral'],
+                  worse: ['Hurting', 'pill--err'] };
+function statusOf(c) {
+  if (c.stop_rule_triggered)
+    return { key: 'stopped', word: 'Stopped', pill: 'pill--err',
+             why: `didn't help, switched off wk of ${wk(c.stopped_week)}` };
+  if (c.state && !c.state.on) return { key: 'off', word: 'Off', pill: 'pill--neutral', why: c.state.reason || '' };
+  if (c.verdict) return { key: c.verdict, word: VERDICT[c.verdict][0], pill: VERDICT[c.verdict][1],
+                          why: plural(c.windows_judged, 'week') + ' judged' };
+  if (c.early && c.early.lift != null)
+    return { key: 'early', word: 'Too early', pill: 'pill--info', why: 'measuring; early read under the lift' };
+  if (c.first_verdict) return { key: 'waiting', word: 'Waiting', pill: 'pill--info', why: `first verdict ~${wk(c.first_verdict)}` };
+  if (!c.counts.written) return { key: 'idle', word: 'Nothing written yet', pill: 'pill--neutral', why: '' };
+  return { key: 'waiting', word: 'Waiting', pill: 'pill--info', why: 'no verdict yet' };
+}
+const stPill = (s) => `<div class="st"><span class="pill pill--sm ${s.pill}">${esc(s.word)}</span>${s.why ? `<span class="why">${esc(s.why)}</span>` : ''}</div>`;
 
 function hoverBody(name, lever, c, fleet) {
   const k = c.counts;
@@ -296,7 +320,7 @@ function hoverBody(name, lever, c, fleet) {
     ${c.paths ? `<div class="hc-foot">${Object.entries(c.paths).map(([p, v]) => row(
         `${esc(p[0].toUpperCase() + p.slice(1))} <span class="of">${num(v.treated)} written, ${num(v.n_treated)} judged vs ${num(v.n_holdout)} held back${v.stopped ? ', stopped' : ''}</span>`,
         v.lift == null ? '—' : lever.fmt(v.lift, 2))).join('')}</div>` : ''}
-    ${noVerdict(c) ? `<div class="hc-foot">First verdicts ~${esc(wk(c.first_verdict))}</div>` : ''}
+    ${c.first_verdict && !c.weeks.length ? `<div class="hc-foot">First verdicts ~${esc(wk(c.first_verdict))}</div>` : ''}
     ${earlyCard(lever, c.early)}
     <div class="hc-foot">
       ${row('Held back', num(k.holdout))}
@@ -309,100 +333,105 @@ function hoverBody(name, lever, c, fleet) {
     </div>`;
 }
 
-function cells(name, lever, c, fleet, chId) {
+function liftHtml(lever, x, verdict, early) {
+  if (x == null) return early && early.lift != null ? '' : '<span class="zero">—</span>';
+  const cls = verdict === 'helped' ? 'ok' : verdict === 'worse' ? 'err' : '';
+  return `<span class="n ${cls}">${lever.fmt(x, 1)}</span>${lever.per ? `<span class="u">${esc(lever.per)}</span>` : ''}`;
+}
+const hv = (body) => { cards.push(body); return cards.length - 1; };
+
+// ── Rows: [off?, cells html] per lever kind ───────────────────────────
+const HEADS = {
+  default: `<th class="l">Channel</th><th class="l">Result</th><th title="Hover for detail, click for the videos">Lift</th>
+    <th>Weekly trend</th><th title="Changes Midas wrote to YouTube">Written</th>
+    <th title="Changes with a measured result">Judged</th><th title="Changes still inside their measurement window">Measuring</th>`,
+  playlist: `<th class="l">Channel</th><th class="l">Answer</th><th title="Hover for detail, click for the playlists">Lift</th>
+    <th>Weekly trend</th><th title="Treated playlists that got their additions">Playlists changed</th>
+    <th title="Playlists with a measured result">Judged</th><th title="Playlists left alone for comparison">Held back</th>`,
+  short_link: `<th class="l">Channel</th><th class="l">Team's use</th><th title="Recommendations nobody acted on yet">Recommended, waiting</th>
+    <th title="Targets the team marked as set in Studio">Set by team</th>
+    <th title="Short → video pairs seen in the traffic">Seen in traffic</th>
+    <th title="Mean change in views per week across the team's links (latest week)">Team effect</th>`,
+};
+
+function leverRow(name, lever, c, fleet, chId) {
+  const s = fleet ? null : statusOf(c);
   const k = c.counts;
-  cards.push(hoverBody(name, lever, c, fleet));
-  const hv = cards.length - 1;
-  const verdict = c.verdict || 'none';
-  const lift = c.lift == null ? '<span class="zero">—</span>'
-    : `${lever.fmt(c.lift, 1)}<span class="u">${esc(lever.per)}</span>`;
-  const first = noVerdict(c) ? `<span class="zero">first verdicts ~${esc(wk(c.first_verdict))}</span>` : '';
-  let status;
+  let result;
   if (fleet) {
-    status = `${c.state.channels_on} of ${c.state.channels} on` +
-      (c.stopped_channels ? ` · <span class="tag stop">${c.stopped_channels} stopped</span>` : '') +
-      (first ? `<br>${first}` : '');
-  } else if (c.stop_rule_triggered) {
-    status = `<span class="tag stop" title="The stop rule fired: it didn't help here. Restarting it is an owner decision.">stopped wk ${esc(wk(c.stopped_week))}</span>`;
-  } else if (!c.state.on) {
-    status = `<span class="off">${esc(c.state.reason || 'off')}</span>`;
-  } else {
-    status = c.verdict ? `<span class="pill pill--sm ${{ helped: 'pill--ok', worse: 'pill--err' }[c.verdict] || 'pill--neutral'}">${esc(c.verdict.replace('_', ' '))}</span>`
-                       : (first || '<span class="zero">on, no verdict yet</span>');
-  }
-  return `<td class="first ${k.written ? '' : 'zero'}">${num(k.written)}</td>
-    <td>${num(k.judged)} <span class="of">/ ${num(k.awaiting)}</span></td>
-    <td class="lift"><span class="v-${esc(fleet ? 'none' : verdict)}" data-hv="${hv}" ${openAttr(chId, lever)} tabindex="0">${lift}</span>${earlyLine(lever, c.early)}</td>
-    <td class="trend">${spark(c.weeks, fleet ? null : c.verdict)}</td>
-    <td class="status">${status}</td>`;
+    const on = c.state.channels_on, all = c.state.channels;
+    result = `<div class="st"><span>${num(on)} of ${num(all)} channels on</span>${c.stopped_channels
+      ? `<span class="why">${plural(c.stopped_channels, 'channel')} stopped</span>` : ''}</div>`;
+  } else result = stPill(s);
+  const verdict = fleet ? null : c.verdict;
+  return [!fleet && s.key === 'off' && !k.written, `
+    <td class="l">${result}</td>
+    <td class="lift"><span data-hv="${hv(hoverBody(name, lever, c, fleet))}" ${openAttr(chId, lever)} tabindex="0">${liftHtml(lever, c.lift, verdict, c.early)}</span>${earlyLine(lever, c.early)}</td>
+    <td class="trend">${spark(c.weeks, verdict)}</td>
+    <td class="${k.written ? '' : 'zero'}">${num(k.written)}</td>
+    <td class="${k.judged ? '' : 'zero'}">${num(k.judged)}</td>
+    <td class="${k.awaiting ? '' : 'zero'}">${num(k.awaiting)}</td>`];
 }
 
-// ── Playlist test and Short links: their own columns ──────────────────
-const ANSWER = { yes: ['pill--ok', 'curated playlists earn starts'], no: ['pill--err', "didn't help: stopped"],
-                 pending: ['pill--neutral', 'the test is still counting'] };
-const answerPill = (a) => `<span class="pill pill--sm ${ANSWER[a][0]}" title="${esc(ANSWER[a][1])}">${esc(a)}</span>`;
-
-function playlistCells(name, lever, c, fleet, chId) {
+const ANSWER = { yes: ['Helping', 'pill--ok', 'playlists with additions earned more starts'],
+                 no: ["Didn't help", 'pill--err', 'stopped'],
+                 pending: ['Still counting', 'pill--info', 'the test runs 4 weeks'] };
+function playlistRow(name, lever, c, fleet, chId) {
   const a = c.arms;
   const arms = (k) => a[k] || 0;
-  const dosed = arms('dosed');
-  const judged = arms('judged') + arms('insufficient_data');
-  cards.push(`<div class="hc-head">${esc(name)} · ${esc(lever.label)}</div>
+  const total = Object.values(a).reduce((x, y) => x + y, 0);
+  const body = hv(`<div class="hc-head">${esc(name)} · ${esc(lever.label)}</div>
     ${fleet ? '' : `<div class="hc-total">${c.lift == null ? '—' : lever.fmt(c.lift, 2)}<small>lift, ${esc(lever.unit)}</small></div>
     <div class="hc-row">Cumulative lift (stop rule)<b>${c.cumulative_lift == null ? '—' : lever.fmt(c.cumulative_lift, 2)}</b></div>
     <div class="hc-row">Weeks judged<b>${c.windows_judged}</b></div>
     <div class="hc-row">Test ran<b>${c.test_start ? esc(wk(c.test_start)) + ' – ' + esc(wk(c.test_end)) : '—'}</b></div>`}
     <div class="hc-foot">${Object.entries(a).map(([k, n]) =>
-      `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(n)}</b></div>`).join('') || 'No arms drawn.'}</div>`);
-  const hv = cards.length - 1;
-  const total = Object.values(a).reduce((x, y) => x + y, 0);
-  let status;
+      `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(n)}</b></div>`).join('') || 'No test drawn.'}</div>`);
+  let result;
   if (fleet) {
     const ans = Object.values(c.answers);
-    status = ans.length ? `${ans.filter(x => x === 'yes').length} yes · ${ans.filter(x => x === 'no').length} no · ${ans.filter(x => x === 'pending').length} pending`
+    result = ans.length ? `<div class="st"><span>${ans.filter(x => x === 'yes').length} helping · ${ans.filter(x => x === 'no').length} didn't · ${ans.filter(x => x === 'pending').length} counting</span></div>`
                         : '<span class="zero">no test drawn</span>';
-  } else if (!total) status = '<span class="off">no test drawn</span>';
-  else status = answerPill(c.answer) + (c.stop_rule_triggered ? ` <span class="tag stop">stopped wk ${esc(wk(c.stopped_week))}</span>` : '');
-  const lift = fleet || c.lift == null ? '<span class="zero">—</span>' : `${lever.fmt(c.lift, 1)}<span class="u">${esc(lever.per)}</span>`;
-  return `<td class="first ${dosed ? '' : 'zero'}" title="Treated playlists that got their additions">${num(dosed)}</td>
-    <td>${num(judged)} <span class="of">/ ${num(dosed + arms('holdout'))}</span></td>
-    <td class="lift"><span class="v-${esc(fleet ? 'none' : (c.verdict || 'none'))}" data-hv="${hv}" ${openAttr(chId, lever)} tabindex="0">${lift}</span></td>
-    <td class="trend">${fleet ? '<span class="zero">·</span>' : spark(c.weeks, c.verdict)}</td>
-    <td class="status">${status}</td>`;
+  } else if (!total) result = stPill({ word: 'No test', pill: 'pill--neutral', why: 'no test drawn on this channel' });
+  else {
+    const [word, pill, why] = ANSWER[c.answer];
+    result = stPill({ word, pill, why: c.stop_rule_triggered ? `stopped wk of ${wk(c.stopped_week)}` : why });
+  }
+  const verdict = fleet ? null : c.verdict;
+  const dosed = arms('dosed'), judged = arms('judged') + arms('insufficient_data');
+  return [!fleet && !total, `
+    <td class="l">${result}</td>
+    <td class="lift"><span data-hv="${body}" ${openAttr(chId, lever)} tabindex="0">${fleet ? '<span class="zero">—</span>' : liftHtml(lever, c.lift, verdict)}</span></td>
+    <td class="trend">${fleet ? '<span class="zero">·</span>' : spark(c.weeks, verdict)}</td>
+    <td class="${dosed ? '' : 'zero'}">${num(dosed)}</td>
+    <td class="${judged ? '' : 'zero'}">${num(judged)}</td>
+    <td class="${arms('holdout') ? '' : 'zero'}">${num(arms('holdout'))}</td>`];
 }
 
-function shortLinkCells(name, lever, c, fleet, chId) {
+function shortLinkRow(name, lever, c, fleet, chId) {
   const r = c.recommendations;
-  const ticked = r.set + r.not_chosen + r.dismissed + c.team;
-  cards.push(`<div class="hc-head">${esc(name)} · ${esc(lever.label)} (the team's work)</div>
+  const used = r.set + r.not_chosen + r.dismissed + c.team;
+  const body = hv(`<div class="hc-head">${esc(name)} · ${esc(lever.label)} (the team's work)</div>
     ${['pending', 'set', 'not_chosen', 'dismissed'].map(k =>
       `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(r[k])}</b></div>`).join('')}
     <div class="hc-foot">
       <div class="hc-row">Seen in Short → video traffic<b>${num(c.seen)}</b></div>
       <div class="hc-row">Team links recorded<b>${num(c.team)}, ${num(c.team_judged)} judged</b></div>
-      ${c.verdict ? `<div class="hc-row">Latest weekly row (${esc(wk(c.verdict.week_start))})<b>${c.verdict.n_treated} links, mean ${c.verdict.treated_mean_delta == null ? '—' : signed(c.verdict.treated_mean_delta, 2)} views/wk</b></div>` : ''}
+      ${c.verdict ? `<div class="hc-row">Latest week (${esc(wk(c.verdict.week_start))})<b>${c.verdict.n_treated} links, mean ${c.verdict.treated_mean_delta == null ? '—' : signed(c.verdict.treated_mean_delta, 2)} views/wk</b></div>` : ''}
     </div>`);
-  const hv = cards.length - 1;
-  const none = !ticked;
-  return `<td class="first ${r.pending ? '' : 'zero'}" title="Recommended, not acted on yet">${num(r.pending)}</td>
-    <td><span data-hv="${hv}" ${openAttr(chId, lever)} tabindex="0">${num(r.set)} <span class="of">set</span></span></td>
-    <td>${num(c.seen)} <span class="of">seen</span></td>
-    <td>${c.verdict && c.verdict.treated_mean_delta != null ? `${signed(c.verdict.treated_mean_delta, 1)}<span class="u">/wk</span>` : '<span class="zero">—</span>'}</td>
-    <td class="status">${none ? `<span class="off">${r.pending ? "the team isn't using the card yet" : 'nothing recommended yet'}</span>`
-      : `${num(c.team)} team link${c.team === 1 ? '' : 's'}`}</td>`;
+  const nothing = !used && !r.pending;
+  const result = fleet ? `<div class="st"><span>${plural(c.team, 'team link')}</span></div>`
+    : used ? stPill({ word: 'In use', pill: 'pill--ok', why: plural(c.team, 'link') + ' recorded' })
+    : r.pending ? stPill({ word: 'Not used yet', pill: 'pill--warn', why: 'recommendations waiting on the Short links card' })
+    : stPill({ word: 'Nothing recommended', pill: 'pill--neutral', why: '' });
+  return [!fleet && nothing, `
+    <td class="l">${result}</td>
+    <td class="${r.pending ? '' : 'zero'}">${num(r.pending)}</td>
+    <td><span data-hv="${body}" ${openAttr(chId, lever)} tabindex="0">${num(r.set)}</span></td>
+    <td class="${c.seen ? '' : 'zero'}">${num(c.seen)}</td>
+    <td>${c.verdict && c.verdict.treated_mean_delta != null ? `${signed(c.verdict.treated_mean_delta, 1)}<span class="of">/wk</span>` : '<span class="zero">—</span>'}</td>`];
 }
-
-const CELLS = { playlist: playlistCells, short_link: shortLinkCells };
-const HEADS = {
-  playlist: `<th class="first" title="Treated playlists that got their additions">Dosed</th>
-    <th title="Arms judged / still open">Judged / open</th><th>Lift</th><th>Weekly lift</th>
-    <th class="status" style="text-align:left">Answer</th>`,
-  short_link: `<th class="first" title="Recommendations not acted on yet">Pending</th>
-    <th title="Targets the team ticked as set in Studio">Set</th>
-    <th title="Pairs seen in Short → video traffic">Seen</th>
-    <th title="Mean change in views per week across the team's links, the latest weekly row; never Midas's lift">Team effect</th>
-    <th class="status" style="text-align:left">Team's use</th>`,
-};
+const ROWS = { playlist: playlistRow, short_link: shortLinkRow };
 
 // ── The changes modal (#173) ──────────────────────────────────────────
 // A channel's cell opens the rows behind it from /seo/results/changes.
@@ -561,11 +590,56 @@ $('board').addEventListener('keydown', (e) => {
   if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
 });
 
+
 // Today's writes against the daily cap, the figure the channel page shows.
 function todayCap(t) {
   if (!t) return '';
   const full = t.cap != null && t.written >= t.cap;
-  return `<span class="cap${full ? ' full' : ''}" title="Changes Midas wrote today, against the channel's daily cap">${num(t.written)}/${t.cap == null ? '–' : num(t.cap)} today</span>`;
+  return `<span class="cap${full ? ' full' : ''}" title="Changes Midas wrote today, against the channel's daily cap">${num(t.written)} of ${t.cap == null ? '–' : num(t.cap)} changes today</span>`;
+}
+
+// ── At a glance: one card per lever, a one-line answer ────────────────
+function glance(lever, data) {
+  const f = data.fleet.levers[lever.id];
+  const cells = data.channels.map(ch => ch.levers[lever.id]).filter(Boolean);
+  let big, cls = '', lines = [];
+  if (lever.kind === 'playlist') {
+    const ans = Object.values(f.answers || {});
+    const yes = ans.filter(a => a === 'yes').length, no = ans.filter(a => a === 'no').length;
+    if (!ans.length) { big = 'No test drawn'; cls = 'muted'; }
+    else if (yes) { big = `Helping on ${yes} of ${ans.length}`; cls = 'ok'; }
+    else if (no) { big = "Didn't help"; cls = 'err'; }
+    else { big = 'Still counting'; cls = 'muted'; }
+    const a = f.arms || {};
+    lines.push(`<b>${num(a.dosed || 0)}</b> playlists changed · <b>${num(a.holdout || 0)}</b> held back`);
+  } else if (lever.kind === 'short_link') {
+    const r = f.recommendations;
+    if (f.team) { big = `${plural(f.team, 'link')} set`; cls = 'ok'; }
+    else if (r.pending) { big = 'Not used yet'; cls = 'muted'; }
+    else { big = 'Nothing recommended'; cls = 'muted'; }
+    lines.push(`<b>${num(r.pending)}</b> recommendations waiting · <b>${num(f.seen)}</b> seen in traffic`);
+  } else {
+    const st = cells.map(statusOf);
+    const n = (key) => st.filter(s => s.key === key).length;
+    const helped = n('helped'), worse = n('worse') + n('stopped'), judged = helped + worse + n('no_change');
+    if (!judged) {
+      big = f.early && f.early.lift != null ? 'Too early to tell' : 'No results yet'; cls = 'muted';
+      if (f.early && f.early.lift != null)
+        lines.push(`Early read <b><i>${lever.fmt(f.early.lift, 1)}${esc(lever.per)}</i></b>, not a verdict`);
+      const first = data.first_title_verdicts;
+      if (lever.id === 'title' && first) lines.push(`First verdicts ~<b>${esc(wk(first))}</b>`);
+    } else {
+      if (helped && helped >= worse) { big = `Helping on ${helped} of ${judged}`; cls = 'ok'; }
+      else if (worse) { big = `Not helping on ${worse} of ${judged}`; cls = 'err'; }
+      else { big = 'No clear effect'; cls = 'muted'; }
+      if (f.lift != null) lines.push(`Overall lift <b>${lever.fmt(f.lift, 1)}${esc(lever.per)}</b>`);
+    }
+    lines.push(`<b>${num(f.counts.written)}</b> written · <b>${num(f.counts.awaiting)}</b> measuring`);
+  }
+  return `<button type="button" class="gl" data-lever="${esc(lever.id)}" aria-pressed="${lever.id === current}">
+    <span class="gl-top">${esc(lever.label)}</span>
+    <span class="gl-big ${cls}">${esc(big)}</span>
+    ${lines.map(l => `<span class="gl-line">${l}</span>`).join('')}</button>`;
 }
 
 function paint(data) {
@@ -573,29 +647,46 @@ function paint(data) {
   cards.length = 0;
   $('hovercard').classList.remove('on');
   const next = new Date(data.next_judgement);
-  $('meta').textContent = `Next weekly judgement ${next.toLocaleString(undefined,
+  $('meta').textContent = `Is Midas helping? Next weekly judgement ${next.toLocaleString(undefined,
     { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      hour12: false, timeZone: 'UTC' })} UTC` +
-    ` · read ${new Date(data.generated_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+      hour12: false, timeZone: 'UTC' })} UTC.`;
   if (!data.channels.length) {
+    $('glance').innerHTML = '';
     $('board').innerHTML = '<div class="dt"><div class="dt-empty muted">No channels are mapped to you yet; ask the admin.</div></div>';
     return;
   }
-  const levers = LEVERS.filter(l => data.fleet.levers[l.id] && active.has(l.id));
-  const head1 = levers.map(l => `<th class="grp" colspan="5">${esc(l.label)}<span class="what">${esc(l.what)}</span></th>`).join('');
-  const head2 = levers.map(l => HEADS[l.id] || `<th class="first" title="Changes Midas wrote to YouTube">Written</th>
-    <th title="Changes judged / still in their measurement window">Judged / pending</th>
-    <th>Lift</th><th>Weekly lift</th><th class="status" style="text-align:left">Verdict</th>`).join('');
-  const fleetRow = `<tbody class="fleet"><tr><td class="name">All channels<span class="sub">pooled over every judged change</span></td>
-    ${levers.map(l => (CELLS[l.id] || cells)('All channels', l, data.fleet.levers[l.id], true, null)).join('')}</tr></tbody>`;
-  const rows = data.channels.map(ch => `<tr><td class="name">
-      <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a>${todayCap(ch.today)}</td>
-      ${levers.map(l => (CELLS[l.id] || cells)(ch.name || ch.id, l, ch.levers[l.id], false, ch.id)).join('')}</tr>`).join('');
+  const levers = LEVERS.filter(l => data.fleet.levers[l.id]);
+  if (!levers.some(l => l.id === current)) current = levers[0].id;
+  const lever = LEVERS.find(l => l.id === current);
+  $('glance').innerHTML = levers.map(l => glance(l, data)).join('');
+  $('lever-title').textContent = lever.label;
+  $('lever-what').textContent = lever.what;
+
+  const row = ROWS[lever.kind] || leverRow;
+  const fleet = row('All channels', lever, data.fleet.levers[lever.id], true, null)[1];
+  const on = [], off = [];
+  for (const ch of data.channels) {
+    const [isOff, html] = row(ch.name || ch.id, lever, ch.levers[lever.id], false, ch.id);
+    const tr = `<tr class="${isOff ? 'is-off' : ''}"><td class="l name">
+      <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a>${todayCap(ch.today)}</td>${html}</tr>`;
+    (isOff ? off : on).push(tr);
+  }
+  const cols = (HEADS[lever.kind] || HEADS.default).match(/<th/g).length;
   $('board').innerHTML = `<div class="grid-wrap"><table class="sb">
-    <thead><tr><th class="name" rowspan="2" style="vertical-align:bottom">Channel</th>${head1}</tr>
-      <tr>${head2}</tr></thead>
-    ${fleetRow}<tbody>${rows}</tbody></table></div>`;
+    <thead><tr>${HEADS[lever.kind] || HEADS.default}</tr></thead>
+    ${data.channels.length > 1 ? `<tbody class="fleet"><tr><td class="l name">All channels<span class="cap">every channel pooled</span></td>${fleet}</tr></tbody>` : ''}
+    <tbody>${on.join('')}</tbody>
+    ${off.length ? `<tbody class="off-head"><tr><td class="l" colspan="${cols}">Not running here (${off.length})</td></tr></tbody><tbody>${off.join('')}</tbody>` : ''}
+    </table></div>`;
 }
+
+$('glance').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lever]');
+  if (!b) return;
+  current = b.dataset.lever;
+  try { localStorage.setItem(LEVER_KEY, current); } catch {}
+  if (shown) paint(shown);
+});
 
 (function wireHoverCard() {
   const card = $('hovercard');
@@ -622,13 +713,9 @@ function paint(data) {
   window.addEventListener('scroll', hide, true);
 })();
 
-// The CSVs carry the page's own filters: the channel, and the levers still shown.
+// The CSVs carry the channel filter; they always hold every lever.
 function csvLinks() {
-  const q = new URLSearchParams();
-  if (channelFilter) q.set('channel_id', channelFilter);
-  const one = active.size === 1 ? [...active][0] : null;
-  if (one) q.set('lever', one);
-  const qs = q.toString() ? '?' + q : '';
+  const qs = channelFilter ? '?' + new URLSearchParams({ channel_id: channelFilter }) : '';
   $('csv-results').href = '/seo/results.csv' + qs;
   $('csv-changes').href = '/seo/results/changes.csv' + qs;
 }
@@ -644,25 +731,12 @@ function paintChannelFilter() {
   delete holder.dataset.cmpWired;
   Components.init(holder.parentNode);
 }
-$('lever-bar').addEventListener('click', (e) => {
-  const chip = e.target.closest('[data-lever]');
-  if (!chip) return;
-  const id = chip.dataset.lever;
-  if (active.has(id) && active.size > 1) active.delete(id); else active.add(id);   // never none
-  for (const c of $('lever-bar').querySelectorAll('[data-lever]'))
-    c.setAttribute('aria-pressed', String(active.has(c.dataset.lever)));
-  csvLinks();
-  if (shown) paint(shown);
-});
 $('ch-filter').addEventListener('change', (e) => {
   if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; csvLinks(); load(); }
 });
 
-
-// ── This week (#174) ──────────────────────────────────────────────────
+// ── What happened lately (#174), folded to one line ───────────────────
 const KINDS = ['written', 'judged', 'reverted', 'stopped', 'cancelled'];
-const KIND_LABEL = { written: 'written', judged: 'judged', reverted: 'reverted',
-                     stopped: 'stopped', cancelled: 'cancelled' };
 let weekData = null;
 
 function eventText(e, names) {
@@ -681,6 +755,7 @@ function eventText(e, names) {
 function paintWeek() {
   const box = $('week');
   if (!weekData) { box.hidden = true; return; }
+  const wasOpen = box.open;
   const names = Object.fromEntries(allChannels.map(c => [c.id, c.name || c.id]));
   const events = weekData.events.filter(e => !channelFilter || e.channel_id === channelFilter);
   const days = new Map();
@@ -690,20 +765,21 @@ function paintWeek() {
     days.get(day).push(e);
   }
   const todayIso = new Date().toISOString().slice(0, 10);
-  const totals = KINDS.map(k => `<b>${events.filter(e => e.kind === k).length}</b> ${KIND_LABEL[k]}`).join(' · ');
+  const totals = KINDS.map(k => [k, events.filter(e => e.kind === k).length]).filter(([, n]) => n)
+    .map(([k, n]) => `<b>${n}</b> ${k}`).join(' · ') || 'nothing happened';
   box.hidden = false;
-  box.innerHTML = `<div class="week-head"><h2>This week</h2>
-      <span class="muted">last ${weekData.days} days (UTC) · ${totals}</span></div>` +
+  box.innerHTML = `<summary><h2>Last ${weekData.days} days</h2><span class="tot">${totals}</span></summary>` +
     (days.size ? [...days].map(([day, evs], i) => {
       const label = day === todayIso ? 'Today' : new Date(day + 'T00:00:00Z').toLocaleDateString(undefined,
         { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
       const counts = KINDS.filter(k => evs.some(e => e.kind === k))
-        .map(k => `<span class="kc"><b>${evs.filter(e => e.kind === k).length}</b> ${KIND_LABEL[k]}</span>`).join('');
+        .map(k => `<span class="kc"><b>${evs.filter(e => e.kind === k).length}</b> ${k}</span>`).join('');
       return `<details class="week-day"${i === 0 ? ' open' : ''}><summary><span class="d">${esc(label)}</span>${counts}</summary>
         <ul>${evs.map(e => `<li><span class="t">${esc(e.at.slice(11, 16))}</span>
-          <span class="k k-${esc(e.kind)}">${esc(KIND_LABEL[e.kind])}</span><span>${eventText(e, names)}</span></li>`).join('')}</ul>
+          <span class="k k-${esc(e.kind)}">${esc(e.kind)}</span><span>${eventText(e, names)}</span></li>`).join('')}</ul>
         </details>`;
-    }).join('') : '<p class="muted" style="margin:.4rem 0 0">Nothing happened in this window.</p>');
+    }).join('') : '');
+  box.open = wasOpen;
 }
 
 function loadWeek() {
