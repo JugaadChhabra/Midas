@@ -39,6 +39,14 @@ earliest day a title row still in its window can be judged: d0
 (`title_measurement.as_of`) + `TITLE_WINDOW_DAYS` + `TRAFFIC_LAG_DAYS`; the
 response's `first_title_verdicts` is the earliest over the visible channels.
 
+The playlist cell (#171) is `playlist_test.playlist_test_summary`'s figures
+(the channel's `/playlist-test` reads the same function): `answer`, dates, `arms`
+by status, the weekly rows and the latest's lift and stop. The Short-link cell is
+the team's work, not Midas's (`by: "team"`, no lift): recommendations by status,
+those `seen` in type-32 traffic, the team's `short_link` interventions and the
+latest `human` verdict row. Their fleet cells sum counts only; playlist answers
+are listed per channel (`answers`), never pooled.
+
 The fleet row sums the counts and pools: its means and `lift` are over every
 judged row of the visible channels (the arithmetic `lever_verdicts` uses per
 channel), never an average of channel lifts; its `weeks` are pooled the same
@@ -53,7 +61,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from app import access, lever_verdicts, title_measurement
+from app import access, lever_verdicts, playlist_test, title_measurement
 from app.channel_seo import lever_states
 from app.config import settings
 from app.db import supabase
@@ -66,6 +74,7 @@ from app.status_vocab import (
     InterventionOrigin,
     InterventionStatus,
     LeverVerdictScope,
+    ShortLinkStatus,
 )
 
 router = APIRouter(tags=["seo-results"])
@@ -73,7 +82,8 @@ router = APIRouter(tags=["seo-results"])
 STATIC_DIR = Path(__file__).parent / "static"
 
 #: The levers the scoreboard has a column for, in column order.
-LEVERS = (InterventionLever.BACKLINKS, InterventionLever.TITLE)
+LEVERS = (InterventionLever.BACKLINKS, InterventionLever.TITLE, InterventionLever.PLAYLIST,
+          InterventionLever.SHORT_LINK)
 
 #: The verdict scopes whose weekly rows a lever's cell reads: backlinks' one,
 #: and a title path's each (S3.5, `lever_verdicts.TITLE_SCOPES`).
@@ -92,6 +102,7 @@ COLUMNS = ("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,cr
 VERDICT_COLUMNS = ("channel_id,lever,arm_scope,week_start,n_treated,n_holdout,"
                    "treated_mean_delta,holdout_mean_delta,lift,cumulative_lift,"
                    "windows_judged,verdict,stop_rule_triggered")
+REC_COLUMNS = "id,channel_id,status,seen_at"
 #: A weekly row as the cell carries it.
 WEEK_FIELDS = ("week_start", "n_treated", "n_holdout", "treated_mean_delta",
                "holdout_mean_delta", "lift", "cumulative_lift", "windows_judged",
@@ -364,6 +375,88 @@ def _title_fleet(rows: list[dict], cells: list[dict]) -> dict:
     }
 
 
+# ── The playlist test and Short links (#171) ────────────────────────────────
+
+SHORT_LINK_STATUSES = (ShortLinkStatus.PENDING, ShortLinkStatus.SET,
+                       ShortLinkStatus.NOT_CHOSEN, ShortLinkStatus.DISMISSED)
+
+
+def _arm_counts(arms: list[dict]) -> dict:
+    counts: dict = {}
+    for a in arms:
+        counts[a["status"]] = counts.get(a["status"], 0) + 1
+    return counts
+
+
+def _sum_dicts(dicts: list[dict]) -> dict:
+    total: dict = {}
+    for d in dicts:
+        for k, n in d.items():
+            total[k] = total.get(k, 0) + n
+    return total
+
+
+def _playlist_cell(summary: dict) -> dict:
+    """A channel's playlist test, from `playlist_test.playlist_test_summary`
+    (the channel's own endpoint reads the same function): its answer, dates,
+    arms by status, and the weekly treated-vs-holdout rows with the latest's
+    figures."""
+    weeks = [v for v in summary["verdicts"]
+             if v.get("arm_scope") == LeverVerdictScope.TREATED_VS_HOLDOUT]
+    latest = weeks[-1] if weeks else {}
+    fired = [w for w in weeks if w.get("stop_rule_triggered")]
+    return {
+        "answer": summary["answer"],
+        "test_start": summary["test_start"], "test_end": summary["test_end"],
+        "arms": _arm_counts(summary["arms"]),
+        "lift": latest.get("lift"),
+        "cumulative_lift": latest.get("cumulative_lift"),
+        "windows_judged": latest.get("windows_judged") or 0,
+        "verdict": latest.get("verdict"),
+        "stop_rule_triggered": bool(fired),
+        "stopped_week": fired[0]["week_start"] if fired else None,
+        "weeks": [{k: w.get(k) for k in WEEK_FIELDS} for w in weeks],
+    }
+
+
+def _playlist_fleet(cells: list[dict]) -> dict:
+    """Arms summed. Answers are never pooled: each channel's is listed (those
+    with a test drawn), and the cell has no `answer` or lift of its own."""
+    return {
+        "arms": _sum_dicts([c["arms"] for c in cells]),
+        "answers": {c["channel_id"]: c["answer"] for c in cells if c["arms"]},
+        "stopped_channels": sum(1 for c in cells if c["stop_rule_triggered"]),
+    }
+
+
+def _short_link_cell(recs: list[dict], team: list[dict], human: list[dict]) -> dict:
+    """The team's Short-link work (Midas only recommends): recommendations by
+    status, those seen in type-32 traffic, the team's `short_link`
+    interventions and the latest `human` verdict row. Never a Midas lift."""
+    latest = max(human, key=lambda v: v["week_start"], default=None)
+    return {
+        "by": "team",
+        "recommendations": {s: sum(1 for r in recs if r.get("status") == s)
+                            for s in SHORT_LINK_STATUSES},
+        "seen": sum(1 for r in recs if r.get("seen_at")),
+        "team": len(team),
+        "team_judged": sum(1 for r in team if r.get("status") == InterventionStatus.JUDGED),
+        "verdict": None if latest is None else {
+            k: latest.get(k) for k in ("week_start", "n_treated", "treated_mean_delta",
+                                       "windows_judged")},
+    }
+
+
+def _short_link_fleet(cells: list[dict]) -> dict:
+    return {
+        "by": "team",
+        "recommendations": _sum_dicts([c["recommendations"] for c in cells]),
+        "seen": sum(c["seen"] for c in cells),
+        "team": sum(c["team"] for c in cells),
+        "team_judged": sum(c["team_judged"] for c in cells),
+    }
+
+
 def _shorts(rows: list[dict]) -> set:
     """Ids of the judged rows on a Short, which no mean reads."""
     judged = [r for r in rows if r.get("status") == InterventionStatus.JUDGED]
@@ -371,8 +464,10 @@ def _shorts(rows: list[dict]) -> set:
     return {r["id"] for r in judged if r["id"] not in kept}
 
 
-def _read(table: str, columns: str, lever: str, user: dict, channel_id: str | None):
-    query = supabase().table(table).select(columns).eq("lever", lever)
+def _read(table: str, columns: str, lever: str | None, user: dict, channel_id: str | None):
+    query = supabase().table(table).select(columns)
+    if lever is not None:
+        query = query.eq("lever", lever)
     if channel_id:
         return all_rows(query.eq("channel_id", channel_id))
     query = access.scope_to_visible(query, user)
@@ -407,6 +502,33 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
     fleet: dict = {"levers": {}}
     for name in LEVERS:
         if lever is not None and name != lever:
+            continue
+        if name == InterventionLever.PLAYLIST:
+            cells = []
+            for entry in out_channels:
+                cell = _playlist_cell(playlist_test.playlist_test_summary(entry["id"]))
+                entry["levers"][name] = cell
+                cells.append({**cell, "channel_id": entry["id"]})
+            fleet["levers"][name] = _playlist_fleet(cells)
+            continue
+        if name == InterventionLever.SHORT_LINK:
+            recs = [r for r in _read("short_link_recommendations", REC_COLUMNS, None, user,
+                                     channel_id) if r.get("channel_id") in ids] if ids else []
+            team = [r for r in _read("interventions", COLUMNS, name, user, channel_id)
+                    if r.get("channel_id") in ids and r.get("origin") == InterventionOrigin.HUMAN
+                    ] if ids else []
+            human = [v for v in _read("lever_verdicts", VERDICT_COLUMNS, name, user, channel_id)
+                     if v.get("channel_id") in ids
+                     and v.get("arm_scope") == LeverVerdictScope.HUMAN] if ids else []
+            cells = []
+            for entry in out_channels:
+                cid = entry["id"]
+                cell = _short_link_cell([r for r in recs if r["channel_id"] == cid],
+                                        [r for r in team if r["channel_id"] == cid],
+                                        [v for v in human if v["channel_id"] == cid])
+                entry["levers"][name] = cell
+                cells.append(cell)
+            fleet["levers"][name] = _short_link_fleet(cells)
             continue
         rows = [r for r in _read("interventions", COLUMNS, name, user, channel_id)
                 if r.get("channel_id") in ids] if ids else []

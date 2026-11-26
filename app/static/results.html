@@ -97,6 +97,8 @@
       <div class="chip-bar" id="lever-bar" role="group" aria-label="Lever">
         <button type="button" class="chip" data-lever="backlinks" aria-pressed="true">Backlinks</button>
         <button type="button" class="chip" data-lever="title" aria-pressed="true">Titles</button>
+        <button type="button" class="chip" data-lever="playlist" aria-pressed="true">Playlist test</button>
+        <button type="button" class="chip" data-lever="short_link" aria-pressed="true">Short links</button>
       </div>
       <span class="grow"></span>
     </div>
@@ -145,6 +147,10 @@ const LEVERS = [
     unit: 'views / week', per: '/wk', fmt: (x, d) => signed(x, d) },
   { id: 'title', label: 'Titles', what: 'rewritten titles', unit: 'change in views vs held back',
     per: '', fmt: (x, d) => pct(x, d === 2 ? 1 : 0), paths: true },
+  { id: 'playlist', label: 'Playlist test', what: 'curated playlist additions, one test per channel',
+    unit: 'playlist starts / week', per: '/wk', fmt: (x, d) => signed(x, d), kind: 'playlist' },
+  { id: 'short_link', label: 'Short links', what: "the team's work: Midas only recommends",
+    kind: 'short_link' },
 ];
 const active = new Set(LEVERS.map(l => l.id));   // the lever chips: which groups show
 
@@ -232,6 +238,73 @@ function cells(name, lever, c, fleet) {
     <td class="status">${status}</td>`;
 }
 
+// ── Playlist test and Short links: their own columns ──────────────────
+const ANSWER = { yes: ['pill--ok', 'curated playlists earn starts'], no: ['pill--err', "didn't help: stopped"],
+                 pending: ['pill--neutral', 'the test is still counting'] };
+const answerPill = (a) => `<span class="pill pill--sm ${ANSWER[a][0]}" title="${esc(ANSWER[a][1])}">${esc(a)}</span>`;
+
+function playlistCells(name, lever, c, fleet) {
+  const a = c.arms;
+  const arms = (k) => a[k] || 0;
+  const dosed = arms('dosed');
+  const judged = arms('judged') + arms('insufficient_data');
+  cards.push(`<div class="hc-head">${esc(name)} · ${esc(lever.label)}</div>
+    ${fleet ? '' : `<div class="hc-total">${c.lift == null ? '—' : lever.fmt(c.lift, 2)}<small>lift, ${esc(lever.unit)}</small></div>
+    <div class="hc-row">Cumulative lift (stop rule)<b>${c.cumulative_lift == null ? '—' : lever.fmt(c.cumulative_lift, 2)}</b></div>
+    <div class="hc-row">Weeks judged<b>${c.windows_judged}</b></div>
+    <div class="hc-row">Test ran<b>${c.test_start ? esc(wk(c.test_start)) + ' – ' + esc(wk(c.test_end)) : '—'}</b></div>`}
+    <div class="hc-foot">${Object.entries(a).map(([k, n]) =>
+      `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(n)}</b></div>`).join('') || 'No arms drawn.'}</div>`);
+  const hv = cards.length - 1;
+  const total = Object.values(a).reduce((x, y) => x + y, 0);
+  let status;
+  if (fleet) {
+    const ans = Object.values(c.answers);
+    status = ans.length ? `${ans.filter(x => x === 'yes').length} yes · ${ans.filter(x => x === 'no').length} no · ${ans.filter(x => x === 'pending').length} pending`
+                        : '<span class="zero">no test drawn</span>';
+  } else if (!total) status = '<span class="off">no test drawn</span>';
+  else status = answerPill(c.answer) + (c.stop_rule_triggered ? ` <span class="tag stop">stopped wk ${esc(wk(c.stopped_week))}</span>` : '');
+  const lift = fleet || c.lift == null ? '<span class="zero">—</span>' : `${lever.fmt(c.lift, 1)}<span class="u">${esc(lever.per)}</span>`;
+  return `<td class="first ${dosed ? '' : 'zero'}" title="Treated playlists that got their additions">${num(dosed)}</td>
+    <td>${num(judged)} <span class="of">/ ${num(dosed + arms('holdout'))}</span></td>
+    <td class="lift"><span class="v-${esc(fleet ? 'none' : (c.verdict || 'none'))}" data-hv="${hv}" tabindex="0">${lift}</span></td>
+    <td class="trend">${fleet ? '<span class="zero">·</span>' : spark(c.weeks, c.verdict)}</td>
+    <td class="status">${status}</td>`;
+}
+
+function shortLinkCells(name, lever, c, fleet) {
+  const r = c.recommendations;
+  const ticked = r.set + r.not_chosen + r.dismissed + c.team;
+  cards.push(`<div class="hc-head">${esc(name)} · ${esc(lever.label)} (the team's work)</div>
+    ${['pending', 'set', 'not_chosen', 'dismissed'].map(k =>
+      `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(r[k])}</b></div>`).join('')}
+    <div class="hc-foot">
+      <div class="hc-row">Seen in Short → video traffic<b>${num(c.seen)}</b></div>
+      <div class="hc-row">Team links recorded<b>${num(c.team)}, ${num(c.team_judged)} judged</b></div>
+      ${c.verdict ? `<div class="hc-row">Latest weekly row (${esc(wk(c.verdict.week_start))})<b>${c.verdict.n_treated} links, mean ${c.verdict.treated_mean_delta == null ? '—' : signed(c.verdict.treated_mean_delta, 2)} views/wk</b></div>` : ''}
+    </div>`);
+  const hv = cards.length - 1;
+  const none = !ticked;
+  return `<td class="first ${r.pending ? '' : 'zero'}" title="Recommended, not acted on yet">${num(r.pending)}</td>
+    <td><span data-hv="${hv}" tabindex="0">${num(r.set)} <span class="of">set</span></span></td>
+    <td>${num(c.seen)} <span class="of">seen</span></td>
+    <td>${c.verdict && c.verdict.treated_mean_delta != null ? `${signed(c.verdict.treated_mean_delta, 1)}<span class="u">/wk</span>` : '<span class="zero">—</span>'}</td>
+    <td class="status">${none ? `<span class="off">${r.pending ? "the team isn't using the card yet" : 'nothing recommended yet'}</span>`
+      : `${num(c.team)} team link${c.team === 1 ? '' : 's'}`}</td>`;
+}
+
+const CELLS = { playlist: playlistCells, short_link: shortLinkCells };
+const HEADS = {
+  playlist: `<th class="first" title="Treated playlists that got their additions">Dosed</th>
+    <th title="Arms judged / still open">Judged / open</th><th>Lift</th><th>Weekly lift</th>
+    <th class="status" style="text-align:left">Answer</th>`,
+  short_link: `<th class="first" title="Recommendations not acted on yet">Pending</th>
+    <th title="Targets the team ticked as set in Studio">Set</th>
+    <th title="Pairs seen in Short → video traffic">Seen</th>
+    <th title="Mean change in views per week across the team's links, the latest weekly row; never Midas's lift">Team effect</th>
+    <th class="status" style="text-align:left">Team's use</th>`,
+};
+
 function paint(data) {
   shown = data;
   cards.length = 0;
@@ -247,14 +320,14 @@ function paint(data) {
   }
   const levers = LEVERS.filter(l => data.fleet.levers[l.id] && active.has(l.id));
   const head1 = levers.map(l => `<th class="grp" colspan="5">${esc(l.label)}<span class="what">${esc(l.what)}</span></th>`).join('');
-  const head2 = levers.map(() => `<th class="first" title="Changes Midas wrote to YouTube">Written</th>
+  const head2 = levers.map(l => HEADS[l.id] || `<th class="first" title="Changes Midas wrote to YouTube">Written</th>
     <th title="Changes judged / still in their measurement window">Judged / pending</th>
     <th>Lift</th><th>Weekly lift</th><th class="status" style="text-align:left">Verdict</th>`).join('');
   const fleetRow = `<tbody class="fleet"><tr><td class="name">All channels<span class="sub">pooled over every judged change</span></td>
-    ${levers.map(l => cells('All channels', l, data.fleet.levers[l.id], true)).join('')}</tr></tbody>`;
+    ${levers.map(l => (CELLS[l.id] || cells)('All channels', l, data.fleet.levers[l.id], true)).join('')}</tr></tbody>`;
   const rows = data.channels.map(ch => `<tr><td class="name">
       <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a></td>
-      ${levers.map(l => cells(ch.name || ch.id, l, ch.levers[l.id], false)).join('')}</tr>`).join('');
+      ${levers.map(l => (CELLS[l.id] || cells)(ch.name || ch.id, l, ch.levers[l.id], false)).join('')}</tr>`).join('');
   $('board').innerHTML = `<div class="grid-wrap"><table class="sb">
     <thead><tr><th class="name" rowspan="2" style="vertical-align:bottom">Channel</th>${head1}</tr>
       <tr>${head2}</tr></thead>

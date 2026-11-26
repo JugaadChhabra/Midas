@@ -84,6 +84,8 @@ def _store(interventions=(), verdicts=(), videos=None, channels=None):
              "is_short": True},
         ],
         "audits": [],
+        "playlist_arms": [],
+        "short_link_recommendations": [],
     })
 
 
@@ -672,3 +674,186 @@ def test_more_than_1000_title_rows_are_counted_in_full(use, capped):
 
     assert cell["counts"]["written"] == 1100
     assert cell["paths"]["pipeline"]["judged"] == 1100
+
+
+# ── the playlist test and Short links (#171) ────────────────────────────────
+
+def _arm(channel_id, playlist, arm, status):
+    return {"id": next(_ids), "channel_id": channel_id, "playlist_id": playlist, "arm": arm,
+            "status": status, "eligible_members": 5, "proposal_ids": [],
+            "first_applied_at": "2026-11-02T08:00:00+00:00" if status == "dosed" else None,
+            "last_applied_at": "2026-11-03T08:00:00+00:00" if status == "dosed" else None}
+
+
+def _pl_verdict(channel_id, week, windows, *, stop=False, lift=2.0, cumulative=2.0):
+    return _verdict(channel_id, week, lever="playlist", windows=windows, stop=stop, lift=lift,
+                    cumulative=cumulative, verdict="worse" if stop else "helped")
+
+
+def _rec(channel_id, status, *, seen=False, short="short1"):
+    return {"id": next(_ids), "channel_id": channel_id, "short_id": short,
+            "target_video_id": f"t{next(_ids)}", "rank": 1, "similarity": 0.9, "status": status,
+            "seen_at": "2026-11-12T00:00:00+00:00" if seen else None}
+
+
+def _team(channel_id, status="applied", delta=None):
+    return _iv(channel_id, "n/a", status, origin="human", applied=False, delta=delta,
+               lever="short_link")
+
+
+def _playlist_store(arms=(), verdicts=(), **kw):
+    sb = _store(verdicts=verdicts, **kw)
+    sb._tables["playlist_arms"] = list(arms)
+    return sb
+
+
+def test_the_playlist_answer_at_each_state(use):
+    four = settings.PLAYLIST_EXPERIMENT_WINDOWS
+    use(_playlist_store(
+        arms=[_arm(CH_A, "PL1", "treated", "dosed"), _arm(CH_A2, "PL2", "treated", "dosed"),
+              _arm(CH_B, "PL3", "treated", "dosed")],
+        verdicts=[_pl_verdict(CH_A, "2026-11-09", 1),                       # still counting
+                  _pl_verdict(CH_A2, "2026-11-30", four),                   # window reached
+                  _pl_verdict(CH_B, "2026-11-30", four, stop=True)]))      # stop rule fired
+
+    body = _results(lever="playlist")
+    assert _cell(body, CH_A, "playlist")["answer"] == "pending"
+    assert _cell(body, CH_A2, "playlist")["answer"] == "yes"
+    assert _cell(body, CH_B, "playlist")["answer"] == "no"
+    assert _cell(body, CH_NONE, "playlist")["answer"] == "pending"
+    assert _cell(body, CH_B, "playlist")["stop_rule_triggered"] is True
+    assert _cell(body, CH_B, "playlist")["stopped_week"] == "2026-11-30"
+
+
+def test_playlist_arm_counts_and_weeks(use):
+    use(_playlist_store(
+        arms=[_arm(CH_A, "P1", "treated", "dosed"), _arm(CH_A, "P2", "treated", "dosed"),
+              _arm(CH_A, "P3", "treated", "no_dose"), _arm(CH_A, "P4", "holdout", "holdout"),
+              _arm(CH_A, "P5", "holdout", "judged"),
+              _arm(CH_A, "P6", "treated", "insufficient_data")],
+        verdicts=[_pl_verdict(CH_A, "2026-11-16", 2, lift=3.0, cumulative=2.5),
+                  _pl_verdict(CH_A, "2026-11-09", 1, lift=2.0, cumulative=2.0)]))
+
+    cell = _cell(_results(), CH_A, "playlist")
+
+    assert cell["arms"] == {"dosed": 2, "no_dose": 1, "holdout": 1, "judged": 1,
+                            "insufficient_data": 1}
+    assert [w["week_start"] for w in cell["weeks"]] == ["2026-11-09", "2026-11-16"]
+    assert (cell["lift"], cell["cumulative_lift"], cell["windows_judged"]) == (3.0, 2.5, 2)
+    assert cell["test_start"] == "2026-11-02"
+
+
+def test_the_playlist_cell_equals_the_channel_endpoints_figures(use):
+    use(_playlist_store(
+        arms=[_arm(CH_A, "P1", "treated", "dosed"), _arm(CH_A, "P2", "holdout", "holdout"),
+              _arm(CH_A, "P3", "treated", "no_dose")],
+        verdicts=[_pl_verdict(CH_A, "2026-11-09", 1), _pl_verdict(CH_A, "2026-11-16", 2)]))
+
+    cell = _cell(_results(), CH_A, "playlist")
+    r = _as(ADMIN).get(f"/channels/{CH_A}/playlist-test")
+    assert r.status_code == 200, r.text
+    test = r.json()
+
+    assert cell["answer"] == test["answer"]
+    assert (cell["test_start"], cell["test_end"]) == (test["test_start"], test["test_end"])
+    by_status = {}
+    for a in test["arms"]:
+        by_status[a["status"]] = by_status.get(a["status"], 0) + 1
+    assert cell["arms"] == by_status
+    assert cell["weeks"] == [{k: v.get(k) for k in ("week_start", "n_treated", "n_holdout",
+                                                    "treated_mean_delta", "holdout_mean_delta",
+                                                    "lift", "cumulative_lift", "windows_judged",
+                                                    "verdict", "stop_rule_triggered")}
+                             for v in test["verdicts"]]
+
+
+def test_the_fleet_sums_playlist_arms_and_never_pools_answers(use):
+    four = settings.PLAYLIST_EXPERIMENT_WINDOWS
+    use(_playlist_store(
+        arms=[_arm(CH_A, "P1", "treated", "dosed"), _arm(CH_B, "P2", "treated", "dosed"),
+              _arm(CH_B, "P3", "holdout", "holdout")],
+        verdicts=[_pl_verdict(CH_A, "2026-11-30", four),
+                  _pl_verdict(CH_B, "2026-11-30", four, stop=True)]))
+
+    fleet = _results()["fleet"]["levers"]["playlist"]
+
+    assert fleet["arms"] == {"dosed": 2, "holdout": 1}
+    assert "answer" not in fleet
+    assert fleet["answers"] == {CH_A: "yes", CH_B: "no"}      # listed per channel, arms only
+
+
+def test_short_link_status_and_seen_counts(use):
+    use_rows = [_rec(CH_A, "pending"), _rec(CH_A, "pending", seen=True), _rec(CH_A, "set", seen=True),
+                _rec(CH_A, "not_chosen"), _rec(CH_A, "dismissed"), _rec(CH_B, "set")]
+    sb = _playlist_store()
+    sb._tables["short_link_recommendations"] = use_rows
+    use(sb)
+
+    cell = _cell(_results(), CH_A, "short_link")
+
+    assert cell["recommendations"] == {"pending": 2, "set": 1, "not_chosen": 1, "dismissed": 1}
+    assert cell["seen"] == 2
+    assert cell["team"] == 0 and cell["verdict"] is None
+    assert cell["by"] == "team"                      # the team's work, never Midas's lift
+    assert "lift" not in cell
+
+
+def test_short_link_team_interventions_and_latest_human_verdict(use):
+    old = _verdict(CH_A, "2026-11-09", lever="short_link", scope="human", windows=1)
+    new = _verdict(CH_A, "2026-11-16", lever="short_link", scope="human", windows=2)
+    new.update(n_treated=3, treated_mean_delta=4.5)
+    midas_scope = _verdict(CH_A, "2026-11-23", lever="short_link", scope="treated_vs_holdout")
+    store = _playlist_store(verdicts=[old, new, midas_scope])
+    store._tables["interventions"] = [_team(CH_A, "judged", 4.0), _team(CH_A, "applied"),
+                                     _team(CH_B, "applied")]
+    use(store)
+
+    cell = _cell(_results(), CH_A, "short_link")
+
+    assert (cell["team"], cell["team_judged"]) == (2, 1)
+    assert cell["verdict"] == {"week_start": "2026-11-16", "n_treated": 3,
+                               "treated_mean_delta": 4.5, "windows_judged": 2}
+
+
+def test_the_fleet_sums_short_link_counts(use):
+    sb = _playlist_store()
+    sb._tables["short_link_recommendations"] = [_rec(CH_A, "set", seen=True), _rec(CH_B, "set"),
+                                               _rec(CH_B, "pending")]
+    sb._tables["interventions"] = [_team(CH_A), _team(CH_B)]
+    use(sb)
+
+    fleet = _results()["fleet"]["levers"]["short_link"]
+
+    assert fleet["recommendations"] == {"pending": 1, "set": 2, "not_chosen": 0, "dismissed": 0}
+    assert (fleet["seen"], fleet["team"]) == (1, 2)
+
+
+def test_playlist_and_short_link_cells_are_scoped(use):
+    sb = _playlist_store(arms=[_arm(CH_A, "P1", "treated", "dosed"), _arm(CH_B, "P2", "treated", "dosed")])
+    sb._tables["short_link_recommendations"] = [_rec(CH_A, "set"), _rec(CH_B, "set")]
+    sb._tables["interventions"] = [_team(CH_B)]
+    use(sb)
+
+    body = _results(MANAGER_A)
+
+    assert [c["id"] for c in body["channels"]] == [CH_A2, CH_A]
+    assert body["fleet"]["levers"]["playlist"]["arms"] == {"dosed": 1}
+    assert body["fleet"]["levers"]["short_link"]["recommendations"]["set"] == 1
+    assert body["fleet"]["levers"]["short_link"]["team"] == 0
+    r = _as(MANAGER_A).get("/seo/results", params={"channel_id": CH_B})
+    assert r.status_code == 404
+
+
+def test_the_lever_filter_takes_playlist_and_short_link(use):
+    use(_playlist_store())
+
+    body = _results(lever="short_link")
+    assert set(body["fleet"]["levers"]) == {"short_link"}
+    assert set(_results(lever="playlist")["fleet"]["levers"]) == {"playlist"}
+
+
+def test_playlist_and_short_link_reads_write_nothing(use):
+    sb = _playlist_store(arms=[_arm(CH_A, "P1", "treated", "dosed")])
+    use(sb)
+    _results()
+    assert sb.writes == []
