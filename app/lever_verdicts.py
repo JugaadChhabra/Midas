@@ -602,6 +602,10 @@ def _trace(rows: list[dict]) -> dict:
 
 @router.get("/channels/{channel_id}/title-test", dependencies=[Depends(require_channel)])
 def channel_title_test(channel_id: str):
+    return title_test_summary(channel_id)
+
+
+def title_test_summary(channel_id: str) -> dict:
     """The title test on the channel (Part 6 S3.5), read-only: per path its
     treated, declined, cancelled (by reason; `reverted` for a title put back),
     judged and insufficient rows, mean Δ, cumulative lift against the holdout,

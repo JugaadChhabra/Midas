@@ -20,7 +20,7 @@ COLUMNS = ("id,video_id,lever,origin,arm,status,payload,applied_at,detected_at,"
            "created_at,measurement_status,measurement_result")
 
 
-def _lever_states(channel: dict) -> dict:
+def lever_states(channel: dict) -> dict:
     """Whether each lever can write on the channel, and if not, the first
     reason, in words. Mirrors `agent_tick.backlinks_enabled`/`titles_open`."""
     cid = channel["id"]
@@ -53,7 +53,10 @@ def _lever_states(channel: dict) -> dict:
             "title": {"on": tl is None, "reason": tl}}
 
 
-def _trim(row: dict) -> dict:
+_lever_states = lever_states  # old name, kept for tests/test_channel_seo.py
+
+
+def trim(row: dict) -> dict:
     """One intervention as the page reads it."""
     p = row.get("payload") or {}
     m = row.get("measurement_result") or {}
@@ -102,7 +105,7 @@ def channel_seo(channel_id: str):
     rows = all_rows(supabase().table("interventions").select(COLUMNS)
                     .eq("channel_id", channel_id))
     rows.sort(key=lambda r: (r.get("created_at") or "", r["id"]), reverse=True)
-    ivs = [_trim(r) for r in rows]
+    ivs = [trim(r) for r in rows]
 
     ids = sorted({r["video_id"] for r in ivs}
                  | {t["video_id"] for r in ivs for t in r["targets"] if t["video_id"]})
@@ -114,7 +117,7 @@ def channel_seo(channel_id: str):
 
     return {
         "agent_enabled": bool(ch.get("agent_enabled")),
-        "levers": _lever_states(ch),
+        "levers": lever_states(ch),
         "today": {"written": autopilot._applies_today(channel_id),
                   "cap": ch.get("autopilot_daily_cap")},
         "verdicts": _latest_verdicts(channel_id),

@@ -824,6 +824,10 @@ def _answer(verdicts: list[dict]) -> str:
 
 @router.get("/channels/{channel_id}/playlist-test", dependencies=[Depends(require_channel)])
 def channel_playlist_test(channel_id: str):
+    return playlist_test_summary(channel_id)
+
+
+def playlist_test_summary(channel_id: str) -> dict:
     """The channel's playlist test: its dates (None until dosed), every arm,
     its weekly verdicts (oldest first), and the answer: `pending` until the
     window-PLAYLIST_EXPERIMENT_WINDOWS verdict, then `yes`, or `no` when it
