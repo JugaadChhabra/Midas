@@ -47,6 +47,13 @@ those `seen` in type-32 traffic, the team's `short_link` interventions and the
 latest `human` verdict row. Their fleet cells sum counts only; playlist answers
 are listed per channel (`answers`), never pooled.
 
+The title and backlinks cells, and their fleet cells, carry `early` (#172): the
+early read of the rows still inside their window, from the post data-days
+already ingested (`app/early_read.py`; titles also impressions and CTR). It is
+computed per request, never written, and nothing that judges or stops a lever
+reads it; None while no open row has a post day. The fleet's pools every
+visible row.
+
 The fleet row sums the counts and pools: its means and `lift` are over every
 judged row of the visible channels (the arithmetic `lever_verdicts` uses per
 channel), never an average of channel lifts; its `weeks` are pooled the same
@@ -61,7 +68,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from app import access, lever_verdicts, playlist_test, title_measurement
+from app import access, early_read, lever_verdicts, playlist_test, title_measurement
 from app.channel_seo import lever_states
 from app.config import settings
 from app.db import supabase
@@ -98,7 +105,7 @@ TRAFFIC_LAG_DAYS = 2
 JUDGEMENT_WEEKDAY, JUDGEMENT_HOUR = 0, 9
 
 COLUMNS = ("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,created_at,"
-           "measurement_result")
+           "measurement_status,measurement_result")
 VERDICT_COLUMNS = ("channel_id,lever,arm_scope,week_start,n_treated,n_holdout,"
                    "treated_mean_delta,holdout_mean_delta,lift,cumulative_lift,"
                    "windows_judged,verdict,stop_rule_triggered")
@@ -499,6 +506,7 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
     states = {c["id"]: lever_states(c) for c in channels}
 
     out_channels = [{"id": c["id"], "name": c.get("name"), "levers": {}} for c in channels]
+    coverage = early_read.Coverage()
     fleet: dict = {"levers": {}}
     for name in LEVERS:
         if lever is not None and name != lever:
@@ -538,6 +546,8 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
         verdicts.sort(key=lambda v: v["week_start"])
         title = name == InterventionLever.TITLE
         shorts = set() if title else _shorts(rows)
+        reads = list((early_read.titles(rows, coverage) if title
+                      else early_read.backlinks(rows, coverage)).values())
         cells = []
         for entry in out_channels:
             cid = entry["id"]
@@ -545,10 +555,13 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
             weeks = [v for v in verdicts if v["channel_id"] == cid]
             cell = (_title_cell(mine, weeks, states[cid][name]) if title
                     else _channel_cell(mine, weeks, shorts, states[cid][name]))
+            cell["early"] = early_read.summary([x for x in reads if x["channel_id"] == cid],
+                                               with_reach=title)
             entry["levers"][name] = cell
             cells.append(cell)
         fleet["levers"][name] = (_title_fleet(rows, cells) if title
                                  else _fleet_cell(rows, cells, shorts))
+        fleet["levers"][name]["early"] = early_read.summary(reads, with_reach=title)
 
     first = fleet["levers"].get(InterventionLever.TITLE, {}).get("first_verdict")
     return {"generated_at": now.isoformat(), "next_judgement": next_judgement(now).isoformat(),
