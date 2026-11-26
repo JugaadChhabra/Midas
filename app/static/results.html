@@ -167,6 +167,8 @@
         <button type="button" class="chip" data-lever="short_link" aria-pressed="true">Short links</button>
       </div>
       <span class="grow"></span>
+      <a class="btn btn-link" id="csv-results" href="/seo/results.csv" download>Download CSV</a>
+      <a class="btn btn-link" id="csv-changes" href="/seo/results/changes.csv" download>Download changes CSV</a>
     </div>
     <p class="legend" id="legend">
       <b>Lift</b> = the mean change in a changed video's views per week, minus the same for the
@@ -620,6 +622,16 @@ function paint(data) {
   window.addEventListener('scroll', hide, true);
 })();
 
+// The CSVs carry the page's own filters: the channel, and the levers still shown.
+function csvLinks() {
+  const q = new URLSearchParams();
+  if (channelFilter) q.set('channel_id', channelFilter);
+  const one = active.size === 1 ? [...active][0] : null;
+  if (one) q.set('lever', one);
+  const qs = q.toString() ? '?' + q : '';
+  $('csv-results').href = '/seo/results.csv' + qs;
+  $('csv-changes').href = '/seo/results/changes.csv' + qs;
+}
 function paintChannelFilter() {
   const holder = $('ch-filter');
   const opts = [{ value: '', label: 'All channels' }]
@@ -639,10 +651,11 @@ $('lever-bar').addEventListener('click', (e) => {
   if (active.has(id) && active.size > 1) active.delete(id); else active.add(id);   // never none
   for (const c of $('lever-bar').querySelectorAll('[data-lever]'))
     c.setAttribute('aria-pressed', String(active.has(c.dataset.lever)));
+  csvLinks();
   if (shown) paint(shown);
 });
 $('ch-filter').addEventListener('change', (e) => {
-  if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; load(); }
+  if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; csvLinks(); load(); }
 });
 
 

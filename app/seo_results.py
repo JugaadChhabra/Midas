@@ -62,16 +62,19 @@ of its own; `stopped_channels` counts the channels whose rule fired.
 """
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app import access, autopilot, early_read, lever_verdicts, playlist_test, reach, title_measurement
 from app.channel_seo import lever_states, trim
 from app.config import settings
 from app.db import supabase
+from app.short_links import _cell
 from app.rows import all_rows, rows_for_ids
 from app.status_vocab import (
     ACTIVE_INTERVENTION_STATUSES,
@@ -720,6 +723,16 @@ def _recommendation_changes(channel_id: str, order: str, limit: int, offset: int
              "target": _video_info(videos, r["target_video_id"])} for r in page]
 
 
+def _changes(channel_id: str, lever: str, arm: str | None, order: str, limit: int,
+             offset: int) -> tuple[str, list[dict]]:
+    """One cell's rows: the JSON drill-down's page and the CSV's whole list."""
+    if lever == InterventionLever.PLAYLIST:
+        return "arms", _arm_changes(channel_id, arm, order, limit, offset)
+    if lever == InterventionLever.SHORT_LINK:
+        return "recommendations", _recommendation_changes(channel_id, order, limit, offset)
+    return "interventions", _intervention_changes(channel_id, lever, arm, order, limit, offset)
+
+
 @router.get("/seo/results/changes")
 def seo_results_changes(channel_id: str, lever: str, arm: str | None = None,
                         order: str = "delta",
@@ -746,14 +759,7 @@ def seo_results_changes(channel_id: str, lever: str, arm: str | None = None,
     if channel is None:
         raise HTTPException(404, access.CHANNEL_NOT_FOUND)
 
-    if lever == InterventionLever.PLAYLIST:
-        kind, changes = "arms", _arm_changes(channel_id, arm, order, limit, offset)
-    elif lever == InterventionLever.SHORT_LINK:
-        kind, changes = "recommendations", _recommendation_changes(channel_id, order, limit,
-                                                                   offset)
-    else:
-        kind, changes = "interventions", _intervention_changes(channel_id, lever, arm, order,
-                                                               limit, offset)
+    kind, changes = _changes(channel_id, lever, arm, order, limit, offset)
     return {"channel_id": channel_id, "lever": lever, "kind": kind, "arm": arm, "order": order,
             "limit": limit, "offset": offset,
             "next_offset": offset + limit if len(changes) == limit else None,
@@ -851,3 +857,113 @@ def seo_results_timeline(days: int = Query(TIMELINE_DEFAULT, ge=1, le=TIMELINE_M
         e["detail"]["video_title"] = (titles.get(e["video_id"]) or {}).get("title")
     return {"days": days, "since": since.isoformat(), "generated_at": now.isoformat(),
             "events": events}
+
+
+# ── CSV exports (#175) ──────────────────────────────────────────────────────
+
+RESULTS_CSV_COLUMNS = (
+    "channel_id", "channel", "lever", "on", "reason", "written", "holdout", "declined",
+    "judged", "awaiting", "n_treated", "n_holdout", "treated_mean_delta", "holdout_mean_delta",
+    "lift", "cumulative_lift", "windows_judged", "verdict", "stop_rule_triggered",
+    "early_lift", "answer",
+)
+CHANGES_CSV_COLUMNS = (
+    "channel_id", "lever", "kind", "id", "video_id", "video_title", "arm", "status", "origin",
+    "delta", "early_delta", "reverted_by", "created_at", "detail",
+)
+WHOLE = 10 ** 9
+
+
+def _csv_response(columns, rows, filename: str) -> StreamingResponse:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=columns)
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: _cell(v) for k, v in r.items()})
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _results_line(channel_id: str, name: str, lever: str, cell: dict) -> dict:
+    state = cell.get("state") or {}
+    counts = cell.get("counts") or {}
+    return {
+        "channel_id": channel_id, "channel": name, "lever": lever,
+        "on": state.get("on"), "reason": state.get("reason"),
+        "written": counts.get("written"), "holdout": counts.get("holdout"),
+        "declined": counts.get("declined"), "judged": counts.get("judged"),
+        "awaiting": counts.get("awaiting"),
+        "n_treated": cell.get("n_treated"), "n_holdout": cell.get("n_holdout"),
+        "treated_mean_delta": cell.get("treated_mean_delta"),
+        "holdout_mean_delta": cell.get("holdout_mean_delta"),
+        "lift": cell.get("lift"), "cumulative_lift": cell.get("cumulative_lift"),
+        "windows_judged": cell.get("windows_judged"), "verdict": cell.get("verdict"),
+        "stop_rule_triggered": cell.get("stop_rule_triggered"),
+        "early_lift": (cell.get("early") or {}).get("lift"),
+        "answer": cell.get("answer"),
+    }
+
+
+@router.get("/seo/results.csv")
+def seo_results_csv(channel_id: str | None = None, lever: str | None = None,
+                    user: dict = Depends(access.current_user)):
+    """`GET /seo/results` flattened: a line per channel x lever, then the fleet's."""
+    body = seo_results(channel_id=channel_id, lever=lever, user=user)
+    lines = [_results_line(c["id"], c["name"], name, cell)
+             for c in body["channels"] for name, cell in c["levers"].items()]
+    lines += [_results_line("", "All channels", name, cell)
+              for name, cell in body["fleet"]["levers"].items()]
+    return _csv_response(RESULTS_CSV_COLUMNS, lines,
+                         f"seo-results-{body['generated_at'][:10]}.csv")
+
+
+def _change_line(channel_id: str, lever: str, kind: str, c: dict) -> dict:
+    video = c.get("video") or {}
+    detail = None
+    if kind == "recommendations":
+        detail = (c.get("target") or {}).get("title")
+    elif kind == "arms":
+        detail = (c.get("playlist") or {}).get("title")
+    else:
+        detail = c.get("title") or "; ".join(
+            t.get("title") or t.get("video_id") or "" for t in c.get("targets") or []) or None
+    return {
+        "channel_id": channel_id, "lever": lever, "kind": kind, "id": c.get("id"),
+        "video_id": c.get("video_id") or c.get("short_id"), "video_title": video.get("title"),
+        "arm": c.get("arm"), "status": c.get("status"), "origin": c.get("origin"),
+        "delta": c.get("delta"), "early_delta": (c.get("early") or {}).get("delta"),
+        "reverted_by": c.get("reverted_by"),
+        "created_at": c.get("created_at") or c.get("drawn_at"), "detail": detail,
+    }
+
+
+@router.get("/seo/results/changes.csv")
+def seo_results_changes_csv(channel_id: str | None = None, lever: str | None = None,
+                            arm: str | None = None, order: str = "delta",
+                            user: dict = Depends(access.current_user)):
+    """Every change in scope, unpaged: the drill-down for each visible channel
+    (or the named one) and each lever (or the named one)."""
+    if lever is not None and lever not in ALL_INTERVENTION_LEVERS:
+        raise HTTPException(400, f"unknown lever: {lever}")
+    if arm is not None and arm not in CHANGE_ARMS:
+        raise HTTPException(400, f"unknown arm: {arm}")
+    if order not in ORDERS:
+        raise HTTPException(400, f"unknown order: {order}")
+    if channel_id:
+        access.check_channel(user, channel_id)
+    query = access.filter_channels(supabase().table("channels").select("id,name"), user)
+    if channel_id:
+        query = query.eq("id", channel_id)
+    channels = sorted(all_rows(query), key=lambda c: ((c.get("name") or "").lower(), c["id"]))
+    if channel_id and not channels:
+        raise HTTPException(404, access.CHANNEL_NOT_FOUND)
+    lines = []
+    for c in channels:
+        for name in LEVERS:
+            if lever is not None and name != lever:
+                continue
+            kind, changes = _changes(c["id"], name, arm, order, WHOLE, 0)
+            lines += [_change_line(c["id"], name, kind, x) for x in changes]
+    return _csv_response(CHANGES_CSV_COLUMNS, lines,
+                         f"seo-changes-{datetime.now(timezone.utc).date().isoformat()}.csv")
