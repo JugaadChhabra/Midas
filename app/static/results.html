@@ -89,6 +89,43 @@
   .hovercard .hc-row b { margin-left:auto; font-weight:600; }
   .hovercard .hc-foot { margin:.5rem 0 0; padding:.45rem 0 0; border-top:1px solid var(--border-soft);
                         color:var(--ink-3); }
+
+  /* The changes modal (#173): a cell opens the rows behind it. */
+  table.sb [data-open] { cursor:pointer; }
+  table.sb td.lift > span[data-open]:hover { box-shadow:inset 0 0 0 1px var(--ink-4); }
+  .modal.chg { max-width:960px; width:calc(100vw - 2rem); max-height:88vh;
+               display:flex; flex-direction:column; }
+  .chg-head { margin:0 0 .8rem; }
+  .chg-head h2 { font-size:16px; margin:0 0 .25rem; }
+  .chg-head .sub { font-size:12.5px; color:var(--ink-3); line-height:1.5; }
+  .chg-tools { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; margin:0 0 .8rem;
+               font-size:12.5px; }
+  .chg-tools a { color:var(--color-accent); }
+  .chg-list { overflow-y:auto; margin:0 0 1rem; padding-right:.25rem; }
+  .chg-group + .chg-group { margin-top:1.3rem; }
+  .chg-group h3 { display:flex; align-items:baseline; gap:.6rem; margin:0 0 .6rem;
+                  font-size:13.5px; font-weight:650; }
+  .chg-group h3 .n { font-size:12px; font-weight:500; color:var(--ink-3); }
+  .chg-row { display:grid; grid-template-columns:132px 1fr auto; gap:.9rem; align-items:start;
+             padding:.65rem 0; border-top:1px solid var(--border-soft); }
+  .chg-group h3 + .chg-row { border-top:0; }
+  .chg-row .th { display:block; position:relative; aspect-ratio:16 / 9; border-radius:var(--radius-sm);
+                 overflow:hidden; background:var(--surface-tint); }
+  .chg-row .th img { width:100%; height:100%; object-fit:cover; display:block; }
+  .chg-row .th .badge { position:absolute; left:5px; bottom:5px; padding:1px 6px; border-radius:4px;
+                        font-size:10.5px; font-weight:600; color:#fff; background:rgba(0,0,0,.72); }
+  .chg-row .vt { font-size:13px; font-weight:600; color:inherit; text-decoration:none; }
+  .chg-row .vt:hover { text-decoration:underline; }
+  .chg-row .tags { display:flex; flex-wrap:wrap; gap:.3rem; margin:.3rem 0; }
+  .chg-row .what { font-size:12.5px; color:var(--ink-2); line-height:1.5; }
+  .chg-row .what .was { color:var(--ink-4); text-decoration:line-through; }
+  .chg-row .what ul { margin:.2rem 0 0; padding-left:1.1rem; }
+  .chg-row .what .of { color:var(--ink-4); }
+  .chg-row .res { text-align:right; font-variant-numeric:tabular-nums; min-width:7.5rem; font-size:12.5px; }
+  .chg-row .res b { display:block; font-size:16px; letter-spacing:-.01em; }
+  .chg-row .res .up { color:var(--color-ok); } .chg-row .res .down { color:var(--color-err); }
+  .chg-row .res .sm { display:block; color:var(--ink-4); font-size:11.5px; margin-top:.15rem; }
+  .chg-more { text-align:center; margin:.8rem 0 0; }
 </style>
 </head>
 <body>
@@ -246,7 +283,7 @@ function hoverBody(name, lever, c, fleet) {
     </div>`;
 }
 
-function cells(name, lever, c, fleet) {
+function cells(name, lever, c, fleet, chId) {
   const k = c.counts;
   cards.push(hoverBody(name, lever, c, fleet));
   const hv = cards.length - 1;
@@ -269,7 +306,7 @@ function cells(name, lever, c, fleet) {
   }
   return `<td class="first ${k.written ? '' : 'zero'}">${num(k.written)}</td>
     <td>${num(k.judged)} <span class="of">/ ${num(k.awaiting)}</span></td>
-    <td class="lift"><span class="v-${esc(fleet ? 'none' : verdict)}" data-hv="${hv}" tabindex="0">${lift}</span>${earlyLine(lever, c.early)}</td>
+    <td class="lift"><span class="v-${esc(fleet ? 'none' : verdict)}" data-hv="${hv}" ${openAttr(chId, lever)} tabindex="0">${lift}</span>${earlyLine(lever, c.early)}</td>
     <td class="trend">${spark(c.weeks, fleet ? null : c.verdict)}</td>
     <td class="status">${status}</td>`;
 }
@@ -279,7 +316,7 @@ const ANSWER = { yes: ['pill--ok', 'curated playlists earn starts'], no: ['pill-
                  pending: ['pill--neutral', 'the test is still counting'] };
 const answerPill = (a) => `<span class="pill pill--sm ${ANSWER[a][0]}" title="${esc(ANSWER[a][1])}">${esc(a)}</span>`;
 
-function playlistCells(name, lever, c, fleet) {
+function playlistCells(name, lever, c, fleet, chId) {
   const a = c.arms;
   const arms = (k) => a[k] || 0;
   const dosed = arms('dosed');
@@ -303,12 +340,12 @@ function playlistCells(name, lever, c, fleet) {
   const lift = fleet || c.lift == null ? '<span class="zero">—</span>' : `${lever.fmt(c.lift, 1)}<span class="u">${esc(lever.per)}</span>`;
   return `<td class="first ${dosed ? '' : 'zero'}" title="Treated playlists that got their additions">${num(dosed)}</td>
     <td>${num(judged)} <span class="of">/ ${num(dosed + arms('holdout'))}</span></td>
-    <td class="lift"><span class="v-${esc(fleet ? 'none' : (c.verdict || 'none'))}" data-hv="${hv}" tabindex="0">${lift}</span></td>
+    <td class="lift"><span class="v-${esc(fleet ? 'none' : (c.verdict || 'none'))}" data-hv="${hv}" ${openAttr(chId, lever)} tabindex="0">${lift}</span></td>
     <td class="trend">${fleet ? '<span class="zero">·</span>' : spark(c.weeks, c.verdict)}</td>
     <td class="status">${status}</td>`;
 }
 
-function shortLinkCells(name, lever, c, fleet) {
+function shortLinkCells(name, lever, c, fleet, chId) {
   const r = c.recommendations;
   const ticked = r.set + r.not_chosen + r.dismissed + c.team;
   cards.push(`<div class="hc-head">${esc(name)} · ${esc(lever.label)} (the team's work)</div>
@@ -322,7 +359,7 @@ function shortLinkCells(name, lever, c, fleet) {
   const hv = cards.length - 1;
   const none = !ticked;
   return `<td class="first ${r.pending ? '' : 'zero'}" title="Recommended, not acted on yet">${num(r.pending)}</td>
-    <td><span data-hv="${hv}" tabindex="0">${num(r.set)} <span class="of">set</span></span></td>
+    <td><span data-hv="${hv}" ${openAttr(chId, lever)} tabindex="0">${num(r.set)} <span class="of">set</span></span></td>
     <td>${num(c.seen)} <span class="of">seen</span></td>
     <td>${c.verdict && c.verdict.treated_mean_delta != null ? `${signed(c.verdict.treated_mean_delta, 1)}<span class="u">/wk</span>` : '<span class="zero">—</span>'}</td>
     <td class="status">${none ? `<span class="off">${r.pending ? "the team isn't using the card yet" : 'nothing recommended yet'}</span>`
@@ -340,6 +377,163 @@ const HEADS = {
     <th title="Mean change in views per week across the team's links, the latest weekly row; never Midas's lift">Team effect</th>
     <th class="status" style="text-align:left">Team's use</th>`,
 };
+
+// ── The changes modal (#173) ──────────────────────────────────────────
+// A channel's cell opens the rows behind it from /seo/results/changes.
+const openAttr = (chId, lever) => chId == null ? ''
+  : `data-open="${esc(chId)}|${esc(lever.id)}" role="button" title="Open the changes behind this cell"`;
+const yt = (id) => `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+const chStat = { open: null };
+
+function videoThumb(id, v) {
+  const img = v && v.thumbnail_url ? `<img src="${esc(v.thumbnail_url)}" loading="lazy" alt="" />` : '';
+  const type = !v || v.is_short == null ? '' : v.is_short ? 'Short' : 'Long-form';
+  return `<a class="th" href="${yt(id)}" target="_blank" rel="noopener">${img}${type ? `<span class="badge">${type}</span>` : ''}</a>`;
+}
+const vlink = (id, v) => `<a class="vt" href="${yt(id)}" target="_blank" rel="noopener">${esc((v && v.title) || id)}</a>`;
+const views = (x) => x == null ? '—' : num(Math.round(x));
+
+function resultCell(lever, c) {
+  if (c.delta != null && !c.early) {
+    const cls = c.delta > 0 ? 'up' : c.delta < 0 ? 'down' : '';
+    return `<b class="${cls}">${lever.fmt(c.delta, 1)}${esc(lever.per)}</b>
+      ${c.pre != null ? `<span class="sm">views ${views(c.pre)} → ${views(c.post)}</span>` : ''}`;
+  }
+  if (c.early) return `<b><i>${c.early.delta == null ? '—' : lever.fmt(c.early.delta, 1) + esc(lever.per)}</i></b>
+      <span class="sm"><span class="pill pill--sm pill--info">early</span> <i>not a verdict</i>, ${c.early.post_days} post day${c.early.post_days === 1 ? '' : 's'}</span>
+      ${c.early.impressions ? `<span class="sm">impressions/day ${views(c.early.impressions.pre)} → ${views(c.early.impressions.post)}</span>
+      <span class="sm">CTR ${ctrPct(c.early.ctr.pre)} → ${ctrPct(c.early.ctr.post)}</span>` : ''}`;
+  if (c.status === 'insufficient_data') return '<span class="sm">not enough data</span>';
+  return `<span class="sm">${esc((c.status || '').replace('_', ' '))}</span>`;
+}
+
+function changeRow(lever, c) {
+  const tags = [];
+  if (c.origin === 'human') tags.push('<span class="tag">team edit</span>');
+  if (c.arm === 'holdout') tags.push('<span class="tag">held back</span>');
+  if (c.status === 'declined') tags.push('<span class="tag">declined</span>');
+  if (c.error) tags.push(`<span class="tag">cancelled: ${esc(c.error)}</span>`);
+  if (c.reverted_by) tags.push(`<span class="pill pill--sm pill--warn" title="${esc(c.reverted_at || '')}">reverted by ${c.reverted_by === 'midas' ? 'Midas' : 'a person'}</span>`);
+  let what = '';
+  if (lever.id === 'title') {
+    if (c.title || c.title_before) what = `<span class="was">${esc(c.title_before || '')}</span> → ${esc(c.title || '(no change)')}`;
+    if (c.path) tags.unshift(`<span class="pill pill--sm pill--neutral">${esc(c.path)} path</span>`);
+  } else if (c.targets && c.targets.length) {
+    what = `Linked to:<ul>${c.targets.map(t => `<li><a href="${yt(t.video_id)}" target="_blank" rel="noopener">${esc(t.title || t.video_id)}</a></li>`).join('')}</ul>`;
+  }
+  return `<div class="chg-row">${videoThumb(c.video_id, c.video)}
+    <div><div>${vlink(c.video_id, c.video)}</div>
+      <div class="tags">${tags.join('')}</div><div class="what">${what}</div></div>
+    <div class="res">${resultCell(lever, c)}</div></div>`;
+}
+
+function armRow(lever, c) {
+  const pill = { dosed: 'pill--ok', holdout: 'pill--neutral', judged: 'pill--info' }[c.status] || 'pill--neutral';
+  const weeks = (c.measurement_result && c.measurement_result.weeks || []).length;
+  return `<div class="chg-row"><div></div>
+    <div><div><b>${esc((c.playlist && c.playlist.title) || c.playlist_id)}</b></div>
+      <div class="tags"><span class="pill pill--sm ${pill}">${esc(c.status.replace('_', ' '))}</span>
+        <span class="tag">${esc(c.arm)}</span></div>
+      <div class="what">${num(c.eligible_members)} members${c.first_applied_at ? ` · first additions ${esc(wk(c.first_applied_at.slice(0, 10)))}` : ''}${weeks ? ` · ${weeks} week${weeks === 1 ? '' : 's'} measured` : ''}</div></div>
+    <div class="res">${c.delta == null ? '<span class="sm">no week judged</span>' : `<b class="${c.delta > 0 ? 'up' : c.delta < 0 ? 'down' : ''}">${lever.fmt(c.delta, 1)}${esc(lever.per)}</b><span class="sm">latest week, starts</span>`}</div></div>`;
+}
+
+function recRow(lever, c) {
+  const pill = { set: 'pill--ok', pending: 'pill--info', dismissed: 'pill--neutral', not_chosen: 'pill--neutral' }[c.status] || 'pill--neutral';
+  return `<div class="chg-row">${videoThumb(c.short_id, c.video)}
+    <div><div>${vlink(c.short_id, c.video)}</div>
+      <div class="tags"><span class="pill pill--sm ${pill}">${esc(c.status.replace('_', ' '))}</span>
+        ${c.seen_at ? '<span class="tag">seen in traffic</span>' : ''}</div>
+      <div class="what">→ <a href="${yt(c.target_video_id)}" target="_blank" rel="noopener">${esc((c.target && c.target.title) || c.target_video_id)}</a>
+        <span class="of">· similarity ${Number(c.similarity).toFixed(2)}${c.feed_views != null ? ` · ${num(c.feed_views)} feed views` : ''}</span></div></div>
+    <div class="res"><span class="sm">rank ${c.rank}</span></div></div>`;
+}
+
+// Gains best first, losses worst first (the server's order), then what is still
+// open, then the rest; a held-back row sits in its own group.
+function groupChanges(lever, d) {
+  if (d.kind !== 'interventions') return [[d.kind === 'arms' ? 'Arms' : 'Recommendations', d.changes]];
+  const held = d.changes.filter(c => c.arm !== 'treated' || c.status === 'declined');
+  const mine = d.changes.filter(c => !held.includes(c));
+  const judged = (c) => c.delta != null && c.status !== 'insufficient_data' && !c.early;
+  return [
+    ['Biggest gains', mine.filter(c => judged(c) && c.delta >= 0)],
+    ['Biggest losses', mine.filter(c => judged(c) && c.delta < 0)],
+    ['Still measuring', mine.filter(c => !judged(c) && c.early)],
+    ['Not measured', mine.filter(c => !judged(c) && !c.early)],
+    ['Held back and declined', held],
+  ].filter(([, rows]) => rows.length);
+}
+
+function openChanges(chId, leverId) {
+  const lever = LEVERS.find(l => l.id === leverId);
+  const ch = (shown.channels.find(c => c.id === chId) || { id: chId });
+  const render = lever.kind === 'playlist' ? armRow : lever.kind === 'short_link' ? recRow : changeRow;
+  let showHeld = false, rows = [], kind = '', next = null, gen = 0;
+
+  const back = document.createElement('div');
+  back.className = 'modal-backdrop';
+  back.innerHTML = `<div class="modal chg" role="dialog" aria-modal="true" aria-labelledby="chg-title">
+    <div class="chg-head"><h2 id="chg-title"></h2>
+      <div class="sub">${esc(lever.what)}. <span class="pill pill--sm pill--info">early</span> rows are
+        <i>early, not a verdict</i>.</div></div>
+    <div class="chg-tools">
+      ${lever.kind === 'short_link' ? '' : '<label class="field-check"><input type="checkbox" id="chg-held" /> <span>Show held back</span></label>'}
+      <a href="/channel?id=${encodeURIComponent(chId)}">Open the channel page</a></div>
+    <div class="chg-list" id="chg-list"><div class="skel" data-skeleton data-rows="3"></div></div>
+    <div class="modal-actions"><button class="btn modal-cancel">Close</button></div></div>`;
+  back.querySelector('#chg-title').textContent = `${ch.name || chId} · ${lever.label}`;
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  back.querySelector('.modal-cancel').onclick = close;
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(back);
+  back.querySelector('.modal-cancel').focus();
+  const list = back.querySelector('#chg-list');
+
+  function draw() {
+    const groups = groupChanges(lever, { kind, changes: rows });
+    list.innerHTML = groups.length
+      ? groups.map(([title, items]) => `<div class="chg-group"><h3>${esc(title)}<span class="n">${items.length}</span></h3>
+          ${items.map(c => render(lever, c)).join('')}</div>`).join('')
+        + (next != null ? '<div class="chg-more"><button class="btn" id="chg-more">Show more</button></div>' : '')
+      : '<div class="muted">Nothing here yet.</div>';
+    const more = list.querySelector('#chg-more');
+    if (more) more.onclick = () => load(true);
+  }
+  async function load(append) {
+    const mine = ++gen;
+    const q = new URLSearchParams({ channel_id: chId, lever: leverId, order: 'delta', limit: '100',
+      offset: append ? String(next) : '0' });
+    if (!showHeld && lever.kind !== 'short_link') q.set('arm', 'treated');
+    try {
+      const r = await fetch('/seo/results/changes?' + q);
+      if (!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      if (mine !== gen) return;
+      rows = append ? rows.concat(d.changes) : d.changes;
+      kind = d.kind; next = d.next_offset;
+      draw();
+    } catch (err) {
+      if (mine === gen) list.innerHTML = `<em class="muted">Could not load the changes: ${esc(err && err.message || err)}</em>`;
+    }
+  }
+  const held = back.querySelector('#chg-held');
+  if (held) held.onchange = () => { showHeld = held.checked; load(false); };
+  load(false);
+}
+$('board').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-open]');
+  if (!el || !shown) return;
+  const [chId, leverId] = el.dataset.open.split('|');
+  $('hovercard').classList.remove('on');
+  openChanges(chId, leverId);
+});
+$('board').addEventListener('keydown', (e) => {
+  const el = e.target.closest && e.target.closest('[data-open]');
+  if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
+});
 
 function paint(data) {
   shown = data;
@@ -360,10 +554,10 @@ function paint(data) {
     <th title="Changes judged / still in their measurement window">Judged / pending</th>
     <th>Lift</th><th>Weekly lift</th><th class="status" style="text-align:left">Verdict</th>`).join('');
   const fleetRow = `<tbody class="fleet"><tr><td class="name">All channels<span class="sub">pooled over every judged change</span></td>
-    ${levers.map(l => (CELLS[l.id] || cells)('All channels', l, data.fleet.levers[l.id], true)).join('')}</tr></tbody>`;
+    ${levers.map(l => (CELLS[l.id] || cells)('All channels', l, data.fleet.levers[l.id], true, null)).join('')}</tr></tbody>`;
   const rows = data.channels.map(ch => `<tr><td class="name">
       <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a></td>
-      ${levers.map(l => (CELLS[l.id] || cells)(ch.name || ch.id, l, ch.levers[l.id], false)).join('')}</tr>`).join('');
+      ${levers.map(l => (CELLS[l.id] || cells)(ch.name || ch.id, l, ch.levers[l.id], false, ch.id)).join('')}</tr>`).join('');
   $('board').innerHTML = `<div class="grid-wrap"><table class="sb">
     <thead><tr><th class="name" rowspan="2" style="vertical-align:bottom">Channel</th>${head1}</tr>
       <tr>${head2}</tr></thead>
