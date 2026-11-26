@@ -605,18 +605,13 @@ def channel_title_test(channel_id: str):
     return title_test_summary(channel_id)
 
 
-def title_test_summary(channel_id: str) -> dict:
-    """The title test on the channel (Part 6 S3.5), read-only: per path its
-    treated, declined, cancelled (by reason; `reverted` for a title put back),
-    judged and insufficient rows, mean Δ, cumulative lift against the holdout,
-    auto-reverts and whether it has stopped; the holdout's n and mean Δ; and
-    the agent's trace numbers."""
-    rows = all_rows(
-        supabase().table("interventions")
-        .select("id,arm,status,payload,applied_at,measurement_result,trajectory")
-        .eq("channel_id", channel_id).eq("lever", InterventionLever.TITLE)
-        .eq("origin", InterventionOrigin.MIDAS)
-    )
+def title_paths(rows: list[dict], is_stopped) -> dict:
+    """The title test's figures over `midas` title rows (the channel's, or
+    several channels' pooled): per path its treated, declined, cancelled (by
+    reason; `reverted` for a title put back), judged and insufficient rows,
+    mean Δ, cumulative lift against the holdout, auto-reverts and `stopped`
+    (`is_stopped(scope)`); and the holdout's n and mean Δ. Pure: the channel
+    endpoint and the Results page both read through it, so they can't differ."""
 
     def deltas(group: list[dict]) -> list[float]:
         return [float(r["measurement_result"]["delta"]) for r in group if _counted(r)]
@@ -647,10 +642,22 @@ def title_test_summary(channel_id: str) -> dict:
                                 and holdout_mean is not None else None),
             "auto_reverts": sum(((r.get("payload") or {}).get("revert") or {}).get("auto") is True
                                 for r in mine),
-            "stopped": stopped(channel_id, InterventionLever.TITLE, scope),
+            "stopped": is_stopped(scope),
         }
-    agent = [r for r in rows if _title_arm(r) == "agent"]
     return {"paths": paths,
             "holdout": {"n": len(holdout), "judged": len(deltas(holdout)),
-                        "mean_delta": holdout_mean},
-            "trace": _trace(agent)}
+                        "mean_delta": holdout_mean}}
+
+
+def title_test_summary(channel_id: str) -> dict:
+    """The title test on the channel (Part 6 S3.5), read-only: `title_paths`
+    over its rows, and the agent's trace numbers."""
+    rows = all_rows(
+        supabase().table("interventions")
+        .select("id,arm,status,payload,applied_at,measurement_result,trajectory")
+        .eq("channel_id", channel_id).eq("lever", InterventionLever.TITLE)
+        .eq("origin", InterventionOrigin.MIDAS)
+    )
+    summary = title_paths(rows, lambda scope: stopped(channel_id, InterventionLever.TITLE, scope))
+    agent = [r for r in rows if _title_arm(r) == "agent"]
+    return {**summary, "trace": _trace(agent)}

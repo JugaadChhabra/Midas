@@ -26,6 +26,19 @@ A lever cell:
     the first that did.
   - `weeks`: every treated-vs-holdout verdict row of the channel, oldest first.
 
+The title cell (#170) has the same fields, plus `paths: {pipeline, agent}` and
+`first_verdict`. A path's figures are `lever_verdicts.title_paths`' own (the
+channel's title-test endpoint reads through the same function) with the cell
+fields added: each path against the shared holdout, declines in the agent's
+mean, a title put back after it was judged still in its path's. The cell's
+means pool both paths; its verdict, weeks and `cumulative_lift` are the lead
+path's (the one with more titles written); `stop_rule_triggered` is true when
+either path's fired. `counts.declined` / `judged` follow the title-test
+summary (a measured decline is judged *and* a decline). `first_verdict` is the
+earliest day a title row still in its window can be judged: d0
+(`title_measurement.as_of`) + `TITLE_WINDOW_DAYS` + `TRAFFIC_LAG_DAYS`; the
+response's `first_title_verdicts` is the earliest over the visible channels.
+
 The fleet row sums the counts and pools: its means and `lift` are over every
 judged row of the visible channels (the arithmetic `lever_verdicts` uses per
 channel), never an average of channel lifts; its `weeks` are pooled the same
@@ -40,7 +53,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from app import access, lever_verdicts
+from app import access, lever_verdicts, title_measurement
 from app.channel_seo import lever_states
 from app.config import settings
 from app.db import supabase
@@ -60,12 +73,22 @@ router = APIRouter(tags=["seo-results"])
 STATIC_DIR = Path(__file__).parent / "static"
 
 #: The levers the scoreboard has a column for, in column order.
-LEVERS = (InterventionLever.BACKLINKS,)
+LEVERS = (InterventionLever.BACKLINKS, InterventionLever.TITLE)
+
+#: The verdict scopes whose weekly rows a lever's cell reads: backlinks' one,
+#: and a title path's each (S3.5, `lever_verdicts.TITLE_SCOPES`).
+SCOPES = {InterventionLever.BACKLINKS: (LeverVerdictScope.TREATED_VS_HOLDOUT,),
+          InterventionLever.TITLE: tuple(lever_verdicts.TITLE_SCOPES.values())}
+
+#: Days after a data-day before the traffic report has it (the steady lag,
+#: docs/PHASE_A_FINDINGS.md A1.1; `channel_health` flags a frontier past 4).
+TRAFFIC_LAG_DAYS = 2
 
 #: When the weekly `lever_measurement` job judges (app/main.py: cron Mon 09:00 UTC).
 JUDGEMENT_WEEKDAY, JUDGEMENT_HOUR = 0, 9
 
-COLUMNS = "id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,measurement_result"
+COLUMNS = ("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,created_at,"
+           "measurement_result")
 VERDICT_COLUMNS = ("channel_id,lever,arm_scope,week_start,n_treated,n_holdout,"
                    "treated_mean_delta,holdout_mean_delta,lift,cumulative_lift,"
                    "windows_judged,verdict,stop_rule_triggered")
@@ -165,15 +188,20 @@ def _channel_cell(rows: list[dict], weeks: list[dict], shorts: set, state: dict)
     }
 
 
-def _pooled_weeks(judged: list[dict]) -> list[dict]:
+def _pooled_weeks(judged: list[dict], scope: str = LeverVerdictScope.TREATED_VS_HOLDOUT
+                  ) -> list[dict]:
     """The fleet's weeks: per judged week, treated vs holdout over every
-    visible channel's rows judged that week (and, cumulatively, up to it)."""
+    visible channel's rows judged that week (and, cumulatively, up to it). A
+    title path's scope pools that path's rows against the shared holdout."""
     weeks = sorted({w for w in map(lever_verdicts._judged_week, judged) if w is not None})
     out = []
     for week in weeks:
-        v = lever_verdicts.verdicts(judged, week, {}, min_lift=settings.BACKLINK_MIN_LIFT,
-                                    windows=settings.BACKLINK_EXPERIMENT_WINDOWS)
-        row = v.get(LeverVerdictScope.TREATED_VS_HOLDOUT)
+        if scope == LeverVerdictScope.TREATED_VS_HOLDOUT:
+            v = lever_verdicts.verdicts(judged, week, {}, min_lift=settings.BACKLINK_MIN_LIFT,
+                                        windows=settings.BACKLINK_EXPERIMENT_WINDOWS)
+        else:
+            v = lever_verdicts.title_verdicts(judged, week, {})
+        row = v.get(scope)
         if row:
             out.append({"week_start": week.isoformat(),
                         **{k: row[k] for k in ("n_treated", "n_holdout", "treated_mean_delta",
@@ -212,6 +240,127 @@ def _fleet_cell(rows: list[dict], cells: list[dict], shorts: set) -> dict:
         "stopped_week": None,
         "stopped_channels": sum(1 for c in cells if c["stop_rule_triggered"]),
         "weeks": weeks,
+    }
+
+
+def _title_judged(rows: list[dict]) -> list[dict]:
+    """The rows that enter a title mean: `midas`, the holdout or a known path's,
+    judged or put back after they were (`lever_verdicts._counted`). Titles are
+    never on a Short, so nothing is left out for that."""
+    return [r for r in rows if r.get("origin") == InterventionOrigin.MIDAS
+            and lever_verdicts._counted(r) and lever_verdicts._title_arm(r) is not None]
+
+
+def _first_verdict(rows: list[dict]) -> str | None:
+    """The earliest day a title row still in its window can be judged: d0 (the
+    measurement's own rule), the post window, then the traffic report's lag."""
+    days = [d0 + timedelta(days=settings.TITLE_WINDOW_DAYS + TRAFFIC_LAG_DAYS)
+            for r in rows if r.get("origin") == InterventionOrigin.MIDAS
+            and title_measurement._pending(r) and (d0 := title_measurement.as_of(r))]
+    return min(days).isoformat() if days else None
+
+
+def _lead_path(paths: dict) -> str:
+    """The path with more titles written (ties: the pipeline): the one whose
+    verdict and weeks stand for the cell."""
+    return max(lever_verdicts.TITLE_SCOPES, key=lambda p: paths[p]["treated"])
+
+
+def _title_counts(rows: list[dict], paths: dict) -> dict:
+    """`_counts` for titles. `declined` and `judged` follow the title-test
+    summary: a decline measured later is `judged` but still a decline, and a
+    title put back after it was judged stays in the means (so it is in both
+    `judged` and `reverted`)."""
+    counts = _counts(rows, set())
+    counts["declined"] = sum(p["declined"] for p in paths.values())
+    counts["judged"] = len(_title_judged(rows))
+    return counts
+
+
+def _path_cell(summary: dict, holdout: dict, weeks: list[dict]) -> dict:
+    """One path's figures: the title-test summary's own, then the cell fields
+    (`mean_delta` / `cumulative_lift` are the same pooled numbers under their
+    cell names) and the path's weekly verdict rows."""
+    fired = [w for w in weeks if w.get("stop_rule_triggered")]
+    latest = weeks[-1] if weeks else {}
+    return {
+        **summary,
+        "n_treated": summary["judged"], "n_holdout": holdout["judged"],
+        "treated_mean_delta": summary["mean_delta"], "holdout_mean_delta": holdout["mean_delta"],
+        "lift": summary["cumulative_lift"],
+        "windows_judged": latest.get("windows_judged") or 0,
+        "verdict": latest.get("verdict"),
+        "stop_rule_triggered": bool(fired),
+        "stopped_week": fired[0]["week_start"] if fired else None,
+        "weeks": [{k: w.get(k) for k in WEEK_FIELDS} for w in weeks],
+    }
+
+
+def _title_cell(rows: list[dict], weeks: list[dict], state: dict) -> dict:
+    """A channel's title cell: backlinks' shape, with the means pooled over both
+    paths against the shared holdout, the verdict, weeks and `cumulative_lift`
+    of the lead path, and `paths` for each against the holdout."""
+    scopes = lever_verdicts.TITLE_SCOPES
+    fired_scopes = {w["arm_scope"] for w in weeks if w.get("stop_rule_triggered")}
+    summary = lever_verdicts.title_paths(_midas(rows), lambda scope: scope in fired_scopes)
+    paths = {p: _path_cell(summary["paths"][p], summary["holdout"],
+                           [w for w in weeks if w["arm_scope"] == scopes[p]])
+             for p in scopes}
+    lead = paths[_lead_path(paths)]
+    latest = lead["weeks"][-1] if lead["weeks"] else {}
+    fired = sorted(p["stopped_week"] for p in paths.values() if p["stopped_week"])
+    return {
+        "state": state,
+        "counts": _title_counts(rows, summary["paths"]),
+        **_means(_title_judged(rows)),
+        "cumulative_lift": latest.get("cumulative_lift"),
+        "windows_judged": lead["windows_judged"],
+        "verdict": lead["verdict"],
+        "stop_rule_triggered": bool(fired),
+        "stopped_week": fired[0] if fired else None,
+        "weeks": lead["weeks"],
+        "paths": paths,
+        "first_verdict": _first_verdict(rows),
+    }
+
+
+def _midas(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r.get("origin") == InterventionOrigin.MIDAS]
+
+
+def _title_fleet(rows: list[dict], cells: list[dict]) -> dict:
+    """The fleet's title cell: counts summed, every mean and path pooled over
+    the visible channels' rows (never an average of channel lifts); no verdict
+    or stop of its own, the stopped channels counted."""
+    judged = _title_judged(rows)
+    means = _means(judged)
+    summary = lever_verdicts.title_paths(_midas(rows), lambda scope: False)
+    stopped = {p: sum(1 for c in cells if c["paths"][p]["stop_rule_triggered"])
+               for p in lever_verdicts.TITLE_SCOPES}
+    paths = {}
+    for p, scope in lever_verdicts.TITLE_SCOPES.items():
+        weeks = _pooled_weeks([r for r in judged if lever_verdicts._title_arm(r) in
+                               (p, InterventionArm.HOLDOUT)], scope)
+        path = _path_cell(summary["paths"][p], summary["holdout"], weeks)
+        paths[p] = {**path, "windows_judged": len(weeks), "verdict": None,
+                    "stop_rule_triggered": None, "stopped_week": None,
+                    "stopped": stopped[p] > 0, "stopped_channels": stopped[p]}
+    weeks = paths[_lead_path(paths)]["weeks"]
+    on = sum(1 for c in cells if c["state"]["on"])
+    return {
+        "state": {"on": on > 0, "reason": None if on else "off on every channel",
+                  "channels_on": on, "channels": len(cells)},
+        "counts": _sum_counts([c["counts"] for c in cells]),
+        **means,
+        "cumulative_lift": means["lift"],
+        "windows_judged": len(weeks),
+        "verdict": None,
+        "stop_rule_triggered": None,
+        "stopped_week": None,
+        "stopped_channels": sum(1 for c in cells if c["stop_rule_triggered"]),
+        "weeks": weeks,
+        "paths": paths,
+        "first_verdict": _first_verdict(rows),
     }
 
 
@@ -262,19 +411,23 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
         rows = [r for r in _read("interventions", COLUMNS, name, user, channel_id)
                 if r.get("channel_id") in ids] if ids else []
         verdicts = [v for v in _read("lever_verdicts", VERDICT_COLUMNS, name, user, channel_id)
-                    if v.get("channel_id") in ids
-                    and v.get("arm_scope") == LeverVerdictScope.TREATED_VS_HOLDOUT] if ids else []
+                    if v.get("channel_id") in ids and v.get("arm_scope") in SCOPES[name]
+                    ] if ids else []
         verdicts.sort(key=lambda v: v["week_start"])
-        shorts = _shorts(rows)
+        title = name == InterventionLever.TITLE
+        shorts = set() if title else _shorts(rows)
         cells = []
         for entry in out_channels:
             cid = entry["id"]
-            cell = _channel_cell([r for r in rows if r["channel_id"] == cid],
-                                 [v for v in verdicts if v["channel_id"] == cid],
-                                 shorts, states[cid][name])
+            mine = [r for r in rows if r["channel_id"] == cid]
+            weeks = [v for v in verdicts if v["channel_id"] == cid]
+            cell = (_title_cell(mine, weeks, states[cid][name]) if title
+                    else _channel_cell(mine, weeks, shorts, states[cid][name]))
             entry["levers"][name] = cell
             cells.append(cell)
-        fleet["levers"][name] = _fleet_cell(rows, cells, shorts)
+        fleet["levers"][name] = (_title_fleet(rows, cells) if title
+                                 else _fleet_cell(rows, cells, shorts))
 
+    first = fleet["levers"].get(InterventionLever.TITLE, {}).get("first_verdict")
     return {"generated_at": now.isoformat(), "next_judgement": next_judgement(now).isoformat(),
-            "channels": out_channels, "fleet": fleet}
+            "first_title_verdicts": first, "channels": out_channels, "fleet": fleet}

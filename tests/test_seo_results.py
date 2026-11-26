@@ -446,3 +446,229 @@ def test_the_rail_lists_results_after_roster(use):
 
     roster, results = js.index("href: '/team'"), js.index("href: '/results'")
     assert roster < results
+
+
+# ── titles (SEO results 03, #170) ──────────────────────────────────────────
+
+def _title(channel_id, path, arm="treated", status="judged", delta=None, *, applied=True,
+           pre=200, payload=None, created="2026-11-01T08:00:00+00:00",
+           judged_at="2026-11-10T09:00:00+00:00"):
+    """A `midas` title row. ``delta`` given → it carries a measurement result."""
+    body = dict(payload or {})
+    if path:
+        body.setdefault("path", path)
+    row = _iv(channel_id, arm, status, applied=applied, payload=body, lever="title")
+    row["created_at"] = created
+    row["measurement_result"] = (None if delta is None else
+                                 {"delta": delta, "pre": pre, "post": 5, "judged_at": judged_at})
+    return row
+
+
+def _title_rows(channel_id):
+    """The title-test endpoint's own mix of rows: both paths, declines, cancels
+    by reason, an auto-reverted and a manually reverted title."""
+    return [
+        _title(channel_id, "pipeline", delta=0.2),
+        _title(channel_id, "pipeline", "treated", "insufficient_data", 0.4, pre=10),
+        _title(channel_id, "pipeline", "treated", "cancelled", applied=False,
+               payload={"error": {"reason": "checks_failed"}}),
+        _title(channel_id, "pipeline", "treated", "cancelled", delta=-0.6,
+               payload={"revert": {"auto": True}}),
+        _title(channel_id, "pipeline", "treated", "cancelled", applied=True,
+               payload={"revert": {"auto": False}}),
+        _title(channel_id, "agent", delta=0.1),
+        _title(channel_id, "agent", "treated", "judged", -0.1, applied=False),      # a decline
+        _title(channel_id, "agent", "treated", "cancelled", applied=False,
+               payload={"error": {"reason": "turn_cap"}}),
+        _title(channel_id, "agent", "treated", "declined", applied=False),
+        _title(channel_id, None, "holdout", "judged", 0.0, applied=False),
+        _title(channel_id, None, "holdout", "judged", 0.1, applied=False),
+        _title(channel_id, None, "holdout", "holdout", applied=False),
+    ]
+
+
+def test_title_paths_against_the_shared_holdout_equal_the_title_test(use):
+    stop = _verdict(CH_A, "2026-11-16", scope="agent_vs_holdout", lever="title", windows=2,
+                    stop=True, verdict="worse", cumulative=-0.2)
+    use(_store(_title_rows(CH_A), [stop]))
+
+    cell = _cell(_results(), CH_A, "title")
+    oracle = _as(ADMIN).get(f"/channels/{CH_A}/title-test").json()
+
+    for path in ("pipeline", "agent"):
+        assert {k: cell["paths"][path][k] for k in oracle["paths"][path]} == oracle["paths"][path]
+    p, a = cell["paths"]["pipeline"], cell["paths"]["agent"]
+    # Declines sit in the agent's mean: (0.1 + -0.1) / 2, against the holdout's 0.05.
+    assert a["treated_mean_delta"] == pytest.approx(0.0)
+    assert a["holdout_mean_delta"] == pytest.approx(0.05)
+    assert a["lift"] == pytest.approx(-0.05)
+    assert (a["n_treated"], a["n_holdout"]) == (2, 2)
+    # The reverted titles stay in the pipeline's mean, as decided: (0.2 - 0.6) / 2.
+    assert p["treated_mean_delta"] == pytest.approx(-0.2)
+    assert p["lift"] == pytest.approx(-0.25)
+    assert (p["n_treated"], p["n_holdout"]) == (2, 2)
+    assert (p["stopped"], a["stopped"]) == (False, True)
+    assert (a["stop_rule_triggered"], a["stopped_week"]) == (True, "2026-11-16")
+    assert (p["stop_rule_triggered"], p["stopped_week"]) == (False, None)
+    assert [w["week_start"] for w in a["weeks"]] == ["2026-11-16"]
+    assert p["weeks"] == [] and p["verdict"] is None
+    # The cell's own means pool both paths against the holdout.
+    assert (cell["n_treated"], cell["n_holdout"]) == (4, 2)
+    assert cell["treated_mean_delta"] == pytest.approx(-0.1)
+    assert cell["holdout_mean_delta"] == pytest.approx(0.05)
+    assert cell["lift"] == pytest.approx(-0.15)
+    assert cell["stop_rule_triggered"] is True and cell["stopped_week"] == "2026-11-16"
+
+
+def test_title_counts_split_cancelled_by_reason_and_reverts_auto_from_manual(use):
+    use(_store(_title_rows(CH_A)))
+
+    counts = _cell(_results(), CH_A, "title")["counts"]
+
+    assert counts == {
+        "written": 5,                       # treated rows that reached YouTube
+        "holdout": 3, "declined": 2,        # the agent's two (one judged, one not)
+        "cancelled": {"checks_failed": 1, "turn_cap": 1},
+        "reverted": {"auto": 1, "manual": 1},
+        "judged": 6,                        # in a mean: the reverted-after-judged one too
+        "insufficient_data": 1, "awaiting": 1, "shorts_excluded": 0,
+        "team": 0, "team_judged": 0,
+    }
+
+
+def test_the_cell_shows_the_lead_paths_verdict_and_weeks(use):
+    rows = [_title(CH_A, "pipeline", delta=0.3), _title(CH_A, "pipeline", delta=0.3),
+            _title(CH_A, "agent", delta=0.0), _title(CH_A, None, "holdout", "judged", 0.0,
+                                                     applied=False)]
+    verdicts = [
+        _verdict(CH_A, "2026-11-09", scope="pipeline_vs_holdout", lever="title", lift=0.1,
+                 cumulative=0.1, windows=1, verdict="helped"),
+        _verdict(CH_A, "2026-11-16", scope="pipeline_vs_holdout", lever="title", lift=0.3,
+                 cumulative=0.2, windows=2, verdict="helped"),
+        _verdict(CH_A, "2026-11-16", scope="agent_vs_holdout", lever="title", lift=0.0,
+                 cumulative=0.0, windows=1, verdict="no_change"),
+        _verdict(CH_A, "2026-11-16", lever="backlinks"),             # another lever
+    ]
+    use(_store(rows, verdicts))
+
+    cell = _cell(_results(), CH_A, "title")
+
+    assert (cell["verdict"], cell["windows_judged"]) == ("helped", 2)
+    assert cell["cumulative_lift"] == pytest.approx(0.2)
+    assert [w["week_start"] for w in cell["weeks"]] == ["2026-11-09", "2026-11-16"]
+    assert cell["paths"]["agent"]["verdict"] == "no_change"
+    assert cell["paths"]["agent"]["windows_judged"] == 1
+
+
+def test_a_title_lever_stopped_on_both_paths_reads_stopped(use):
+    verdicts = [_verdict(CH_A, "2026-11-16", scope=s, lever="title", windows=4, stop=True)
+                for s in ("pipeline_vs_holdout", "agent_vs_holdout")]
+    use(_store(verdicts=verdicts))
+
+    with patch.multiple(settings, TITLE_AGENT_PCT=0.5):
+        page = _as(ADMIN).get(f"/channels/{CH_A}/seo").json()["levers"]["title"]
+        cell = _cell(_results(), CH_A, "title")
+
+    assert cell["state"] == page == {"on": False,
+                                     "reason": "stopped: it didn't help on this channel"}
+    assert cell["paths"]["pipeline"]["stopped"] and cell["paths"]["agent"]["stopped"]
+
+
+def test_the_fleet_pools_titles_over_every_visible_channel(use):
+    rows = ([_title(CH_A, "pipeline", delta=9.0) for _ in range(3)]
+            + [_title(CH_A, None, "holdout", "judged", 0.0, applied=False)]
+            + [_title(CH_A2, "pipeline", delta=0.0)]
+            + [_title(CH_A2, None, "holdout", "judged", 3.0, applied=False) for _ in range(3)]
+            + [_title(CH_A2, "agent", delta=1.0), _title(CH_A2, "agent", "treated", "cancelled",
+                                                         applied=False,
+                                                         payload={"error": {"reason": "turn_cap"}})])
+    use(_store(rows, [_verdict(CH_A, "2026-11-16", scope="pipeline_vs_holdout", lever="title",
+                               windows=4, stop=True)]))
+
+    fleet = _results()["fleet"]["levers"]["title"]
+
+    assert fleet["treated_mean_delta"] == pytest.approx(28 / 5)
+    assert fleet["holdout_mean_delta"] == pytest.approx(9 / 4)
+    assert fleet["lift"] == pytest.approx(28 / 5 - 9 / 4)      # not (9 + -3 + ...) / channels
+    assert (fleet["n_treated"], fleet["n_holdout"]) == (5, 4)
+    assert fleet["counts"]["written"] == 5 and fleet["counts"]["judged"] == 9
+    assert fleet["counts"]["cancelled"] == {"turn_cap": 1}
+    pipe, agent = fleet["paths"]["pipeline"], fleet["paths"]["agent"]
+    assert pipe["mean_delta"] == pytest.approx(27 / 4)
+    assert pipe["cumulative_lift"] == pytest.approx(27 / 4 - 9 / 4)
+    assert pipe["n_treated"] == 4 and pipe["n_holdout"] == 4
+    assert agent["mean_delta"] == pytest.approx(1.0)
+    assert (pipe["stopped_channels"], agent["stopped_channels"]) == (1, 0)
+    assert fleet["stopped_channels"] == 1
+    assert fleet["verdict"] is None and fleet["stop_rule_triggered"] is None
+
+
+def test_first_title_verdicts_is_the_earliest_a_pending_row_can_be_judged(use):
+    # d0 = the Pacific date of applied_at: 11-16, then 11-20. Post ends d0 + 14;
+    # the traffic report lags 2 days more.
+    rows = [_title(CH_A, "pipeline", "treated", "measuring", applied=True),
+            _title(CH_A2, "pipeline", "treated", "measuring", applied=True),
+            _title(CH_A, "pipeline", delta=0.1)]                      # judged: not pending
+    rows[0]["applied_at"] = "2026-11-20T15:00:00+00:00"
+    rows[1]["applied_at"] = "2026-11-16T15:00:00+00:00"
+    use(_store(rows))
+
+    body = _results()
+
+    assert body["first_title_verdicts"] == "2026-12-02"
+    assert _cell(body, CH_A, "title")["first_verdict"] == "2026-12-06"
+    assert _cell(body, CH_A2, "title")["first_verdict"] == "2026-12-02"
+    assert _cell(body, CH_B, "title")["first_verdict"] is None
+
+
+def test_first_title_verdicts_counts_a_holdout_by_its_created_day(use):
+    row = _title(CH_A, None, "holdout", "holdout", applied=False, created="2026-11-18T20:00:00+00:00")
+    use(_store([row]))
+
+    assert _results()["first_title_verdicts"] == "2026-12-04"
+
+
+def test_no_pending_title_rows_means_no_first_verdict_date(use):
+    use(_store([_title(CH_A, "pipeline", delta=0.1)]))
+
+    assert _results()["first_title_verdicts"] is None
+
+
+def test_title_results_are_scoped_to_the_users_channels(use):
+    rows = [_title(CH_A, "pipeline", delta=1.0), _title(CH_B, "pipeline", delta=5.0),
+            _title(CH_B, "pipeline", "treated", "measuring", applied=True)]
+    rows[2]["applied_at"] = "2026-11-10T15:00:00+00:00"
+    sb = use(_store(rows))
+
+    mine = _results(MANAGER_A)
+    theirs = _results(MANAGER_B)
+
+    assert [c["id"] for c in mine["channels"]] == [CH_A2, CH_A]   # by name
+    assert mine["fleet"]["levers"]["title"]["counts"]["written"] == 1
+    assert mine["fleet"]["levers"]["title"]["paths"]["pipeline"]["mean_delta"] == pytest.approx(1.0)
+    assert mine["first_title_verdicts"] is None             # B's pending row isn't A's
+    assert theirs["first_title_verdicts"] == "2026-11-26"
+    assert theirs["fleet"]["levers"]["title"]["counts"]["written"] == 2
+    assert _results(EXEC)["fleet"]["levers"]["title"]["counts"]["written"] == 3
+    assert _as(MANAGER_A).get("/seo/results", params={"channel_id": CH_B}).status_code == 404
+    assert sb.writes == []
+
+
+def test_the_lever_filter_keeps_only_titles(use):
+    use(_store([_title(CH_A, "pipeline", "treated", "measuring")]))
+
+    body = _results(lever="title")
+
+    assert set(_cell(body, CH_A, "title")) >= {"paths", "counts", "first_verdict"}
+    assert "backlinks" not in body["fleet"]["levers"]
+    assert "title" not in _results(lever="backlinks")["fleet"]["levers"]
+    assert _results(lever="backlinks")["first_title_verdicts"] is None
+
+
+def test_more_than_1000_title_rows_are_counted_in_full(use, capped):
+    use(_store([_title(CH_A, "pipeline", delta=0.1) for _ in range(1100)]))
+
+    cell = _cell(_results(), CH_A, "title")
+
+    assert cell["counts"]["written"] == 1100
+    assert cell["paths"]["pipeline"]["judged"] == 1100
