@@ -82,7 +82,8 @@
   // location.hash across so you'd stay on the same section, but the hrefs are
   // built once at render time, so they froze the hash you happened to arrive
   // with and then dragged it into every channel you opened afterwards.
-  const channelHref = (id) => `/channel?id=${encodeURIComponent(id)}`;
+  // A page may point the rows elsewhere (the Results page keeps you on Results).
+  const channelHref = (id) => cfg.channelHref ? cfg.channelHref(id) : `/channel?id=${encodeURIComponent(id)}`;
 
   function mount(opts) {
     cfg = opts || {};
@@ -337,14 +338,15 @@
     { id: 'running', label: 'Running', icon: 'running', href: '/' },
     { id: 'uploads', label: 'Uploads', icon: 'uploads', href: '/uploads' },
     { id: 'roster',  label: 'Roster',  icon: 'team',    href: '/team' },
-    { id: 'results', label: 'Results', icon: 'results', href: '/results' },
   ];
 
-  // The four channel sections, in order. The rail is identical on every screen
+  // The channel sections, in order. The rail is identical on every screen
   // — including the board, where they point into whichever channel you last
   // had open — so this list lives here rather than being retyped per page.
   const CHANNEL_ITEMS = [
     { id: 'autopilot', label: 'Autopilot', icon: 'autopilot' },
+    // Its own page rather than a panel of /channel: `page` is where it lives.
+    { id: 'results',   label: 'Results',   icon: 'results', page: '/results' },
     { id: 'videos',    label: 'Videos',    icon: 'videos' },
     { id: 'playlists', label: 'Playlists', icon: 'playlists' },
     { id: 'settings',  label: 'Settings',  icon: 'settings' },
@@ -361,6 +363,14 @@
     try { return localStorage.getItem(LAST_KEY) || ''; } catch { return ''; }
   }
 
+  // Where a channel section lives for a channel: its own page, or a panel of
+  // /channel. With no channel yet, a page item still opens (it picks one).
+  function channelItemHref(id, channelId) {
+    const it = CHANNEL_ITEMS.find(x => x.id === id) || {};
+    if (it.page) return channelId ? `${it.page}?id=${encodeURIComponent(channelId)}` : it.page;
+    return channelId ? `/channel?id=${encodeURIComponent(channelId)}#${id}` : '/';
+  }
+
   window.Sidebar = { mount, setChannels, setSection, shortLabel, commonWordPrefix,
-                     TOP_ITEMS, CHANNEL_ITEMS, rememberChannel, lastChannel };
+                     TOP_ITEMS, CHANNEL_ITEMS, rememberChannel, lastChannel, channelItemHref };
 })();

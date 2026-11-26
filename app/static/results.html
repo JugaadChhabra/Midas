@@ -10,125 +10,61 @@
 <style>
   body { margin:0; background:var(--ground); }
 
-  /* At a glance: one card per lever, each the tab for its table. */
-  .glance { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.75rem;
-            margin:0 0 1.1rem; }
+  /* One card per lever for this channel; each is the tab for the section below. */
+  .glance { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:.75rem; margin:0 0 1.2rem; }
   .gl { text-align:left; font:inherit; color:inherit; cursor:pointer; padding:.85rem 1rem .9rem;
         border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
         display:flex; flex-direction:column; gap:.3rem; transition:border-color .12s, box-shadow .12s; }
   .gl:hover { border-color:var(--ink-4); }
   .gl[aria-pressed="true"] { border-color:var(--color-accent); box-shadow:inset 0 0 0 1px var(--color-accent); }
-  .gl .gl-top { display:flex; align-items:center; justify-content:space-between; gap:.5rem;
-                font-size:12.5px; font-weight:650; color:var(--ink-2); }
+  .gl .gl-top { font-size:12.5px; font-weight:650; color:var(--ink-2); }
   .gl .gl-big { font-size:19px; font-weight:700; letter-spacing:-.01em; line-height:1.2; }
   .gl .gl-big.ok { color:var(--color-ok); } .gl .gl-big.err { color:var(--color-err); }
   .gl .gl-big.muted { color:var(--ink-3); }
   .gl .gl-line { font-size:12.5px; color:var(--ink-3); line-height:1.45; }
   .gl .gl-line b { color:var(--ink-1); font-weight:600; font-variant-numeric:tabular-nums; }
 
-  .res-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem 1rem; margin:0 0 .6rem; }
-  .res-bar .grow { flex:1 1 0; }
-  .res-bar h2 { font-size:15px; margin:0; }
-  .res-bar .what { font-size:12.5px; color:var(--ink-3); }
-
-  .howto { font-size:12.5px; color:var(--ink-3); margin:0 0 .8rem; line-height:1.55; }
-  .howto summary { cursor:pointer; color:var(--color-accent); width:max-content; }
-  .howto ul { margin:.4rem 0 0; padding-left:1.1rem; }
-  .howto li { margin:.15rem 0; }
-
-  /* The table: one lever, a row per channel, the whole fleet on top. */
-  .grid-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius);
-               background:var(--panel-bg); }
-  table.sb { border-collapse:separate; border-spacing:0; font-size:13px;
-             font-variant-numeric:tabular-nums; width:100%; }
-  table.sb th, table.sb td { padding:.55rem .8rem; text-align:right; white-space:nowrap;
-                             border-bottom:1px solid var(--border-soft); vertical-align:middle; }
-  table.sb tbody tr:last-child td { border-bottom:0; }
-  table.sb thead th { font-size:11.5px; font-weight:500; color:var(--ink-3);
-                      border-bottom:1px solid var(--border); }
-  table.sb th.l, table.sb td.l { text-align:left; }
-  table.sb td.name { min-width:9rem; }
-  table.sb td.name a { color:inherit; text-decoration:none; font-weight:600; }
-  table.sb td.name a:hover { text-decoration:underline; }
-  table.sb td.name .cap { display:block; font-weight:400; font-size:11px; color:var(--ink-4); margin-top:.1rem; }
-  table.sb td.name .cap.full { color:var(--color-ok); }
-  table.sb tbody.fleet td { background:var(--surface-faint); font-weight:600; border-bottom:1px solid var(--border); }
-  table.sb tbody.fleet td.name .cap { color:var(--ink-4); }
-  table.sb tr.is-off td { color:var(--ink-4); }
-  table.sb tr.is-off td.name a { color:var(--ink-3); font-weight:500; }
-  table.sb tbody.off-head td { font-size:11px; color:var(--ink-4); text-transform:uppercase;
-                               letter-spacing:.04em; padding:.6rem .8rem .3rem; background:var(--surface-faint); }
-  table.sb .of { color:var(--ink-4); font-weight:400; }
-  table.sb .zero { color:var(--ink-4); }
-
-  /* The result: a plain word, then why. */
-  .st { display:flex; flex-direction:column; align-items:flex-start; gap:.15rem; }
-  .st .why { font-size:11.5px; color:var(--ink-4); white-space:normal; max-width:16rem; }
-
-  /* The lift: coloured only once there is a verdict. */
-  table.sb td.lift { min-width:6rem; }
-  table.sb td.lift .n { font-weight:650; font-size:13.5px; }
-  table.sb td.lift .n.ok { color:var(--color-ok); } table.sb td.lift .n.err { color:var(--color-err); }
-  table.sb td.lift .u { font-size:10.5px; font-weight:500; color:var(--ink-4); margin-left:.15rem; }
-  table.sb td.lift .early { display:block; font-size:11.5px; color:var(--ink-3); margin-top:.1rem; }
-  table.sb td.lift .early i { color:var(--ink-2); font-weight:600; }
-  table.sb [data-open] { cursor:pointer; border-radius:5px; padding:.2rem .35rem; margin:-.2rem -.35rem; display:inline-block; }
-  table.sb [data-open]:hover, table.sb [data-open]:focus-visible { background:var(--surface-tint); outline:none; }
-  table.sb [data-hv] { cursor:default; }
-  table.sb [data-open][data-hv] { cursor:pointer; }
-
-  table.sb td.trend { padding:.3rem .8rem; }
-  .spark-svg { display:block; margin-left:auto; overflow:visible; }
+  /* The selected lever: its numbers, then the videos behind them. */
+  .panel { border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg); padding:1rem 1.1rem; }
+  .lv-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:.4rem 1rem; margin:0 0 .9rem; }
+  .lv-head h2 { font-size:16px; margin:0; }
+  .lv-head .what { font-size:12.5px; color:var(--ink-3); }
+  .lv-head .grow { flex:1 1 0; }
+  .lv-head a { font-size:12.5px; color:var(--color-accent); }
+  .stats { display:flex; flex-wrap:wrap; gap:.8rem 2rem; align-items:flex-end; padding:0 0 1rem;
+           border-bottom:1px solid var(--border-soft); margin:0 0 1rem; font-variant-numeric:tabular-nums; }
+  .stat .k { display:block; font-size:11.5px; color:var(--ink-3); margin:0 0 .2rem; }
+  .stat .v { font-size:20px; font-weight:700; letter-spacing:-.01em; }
+  .stat .v.ok { color:var(--color-ok); } .stat .v.err { color:var(--color-err); }
+  .stat .v small { font-size:12px; font-weight:500; color:var(--ink-3); margin-left:.2rem; }
+  .stat .s { display:block; font-size:11.5px; color:var(--ink-4); margin-top:.15rem; }
+  .stat .v i { font-weight:650; }
+  .spark-svg { display:block; overflow:visible; }
   .spark-svg .zl { stroke:var(--border); stroke-dasharray:2 2; }
   .spark-svg .ln { fill:none; stroke:var(--ink-3); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
   .spark-svg .pt { fill:var(--ink-3); }
   .spark-svg.v-helped .ln { stroke:var(--color-ok); } .spark-svg.v-helped .pt { fill:var(--color-ok); }
   .spark-svg.v-worse .ln { stroke:var(--color-err); } .spark-svg.v-worse .pt { fill:var(--color-err); }
+  .zero { color:var(--ink-4); }
+  .of { color:var(--ink-4); font-weight:400; }
 
-  /* What happened lately: folded to one line until opened. */
-  .week { border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
-          margin:1rem 0 0; padding:.65rem .9rem; }
-  .week > summary { cursor:pointer; display:flex; gap:.8rem; align-items:baseline; flex-wrap:wrap; font-size:13px; }
-  .week > summary h2 { font-size:13.5px; font-weight:650; margin:0; display:inline; }
-  .week .tot { color:var(--ink-3); } .week .tot b { color:var(--ink-1); font-weight:650; }
-  .week-day { border-top:1px solid var(--border-soft); margin-top:.5rem; padding-top:.4rem; }
-  .week-day > summary { cursor:pointer; display:flex; gap:.9rem; align-items:baseline; font-size:13px; flex-wrap:wrap; }
-  .week-day .d { font-weight:600; min-width:7rem; }
-  .week-day .kc { color:var(--ink-3); } .week-day .kc b { color:var(--ink-1); font-weight:650; }
-  .week-day ul { list-style:none; margin:.4rem 0 .2rem; padding:0; font-size:12.5px; }
-  .week-day li { display:flex; gap:.7rem; padding:.18rem 0; align-items:baseline; }
-  .week-day li .t { color:var(--ink-4); width:3rem; flex:none; font-variant-numeric:tabular-nums; }
-  .week-day li .k { width:5.2rem; flex:none; font-weight:600; }
-  .week-day li .k-written { color:var(--color-ok); } .week-day li .k-judged { color:var(--ink-2); }
-  .week-day li .k-reverted, .week-day li .k-stopped, .week-day li .k-cancelled { color:var(--color-err); }
+  .more-nums { font-size:12.5px; margin:-.4rem 0 1rem; }
+  .more-nums summary { cursor:pointer; color:var(--color-accent); width:max-content; }
+  .more-nums .box { max-width:30rem; margin:.5rem 0 0; font-variant-numeric:tabular-nums; }
+  .hc-head, .hc-total { display:none; }
+  .hc-row { display:flex; align-items:center; gap:.45rem; margin:.2rem 0; }
+  .hc-row b { margin-left:auto; font-weight:600; }
+  .hc-foot { margin:.5rem 0 0; padding:.45rem 0 0; border-top:1px solid var(--border-soft); color:var(--ink-3); }
 
-  .hovercard { position:fixed; z-index:50; pointer-events:none; min-width:14rem;
-    padding:.75rem .85rem; border-radius:var(--radius-md); background:var(--panel-bg);
-    border:1px solid var(--border); box-shadow:var(--shadow-2); font-size:12.5px;
-    font-variant-numeric:tabular-nums; opacity:0; transform:translateY(4px);
-    transition:opacity .12s ease-out, transform .12s ease-out; }
-  .hovercard.on { opacity:1; transform:none; }
-  .hovercard .hc-head { font-size:11.5px; color:var(--ink-3); margin:0 0 .35rem; }
-  .hovercard .hc-total { font-size:22px; font-weight:700; letter-spacing:-.01em; line-height:1.1; }
-  .hovercard .hc-total small { font-size:12px; font-weight:500; color:var(--ink-3); margin-left:.3rem; }
-  .hovercard .hc-row { display:flex; align-items:center; gap:.45rem; margin:.2rem 0; }
-  .hovercard .hc-row b { margin-left:auto; font-weight:600; }
-  .hovercard .hc-foot { margin:.5rem 0 0; padding:.45rem 0 0; border-top:1px solid var(--border-soft);
-                        color:var(--ink-3); }
+  .howto { font-size:12.5px; color:var(--ink-3); margin:.9rem 0 0; line-height:1.55; }
+  .howto summary { cursor:pointer; color:var(--color-accent); width:max-content; }
+  .howto ul { margin:.4rem 0 0; padding-left:1.1rem; }
 
-  /* The changes modal (#173): a cell opens the rows behind it. */
-  .modal.chg { max-width:960px; width:calc(100vw - 2rem); max-height:88vh;
-               display:flex; flex-direction:column; }
-  .chg-head { margin:0 0 .8rem; }
-  .chg-head h2 { font-size:16px; margin:0 0 .25rem; }
-  .chg-head .sub { font-size:12.5px; color:var(--ink-3); line-height:1.5; }
-  .chg-tools { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; margin:0 0 .8rem;
-               font-size:12.5px; }
-  .chg-tools a { color:var(--color-accent); }
-  .chg-list { overflow-y:auto; margin:0 0 1rem; padding-right:.25rem; }
+  .chg-tools { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; margin:0 0 .6rem; font-size:12.5px; }
+  .chg-tools h3 { font-size:13.5px; margin:0; }
+  .chg-tools .grow { flex:1 1 0; }
   .chg-group + .chg-group { margin-top:1.3rem; }
-  .chg-group h3 { display:flex; align-items:baseline; gap:.6rem; margin:0 0 .6rem;
-                  font-size:13.5px; font-weight:650; }
+  .chg-group h3 { display:flex; align-items:baseline; gap:.6rem; margin:0 0 .4rem; font-size:13px; font-weight:650; color:var(--ink-2); }
   .chg-group h3 .n { font-size:12px; font-weight:500; color:var(--ink-3); }
   .chg-row { display:grid; grid-template-columns:132px 1fr auto; gap:.9rem; align-items:start;
              padding:.65rem 0; border-top:1px solid var(--border-soft); }
@@ -144,54 +80,42 @@
   .chg-row .what { font-size:12.5px; color:var(--ink-2); line-height:1.5; }
   .chg-row .what .was { color:var(--ink-4); text-decoration:line-through; }
   .chg-row .what ul { margin:.2rem 0 0; padding-left:1.1rem; }
-  .chg-row .what .of { color:var(--ink-4); }
   .chg-row .res { text-align:right; font-variant-numeric:tabular-nums; min-width:7.5rem; font-size:12.5px; }
   .chg-row .res b { display:block; font-size:16px; letter-spacing:-.01em; }
   .chg-row .res .up { color:var(--color-ok); } .chg-row .res .down { color:var(--color-err); }
   .chg-row .res .sm { display:block; color:var(--ink-4); font-size:11.5px; margin-top:.15rem; }
   .chg-more { text-align:center; margin:.8rem 0 0; }
+  @media (max-width: 640px) {
+    .chg-row { grid-template-columns:88px 1fr; }
+    .chg-row .res { grid-column:2; text-align:left; }
+  }
 
+  .week { border:1px solid var(--border); border-radius:var(--radius); background:var(--panel-bg);
+          margin:1rem 0 0; padding:.65rem .9rem; }
+  .week > summary { cursor:pointer; display:flex; gap:.8rem; align-items:baseline; flex-wrap:wrap; font-size:13px; }
+  .week > summary h2 { font-size:13.5px; font-weight:650; margin:0; display:inline; }
+  .week .tot { color:var(--ink-3); } .week .tot b { color:var(--ink-1); font-weight:650; }
+  .week ul { list-style:none; margin:.5rem 0 .2rem; padding:0; font-size:12.5px; }
+  .week li { display:flex; gap:.7rem; padding:.18rem 0; align-items:baseline; }
+  .week li .t { color:var(--ink-4); width:6.5rem; flex:none; font-variant-numeric:tabular-nums; }
+  .week li .k { width:5.2rem; flex:none; font-weight:600; }
+  .week li .k-written { color:var(--color-ok); } .week li .k-judged { color:var(--ink-2); }
+  .week li .k-reverted, .week li .k-stopped, .week li .k-cancelled { color:var(--color-err); }
 </style>
 </head>
 <body>
   <div class="app-shell" id="app-shell">
   <main class="app-main">
     <header class="page-head">
-      <h1 class="page-title">Results</h1>
+      <h1 class="page-title" id="title">Results</h1>
     </header>
-    <p class="page-meta" id="meta">Is Midas helping? One card per kind of change; pick one to see it per channel.</p>
+    <p class="page-meta" id="meta">Is Midas helping this channel?</p>
 
     <div class="glance" id="glance" role="group" aria-label="What Midas changes"></div>
-
-    <div class="res-bar">
-      <h2 id="lever-title"></h2><span class="what" id="lever-what"></span>
-      <span class="grow"></span>
-      <div id="ch-filter"></div>
-      <a class="btn btn-link" id="csv-results" href="/seo/results.csv" download title="A line per channel and lever">Download CSV</a>
-      <a class="btn btn-link" id="csv-changes" href="/seo/results/changes.csv" download title="Every change, one per line">Changes CSV</a>
-    </div>
-    <details class="howto">
-      <summary>How to read this</summary>
-      <ul>
-        <li><b>Result</b> is the answer: <b>Helping</b>, <b>No clear effect</b> or <b>Hurting</b> comes from
-          the weekly judgement (Mondays). <b>Stopped</b> means it didn't help there, so Midas switched it off on
-          that channel.</li>
-        <li><b>Lift</b> is how much more a changed video gained than the videos Midas deliberately left
-          alone (1 in 5 is held back for comparison). Backlinks: extra views per week arriving from the
-          linking video. Titles: the extra change in browse, search and suggested views, as a %.</li>
-        <li><span class="pill pill--sm pill--info">early</span> <i>in italics</i> is a first look at changes
-          still being measured. It is not a verdict and never stops or undoes anything.</li>
-        <li>Click a lift to see the videos behind it; hover it for the detail.</li>
-      </ul>
-    </details>
-
-    <div id="board"><div class="skel" data-skeleton data-rows="5"></div></div>
-
+    <section class="panel" id="lever"><div class="skel" data-skeleton data-rows="4"></div></section>
     <details class="week" id="week" hidden></details>
   </main>
   </div>
-
-  <div class="hovercard" id="hovercard" role="tooltip" aria-hidden="true"></div>
 
 <script src="/static/swr.js"></script>
 <script src="/static/components.js"></script>
@@ -202,20 +126,16 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// ── Rail ──────────────────────────────────────────────────────────────
-const railChannel = Sidebar.lastChannel();
-const railHref = (section) => railChannel
-  ? `/channel?id=${encodeURIComponent(railChannel)}#${section}` : '/';
+// ── Which channel: ?id=, else the last one opened, else the first ─────
+const params = new URLSearchParams(location.search);
+let channelId = params.get('id') || Sidebar.lastChannel() || '';
+let channelName = '';
 Sidebar.mount({
-  items: Sidebar.TOP_ITEMS
-    .concat([{ section: '' }])
-    .concat(Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: railHref(it.id) }))),
+  items: Sidebar.TOP_ITEMS.concat([{ section: '' }],
+    Sidebar.CHANNEL_ITEMS.map(it => ({ ...it, href: Sidebar.channelItemHref(it.id, channelId) }))),
   activeId: 'results',
+  channelHref: (id) => `/results?id=${encodeURIComponent(id)}`,
 });
-fetch('/auth/channels').then(r => r.ok ? r.json() : []).then(chs => {
-  Sidebar.setChannels(chs, chs.some(c => c.id === railChannel) ? railChannel : null,
-                      { open: false });
-}).catch(() => {});
 
 // ── Formatting ────────────────────────────────────────────────────────
 const num = (n) => Number(n || 0).toLocaleString();
@@ -225,7 +145,6 @@ const wk = (iso) => iso ? new Date(iso + 'T00:00:00Z').toLocaleDateString(undefi
   { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
 const plural = (n, w) => `${num(n)} ${w}${n === 1 ? '' : 's'}`;
 
-// ── The levers, in card order ─────────────────────────────────────────
 // `fmt` writes a lift: backlinks and playlists per week, titles as the % a log-ratio is.
 const LEVERS = [
   { id: 'backlinks', label: 'Backlinks', what: 'Midas adds up to 3 links to related videos in the description',
@@ -238,16 +157,10 @@ const LEVERS = [
     kind: 'short_link' },
 ];
 const LEVER_KEY = 'midas:results:lever';
-let current = new URLSearchParams(location.search).get('lever')
+let current = params.get('lever')
   || (() => { try { return localStorage.getItem(LEVER_KEY) || 'backlinks'; } catch { return 'backlinks'; } })();
 if (!LEVERS.some(l => l.id === current)) current = 'backlinks';
 
-let channelFilter = '';
-let allChannels = [];        // from the unfiltered read: the filter's options
-let shown = null;
-const cards = [];            // hover-card bodies, by index
-
-// A sparkline of the weekly lift, oldest to newest, with a zero line.
 function spark(weeks, verdict) {
   const vals = (weeks || []).map(w => w.lift).filter(v => v != null);
   if (!vals.length) return '<span class="zero">·</span>';
@@ -300,7 +213,7 @@ function statusOf(c) {
   if (c.verdict) return { key: c.verdict, word: VERDICT[c.verdict][0], pill: VERDICT[c.verdict][1],
                           why: plural(c.windows_judged, 'week') + ' judged' };
   if (c.early && c.early.lift != null)
-    return { key: 'early', word: 'Too early', pill: 'pill--info', why: 'measuring; early read under the lift' };
+    return { key: 'early', word: 'Too early', pill: 'pill--info', why: 'still being measured' };
   if (c.first_verdict) return { key: 'waiting', word: 'Waiting', pill: 'pill--info', why: `first verdict ~${wk(c.first_verdict)}` };
   if (!c.counts.written) return { key: 'idle', word: 'Nothing written yet', pill: 'pill--neutral', why: '' };
   return { key: 'waiting', word: 'Waiting', pill: 'pill--info', why: 'no verdict yet' };
@@ -338,107 +251,7 @@ function liftHtml(lever, x, verdict, early) {
   const cls = verdict === 'helped' ? 'ok' : verdict === 'worse' ? 'err' : '';
   return `<span class="n ${cls}">${lever.fmt(x, 1)}</span>${lever.per ? `<span class="u">${esc(lever.per)}</span>` : ''}`;
 }
-const hv = (body) => { cards.push(body); return cards.length - 1; };
-
-// ── Rows: [off?, cells html] per lever kind ───────────────────────────
-const HEADS = {
-  default: `<th class="l">Channel</th><th class="l">Result</th><th title="Hover for detail, click for the videos">Lift</th>
-    <th>Weekly trend</th><th title="Changes Midas wrote to YouTube">Written</th>
-    <th title="Changes with a measured result">Judged</th><th title="Changes still inside their measurement window">Measuring</th>`,
-  playlist: `<th class="l">Channel</th><th class="l">Answer</th><th title="Hover for detail, click for the playlists">Lift</th>
-    <th>Weekly trend</th><th title="Treated playlists that got their additions">Playlists changed</th>
-    <th title="Playlists with a measured result">Judged</th><th title="Playlists left alone for comparison">Held back</th>`,
-  short_link: `<th class="l">Channel</th><th class="l">Team's use</th><th title="Recommendations nobody acted on yet">Recommended, waiting</th>
-    <th title="Targets the team marked as set in Studio">Set by team</th>
-    <th title="Short → video pairs seen in the traffic">Seen in traffic</th>
-    <th title="Mean change in views per week across the team's links (latest week)">Team effect</th>`,
-};
-
-function leverRow(name, lever, c, fleet, chId) {
-  const s = fleet ? null : statusOf(c);
-  const k = c.counts;
-  let result;
-  if (fleet) {
-    const on = c.state.channels_on, all = c.state.channels;
-    result = `<div class="st"><span>${num(on)} of ${num(all)} channels on</span>${c.stopped_channels
-      ? `<span class="why">${plural(c.stopped_channels, 'channel')} stopped</span>` : ''}</div>`;
-  } else result = stPill(s);
-  const verdict = fleet ? null : c.verdict;
-  return [!fleet && s.key === 'off' && !k.written, `
-    <td class="l">${result}</td>
-    <td class="lift"><span data-hv="${hv(hoverBody(name, lever, c, fleet))}" ${openAttr(chId, lever)} tabindex="0">${liftHtml(lever, c.lift, verdict, c.early)}</span>${earlyLine(lever, c.early)}</td>
-    <td class="trend">${spark(c.weeks, verdict)}</td>
-    <td class="${k.written ? '' : 'zero'}">${num(k.written)}</td>
-    <td class="${k.judged ? '' : 'zero'}">${num(k.judged)}</td>
-    <td class="${k.awaiting ? '' : 'zero'}">${num(k.awaiting)}</td>`];
-}
-
-const ANSWER = { yes: ['Helping', 'pill--ok', 'playlists with additions earned more starts'],
-                 no: ["Didn't help", 'pill--err', 'stopped'],
-                 pending: ['Still counting', 'pill--info', 'the test runs 4 weeks'] };
-function playlistRow(name, lever, c, fleet, chId) {
-  const a = c.arms;
-  const arms = (k) => a[k] || 0;
-  const total = Object.values(a).reduce((x, y) => x + y, 0);
-  const body = hv(`<div class="hc-head">${esc(name)} · ${esc(lever.label)}</div>
-    ${fleet ? '' : `<div class="hc-total">${c.lift == null ? '—' : lever.fmt(c.lift, 2)}<small>lift, ${esc(lever.unit)}</small></div>
-    <div class="hc-row">Cumulative lift (stop rule)<b>${c.cumulative_lift == null ? '—' : lever.fmt(c.cumulative_lift, 2)}</b></div>
-    <div class="hc-row">Weeks judged<b>${c.windows_judged}</b></div>
-    <div class="hc-row">Test ran<b>${c.test_start ? esc(wk(c.test_start)) + ' – ' + esc(wk(c.test_end)) : '—'}</b></div>`}
-    <div class="hc-foot">${Object.entries(a).map(([k, n]) =>
-      `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(n)}</b></div>`).join('') || 'No test drawn.'}</div>`);
-  let result;
-  if (fleet) {
-    const ans = Object.values(c.answers);
-    result = ans.length ? `<div class="st"><span>${ans.filter(x => x === 'yes').length} helping · ${ans.filter(x => x === 'no').length} didn't · ${ans.filter(x => x === 'pending').length} counting</span></div>`
-                        : '<span class="zero">no test drawn</span>';
-  } else if (!total) result = stPill({ word: 'No test', pill: 'pill--neutral', why: 'no test drawn on this channel' });
-  else {
-    const [word, pill, why] = ANSWER[c.answer];
-    result = stPill({ word, pill, why: c.stop_rule_triggered ? `stopped wk of ${wk(c.stopped_week)}` : why });
-  }
-  const verdict = fleet ? null : c.verdict;
-  const dosed = arms('dosed'), judged = arms('judged') + arms('insufficient_data');
-  return [!fleet && !total, `
-    <td class="l">${result}</td>
-    <td class="lift"><span data-hv="${body}" ${openAttr(chId, lever)} tabindex="0">${fleet ? '<span class="zero">—</span>' : liftHtml(lever, c.lift, verdict)}</span></td>
-    <td class="trend">${fleet ? '<span class="zero">·</span>' : spark(c.weeks, verdict)}</td>
-    <td class="${dosed ? '' : 'zero'}">${num(dosed)}</td>
-    <td class="${judged ? '' : 'zero'}">${num(judged)}</td>
-    <td class="${arms('holdout') ? '' : 'zero'}">${num(arms('holdout'))}</td>`];
-}
-
-function shortLinkRow(name, lever, c, fleet, chId) {
-  const r = c.recommendations;
-  const used = r.set + r.not_chosen + r.dismissed + c.team;
-  const body = hv(`<div class="hc-head">${esc(name)} · ${esc(lever.label)} (the team's work)</div>
-    ${['pending', 'set', 'not_chosen', 'dismissed'].map(k =>
-      `<div class="hc-row">${esc(k.replace('_', ' '))}<b>${num(r[k])}</b></div>`).join('')}
-    <div class="hc-foot">
-      <div class="hc-row">Seen in Short → video traffic<b>${num(c.seen)}</b></div>
-      <div class="hc-row">Team links recorded<b>${num(c.team)}, ${num(c.team_judged)} judged</b></div>
-      ${c.verdict ? `<div class="hc-row">Latest week (${esc(wk(c.verdict.week_start))})<b>${c.verdict.n_treated} links, mean ${c.verdict.treated_mean_delta == null ? '—' : signed(c.verdict.treated_mean_delta, 2)} views/wk</b></div>` : ''}
-    </div>`);
-  const nothing = !used && !r.pending;
-  const result = fleet ? `<div class="st"><span>${plural(c.team, 'team link')}</span></div>`
-    : used ? stPill({ word: 'In use', pill: 'pill--ok', why: plural(c.team, 'link') + ' recorded' })
-    : r.pending ? stPill({ word: 'Not used yet', pill: 'pill--warn', why: 'recommendations waiting on the Short links card' })
-    : stPill({ word: 'Nothing recommended', pill: 'pill--neutral', why: '' });
-  return [!fleet && nothing, `
-    <td class="l">${result}</td>
-    <td class="${r.pending ? '' : 'zero'}">${num(r.pending)}</td>
-    <td><span data-hv="${body}" ${openAttr(chId, lever)} tabindex="0">${num(r.set)}</span></td>
-    <td class="${c.seen ? '' : 'zero'}">${num(c.seen)}</td>
-    <td>${c.verdict && c.verdict.treated_mean_delta != null ? `${signed(c.verdict.treated_mean_delta, 1)}<span class="of">/wk</span>` : '<span class="zero">—</span>'}</td>`];
-}
-const ROWS = { playlist: playlistRow, short_link: shortLinkRow };
-
-// ── The changes modal (#173) ──────────────────────────────────────────
-// A channel's cell opens the rows behind it from /seo/results/changes.
-const openAttr = (chId, lever) => chId == null ? ''
-  : `data-open="${esc(chId)}|${esc(lever.id)}" role="button" title="Open the changes behind this cell"`;
 const yt = (id) => `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
-const chStat = { open: null };
 
 function videoThumb(id, v) {
   const img = v && v.thumbnail_url ? `<img src="${esc(v.thumbnail_url)}" loading="lazy" alt="" />` : '';
@@ -519,226 +332,7 @@ function groupChanges(lever, d) {
     ['Held back and declined', held],
   ].filter(([, rows]) => rows.length);
 }
-
-function openChanges(chId, leverId) {
-  const lever = LEVERS.find(l => l.id === leverId);
-  const ch = (shown.channels.find(c => c.id === chId) || { id: chId });
-  const render = lever.kind === 'playlist' ? armRow : lever.kind === 'short_link' ? recRow : changeRow;
-  let showHeld = false, rows = [], kind = '', next = null, gen = 0;
-
-  const back = document.createElement('div');
-  back.className = 'modal-backdrop';
-  back.innerHTML = `<div class="modal chg" role="dialog" aria-modal="true" aria-labelledby="chg-title">
-    <div class="chg-head"><h2 id="chg-title"></h2>
-      <div class="sub">${esc(lever.what)}. <span class="pill pill--sm pill--info">early</span> rows are
-        <i>early, not a verdict</i>.</div></div>
-    <div class="chg-tools">
-      ${lever.kind === 'short_link' ? '' : '<label class="field-check"><input type="checkbox" id="chg-held" /> <span>Show held back</span></label>'}
-      <a href="/channel?id=${encodeURIComponent(chId)}">Open the channel page</a></div>
-    <div class="chg-list" id="chg-list"><div class="skel" data-skeleton data-rows="3"></div></div>
-    <div class="modal-actions"><button class="btn modal-cancel">Close</button></div></div>`;
-  back.querySelector('#chg-title').textContent = `${ch.name || chId} · ${lever.label}`;
-  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
-  function onKey(e) { if (e.key === 'Escape') close(); }
-  back.querySelector('.modal-cancel').onclick = close;
-  back.addEventListener('click', (e) => { if (e.target === back) close(); });
-  document.addEventListener('keydown', onKey);
-  document.body.appendChild(back);
-  back.querySelector('.modal-cancel').focus();
-  const list = back.querySelector('#chg-list');
-
-  function draw() {
-    const groups = groupChanges(lever, { kind, changes: rows });
-    list.innerHTML = groups.length
-      ? groups.map(([title, items]) => `<div class="chg-group"><h3>${esc(title)}<span class="n">${items.length}</span></h3>
-          ${items.map(c => render(lever, c)).join('')}</div>`).join('')
-        + (next != null ? '<div class="chg-more"><button class="btn" id="chg-more">Show more</button></div>' : '')
-      : '<div class="muted">Nothing here yet.</div>';
-    const more = list.querySelector('#chg-more');
-    if (more) more.onclick = () => load(true);
-  }
-  async function load(append) {
-    const mine = ++gen;
-    const q = new URLSearchParams({ channel_id: chId, lever: leverId, order: 'delta', limit: '100',
-      offset: append ? String(next) : '0' });
-    if (!showHeld && lever.kind !== 'short_link') q.set('arm', 'treated');
-    try {
-      const r = await fetch('/seo/results/changes?' + q);
-      if (!r.ok) throw new Error(r.status);
-      const d = await r.json();
-      if (mine !== gen) return;
-      rows = append ? rows.concat(d.changes) : d.changes;
-      kind = d.kind; next = d.next_offset;
-      draw();
-    } catch (err) {
-      if (mine === gen) list.innerHTML = `<em class="muted">Could not load the changes: ${esc(err && err.message || err)}</em>`;
-    }
-  }
-  const held = back.querySelector('#chg-held');
-  if (held) held.onchange = () => { showHeld = held.checked; load(false); };
-  load(false);
-}
-$('board').addEventListener('click', (e) => {
-  const el = e.target.closest('[data-open]');
-  if (!el || !shown) return;
-  const [chId, leverId] = el.dataset.open.split('|');
-  $('hovercard').classList.remove('on');
-  openChanges(chId, leverId);
-});
-$('board').addEventListener('keydown', (e) => {
-  const el = e.target.closest && e.target.closest('[data-open]');
-  if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
-});
-
-
-// Today's writes against the daily cap, the figure the channel page shows.
-function todayCap(t) {
-  if (!t) return '';
-  const full = t.cap != null && t.written >= t.cap;
-  return `<span class="cap${full ? ' full' : ''}" title="Changes Midas wrote today, against the channel's daily cap">${num(t.written)} of ${t.cap == null ? '–' : num(t.cap)} changes today</span>`;
-}
-
-// ── At a glance: one card per lever, a one-line answer ────────────────
-function glance(lever, data) {
-  const f = data.fleet.levers[lever.id];
-  const cells = data.channels.map(ch => ch.levers[lever.id]).filter(Boolean);
-  let big, cls = '', lines = [];
-  if (lever.kind === 'playlist') {
-    const ans = Object.values(f.answers || {});
-    const yes = ans.filter(a => a === 'yes').length, no = ans.filter(a => a === 'no').length;
-    if (!ans.length) { big = 'No test drawn'; cls = 'muted'; }
-    else if (yes) { big = `Helping on ${yes} of ${ans.length}`; cls = 'ok'; }
-    else if (no) { big = "Didn't help"; cls = 'err'; }
-    else { big = 'Still counting'; cls = 'muted'; }
-    const a = f.arms || {};
-    lines.push(`<b>${num(a.dosed || 0)}</b> playlists changed · <b>${num(a.holdout || 0)}</b> held back`);
-  } else if (lever.kind === 'short_link') {
-    const r = f.recommendations;
-    if (f.team) { big = `${plural(f.team, 'link')} set`; cls = 'ok'; }
-    else if (r.pending) { big = 'Not used yet'; cls = 'muted'; }
-    else { big = 'Nothing recommended'; cls = 'muted'; }
-    lines.push(`<b>${num(r.pending)}</b> recommendations waiting · <b>${num(f.seen)}</b> seen in traffic`);
-  } else {
-    const st = cells.map(statusOf);
-    const n = (key) => st.filter(s => s.key === key).length;
-    const helped = n('helped'), worse = n('worse') + n('stopped'), judged = helped + worse + n('no_change');
-    if (!judged) {
-      big = f.early && f.early.lift != null ? 'Too early to tell' : 'No results yet'; cls = 'muted';
-      if (f.early && f.early.lift != null)
-        lines.push(`Early read <b><i>${lever.fmt(f.early.lift, 1)}${esc(lever.per)}</i></b>, not a verdict`);
-      const first = data.first_title_verdicts;
-      if (lever.id === 'title' && first) lines.push(`First verdicts ~<b>${esc(wk(first))}</b>`);
-    } else {
-      if (helped && helped >= worse) { big = `Helping on ${helped} of ${judged}`; cls = 'ok'; }
-      else if (worse) { big = `Not helping on ${worse} of ${judged}`; cls = 'err'; }
-      else { big = 'No clear effect'; cls = 'muted'; }
-      if (f.lift != null) lines.push(`Overall lift <b>${lever.fmt(f.lift, 1)}${esc(lever.per)}</b>`);
-    }
-    lines.push(`<b>${num(f.counts.written)}</b> written · <b>${num(f.counts.awaiting)}</b> measuring`);
-  }
-  return `<button type="button" class="gl" data-lever="${esc(lever.id)}" aria-pressed="${lever.id === current}">
-    <span class="gl-top">${esc(lever.label)}</span>
-    <span class="gl-big ${cls}">${esc(big)}</span>
-    ${lines.map(l => `<span class="gl-line">${l}</span>`).join('')}</button>`;
-}
-
-function paint(data) {
-  shown = data;
-  cards.length = 0;
-  $('hovercard').classList.remove('on');
-  const next = new Date(data.next_judgement);
-  $('meta').textContent = `Is Midas helping? Next weekly judgement ${next.toLocaleString(undefined,
-    { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      hour12: false, timeZone: 'UTC' })} UTC.`;
-  if (!data.channels.length) {
-    $('glance').innerHTML = '';
-    $('board').innerHTML = '<div class="dt"><div class="dt-empty muted">No channels are mapped to you yet; ask the admin.</div></div>';
-    return;
-  }
-  const levers = LEVERS.filter(l => data.fleet.levers[l.id]);
-  if (!levers.some(l => l.id === current)) current = levers[0].id;
-  const lever = LEVERS.find(l => l.id === current);
-  $('glance').innerHTML = levers.map(l => glance(l, data)).join('');
-  $('lever-title').textContent = lever.label;
-  $('lever-what').textContent = lever.what;
-
-  const row = ROWS[lever.kind] || leverRow;
-  const fleet = row('All channels', lever, data.fleet.levers[lever.id], true, null)[1];
-  const on = [], off = [];
-  for (const ch of data.channels) {
-    const [isOff, html] = row(ch.name || ch.id, lever, ch.levers[lever.id], false, ch.id);
-    const tr = `<tr class="${isOff ? 'is-off' : ''}"><td class="l name">
-      <a href="/channel?id=${encodeURIComponent(ch.id)}">${esc(ch.name || ch.id)}</a>${todayCap(ch.today)}</td>${html}</tr>`;
-    (isOff ? off : on).push(tr);
-  }
-  const cols = (HEADS[lever.kind] || HEADS.default).match(/<th/g).length;
-  $('board').innerHTML = `<div class="grid-wrap"><table class="sb">
-    <thead><tr>${HEADS[lever.kind] || HEADS.default}</tr></thead>
-    ${data.channels.length > 1 ? `<tbody class="fleet"><tr><td class="l name">All channels<span class="cap">every channel pooled</span></td>${fleet}</tr></tbody>` : ''}
-    <tbody>${on.join('')}</tbody>
-    ${off.length ? `<tbody class="off-head"><tr><td class="l" colspan="${cols}">Not running here (${off.length})</td></tr></tbody><tbody>${off.join('')}</tbody>` : ''}
-    </table></div>`;
-}
-
-$('glance').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-lever]');
-  if (!b) return;
-  current = b.dataset.lever;
-  try { localStorage.setItem(LEVER_KEY, current); } catch {}
-  if (shown) paint(shown);
-});
-
-(function wireHoverCard() {
-  const card = $('hovercard');
-  let on = null;
-  const hide = () => { on = null; card.classList.remove('on'); card.setAttribute('aria-hidden', 'true'); };
-  const show = (el) => {
-    if (on === el) return;
-    on = el;
-    card.innerHTML = cards[Number(el.dataset.hv)] || '';
-    const r = el.getBoundingClientRect();
-    const w = card.offsetWidth, h = card.offsetHeight;
-    const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
-    const top = r.top - h - 8 >= 8 ? r.top - h - 8 : r.bottom + 8;
-    card.style.left = left + 'px';
-    card.style.top = top + 'px';
-    card.classList.add('on');
-    card.setAttribute('aria-hidden', 'false');
-  };
-  const board = $('board');
-  board.addEventListener('mouseover', (e) => { const el = e.target.closest('[data-hv]'); if (el) show(el); else hide(); });
-  board.addEventListener('mouseleave', hide);
-  board.addEventListener('focusin', (e) => { const el = e.target.closest('[data-hv]'); if (el) show(el); });
-  board.addEventListener('focusout', hide);
-  window.addEventListener('scroll', hide, true);
-})();
-
-// The CSVs carry the channel filter; they always hold every lever.
-function csvLinks() {
-  const qs = channelFilter ? '?' + new URLSearchParams({ channel_id: channelFilter }) : '';
-  $('csv-results').href = '/seo/results.csv' + qs;
-  $('csv-changes').href = '/seo/results/changes.csv' + qs;
-}
-function paintChannelFilter() {
-  const holder = $('ch-filter');
-  const opts = [{ value: '', label: 'All channels' }]
-    .concat(allChannels.map(c => ({ value: c.id, label: c.name || c.id })));
-  holder.innerHTML = '';
-  holder.dataset.dropdown = '';
-  holder.dataset.label = 'Channel';
-  holder.dataset.value = channelFilter;
-  holder.dataset.options = JSON.stringify(opts);
-  delete holder.dataset.cmpWired;
-  Components.init(holder.parentNode);
-}
-$('ch-filter').addEventListener('change', (e) => {
-  if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; csvLinks(); load(); }
-});
-
-// ── What happened lately (#174), folded to one line ───────────────────
-const KINDS = ['written', 'judged', 'reverted', 'stopped', 'cancelled'];
-let weekData = null;
-
+const ANSWER = { yes: ['Helping', 'pill--ok', 'playlists with additions earned more starts'], no: ["Didn't help", 'pill--err', 'stopped'], pending: ['Still counting', 'pill--info', 'the test runs 4 weeks'] };
 function eventText(e, names) {
   const d = e.detail || {};
   const ch = names[e.channel_id] || e.channel_id;
@@ -752,62 +346,214 @@ function eventText(e, names) {
   return `${esc(ch)} · ${esc(lever)} · ${link}${esc(tail)}`;
 }
 
-function paintWeek() {
-  const box = $('week');
-  if (!weekData) { box.hidden = true; return; }
-  const wasOpen = box.open;
-  const names = Object.fromEntries(allChannels.map(c => [c.id, c.name || c.id]));
-  const events = weekData.events.filter(e => !channelFilter || e.channel_id === channelFilter);
-  const days = new Map();
-  for (const e of events) {
-    const day = e.at.slice(0, 10);
-    if (!days.has(day)) days.set(day, []);
-    days.get(day).push(e);
+
+// ── This channel's answer per lever ───────────────────────────────────
+function cardFor(lever, c) {
+  let big, cls = 'muted', lines = [];
+  if (lever.kind === 'playlist') {
+    const total = Object.values(c.arms).reduce((x, y) => x + y, 0);
+    if (!total) big = 'No test here';
+    else { big = ANSWER[c.answer][0]; cls = { yes: 'ok', no: 'err' }[c.answer] || 'muted'; }
+    if (total) lines.push(`<b>${num(c.arms.dosed || 0)}</b> playlists changed · <b>${num(c.arms.holdout || 0)}</b> held back`);
+  } else if (lever.kind === 'short_link') {
+    const r = c.recommendations;
+    if (c.team) { big = `${plural(c.team, 'link')} set`; cls = 'ok'; }
+    else if (r.pending) big = 'Not used yet';
+    else big = 'Nothing recommended';
+    lines.push(`<b>${num(r.pending)}</b> recommendations waiting`);
+  } else {
+    const s = statusOf(c);
+    big = s.word;
+    cls = { helped: 'ok', worse: 'err', stopped: 'err' }[s.key] || 'muted';
+    if (c.lift != null) lines.push(`Lift <b>${lever.fmt(c.lift, 1)}${esc(lever.per)}</b>`);
+    else if (c.early && c.early.lift != null) lines.push(`Early read <b><i>${lever.fmt(c.early.lift, 1)}${esc(lever.per)}</i></b>, not a verdict`);
+    if (s.why && s.key !== 'early') lines.push(esc(s.why));
+    lines.push(`<b>${num(c.counts.written)}</b> written · <b>${num(c.counts.awaiting)}</b> measuring`);
   }
-  const todayIso = new Date().toISOString().slice(0, 10);
+  return `<button type="button" class="gl" data-lever="${esc(lever.id)}" aria-pressed="${lever.id === current}">
+    <span class="gl-top">${esc(lever.label)}</span><span class="gl-big ${cls}">${esc(big)}</span>
+    ${lines.map(l => `<span class="gl-line">${l}</span>`).join('')}</button>`;
+}
+
+// ── The selected lever: headline numbers ──────────────────────────────
+const stat = (k, v, s = '', cls = '') => `<div class="stat"><span class="k">${k}</span><span class="v ${cls}">${v}</span>${s ? `<span class="s">${s}</span>` : ''}</div>`;
+const liftCls = (v) => v === 'helped' ? 'ok' : v === 'worse' ? 'err' : '';
+
+function statsFor(lever, c) {
+  if (lever.kind === 'short_link') {
+    const r = c.recommendations;
+    return stat('Recommended, waiting', num(r.pending)) + stat('Set by the team', num(r.set))
+      + stat('Seen in traffic', num(c.seen))
+      + stat('Team effect', c.verdict && c.verdict.treated_mean_delta != null
+          ? `${signed(c.verdict.treated_mean_delta, 1)}<small>views/wk</small>` : '<span class="zero">—</span>',
+          c.verdict ? `week of ${wk(c.verdict.week_start)}` : 'no week measured yet');
+  }
+  if (lever.kind === 'playlist') {
+    const total = Object.values(c.arms).reduce((x, y) => x + y, 0);
+    if (!total) return stat('Answer', 'No test drawn on this channel', '', 'zero');
+    const [word, , why] = ANSWER[c.answer];
+    return stat('Answer', word, c.stop_rule_triggered ? `stopped wk of ${wk(c.stopped_week)}` : why,
+                { yes: 'ok', no: 'err' }[c.answer] || '')
+      + stat('Lift', c.lift == null ? '<span class="zero">—</span>' : `${lever.fmt(c.lift, 1)}<small>${esc(lever.unit)}</small>`,
+             plural(c.windows_judged, 'week') + ' judged', liftCls(c.verdict))
+      + stat('Weekly trend', spark(c.weeks, c.verdict))
+      + stat('Test ran', c.test_start ? `${wk(c.test_start)} – ${wk(c.test_end)}` : '—')
+      + stat('Playlists changed', num(c.arms.dosed || 0), `${num(c.arms.holdout || 0)} held back`);
+  }
+  const s = statusOf(c);
+  const k = c.counts;
+  const lift = c.lift != null
+    ? stat('Lift', `${lever.fmt(c.lift, 1)}<small>${esc(lever.unit)}</small>`,
+           `changed ${c.treated_mean_delta == null ? '—' : lever.fmt(c.treated_mean_delta, 1)} vs held back ${c.holdout_mean_delta == null ? '—' : lever.fmt(c.holdout_mean_delta, 1)}`,
+           liftCls(c.verdict))
+    : c.early && c.early.lift != null
+      ? stat('Early read', `<i>${lever.fmt(c.early.lift, 1)}</i><small>${esc(lever.unit)}</small>`,
+             `not a verdict · ${postDays(c.early)}`)
+      : stat('Lift', '<span class="zero">—</span>', 'nothing measured yet');
+  return stat('Result', `<span class="pill ${s.pill}">${esc(s.word)}</span>`, esc(s.why))
+    + lift
+    + (c.weeks.length ? stat('Weekly trend', spark(c.weeks, c.verdict), plural(c.weeks.length, 'week')) : '')
+    + stat('Written', num(k.written), `${num(k.holdout)} held back for comparison`)
+    + stat('Measured', num(k.judged), `${num(k.awaiting)} still measuring`);
+}
+
+function paintLever() {
+  if (!shown) return;
+  const lever = LEVERS.find(l => l.id === current);
+  const c = shown.levers[lever.id];
+  const more = lever.kind ? '' : `<details class="more-nums"><summary>All the numbers</summary>
+      <div class="box">${hoverBody(channelName, lever, c, false)}</div></details>`;
+  const csvQ = new URLSearchParams({ channel_id: channelId, lever: lever.id });
+  $('lever').innerHTML = `<div class="lv-head"><h2>${esc(lever.label)}</h2><span class="what">${esc(lever.what)}</span>
+      <span class="grow"></span><a href="/seo/results/changes.csv?${csvQ}" download>Download CSV</a></div>
+    <div class="stats">${statsFor(lever, c)}</div>${more}
+    <div class="chg-tools"><h3>${lever.kind === 'playlist' ? 'Playlists' : lever.kind === 'short_link' ? 'Recommendations' : 'Videos changed'}</h3>
+      <span class="grow"></span>
+      ${lever.kind === 'short_link' ? '' : `<label class="field-check"><input type="checkbox" id="chg-held"${showHeld ? ' checked' : ''} /> <span>Show held back</span></label>`}</div>
+    <div id="chg-list"><div class="skel" data-skeleton data-rows="3"></div></div>
+    <details class="howto"><summary>How to read this</summary><ul>
+      <li><b>Helping</b>, <b>No clear effect</b> or <b>Hurting</b> comes from the weekly judgement (Mondays).
+        <b>Stopped</b> means it didn't help here, so Midas switched it off on this channel.</li>
+      <li><b>Lift</b> is how much more a changed video gained than the videos Midas deliberately left alone
+        (1 in 5 is held back for comparison). Backlinks: extra views per week arriving from the linking video.
+        Titles: the extra change in browse, search and suggested views, as a %.</li>
+      <li><span class="pill pill--sm pill--info">early</span> <i>in italics</i> is a first look at changes still being
+        measured. It is not a verdict and never stops or undoes anything.</li></ul></details>`;
+  const held = $('chg-held');
+  if (held) held.onchange = () => { showHeld = held.checked; loadChanges(false); };
+  loadChanges(false);
+}
+
+// ── The videos behind it, from /seo/results/changes ───────────────────
+let showHeld = false, chRows = [], chKind = '', chNext = null, chGen = 0;
+function drawChanges(lever) {
+  const list = $('chg-list');
+  if (!list) return;
+  const render = lever.kind === 'playlist' ? armRow : lever.kind === 'short_link' ? recRow : changeRow;
+  const groups = groupChanges(lever, { kind: chKind, changes: chRows });
+  list.innerHTML = groups.length
+    ? groups.map(([title, items]) => `<div class="chg-group"><h3>${esc(title)}<span class="n">${items.length}</span></h3>
+        ${items.map(c => render(lever, c)).join('')}</div>`).join('')
+      + (chNext != null ? '<div class="chg-more"><button class="btn" id="chg-more">Show more</button></div>' : '')
+    : '<p class="muted">Nothing here yet.</p>';
+  const more = $('chg-more');
+  if (more) more.onclick = () => loadChanges(true);
+}
+async function loadChanges(append) {
+  const lever = LEVERS.find(l => l.id === current);
+  const mine = ++chGen;
+  const q = new URLSearchParams({ channel_id: channelId, lever: lever.id, order: 'delta', limit: '100',
+    offset: append ? String(chNext) : '0' });
+  if (!showHeld && lever.kind !== 'short_link') q.set('arm', 'treated');
+  try {
+    const r = await fetch('/seo/results/changes?' + q);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    if (mine !== chGen) return;
+    chRows = append ? chRows.concat(d.changes) : d.changes;
+    chKind = d.kind; chNext = d.next_offset;
+    drawChanges(lever);
+  } catch (err) {
+    if (mine === chGen && $('chg-list')) $('chg-list').innerHTML = `<em class="muted">Could not load the changes: ${esc(err && err.message || err)}</em>`;
+  }
+}
+
+// ── Page ──────────────────────────────────────────────────────────────
+let shown = null;
+function paint(data) {
+  const ch = data.channels.find(c => c.id === channelId);
+  if (!ch) { $('lever').innerHTML = '<p class="muted">This channel has no results.</p>'; return; }
+  shown = ch;
+  const next = new Date(data.next_judgement);
+  const t = ch.today;
+  $('meta').textContent = (t ? `${num(t.written)} of ${t.cap == null ? '–' : num(t.cap)} changes written today. ` : '')
+    + `Next weekly judgement ${next.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short',
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC.`;
+  const levers = LEVERS.filter(l => ch.levers[l.id]);
+  if (!levers.some(l => l.id === current)) current = levers[0].id;
+  $('glance').innerHTML = levers.map(l => cardFor(l, ch.levers[l.id])).join('');
+  paintLever();
+}
+$('glance').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lever]');
+  if (!b || b.dataset.lever === current) return;
+  current = b.dataset.lever;
+  try { localStorage.setItem(LEVER_KEY, current); } catch {}
+  for (const x of $('glance').querySelectorAll('[data-lever]')) x.setAttribute('aria-pressed', String(x.dataset.lever === current));
+  paintLever();
+});
+
+// ── Last 7 days on this channel, folded to one line ───────────────────
+const KINDS = ['written', 'judged', 'reverted', 'stopped', 'cancelled'];
+function paintWeek(data) {
+  const box = $('week');
+  const events = data.events.filter(e => e.channel_id === channelId);
   const totals = KINDS.map(k => [k, events.filter(e => e.kind === k).length]).filter(([, n]) => n)
     .map(([k, n]) => `<b>${n}</b> ${k}`).join(' · ') || 'nothing happened';
+  const names = { [channelId]: channelName };
+  const wasOpen = box.open;
   box.hidden = false;
-  box.innerHTML = `<summary><h2>Last ${weekData.days} days</h2><span class="tot">${totals}</span></summary>` +
-    (days.size ? [...days].map(([day, evs], i) => {
-      const label = day === todayIso ? 'Today' : new Date(day + 'T00:00:00Z').toLocaleDateString(undefined,
-        { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
-      const counts = KINDS.filter(k => evs.some(e => e.kind === k))
-        .map(k => `<span class="kc"><b>${evs.filter(e => e.kind === k).length}</b> ${k}</span>`).join('');
-      return `<details class="week-day"${i === 0 ? ' open' : ''}><summary><span class="d">${esc(label)}</span>${counts}</summary>
-        <ul>${evs.map(e => `<li><span class="t">${esc(e.at.slice(11, 16))}</span>
-          <span class="k k-${esc(e.kind)}">${esc(e.kind)}</span><span>${eventText(e, names)}</span></li>`).join('')}</ul>
-        </details>`;
-    }).join('') : '');
+  box.innerHTML = `<summary><h2>Last ${data.days} days</h2><span class="tot">${totals}</span></summary>
+    ${events.length ? `<ul>${events.map(e => `<li><span class="t">${esc(new Date(e.at).toLocaleString(undefined,
+      { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }))}</span>
+      <span class="k k-${esc(e.kind)}">${esc(e.kind)}</span><span>${eventText(e, names).replace(/^[^·]*· /, '')}</span></li>`).join('')}</ul>` : ''}`;
   box.open = wasOpen;
 }
 
-function loadWeek() {
-  SWR.swr('/seo/results/timeline?days=7', (data) => { weekData = data; paintWeek(); },
-          { onError: () => { weekData = null; paintWeek(); } });
-}
+async function start() {
+  let all = [];
+  try { const r = await fetch('/auth/channels'); all = r.ok ? await r.json() : []; } catch {}
+  if (!all.some(c => c.id === channelId)) channelId = (all.slice().sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || '')))[0] || {}).id || '';
+  if (!channelId) {
+    $('glance').innerHTML = '';
+    $('lever').innerHTML = '<p class="muted">No channels are mapped to you yet; ask the admin.</p>';
+    return;
+  }
+  Sidebar.rememberChannel(channelId);
+  const q = new URLSearchParams(location.search);
+  q.set('id', channelId);
+  history.replaceState(null, '', '/results?' + q);
+  for (const it of Sidebar.CHANNEL_ITEMS) {
+    const a = document.querySelector(`.sidebar a[data-tab="${it.id}"]`);
+    if (a) a.setAttribute('href', Sidebar.channelItemHref(it.id, channelId));
+  }
+  const c = all.find(x => x.id === channelId) || {};
+  channelName = c.name || channelId;
+  const short = Sidebar.shortLabel(channelName, Sidebar.commonWordPrefix(all.map(x => x.name)));
+  Sidebar.setChannels(all, channelId);
+  Sidebar.setSection(short);
+  $('title').textContent = `${short} · Results`;
+  document.title = `Midas · ${short} · Results`;
 
-function load() {
-  const q = new URLSearchParams();
-  if (channelFilter) q.set('channel_id', channelFilter);
-  const url = '/seo/results' + (q.toString() ? '?' + q : '');
-  SWR.swr(url, (data) => {
-    if (!channelFilter && data.channels.length !== allChannels.length) {
-      allChannels = data.channels.map(c => ({ id: c.id, name: c.name }));
-      paintChannelFilter();
-    }
-    paint(data);
-    paintWeek();
-  }, {
-    onError: (err) => {
-      if (!shown) $('board').innerHTML = `<em class="muted">Could not load the results: ${esc(err && err.message || err)}</em>`;
-    },
+  SWR.swr('/seo/results?' + new URLSearchParams({ channel_id: channelId }), paint, {
+    onError: (err) => { if (!shown) $('lever').innerHTML = `<em class="muted">Could not load the results: ${esc(err && err.message || err)}</em>`; },
   });
+  SWR.swr('/seo/results/timeline?days=7', paintWeek, { onError: () => {} });
 }
 
 Components.init();
-load();
-loadWeek();
+start();
 </script>
 </body>
 </html>

@@ -403,8 +403,7 @@ const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g,
 // The same rail as the board: its channel sections point into the channel
 // last opened (Sidebar.lastChannel), or the board until one has been.
 const railChannel = Sidebar.lastChannel();
-const railHref = (section) => railChannel
-  ? `/channel?id=${encodeURIComponent(railChannel)}#${section}` : '/';
+const railHref = (section) => Sidebar.channelItemHref(section, railChannel);
 Sidebar.mount({
   items: Sidebar.TOP_ITEMS
     .concat([{ section: '' }])

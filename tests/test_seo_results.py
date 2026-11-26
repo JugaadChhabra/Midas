@@ -445,13 +445,18 @@ def test_the_page_is_served_to_a_signed_in_user(use):
     assert "/seo/results" in r.text
 
 
-def test_the_rail_lists_results_after_roster(use):
+def test_the_rail_lists_results_as_a_channel_section(use):
+    """Results is one channel's page, beside Autopilot and Settings, not a fleet-wide item."""
     use(_store())
 
     js = _as(ADMIN).get("/static/sidebar.js").text
+    top = js[js.index("const TOP_ITEMS"):js.index("const CHANNEL_ITEMS")]
+    channel = js[js.index("const CHANNEL_ITEMS"):]
 
-    roster, results = js.index("href: '/team'"), js.index("href: '/results'")
-    assert roster < results
+    assert "/results" not in top
+    autopilot, results, settings = (channel.index(f"id: '{i}'") for i in ("autopilot", "results", "settings"))
+    assert autopilot < results < settings
+    assert "page: '/results'" in channel
 
 
 # ── titles (SEO results 03, #170) ──────────────────────────────────────────
