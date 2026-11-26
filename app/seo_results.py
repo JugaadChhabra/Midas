@@ -68,7 +68,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from app import access, early_read, lever_verdicts, playlist_test, reach, title_measurement
+from app import access, autopilot, early_read, lever_verdicts, playlist_test, reach, title_measurement
 from app.channel_seo import lever_states, trim
 from app.config import settings
 from app.db import supabase
@@ -496,7 +496,7 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
     now = datetime.now(timezone.utc)
 
     query = access.filter_channels(
-        supabase().table("channels").select("id,name,agent_enabled,default_language"), user)
+        supabase().table("channels").select("id,name,agent_enabled,default_language,autopilot_daily_cap"), user)
     if channel_id:
         query = query.eq("id", channel_id)
     channels = sorted(all_rows(query), key=lambda c: ((c.get("name") or "").lower(), c["id"]))
@@ -505,7 +505,11 @@ def seo_results(channel_id: str | None = None, lever: str | None = None,
     ids = {c["id"] for c in channels}
     states = {c["id"]: lever_states(c) for c in channels}
 
-    out_channels = [{"id": c["id"], "name": c.get("name"), "levers": {}} for c in channels]
+    # Writes today against the cap: the channel page's own figure (#174).
+    out_channels = [{"id": c["id"], "name": c.get("name"),
+                     "today": {"written": autopilot._applies_today(c["id"]),
+                               "cap": c.get("autopilot_daily_cap")},
+                     "levers": {}} for c in channels]
     coverage = early_read.Coverage()
     fleet: dict = {"levers": {}}
     for name in LEVERS:
@@ -754,3 +758,96 @@ def seo_results_changes(channel_id: str, lever: str, arm: str | None = None,
             "limit": limit, "offset": offset,
             "next_offset": offset + limit if len(changes) == limit else None,
             "changes": changes}
+
+
+# ── This week: the timeline (#174) ──────────────────────────────────────────
+
+TIMELINE_DEFAULT = 7
+TIMELINE_MAX = 31
+TIMELINE_KINDS = ("written", "judged", "reverted", "stopped", "cancelled")
+
+TIMELINE_COLUMNS = ("id,video_id,channel_id,lever,origin,arm,status,payload,applied_at,"
+                    "created_at,measurement_result")
+TIMELINE_VERDICT_COLUMNS = ("channel_id,lever,arm_scope,week_start,cumulative_lift,"
+                            "windows_judged,stop_rule_triggered,computed_at")
+
+
+def _at(value) -> datetime | None:
+    """A stored timestamp as an aware UTC datetime (None if missing or unparsable)."""
+    if not value:
+        return None
+    try:
+        at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at.astimezone(timezone.utc)
+
+
+def _timeline_events(interventions: list[dict], verdicts: list[dict], since: datetime) -> list[dict]:
+    """Every event at or after `since`, unsorted. Midas's own rows only: the
+    team's (`human`) never reach YouTube through Midas."""
+    events = []
+
+    def add(at, kind, row, detail):
+        if at is not None and at >= since:
+            events.append({"at": at.isoformat(), "kind": kind, "channel_id": row["channel_id"],
+                           "lever": row["lever"], "video_id": row.get("video_id"),
+                           "detail": detail, "_id": row.get("id", 0)})
+
+    for r in interventions:
+        if r.get("origin") != InterventionOrigin.MIDAS:
+            continue
+        payload = r.get("payload") or {}
+        if r.get("arm") == InterventionArm.TREATED:
+            add(_at(r.get("applied_at")), "written", r,
+                {"path": payload.get("path"), "title": payload.get("title"),
+                 "targets": len(payload.get("targets") or []) or None})
+        result = r.get("measurement_result") or {}
+        add(_at(result.get("judged_at")), "judged", r,
+            {"status": r.get("status"), "arm": r.get("arm"), "delta": result.get("delta")})
+        revert = payload.get("revert")
+        if revert:
+            add(_at(revert.get("reverted_at")), "reverted", r,
+                {"by": "midas" if revert.get("auto") is True else "person"})
+        elif r.get("status") == InterventionStatus.CANCELLED:
+            # No stamp of its own: the row's creation is when the attempt failed.
+            add(_at(r.get("created_at")), "cancelled", r,
+                {"reason": (payload.get("error") or {}).get("reason") or "unknown"})
+
+    # A stop is sticky and every later weekly row repeats the flag: the event
+    # is the first row that fired it, per channel, lever and scope.
+    first: dict = {}
+    for v in sorted(verdicts, key=lambda v: (v.get("week_start") or "", v.get("computed_at") or "")):
+        if v.get("stop_rule_triggered"):
+            first.setdefault((v["channel_id"], v["lever"], v["arm_scope"]), v)
+    for v in first.values():
+        add(_at(v.get("computed_at")), "stopped", {**v, "video_id": None},
+            {"arm_scope": v["arm_scope"], "week_start": v.get("week_start"),
+             "cumulative_lift": v.get("cumulative_lift"),
+             "windows_judged": v.get("windows_judged")})
+    return events
+
+
+@router.get("/seo/results/timeline")
+def seo_results_timeline(days: int = Query(TIMELINE_DEFAULT, ge=1, le=TIMELINE_MAX),
+                         user: dict = Depends(access.current_user)):
+    """What happened on the visible channels over the last `days` UTC days
+    (today included), newest first: `{at, kind, channel_id, lever, video_id,
+    detail}` with `kind` `written` (`applied_at`), `judged`
+    (`measurement_result.judged_at`), `reverted` (`payload.revert.reverted_at`,
+    auto or by a person), `stopped` (the first `lever_verdicts` row of a
+    channel, lever and scope with the stop rule fired, at its `computed_at`) or
+    `cancelled` (with its error reason, at the row's creation). Read-only."""
+    now = datetime.now(timezone.utc)
+    since = datetime.combine((now - timedelta(days=days - 1)).date(), datetime.min.time(),
+                             tzinfo=timezone.utc)
+    interventions = _read("interventions", TIMELINE_COLUMNS, None, user, None)
+    verdicts = _read("lever_verdicts", TIMELINE_VERDICT_COLUMNS, None, user, None)
+    events = _timeline_events(interventions, verdicts, since)
+    events.sort(key=lambda e: (_at(e["at"]), e["_id"]), reverse=True)
+    titles = _read_videos({e["video_id"] for e in events})
+    for e in events:
+        e.pop("_id")
+        e["detail"]["video_title"] = (titles.get(e["video_id"]) or {}).get("title")
+    return {"days": days, "since": since.isoformat(), "generated_at": now.isoformat(),
+            "events": events}
