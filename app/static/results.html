@@ -96,12 +96,14 @@
       <div id="ch-filter"></div>
       <div class="chip-bar" id="lever-bar" role="group" aria-label="Lever">
         <button type="button" class="chip" data-lever="backlinks" aria-pressed="true">Backlinks</button>
+        <button type="button" class="chip" data-lever="title" aria-pressed="true">Titles</button>
       </div>
       <span class="grow"></span>
     </div>
     <p class="legend" id="legend">
       <b>Lift</b> = the mean change in a changed video's views per week, minus the same for the
-      held-back videos Midas left alone (backlinks: views arriving from the linking video).
+      held-back videos Midas left alone (backlinks: views arriving from the linking video; titles:
+      the change in the video's browse, search and suggested views, shown as a percentage).
       <i class="k-helped"></i>helped<i class="k-no_change"></i>no change<i class="k-worse"></i>worse<i class="k-none"></i>no verdict yet
     </p>
 
@@ -136,9 +138,15 @@ fetch('/auth/channels').then(r => r.ok ? r.json() : []).then(chs => {
 }).catch(() => {});
 
 // ── The levers the board shows, in column order ───────────────────────
+// `fmt` writes a lift: backlinks in views per week, titles as the % a log-ratio is.
+const pct = (x, d = 0) => x == null ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(100 * (Math.exp(x) - 1)).toFixed(d) + '%';
 const LEVERS = [
-  { id: 'backlinks', label: 'Backlinks', what: 'related-video links in the description' },
+  { id: 'backlinks', label: 'Backlinks', what: 'related-video links in the description',
+    unit: 'views / week', per: '/wk', fmt: (x, d) => signed(x, d) },
+  { id: 'title', label: 'Titles', what: 'rewritten titles', unit: 'change in views vs held back',
+    per: '', fmt: (x, d) => pct(x, d === 2 ? 1 : 0), paths: true },
 ];
+const active = new Set(LEVERS.map(l => l.id));   // the lever chips: which groups show
 
 let channelFilter = '';
 let allChannels = [];        // from the unfiltered read: the filter's options
@@ -168,16 +176,23 @@ function spark(weeks, verdict) {
     <circle class="pt" cx="${x(last).toFixed(1)}" cy="${y(vals[last]).toFixed(1)}" r="2.4"/></svg>`;
 }
 
+// A title cell with no weekly verdict yet, and a row still inside its window.
+const noVerdict = (c) => c.first_verdict && !c.weeks.length;
+
 function hoverBody(name, lever, c, fleet) {
   const k = c.counts;
   const cancelled = Object.entries(k.cancelled).map(([r, n]) => `${esc(r)} ${n}`).join(', ');
   const row = (label, v) => `<div class="hc-row">${label}<b>${v}</b></div>`;
   return `<div class="hc-head">${esc(name)} · ${esc(lever.label)}</div>
-    <div class="hc-total">${c.lift == null ? '—' : signed(c.lift, 2)}<small>lift, views / week</small></div>
-    ${row('Changed videos, mean', c.treated_mean_delta == null ? '—' : `${signed(c.treated_mean_delta, 2)} <span class="of">(${c.n_treated})</span>`)}
-    ${row('Held back, mean', c.holdout_mean_delta == null ? '—' : `${signed(c.holdout_mean_delta, 2)} <span class="of">(${c.n_holdout})</span>`)}
-    ${fleet ? '' : row('Cumulative lift (stop rule)', c.cumulative_lift == null ? '—' : signed(c.cumulative_lift, 2))}
+    <div class="hc-total">${c.lift == null ? '—' : lever.fmt(c.lift, 2)}<small>lift, ${esc(lever.unit)}</small></div>
+    ${row('Changed videos, mean', c.treated_mean_delta == null ? '—' : `${lever.fmt(c.treated_mean_delta, 2)} <span class="of">(${c.n_treated})</span>`)}
+    ${row('Held back, mean', c.holdout_mean_delta == null ? '—' : `${lever.fmt(c.holdout_mean_delta, 2)} <span class="of">(${c.n_holdout})</span>`)}
+    ${fleet ? '' : row('Cumulative lift (stop rule)', c.cumulative_lift == null ? '—' : lever.fmt(c.cumulative_lift, 2))}
     ${row('Weeks judged', c.windows_judged)}
+    ${c.paths ? `<div class="hc-foot">${Object.entries(c.paths).map(([p, v]) => row(
+        `${esc(p[0].toUpperCase() + p.slice(1))} <span class="of">${num(v.treated)} written, ${num(v.n_treated)} judged vs ${num(v.n_holdout)} held back${v.stopped ? ', stopped' : ''}</span>`,
+        v.lift == null ? '—' : lever.fmt(v.lift, 2))).join('')}</div>` : ''}
+    ${noVerdict(c) ? `<div class="hc-foot">First verdicts ~${esc(wk(c.first_verdict))}</div>` : ''}
     <div class="hc-foot">
       ${row('Held back', num(k.holdout))}
       ${row('Declined', num(k.declined))}
@@ -195,18 +210,20 @@ function cells(name, lever, c, fleet) {
   const hv = cards.length - 1;
   const verdict = c.verdict || 'none';
   const lift = c.lift == null ? '<span class="zero">—</span>'
-    : `${signed(c.lift)}<span class="u">/wk</span>`;
+    : `${lever.fmt(c.lift, 1)}<span class="u">${esc(lever.per)}</span>`;
+  const first = noVerdict(c) ? `<span class="zero">first verdicts ~${esc(wk(c.first_verdict))}</span>` : '';
   let status;
   if (fleet) {
     status = `${c.state.channels_on} of ${c.state.channels} on` +
-      (c.stopped_channels ? ` · <span class="tag stop">${c.stopped_channels} stopped</span>` : '');
+      (c.stopped_channels ? ` · <span class="tag stop">${c.stopped_channels} stopped</span>` : '') +
+      (first ? `<br>${first}` : '');
   } else if (c.stop_rule_triggered) {
     status = `<span class="tag stop" title="The stop rule fired: it didn't help here. Restarting it is an owner decision.">stopped wk ${esc(wk(c.stopped_week))}</span>`;
   } else if (!c.state.on) {
     status = `<span class="off">${esc(c.state.reason || 'off')}</span>`;
   } else {
     status = c.verdict ? `<span class="pill pill--sm ${{ helped: 'pill--ok', worse: 'pill--err' }[c.verdict] || 'pill--neutral'}">${esc(c.verdict.replace('_', ' '))}</span>`
-                       : '<span class="zero">on, no verdict yet</span>';
+                       : (first || '<span class="zero">on, no verdict yet</span>');
   }
   return `<td class="first ${k.written ? '' : 'zero'}">${num(k.written)}</td>
     <td>${num(k.judged)} <span class="of">/ ${num(k.awaiting)}</span></td>
@@ -228,7 +245,7 @@ function paint(data) {
     $('board').innerHTML = '<div class="dt"><div class="dt-empty muted">No channels are mapped to you yet; ask the admin.</div></div>';
     return;
   }
-  const levers = LEVERS.filter(l => data.fleet.levers[l.id]);
+  const levers = LEVERS.filter(l => data.fleet.levers[l.id] && active.has(l.id));
   const head1 = levers.map(l => `<th class="grp" colspan="5">${esc(l.label)}<span class="what">${esc(l.what)}</span></th>`).join('');
   const head2 = levers.map(() => `<th class="first" title="Changes Midas wrote to YouTube">Written</th>
     <th title="Changes judged / still in their measurement window">Judged / pending</th>
@@ -281,6 +298,15 @@ function paintChannelFilter() {
   delete holder.dataset.cmpWired;
   Components.init(holder.parentNode);
 }
+$('lever-bar').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-lever]');
+  if (!chip) return;
+  const id = chip.dataset.lever;
+  if (active.has(id) && active.size > 1) active.delete(id); else active.add(id);   // never none
+  for (const c of $('lever-bar').querySelectorAll('[data-lever]'))
+    c.setAttribute('aria-pressed', String(active.has(c.dataset.lever)));
+  if (shown) paint(shown);
+});
 $('ch-filter').addEventListener('change', (e) => {
   if (e.detail && 'value' in e.detail) { channelFilter = e.detail.value; load(); }
 });

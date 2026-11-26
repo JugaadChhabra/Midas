@@ -26,6 +26,19 @@ A lever cell:
     the first that did.
   - `weeks`: every treated-vs-holdout verdict row of the channel, oldest first.
 
+The title cell (#170) has the same fields, plus `paths: {pipeline, agent}` and
+`first_verdict`. A path's figures are `lever_verdicts.title_paths`' own (the
+channel's title-test endpoint reads through the same function) with the cell
+fields added: each path against the shared holdout, declines in the agent's
+mean, a title put back after it was judged still in its path's. The cell's
+means pool both paths; its verdict, weeks and `cumulative_lift` are the lead
+path's (the one with more titles written); `stop_rule_triggered` is true when
+either path's fired. `counts.declined` / `judged` follow the title-test
+summary (a measured decline is judged *and* a decline). `first_verdict` is the
+earliest day a title row still in its window can be judged: d0
+(`title_measurement.as_of`) + `TITLE_WINDOW_DAYS` + `TRAFFIC_LAG_DAYS`; the
+response's `first_title_verdicts` is the earliest over the visible channels.
+
 The fleet row sums the counts and pools: its means and `lift` are over every
 judged row of the visible channels (the arithmetic `lever_verdicts` uses per
 channel), never an average of channel lifts; its `weeks` are pooled the same
@@ -289,7 +302,7 @@ def _title_cell(rows: list[dict], weeks: list[dict], state: dict) -> dict:
     of the lead path, and `paths` for each against the holdout."""
     scopes = lever_verdicts.TITLE_SCOPES
     fired_scopes = {w["arm_scope"] for w in weeks if w.get("stop_rule_triggered")}
-    summary = lever_verdicts.title_paths(rows_midas(rows), lambda scope: scope in fired_scopes)
+    summary = lever_verdicts.title_paths(_midas(rows), lambda scope: scope in fired_scopes)
     paths = {p: _path_cell(summary["paths"][p], summary["holdout"],
                            [w for w in weeks if w["arm_scope"] == scopes[p]])
              for p in scopes}
@@ -311,7 +324,7 @@ def _title_cell(rows: list[dict], weeks: list[dict], state: dict) -> dict:
     }
 
 
-def rows_midas(rows: list[dict]) -> list[dict]:
+def _midas(rows: list[dict]) -> list[dict]:
     return [r for r in rows if r.get("origin") == InterventionOrigin.MIDAS]
 
 
@@ -321,7 +334,7 @@ def _title_fleet(rows: list[dict], cells: list[dict]) -> dict:
     or stop of its own, the stopped channels counted."""
     judged = _title_judged(rows)
     means = _means(judged)
-    summary = lever_verdicts.title_paths(rows_midas(rows), lambda scope: False)
+    summary = lever_verdicts.title_paths(_midas(rows), lambda scope: False)
     stopped = {p: sum(1 for c in cells if c["paths"][p]["stop_rule_triggered"])
                for p in lever_verdicts.TITLE_SCOPES}
     paths = {}
