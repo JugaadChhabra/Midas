@@ -179,6 +179,7 @@ def test_without_a_session_api_routes_answer_401(store, method, path):
     ("/", "/login"),
     ("/channel?id=UC1", "/login?next=%2Fchannel%3Fid%3DUC1"),
     ("/autoshorts", "/login?next=%2Fautoshorts"),
+    ("/results", "/login?next=%2Fresults"),
 ])
 def test_without_a_session_html_pages_redirect_to_login(store, path, location):
     r = _client().get(path, follow_redirects=False)
