@@ -256,3 +256,8 @@ local_snapshots/
 .design-diff/
 
 graphify-out/
+# Source episodes and cut Shorts dropped in for cutter work (multi-GB; never tracked).
+*.mp4
+*.zip
+char_dost_story_shorts/
+shorts_eval/
